@@ -13,34 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-    // 🛎️ 1. API ดูสถานะห้องพัก (ว่าง / มีแขกเข้าพัก)
-    public function roomStatus(Request $request)
-    {
-        // รับค่า filter จาก URL เช่น ?status=available
-        $statusFilter = $request->query('status');
-
-        $rooms = Room::with('roomType')
-            ->when($statusFilter, function ($query, $statusFilter) {
-                return $query->where('status', $statusFilter);
-            })
-            ->orderBy('room_number')
-            ->get()
-            ->map(function ($room) {
-                return [
-                    'room_number' => $room->room_number,
-                    'room_type' => $room->roomType->name_en ?? 'Unknown',
-                    'status' => $room->status, // available, occupied, checkout_makeup
-                    'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-'
-                ];
-            });
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Room status list fetched successfully',
-            'total_rooms' => $rooms->count(),
-            'data' => $rooms
-        ]);
-    }
+    
 
     // 🧹 2. API ดูสถานะงานทำความสะอาดของแม่บ้าน
     public function cleaningTasks(Request $request)
@@ -65,59 +38,6 @@ class DashboardController extends Controller
             'message' => 'Housekeeping tasks fetched successfully',
             'pending_tasks' => $tasks->count(),
             'data' => $tasks
-        ]);
-    }
-
-    // 📅 3. API ปฏิทินการเข้าพัก (ดึงข้อมูลตามเดือน/ปี)
-    // 📅 3. API ปฏิทินการเข้าพัก (ดึงข้อมูลตามเดือน/ปี)
-    public function bookingCalendar(Request $request)
-    {
-        $month = $request->query('month', Carbon::now()->month);
-        $year = $request->query('year', Carbon::now()->year);
-
-        $startOfMonth = Carbon::createFromDate($year, $month, 1)->startOfDay();
-        $endOfMonth = Carbon::createFromDate($year, $month, 1)->endOfMonth()->endOfDay();
-
-        // 🚨 แก้ไขชื่อฟิลด์เป็น check_in และ check_out ตาม Migration ของนายท่านแล้วค่ะ!
-        $bookings = Booking::with(['bookingRooms.roomType', 'bookingRooms.room'])
-            ->where(function ($query) use ($startOfMonth, $endOfMonth) {
-                $query->whereBetween('check_in', [$startOfMonth, $endOfMonth])
-                      ->orWhereBetween('check_out', [$startOfMonth, $endOfMonth])
-                      ->orWhere(function ($q) use ($startOfMonth, $endOfMonth) {
-                          $q->where('check_in', '<=', $startOfMonth)
-                            ->where('check_out', '>=', $endOfMonth);
-                      });
-            })
-            ->orderBy('check_in', 'asc')
-            ->get()
-            ->map(function ($booking) {
-                return [
-                    'booking_id' => $booking->id,
-                    'confirmation_no' => $booking->confirmation_no, // เพิ่มเลข Confirm ให้ด้วยค่ะ! เผื่อเอาไปโชว์ในปฏิทิน
-                    'guest_name' => "Guest (Walk-in/Admin)", // เนื่องจาก user_id เป็น nullable เลยใส่เผื่อไว้ก่อนค่ะ
-                    'check_in' => Carbon::parse($booking->check_in)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
-                    'check_out' => Carbon::parse($booking->check_out)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
-                    'status' => $booking->status,
-                    
-                    'booked_details' => $booking->bookingRooms->groupBy('room_type_id')->map(function ($group) {
-                        $assignedRooms = $group->whereNotNull('room_id')->map(function($br) {
-                            return $br->room->room_number ?? null;
-                        })->filter()->values();
-
-                        return [
-                            'room_type' => $group->first()->roomType->name_en ?? 'Unknown',
-                            'quantity' => $group->count(),
-                            'assigned_rooms' => $assignedRooms->isEmpty() ? 'Pending check-in' : $assignedRooms
-                        ];
-                    })->values()
-                ];
-            });
-
-        return response()->json([
-            'status' => 'success',
-            'message' => "Booking calendar for {$month}/{$year}",
-            'total_bookings' => $bookings->count(),
-            'data' => $bookings
         ]);
     }
 
@@ -187,91 +107,4 @@ class DashboardController extends Controller
         }
     }
 
-    // 🛏️ 5. API ดึงข้อมูลห้องพักทั้งหมด
-    public function allRooms()
-    {
-        // ดึงข้อมูลห้องพักพร้อมข้อมูลประเภทห้อง (ตาราง rooms เชื่อมกับ room_types ผ่าน room_type_id)
-        $rooms = Room::with('roomType:id,name_en')
-            ->orderBy('room_number', 'asc')
-            ->get()
-            ->map(function ($room) {
-                return [
-                    'id' => $room->id, // UUID ของห้องพัก
-                    'room_number' => $room->room_number,
-                    'room_type_id' => $room->room_type_id, // ID ของประเภทห้องพัก
-                    'room_type_name' => $room->roomType->name_en ?? 'Unknown',
-                    'status' => $room->status,
-                    'status_updated_at' => $room->status_updated_at,
-                ];
-            });
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'All rooms fetched successfully',
-            'total_rooms' => $rooms->count(),
-            'data' => $rooms
-        ]);
-    }
-
-    // 🏷️ 6. API ดึงข้อมูลประเภทห้องพักทั้งหมด
-    public function allRoomTypes()
-    {
-        // ดึงข้อมูลทั้งหมดจากตาราง room_types (id, name_en, name_th, max_guests, etc.)
-        $roomTypes = RoomType::all();
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'All room types fetched successfully',
-            'total_types' => $roomTypes->count(),
-            'data' => $roomTypes
-        ]);
-    }
-
-    public function getRoomById($id)
-    {
-        // ค้นหาห้องพักด้วย ID พร้อมดึงข้อมูลประเภทห้องมาด้วย
-        $room = Room::with('roomType:id,name_en')->find($id);
-
-        // ดักไว้ก่อน เผื่อหาไม่เจอค่ะ!
-        if (!$room) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Room not found'
-            ], 404);
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Room fetched successfully',
-            'data' => [
-                'id' => $room->id,
-                'room_number' => $room->room_number,
-                'room_type_id' => $room->room_type_id,
-                'room_type_name' => $room->roomType->name_en ?? 'Unknown',
-                'status' => $room->status,
-                'status_updated_at' => $room->status_updated_at,
-            ]
-        ]);
-    }
-
-    // 🏷️ API ดึงข้อมูลประเภทห้องพักตาม ID
-    public function getRoomTypeById($id)
-    {
-        // ค้นหาประเภทห้องด้วย ID
-        $roomType = RoomType::find($id);
-
-        // ดักไว้เหมือนกันค่ะ กันเหนียว!
-        if (!$roomType) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Room type not found'
-            ], 404);
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Room type fetched successfully',
-            'data' => $roomType
-        ]);
-    }
 }

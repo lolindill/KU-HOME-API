@@ -258,4 +258,56 @@ class BookingController extends Controller
             ], 500);
         }
     }
+
+    // 📅 3. API ปฏิทินการเข้าพัก (ดึงข้อมูลตามเดือน/ปี)
+    public function bookingCalendar(Request $request)
+    {
+        $month = $request->query('month', Carbon::now()->month);
+        $year = $request->query('year', Carbon::now()->year);
+
+        $startOfMonth = Carbon::createFromDate($year, $month, 1)->startOfDay();
+        $endOfMonth = Carbon::createFromDate($year, $month, 1)->endOfMonth()->endOfDay();
+
+        // 🚨 แก้ไขชื่อฟิลด์เป็น check_in และ check_out ตาม Migration ของนายท่านแล้วค่ะ!
+        $bookings = Booking::with(['bookingRooms.roomType', 'bookingRooms.room'])
+            ->where(function ($query) use ($startOfMonth, $endOfMonth) {
+                $query->whereBetween('check_in', [$startOfMonth, $endOfMonth])
+                      ->orWhereBetween('check_out', [$startOfMonth, $endOfMonth])
+                      ->orWhere(function ($q) use ($startOfMonth, $endOfMonth) {
+                          $q->where('check_in', '<=', $startOfMonth)
+                            ->where('check_out', '>=', $endOfMonth);
+                      });
+            })
+            ->orderBy('check_in', 'asc')
+            ->get()
+            ->map(function ($booking) {
+                return [
+                    'booking_id' => $booking->id,
+                    'confirmation_no' => $booking->confirmation_no, // เพิ่มเลข Confirm ให้ด้วยค่ะ! เผื่อเอาไปโชว์ในปฏิทิน
+                    'guest_name' => "Guest (Walk-in/Admin)", // เนื่องจาก user_id เป็น nullable เลยใส่เผื่อไว้ก่อนค่ะ
+                    'check_in' => Carbon::parse($booking->check_in)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
+                    'check_out' => Carbon::parse($booking->check_out)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
+                    'status' => $booking->status,
+                    
+                    'booked_details' => $booking->bookingRooms->groupBy('room_type_id')->map(function ($group) {
+                        $assignedRooms = $group->whereNotNull('room_id')->map(function($br) {
+                            return $br->room->room_number ?? null;
+                        })->filter()->values();
+
+                        return [
+                            'room_type' => $group->first()->roomType->name_en ?? 'Unknown',
+                            'quantity' => $group->count(),
+                            'assigned_rooms' => $assignedRooms->isEmpty() ? 'Pending check-in' : $assignedRooms
+                        ];
+                    })->values()
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Booking calendar for {$month}/{$year}",
+            'total_bookings' => $bookings->count(),
+            'data' => $bookings
+        ]);
+    }
 }

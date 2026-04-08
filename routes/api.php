@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\RoomController; // 🌟 เพิ่ม RoomController เข้ามาใหม่ค่ะนายท่าน!
 
 // 🌟 API Root / Health Check 
 Route::get('/', function () {
@@ -33,7 +34,6 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::controller(BookingController::class)->group(function () {
-        Route::get('/rooms/availability', 'availability'); // http://hotel.test/api/v1/rooms/availability
         Route::post('/bookings/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
         Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
         Route::post('/bookings', 'createBooking');     // http://hotel.test/api/v1/bookings
@@ -43,13 +43,14 @@ Route::prefix('v1')->group(function () {
         Route::post('/webhook', [PaymentController::class, 'webhook']); // http://hotel.test/api/v1/payments/webhook
     });
 
-    Route::controller(DashboardController::class)->group(function (){
-        // 👇 หนูเพิ่ม Public Route สำหรับดึงข้อมูลห้องทั้งหมดและประเภทห้องให้แล้วนะคะนายท่าน! 💖
-        //Route::get('/rooms', 'allRooms');                 // http://hotel.test/api/v1/rooms
+    // 👇 หนูย้ายหน้าที่ดูแลเรื่องห้องพักมาให้ RoomController แล้วนะคะ! 💖
+    Route::controller(RoomController::class)->group(function (){
+        Route::get('/rooms/availability', 'availability'); // http://hotel.test/api/v1/rooms/availability
         Route::get('/room-types', 'allRoomTypes');          // http://hotel.test/api/v1/room-types
-        Route::get('/rooms/{id}','getRoomById');            // http://hotel.test/api/v1/room/{id}
+        Route::get('/rooms/{id}','getRoomById');            // http://hotel.test/api/v1/rooms/{id}
         Route::get('/room-types/{id}','getRoomTypeById');   // http://hotel.test/api/v1/room-types/{id}
     });   
+    
     // ==========================================
     // 🛡️ โซนหวงห้าม (Protected Routes) ต้องมี Token Sanctum
     // ==========================================
@@ -85,17 +86,25 @@ Route::prefix('v1')->group(function () {
             });
         });
 
-        // 📊 ระบบแดชบอร์ดและแม่บ้าน (เฉพาะแอดมิน / แม่บ้าน)
-        Route::middleware('role:admin')->controller(DashboardController::class)->group(function () {
-            Route::get('/rooms', 'allRooms');                           // http://hotel.test/api/v1/rooms
-            //Route::get('/room-types', 'allRoomTypes');                  // http://hotel.test/api/v1/room-types
+        // 📊 ระบบแดชบอร์ด แอดมิน และแม่บ้าน
+        Route::middleware('role:admin')->group(function () {
             
-            Route::get('/rooms/status', 'roomStatus');                  // http://hotel.test/api/v1/rooms/status
-            Route::get('/calendar', 'bookingCalendar');                 // http://hotel.test/api/v1/calendar
+            // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
+            Route::controller(RoomController::class)->group(function () {
+                Route::get('/rooms', 'allRooms');                           // http://hotel.test/api/v1/rooms
+                Route::get('/rooms/status', 'roomStatus');                  // http://hotel.test/api/v1/rooms/status
+            });
+
+            // 📅 ปฏิทินการจอง (ย้ายมา BookingController)
+            Route::controller(BookingController::class)->group(function () {
+                Route::get('/calendar', 'bookingCalendar');                 // http://hotel.test/api/v1/calendar
+            });
             
-            Route::prefix('housekeeping')->group(function () {
-                Route::get('/', 'cleaningTasks');                       // http://hotel.test/api/v1/housekeeping
-                Route::post('/{task_id}/status', 'updateCleaningStatus'); // http://hotel.test/api/v1/housekeeping/{task_id}/status
+            // 🧹 งานแม่บ้าน (เหลือไว้ใน DashboardController ก่อนค่ะ หรือจะแยกเป็น HousekeepingController ทีหลังก็ได้น้า)
+            Route::controller(DashboardController::class)->prefix('housekeeping')->group(function () {
+                Route::get('/', 'cleaningTasks');                           // http://hotel.test/api/v1/housekeeping
+                // 👇 เปลี่ยน {task_id} เป็น {room_id} ตามโค้ด Controller ของนายท่านค่ะ
+                Route::post('/{room_id}/status', 'updateCleaningStatus');   // http://hotel.test/api/v1/housekeeping/{room_id}/status
             });
         });
 
