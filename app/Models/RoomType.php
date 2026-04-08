@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-
+use Illuminate\Database\Eloquent\Relations\HasMany;
 class RoomType extends Model
 {
     use HasFactory;
@@ -21,6 +21,14 @@ class RoomType extends Model
             'extra_bed_enabled' => 'boolean',
         ];
     }
-
+    public function rooms(): HasMany
+    {
+        // เชื่อมไปยัง Model Room โดยใช้ room_type_id เป็น Foreign Key ค่ะ
+        return $this->hasMany(Room::class, 'room_type_id', 'id');
+    }
+    public function bookingRooms(): HasMany
+    {
+        return $this->hasMany(BookingRoom::class, 'room_type_id', 'id');
+    }
     
 }

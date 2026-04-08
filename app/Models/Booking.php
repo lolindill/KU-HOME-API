@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
 class Booking extends Model
 {
-    use HasFactory;
+    use HasFactory,HasUuids;
 
     // 1. ปลดล็อกให้เซฟข้อมูลได้ทุกฟิลด์ (เพราะใน Controller เรา Validate มาอย่างดีแล้วค่ะ!)
     protected $guarded = []; 
@@ -21,6 +22,6 @@ class Booking extends Model
     // นำไปวางในไฟล์ Booking.php นะคะนายท่าน
     public function bookingAddons()
     {
-        return $this->hasMany(BookingAddon::class);
+        return $this->hasMany(Addon::class);
     }
 }

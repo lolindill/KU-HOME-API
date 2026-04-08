@@ -1,0 +1,241 @@
+get:http://hotel.test/api/v1/rooms/availability        ค้าหาห้องที่ว่างในวันนั้น
+in : {} default empty return this day 
+   :{
+  	"check_in": "2026-05-01",
+  	"check_out": "2026-05-03"
+    }
+
+out:{
+  "status": "success",
+  "data": [
+    {
+      "room_type_id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+      "name_en": "Standard Room",
+      "name_th": "ห้องมาตรฐาน",
+      "max_guests": 2,
+      "daily_rate": 1000,
+      "extra_bed_price": 0,
+      "available_rooms": 3,
+      "search_criteria": {
+        "check_in": "2026-04-08",
+        "check_out": "2026-04-09"
+      }
+    },
+    {
+      "room_type_id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "name_en": "Deluxe Room",
+      "name_th": "ห้องดีลักซ์",
+      "max_guests": 2,
+      "daily_rate": 1800,
+      "extra_bed_price": 500,
+      "available_rooms": 3,
+      "search_criteria": {
+        "check_in": "2026-04-08",
+        "check_out": "2026-04-09"
+      }
+    },
+    {
+      "room_type_id": "4a0dc2e0-6397-4e02-8bdf-4a886e864252",
+      "name_en": "Family Suite",
+      "name_th": "ห้องแฟมิลี่สวีท",
+      "max_guests": 4,
+      "daily_rate": 3500,
+      "extra_bed_price": 600,
+      "available_rooms": 2,
+      "search_criteria": {
+        "check_in": "2026-04-08",
+        "check_out": "2026-04-09"
+      }
+    }
+  ]
+}
+
+
+get: http://hotel.test/api/v1/rooms
+out:{
+  "status": "success",
+  "message": "All rooms fetched successfully",
+  "total_rooms": 8,
+  "data": [
+    {
+      "id": "59c0e20c-9c07-4e98-8522-a041b62d8636",
+      "room_number": "101",
+      "room_type_id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+      "room_type_name": "Standard Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "543cba01-1006-4d33-a83b-c952d1b82daa",
+      "room_number": "102",
+      "room_type_id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+      "room_type_name": "Standard Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "719038d1-a8f3-48bc-aed2-f39de0dea439",
+      "room_number": "103",
+      "room_type_id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+      "room_type_name": "Standard Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "464afba5-da99-4344-b7f6-cfb963499230",
+      "room_number": "201",
+      "room_type_id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "room_type_name": "Deluxe Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "1722bd89-6232-46e9-9e55-541d6ad4bfcc",
+      "room_number": "202",
+      "room_type_id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "room_type_name": "Deluxe Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "04cf5393-e7b2-443c-aa1b-ef171dacc950",
+      "room_number": "203",
+      "room_type_id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "room_type_name": "Deluxe Room",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "8f6c1555-67ed-4661-ac64-f6d9c720871f",
+      "room_number": "301",
+      "room_type_id": "4a0dc2e0-6397-4e02-8bdf-4a886e864252",
+      "room_type_name": "Family Suite",
+      "status": "available",
+      "status_updated_at": null
+    },
+    {
+      "id": "49799e9c-d9e0-4a9c-ba1b-23c1e78154f6",
+      "room_number": "302",
+      "room_type_id": "4a0dc2e0-6397-4e02-8bdf-4a886e864252",
+      "room_type_name": "Family Suite",
+      "status": "available",
+      "status_updated_at": null
+    }
+  ]
+}
+
+
+
+get: http://hotel.test/api/v1/room-types                get all room types
+out:{
+  "status": "success",
+  "message": "All room types fetched successfully",
+  "total_types": 3,
+  "data": [
+    {
+      "id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+      "name_en": "Standard Room",
+      "name_th": "ห้องมาตรฐาน",
+      "max_guests": 2,
+      "extra_bed_enabled": false,
+      "max_extra_beds": 0,
+      "extra_bed_price": 0,
+      "rate_daily_general": 1000,
+      "created_at": "2026-04-07T07:47:26.000000Z",
+      "updated_at": "2026-04-07T07:47:26.000000Z"
+    },
+    {
+      "id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "name_en": "Deluxe Room",
+      "name_th": "ห้องดีลักซ์",
+      "max_guests": 2,
+      "extra_bed_enabled": true,
+      "max_extra_beds": 1,
+      "extra_bed_price": 500,
+      "rate_daily_general": 1800,
+      "created_at": "2026-04-07T07:47:27.000000Z",
+      "updated_at": "2026-04-07T07:47:27.000000Z"
+    },
+    {
+      "id": "4a0dc2e0-6397-4e02-8bdf-4a886e864252",
+      "name_en": "Family Suite",
+      "name_th": "ห้องแฟมิลี่สวีท",
+      "max_guests": 4,
+      "extra_bed_enabled": true,
+      "max_extra_beds": 2,
+      "extra_bed_price": 600,
+      "rate_daily_general": 3500,
+      "created_at": "2026-04-07T07:47:27.000000Z",
+      "updated_at": "2026-04-07T07:47:27.000000Z"
+    }
+  ]
+}
+
+
+get: http://hotel.test/api/v1/room-types/{id}                 get room type by is
+out:{
+	"status": "success",
+  	"message": "Room type fetched successfully",
+  	"data": {
+    		"id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+    		"name_en": "Standard Room",
+    		"name_th": "ห้องมาตรฐาน",
+    		"max_guests": 2,
+   		 "extra_bed_enabled": false,
+    		"max_extra_beds": 0,
+		"extra_bed_price": 0,
+    		"rate_daily_general": 1000,
+    		"created_at": "2026-04-07T07:47:26.000000Z",
+    		"updated_at": "2026-04-07T07:47:26.000000Z"
+  	}
+}
+
+
+get: http://hotel.test/api/v1/rooms/{id}                              get room by id
+out: {
+  "status": "success",
+  "message": "Room fetched successfully",
+  "data": {
+    "id": "59c0e20c-9c07-4e98-8522-a041b62d8636",
+    "room_number": "101",
+    "room_type_id": "d30ab309-93b1-443e-bdbb-0817888a32ea",
+    "room_type_name": "Standard Room",
+    "status": "available",
+    "status_updated_at": null
+  }
+}
+
+http://hotel.test/api/v1/bookings              จองห้องพัก
+in : {
+  "check_in": "2026-04-10",
+  "check_out": "2026-04-12",
+  "source": "online",
+  
+  "guest_title": "Mr.",
+  "guest_first_name": "John",
+  "guest_last_name": "Doe",
+  "guest_email": "john.doe@example.com",
+  "guest_phone": "0812345678",
+  "guest_id_number": "1103456789123",
+  "guest_nationality": "Thai",
+  "is_ku_member": "false",
+  
+  "booking_rooms": [
+    {
+      "room_type_id": "495fea36-763b-4d7f-bcdb-4f477dba9d0f",
+      "quantity": 2,
+      "extra_beds": 1
+    }
+  ]
+}
+
+out: {
+  "status": "success",
+  "message": "Booking created successfully",
+  "data": {
+    "booking_id": "019d6c01-faa0-7356-a34d-9cfed12beac5",
+    "confirmation_no": "202604-5358",
+    "total_amount": 9200,
+    "payment_deadline": "2026-04-09 07:32:40"
+  }
+}

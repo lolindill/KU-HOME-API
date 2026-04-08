@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Room;
+use App\Models\RoomType;
 use App\Models\Booking;
 use App\Models\HousekeepingTask;
 use Carbon\Carbon;
@@ -120,7 +121,6 @@ class DashboardController extends Controller
         ]);
     }
 
-
     // 🧹 4. API อัปเดตสถานะงานทำความสะอาด (ค้นหาจาก Room ID)
     public function updateCleaningStatus(Request $request, $roomId)
     {
@@ -185,5 +185,93 @@ class DashboardController extends Controller
                 'message' => 'Failed to update status: ' . $e->getMessage()
             ], 400);
         }
+    }
+
+    // 🛏️ 5. API ดึงข้อมูลห้องพักทั้งหมด
+    public function allRooms()
+    {
+        // ดึงข้อมูลห้องพักพร้อมข้อมูลประเภทห้อง (ตาราง rooms เชื่อมกับ room_types ผ่าน room_type_id)
+        $rooms = Room::with('roomType:id,name_en')
+            ->orderBy('room_number', 'asc')
+            ->get()
+            ->map(function ($room) {
+                return [
+                    'id' => $room->id, // UUID ของห้องพัก
+                    'room_number' => $room->room_number,
+                    'room_type_id' => $room->room_type_id, // ID ของประเภทห้องพัก
+                    'room_type_name' => $room->roomType->name_en ?? 'Unknown',
+                    'status' => $room->status,
+                    'status_updated_at' => $room->status_updated_at,
+                ];
+            });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'All rooms fetched successfully',
+            'total_rooms' => $rooms->count(),
+            'data' => $rooms
+        ]);
+    }
+
+    // 🏷️ 6. API ดึงข้อมูลประเภทห้องพักทั้งหมด
+    public function allRoomTypes()
+    {
+        // ดึงข้อมูลทั้งหมดจากตาราง room_types (id, name_en, name_th, max_guests, etc.)
+        $roomTypes = RoomType::all();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'All room types fetched successfully',
+            'total_types' => $roomTypes->count(),
+            'data' => $roomTypes
+        ]);
+    }
+
+    public function getRoomById($id)
+    {
+        // ค้นหาห้องพักด้วย ID พร้อมดึงข้อมูลประเภทห้องมาด้วย
+        $room = Room::with('roomType:id,name_en')->find($id);
+
+        // ดักไว้ก่อน เผื่อหาไม่เจอค่ะ!
+        if (!$room) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Room fetched successfully',
+            'data' => [
+                'id' => $room->id,
+                'room_number' => $room->room_number,
+                'room_type_id' => $room->room_type_id,
+                'room_type_name' => $room->roomType->name_en ?? 'Unknown',
+                'status' => $room->status,
+                'status_updated_at' => $room->status_updated_at,
+            ]
+        ]);
+    }
+
+    // 🏷️ API ดึงข้อมูลประเภทห้องพักตาม ID
+    public function getRoomTypeById($id)
+    {
+        // ค้นหาประเภทห้องด้วย ID
+        $roomType = RoomType::find($id);
+
+        // ดักไว้เหมือนกันค่ะ กันเหนียว!
+        if (!$roomType) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room type not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Room type fetched successfully',
+            'data' => $roomType
+        ]);
     }
 }
