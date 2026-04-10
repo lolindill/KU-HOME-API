@@ -32,10 +32,9 @@ class AuthController extends Controller
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
         return response()->json([
-            'message' => 'ลงทะเบียนสำเร็จแล้วค่ะนายท่าน! 🎉',
+            'message' => 'success',
             'access_token' => $token,
-            'token_type' => 'Bearer',
-            'user' => $user
+            'token_type' => 'Bearer'
         ], 201);
     }
 
@@ -51,28 +50,26 @@ class AuthController extends Controller
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
-                'error' => 'อีเมลหรือรหัสผ่านของนายท่านไม่ถูกต้องค่ะ 🥺'
+                'error' => 'อีเมลหรือรหัสผ่านไม่ถูกต้องค่ะ'
             ], 401);
         }
         
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
         return response()->json([
-            'message' => 'ยินดีต้อนรับกลับมาค่ะนายท่าน! 🎉',
+            'message' => 'success',
             'access_token' => $token,
-            'token_type' => 'Bearer',
-            'user' => $user
+            'token_type' => 'Bearer'
         ], 200);
     }
 
     // 🚪 3. ออกจากระบบ (Logout)
     public function logout(Request $request)
     {
-        // ทำลาย Token ปัจจุบันที่นายท่านใช้ Login เข้ามาค่ะ
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
-            'message' => 'ออกจากระบบเรียบร้อยแล้วค่ะ พักผ่อนเยอะๆ นะคะนายท่าน! 🛏️💤'
+            'message' => 'success',
         ], 200);
     }
 }

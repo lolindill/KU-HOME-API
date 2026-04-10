@@ -37,6 +37,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
         Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
         Route::post('/bookings', 'createBooking');     // http://hotel.test/api/v1/bookings
+        Route::get('/get/bookings', 'GetAllBookings');                       // http://hotel.test/api/v1/get/bookings
     });
 
     Route::prefix('payments')->group(function () {
@@ -67,7 +68,8 @@ Route::prefix('v1')->group(function () {
 
         // 🏨 ระบบจองห้องพัก (เฉพาะลูกค้าที่ Login แล้ว)
         Route::controller(BookingController::class)->group(function () {
-            Route::get('/get_bookings', 'GetAllBookings'); // http://hotel.test/api/v1/get_bookings
+            Route::get('user/get/bookings', 'userGetAllBookings'); // http://hotel.test/api/v1/user/get/bookings
+            
         });
 
         // 💳 ระบบการชำระเงิน
@@ -91,13 +93,14 @@ Route::prefix('v1')->group(function () {
             
             // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
             Route::controller(RoomController::class)->group(function () {
-                Route::get('/rooms', 'allRooms');                           // http://hotel.test/api/v1/rooms
+                Route::get('/rooms/get', 'allRooms');                           // http://hotel.test/api/v1/rooms/get
                 Route::get('/rooms/status', 'roomStatus');                  // http://hotel.test/api/v1/rooms/status
             });
 
             // 📅 ปฏิทินการจอง (ย้ายมา BookingController)
-            Route::controller(BookingController::class)->group(function () {
-                Route::get('/calendar', 'bookingCalendar');                 // http://hotel.test/api/v1/calendar
+            Route::controller(BookingController::class)->group(function () {                
+                //Route::get('/get/bookings', 'GetAllBookings');                       // http://hotel.test/api/v1/get/bookings
+                Route::get('/search/bookings', 'bookingSearch');                    // http://hotel.test/api/v1//search/bookings/
             });
             
             // 🧹 งานแม่บ้าน (เหลือไว้ใน DashboardController ก่อนค่ะ หรือจะแยกเป็น HousekeepingController ทีหลังก็ได้น้า)

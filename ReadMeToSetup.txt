@@ -24,13 +24,14 @@ const signIn = async (email: string, password: string) => {
           localStorage.setItem('token', data.access_token); 
       }
  };
+ 
 
 	]	
 
 
 ku-home/src/app/pages/UserProfile.tsx
 	fetchBookings
-		${localUrl}/make-server-fb9ae70e/bookings -> http://hotel.test/api/v1/get_bookings
+		${localUrl}/make-server-fb9ae70e/bookings -> http://hotel.test/api/v1/user/get_bookings
 
 
 

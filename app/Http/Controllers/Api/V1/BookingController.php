@@ -8,7 +8,8 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\RoomType;
 use App\Models\Addon;         
-use App\Models\BookingAddon;  
+use App\Models\BookingAddon; 
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -20,17 +21,17 @@ class BookingController extends Controller
     public function GetAllBookings(Request $request)
     {
         try {
-             $user = $request->user();
+           $bookings = Booking::leftJoin('users', 'bookings.user_id', '=', 'users.id')
+            ->select('bookings.*', 'users.name as user_name')
+            ->orderBy('users.name', 'asc')           // เรียงตามชื่อ (คนไม่มีชื่อจะไปรวมกันอยู่บนสุดหรือล่างสุดตาม DB)
+            ->orderBy('bookings.created_at', 'desc') // เรียงตามวันที่สร้าง
+            ->get();
 
-            $bookings = Booking::where('user_id', $user->id)
-                ->orderBy('created_at', 'desc')
-                ->get();
             return response()->json([
                 'bookings' => $bookings
             ], 200);
 
         } catch (\Exception $e) {
-            // 🚨 4. ดักจับ Error ตามสไตล์โค้ดเดิมเป๊ะๆ เลยค่ะนายท่าน!
             Log::error("Server error getting bookings: " . $e->getMessage());
             
             return response()->json([
@@ -38,53 +39,38 @@ class BookingController extends Controller
             ], 500);
         }
     }
-    // 1️⃣ API ค้นหาห้องว่างพร้อมราคา 
-   public function availability(Request $request)
+    public function userGetAllBookings(Request $request)
 {
-    // 🌟 เอา guests ออกจากการ validate ไปเลยค่ะ
-    $request->validate([
-        'check_in' => 'nullable|date|after_or_equal:today',
-        'check_out' => 'nullable|date|after:check_in',
-    ]);
+    try {
+        $user = $request->user();
 
-    $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
-    $checkOut = $request->check_out ? Carbon::parse($request->check_out) : Carbon::tomorrow();
+        if (!$user) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        $bookings = Booking::where('user_id', $user->id)
+            ->with(['room', 'status']) 
+            ->orderBy('created_at', 'desc')
+            ->get();
 
-    // 🎀 ดึง Room Types ทั้งหมดมาโชว์แบบไม่ต้องกรองจำนวนคนแล้วค่ะ!
-    $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
-            $query->where('status', 'available');
-        }])
-        ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
-            $query->whereHas('booking', function ($q) use ($checkIn, $checkOut) {
-                // เช็ควันทับซ้อน (Overlap)
-                $q->where('check_in', '<', $checkOut)
-                  ->where('check_out', '>', $checkIn)
-                  // 🛑 ตัดการจองที่ยังเป็น draft หรือ cancelled ทิ้งไป
-                  ->whereNotIn('status', ['draft', 'cancelled']); 
-            });
-        }])
-        ->get()
-        ->map(function ($type) use ($checkIn, $checkOut) {
-            // ✨ คณิตศาสตร์ของน้องเมด
-            $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
+        return response()->json([
+            'status' => 'success',
+            'count' => $bookings->count(),
+            'bookings' => $bookings
+        ], 200);
 
-            return [
-                'room_type_id' => $type->id,
-                'name_en' => $type->name_en,
-                'name_th' => $type->name_th,
-                'available_rooms' => $availableRooms, 
-                'search_criteria' => [
-                    'check_in' => $checkIn->toDateString(),
-                    'check_out' => $checkOut->toDateString(),
-                ]
-            ];
-        });
-
-    return response()->json([
-        'status' => 'success',
-        'data' => $availableRoomTypes
-    ]);
+    } catch (\Exception $e) {
+        Log::error("Server error getting bookings: " . $e->getMessage(), [
+            'user_id' => optional($request->user())->id,
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'error' => 'Server error getting bookings',
+            'message' => $e->getMessage() 
+        ], 500);
+    }
 }
+    
     // 2️⃣ API ตรวจสอบรหัสส่วนลด (Process 2.2)
     public function validateDiscount(Request $request)
     {
@@ -259,55 +245,97 @@ class BookingController extends Controller
         }
     }
 
-    // 📅 3. API ปฏิทินการเข้าพัก (ดึงข้อมูลตามเดือน/ปี)
-    public function bookingCalendar(Request $request)
-    {
-        $month = $request->query('month', Carbon::now()->month);
-        $year = $request->query('year', Carbon::now()->year);
 
-        $startOfMonth = Carbon::createFromDate($year, $month, 1)->startOfDay();
-        $endOfMonth = Carbon::createFromDate($year, $month, 1)->endOfMonth()->endOfDay();
-
-        // 🚨 แก้ไขชื่อฟิลด์เป็น check_in และ check_out ตาม Migration ของนายท่านแล้วค่ะ!
-        $bookings = Booking::with(['bookingRooms.roomType', 'bookingRooms.room'])
-            ->where(function ($query) use ($startOfMonth, $endOfMonth) {
-                $query->whereBetween('check_in', [$startOfMonth, $endOfMonth])
-                      ->orWhereBetween('check_out', [$startOfMonth, $endOfMonth])
-                      ->orWhere(function ($q) use ($startOfMonth, $endOfMonth) {
-                          $q->where('check_in', '<=', $startOfMonth)
-                            ->where('check_out', '>=', $endOfMonth);
-                      });
-            })
-            ->orderBy('check_in', 'asc')
-            ->get()
-            ->map(function ($booking) {
-                return [
-                    'booking_id' => $booking->id,
-                    'confirmation_no' => $booking->confirmation_no, // เพิ่มเลข Confirm ให้ด้วยค่ะ! เผื่อเอาไปโชว์ในปฏิทิน
-                    'guest_name' => "Guest (Walk-in/Admin)", // เนื่องจาก user_id เป็น nullable เลยใส่เผื่อไว้ก่อนค่ะ
-                    'check_in' => Carbon::parse($booking->check_in)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
-                    'check_out' => Carbon::parse($booking->check_out)->format('Y-m-d'), // เปลี่ยนชื่อฟิลด์ตรงนี้ด้วยค่ะ
-                    'status' => $booking->status,
-                    
-                    'booked_details' => $booking->bookingRooms->groupBy('room_type_id')->map(function ($group) {
-                        $assignedRooms = $group->whereNotNull('room_id')->map(function($br) {
-                            return $br->room->room_number ?? null;
-                        })->filter()->values();
-
-                        return [
-                            'room_type' => $group->first()->roomType->name_en ?? 'Unknown',
-                            'quantity' => $group->count(),
-                            'assigned_rooms' => $assignedRooms->isEmpty() ? 'Pending check-in' : $assignedRooms
-                        ];
-                    })->values()
-                ];
-            });
-
-        return response()->json([
-            'status' => 'success',
-            'message' => "Booking calendar for {$month}/{$year}",
-            'total_bookings' => $bookings->count(),
-            'data' => $bookings
-        ]);
+    private function applyUserFilter($query, $term)
+{
+    if (empty($term)) {
+        return $query;
     }
+
+    return $query->where(function ($q) use ($term) {
+        
+        // กรณีที่ 1: ถ้าคำค้นหาเป็น UUID (เช่น copy รหัส user_id มาค้นหาตรงๆ)
+        if (Str::isUuid($term)) {
+            $q->where('user_id', $term)
+              // เสริม orWhere ให้ค้นหาแบบ Substring เผื่อเอาไว้ด้วยค่ะ
+              ->orWhereHas('user', function ($userQuery) use ($term) {
+                  $userQuery->where('name', 'LIKE', '%' . $term . '%');
+              })
+              ->orWhere('guest_name', 'LIKE', '%' . $term . '%');
+        } 
+        // กรณีที่ 2: ถ้าเป็นข้อความค้นหาปกติ
+        else {
+            // ค้นหาแบบ Substring จาก name ในตาราง users
+            $q->whereHas('user', function ($userQuery) use ($term) {
+                $userQuery->where('name', 'LIKE', '%' . $term . '%');
+            })
+            // หรือ ค้นหาแบบ Substring จาก guest_name ในตาราง bookings โดยตรงค่ะ
+            ->orWhere('guest_name', 'LIKE', '%' . $term . '%');
+        }
+    });
+}
+    private function applyDateFilter($query, $checkIn, $checkOut)
+    {
+        $startDate = Carbon::parse($checkIn)->startOfDay();
+        $endDate = Carbon::parse($checkOut)->endOfDay();
+
+        return $query->where(function ($q) use ($startDate, $endDate) {
+            $q->whereBetween('check_in', [$startDate, $endDate])
+              ->orWhereBetween('check_out', [$startDate, $endDate])
+              ->orWhere(function ($subQ) use ($startDate, $endDate) {
+                  $subQ->where('check_in', '<=', $startDate)
+                       ->where('check_out', '>=', $endDate);
+              });
+        });
+    }
+
+    private function applyRoomTypeFilter($query, $roomTypeId)
+    {
+        if (empty($roomTypeId) || $roomTypeId === 'all') {
+            return $query; 
+        }
+
+        return $query->whereHas('bookingRooms', function ($q) use ($roomTypeId) {
+            $q->where('room_type_id', $roomTypeId);
+        });
+    }
+    public function bookingSearch(Request $request)
+    {
+        try {
+            // 1. รับค่าพารามิเตอร์ต่างๆ
+            $term = $request->query('term');
+            $roomTypeId = $request->query('room_type', 'all');
+            $checkIn = $request->query('check_in', Carbon::today()->toDateString());
+            $checkOut = $request->query('check_out', Carbon::today()->toDateString());
+
+            // 🚀 2. เริ่มต้นสร้าง Query
+            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'user']);
+
+            // 🪄 3. ส่ง Query ไปให้ Sub-functions ต่างๆ จัดการ (Chain methods)
+            $query = $this->applyUserFilter($query, $term);
+            $query = $this->applyDateFilter($query, $checkIn, $checkOut);
+            $query = $this->applyRoomTypeFilter($query, $roomTypeId);
+
+            // 🎉 4. ประมวลผล Query สุทธิ
+            $bookings = $query->orderBy('check_in', 'asc')->get();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Search completed successfully!',
+                'total' => $bookings->count(),
+                'search_criteria' => [
+                    'term' => $term,
+                    'check_in' => $checkIn,
+                    'check_out' => $checkOut,
+                    'room_type' => $roomTypeId
+                ],
+                'bookings' => $bookings
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Server error in booking search: " . $e->getMessage());
+            return response()->json(['error' => 'Server error while searching bookings'], 500);
+        }
+    }
+
 }

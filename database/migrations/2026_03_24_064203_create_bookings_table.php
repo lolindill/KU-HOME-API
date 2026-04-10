@@ -21,8 +21,7 @@ return new class extends Migration
             
             // 🧍‍♂️ ข้อมูลผู้เข้าพัก (Snapshot)
             $table->string('guest_title')->nullable();
-            $table->string('guest_first_name');
-            $table->string('guest_last_name');
+            $table->string('guest_name');
             $table->string('guest_email');
             $table->string('guest_phone');
             $table->string('guest_id_number')->nullable();
@@ -36,7 +35,7 @@ return new class extends Migration
 
             $table->string('status')->default('draft'); // draft | confirmed | checked_in | checked_out | cancelled
 
-            $table->uuid('created_by')->nullable(); // user
+            
             $table->timestamps();
         });
     }

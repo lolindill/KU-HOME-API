@@ -21,8 +21,8 @@ class RoomSeeder extends Seeder
 
         RoomType::create([
             'id' => $standardId,
-            'name_en' => 'Standard Room',
-            'name_th' => 'ห้องมาตรฐาน',
+            'name_en' => 'Superior',
+            'name_th' => 'ห้องซูพีเรียร์',
             'max_guests' => 2,
             'extra_bed_enabled' => 'false',
             'max_extra_beds' => 0,
@@ -32,7 +32,7 @@ class RoomSeeder extends Seeder
 
         RoomType::create([
             'id' => $deluxeId,
-            'name_en' => 'Deluxe Room',
+            'name_en' => 'Deluxe',
             'name_th' => 'ห้องดีลักซ์',
             'max_guests' => 2,
             'extra_bed_enabled' =>'true',
@@ -43,8 +43,8 @@ class RoomSeeder extends Seeder
 
         RoomType::create([
             'id' => $suiteId,
-            'name_en' => 'Family Suite',
-            'name_th' => 'ห้องแฟมิลี่สวีท',
+            'name_en' => 'Suite',
+            'name_th' => 'ห้องสวีท',
             'max_guests' => 4,
             'extra_bed_enabled' => 'true',
             'max_extra_beds' => 2,
