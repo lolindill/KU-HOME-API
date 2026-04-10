@@ -23,7 +23,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('email')->unique();
             $table->string('title')->nullable();
-            $table->string('hone');
+            $table->string('phone')->nullable();
             $table->string('nationality')->default('Thai');
             $table->boolean('is_ku_member')->default(false);
             

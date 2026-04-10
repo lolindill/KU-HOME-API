@@ -120,4 +120,51 @@ class RoomController extends Controller
             'data' => $roomType
         ]);
     }
+
+    public function availability(Request $request)
+{
+    // 🌟 เอา guests ออกจากการ validate ไปเลยค่ะ
+    $request->validate([
+        'check_in' => 'nullable|date|after_or_equal:today',
+        'check_out' => 'nullable|date|after:check_in',
+    ]);
+
+    $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
+    $checkOut = $request->check_out ? Carbon::parse($request->check_out) : Carbon::tomorrow();
+
+    // 🎀 ดึง Room Types ทั้งหมดมาโชว์แบบไม่ต้องกรองจำนวนคนแล้วค่ะ!
+    $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
+            $query->where('status', 'available');
+        }])
+        ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
+            $query->whereHas('booking', function ($q) use ($checkIn, $checkOut) {
+                // เช็ควันทับซ้อน (Overlap)
+                $q->where('check_in', '<', $checkOut)
+                  ->where('check_out', '>', $checkIn)
+                  // 🛑 ตัดการจองที่ยังเป็น draft หรือ cancelled ทิ้งไป
+                  ->whereNotIn('status', ['draft', 'cancelled']); 
+            });
+        }])
+        ->get()
+        ->map(function ($type) use ($checkIn, $checkOut) {
+            // ✨ คณิตศาสตร์ของน้องเมด
+            $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
+
+            return [
+                'room_type_id' => $type->id,
+                'name_en' => $type->name_en,
+                'name_th' => $type->name_th,
+                'available_rooms' => $availableRooms, 
+                'search_criteria' => [
+                    'check_in' => $checkIn->toDateString(),
+                    'check_out' => $checkOut->toDateString(),
+                ]
+            ];
+        });
+
+    return response()->json([
+        'status' => 'success',
+        'data' => $availableRoomTypes
+    ]);
+}
 }

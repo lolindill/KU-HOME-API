@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController; // 🌟 เพิ่ม RoomController เข้ามาใหม่ค่ะนายท่าน!
+use App\Http\Controllers\Api\V1\UserController;
 
 // 🌟 API Root / Health Check 
 Route::get('/', function () {
@@ -37,8 +38,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/bookings/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
         Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
         Route::post('/bookings', 'createBooking');     // http://hotel.test/api/v1/bookings
-        Route::get('/get/bookings', 'GetAllBookings');                       // http://hotel.test/api/v1/get/bookings
     });
+        
 
     Route::prefix('payments')->group(function () {
         Route::post('/webhook', [PaymentController::class, 'webhook']); // http://hotel.test/api/v1/payments/webhook
@@ -61,9 +62,7 @@ Route::prefix('v1')->group(function () {
         // 🔐 ข้อมูลส่วนตัวและการออกจากระบบ
         Route::prefix('auth')->controller(AuthController::class)->group(function () {
             Route::post('/logout', 'logout');          // http://hotel.test/api/v1/auth/logout
-            Route::get('/user', function (Request $request) {
-                return $request->user();
-            });                                        // http://hotel.test/api/v1/auth/user
+                                                   // http://hotel.test/api/v1/auth/user
         });
 
         // 🏨 ระบบจองห้องพัก (เฉพาะลูกค้าที่ Login แล้ว)
@@ -77,33 +76,42 @@ Route::prefix('v1')->group(function () {
             Route::post('/request', [PaymentController::class, 'requestPayment']); // http://hotel.test/api/v1/payments/request
         });
 
-        // 🛎️ ระบบหน้าฟรอนต์ (เฉพาะพนักงาน)
+        Route::controller(UserController::class)->prefix('users')->group(function () {
+                Route::get('/self', 'me');                              // http://hotel.test/api/v1/users/self
+                Route::put('/update_profile', 'updateProfile');         // http://hotel.test/api/v1/users/update_profile
+            });
+        
         Route::middleware('role:admin')->prefix('frontdesk')->controller(FrontDeskController::class)->group(function () {
-            Route::post('/walk-in', 'walkIn');         // http://hotel.test/api/v1/frontdesk/walk-in
+            Route::post('/walk-in', 'walkIn');                              // http://hotel.test/api/v1/frontdesk/walk-in
 
             Route::prefix('bookings/{booking_id}')->group(function () {
-                Route::post('/check-in', 'checkIn');   // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-in
-                Route::post('/pay', 'recordPayment');  // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/pay
-                Route::post('/check-out', 'checkOut'); // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-out
+                Route::post('/check-in', 'checkIn');                        // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-in
+                Route::post('/pay', 'recordPayment');                       // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/pay
+                Route::post('/check-out', 'checkOut');                      // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-out
             });
+        
+             
         });
 
         // 📊 ระบบแดชบอร์ด แอดมิน และแม่บ้าน
         Route::middleware('role:admin')->group(function () {
-            
+
+            Route::controller(UserController::class)->prefix('users')->group(function () {
+                Route::get('/get', 'index');           // GET http://hotel.test/api/v1/users/get
+                Route::get('/{id}', 'show');        // GET http://hotel.test/api/v1/users/{id}
+                Route::delete('/{id}', 'destroy');  // DELETE http://hotel.test/api/v1/users/{id}
+            });
             // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
             Route::controller(RoomController::class)->group(function () {
                 Route::get('/rooms/get', 'allRooms');                           // http://hotel.test/api/v1/rooms/get
                 Route::get('/rooms/status', 'roomStatus');                  // http://hotel.test/api/v1/rooms/status
             });
-
-            // 📅 ปฏิทินการจอง (ย้ายมา BookingController)
+           
             Route::controller(BookingController::class)->group(function () {                
-                //Route::get('/get/bookings', 'GetAllBookings');                       // http://hotel.test/api/v1/get/bookings
+                Route::get('/get/bookings', 'GetAllBookings');                       // http://hotel.test/api/v1/get/bookings
                 Route::get('/search/bookings', 'bookingSearch');                    // http://hotel.test/api/v1//search/bookings/
             });
             
-            // 🧹 งานแม่บ้าน (เหลือไว้ใน DashboardController ก่อนค่ะ หรือจะแยกเป็น HousekeepingController ทีหลังก็ได้น้า)
             Route::controller(DashboardController::class)->prefix('housekeeping')->group(function () {
                 Route::get('/', 'cleaningTasks');                           // http://hotel.test/api/v1/housekeeping
                 // 👇 เปลี่ยน {task_id} เป็น {room_id} ตามโค้ด Controller ของนายท่านค่ะ

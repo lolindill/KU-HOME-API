@@ -24,4 +24,5 @@ class Booking extends Model
     {
         return $this->hasMany(Addon::class);
     }
+    
 }

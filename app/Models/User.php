@@ -24,6 +24,11 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'role',
+        'title',          
+        'hone',           
+        'nationality',    
+        'is_ku_member',
     ];
     /**
      * Get the attributes that should be cast.
