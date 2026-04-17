@@ -34,10 +34,11 @@ Route::prefix('v1')->group(function () {
         Route::post('/register', 'register');          // http://hotel.test/api/v1/auth/register
     });
 
-    Route::controller(BookingController::class)->group(function () {
-        Route::post('/bookings/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
+    Route::prefix('bookings')->controller(BookingController::class)->group(function () {
+        Route::post('/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
         Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
-        Route::post('/bookings', 'createBooking');     // http://hotel.test/api/v1/bookings
+        Route::post('', 'createBooking');               // http://hotel.test/api/v1/bookings
+        Route::post('/update', 'updateStatus');           // http://hotel.test/api/v1/bookings/update
     });
         
 
@@ -97,9 +98,9 @@ Route::prefix('v1')->group(function () {
         Route::middleware('role:admin')->group(function () {
 
             Route::controller(UserController::class)->prefix('users')->group(function () {
-                Route::get('/get', 'index');           // GET http://hotel.test/api/v1/users/get
-                Route::get('/{id}', 'show');        // GET http://hotel.test/api/v1/users/{id}
-                Route::delete('/{id}', 'destroy');  // DELETE http://hotel.test/api/v1/users/{id}
+                Route::get('/get', 'index');            // GET http://hotel.test/api/v1/users/get
+                Route::get('/{id}', 'show');            // GET http://hotel.test/api/v1/users/{id}
+                Route::delete('/{id}', 'destroy');      // DELETE http://hotel.test/api/v1/users/{id}
             });
             // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
             Route::controller(RoomController::class)->group(function () {

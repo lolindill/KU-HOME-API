@@ -7,7 +7,8 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckRole
-{
+{   
+    // user ku_member staff admin housekeeping
     /**
      * Handle an incoming request.
      *

@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 
 class BookingController extends Controller
@@ -122,8 +123,7 @@ class BookingController extends Controller
 
             // 🧍‍♂️ ข้อมูลผู้เข้าพัก (Guest Details Snapshot)
             'guest_title' => 'nullable|string',
-            'guest_first_name' => 'required|string',
-            'guest_last_name' => 'required|string',
+            'guest_name' => 'required|string',
             'guest_email' => 'required|email',
             'guest_phone' => 'required|string',
             'guest_id_number' => 'nullable|string',
@@ -148,14 +148,13 @@ class BookingController extends Controller
                 'user_id' => $request->user()?->id, // ดึง ID จากคนล็อกอิน (ถ้ามี)
                 'booking_type' => 'individual', 
                 'source' => $validated['source'],
-                'status' => 'pending', 
+                'status' => 'draft', 
                 'check_in' => $validated['check_in'], 
                 'check_out' => $validated['check_out'], 
                 
                 // ข้อมูลผู้เข้าพักแบบ Snapshot
                 'guest_title' => $validated['guest_title'],
-                'guest_first_name' => $validated['guest_first_name'],
-                'guest_last_name' => $validated['guest_last_name'],
+                'guest_name' => $validated['guest_name'],
                 'guest_email' => $validated['guest_email'],
                 'guest_phone' => $validated['guest_phone'],
                 'guest_id_number' => $validated['guest_id_number'],
@@ -338,4 +337,89 @@ class BookingController extends Controller
         }
     }
 
+    // 🌟 API อัปเดตสถานะการจอง พร้อมตรวจสอบ Role และ State Rule
+    public function updateStatus(Request $request)
+    {
+        // 1. ตรวจสอบข้อมูล JSON ที่ส่งมา
+        $request->validate([
+            'booking_id' => 'required|uuid|exists:bookings,id',
+            'status'     => 'required|string|in:draft,confirmed,checked_in,checked_out,cancelled,no_show,deleted'
+        ]);
+
+        try {
+            $booking = Booking::findOrFail($request->booking_id);
+            $currentStatus = $booking->status;
+            $newStatus = $request->status;
+            
+            $user = $request->user('sanctum'); // หรือใช้ auth('sanctum')->user() ก็ได้นะคะ
+            $userRole = $user ? $user->role : 'guest';
+            
+
+            // 2. กฎการเปลี่ยนสถานะ (State Rules) ควบคู่กับสิทธิ์ (Roles) ที่อนุญาต
+            $validTransitions = [
+                'draft' => [
+                    'confirmed' => 'user'||'guest',
+                    'deleted'   => 'user'||'guest',
+                ],
+                'confirmed' => [
+                    'cancelled'  => 'admin',
+                    'checked_in' => 'admin',
+                    'no_show'    => 'admin',
+                ],
+                'checked_in' => [
+                    'checked_out' => 'admin',
+                ],
+            ];
+
+            // 3. ตรวจสอบว่าสถานะปัจจุบันสามารถเปลี่ยนไปเป็นสถานะใหม่ได้หรือไม่
+            if (!array_key_exists($currentStatus, $validTransitions) || !array_key_exists($newStatus, $validTransitions[$currentStatus])) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => "ไม่อนุญาตให้เปลี่ยนสถานะจาก '{$currentStatus}' ไปเป็น '{$newStatus}' ตาม Flow ระบบค่ะนายท่าน"
+                ], 422);
+            }
+
+            // 4. ตรวจสอบ Role ว่าตรงกับที่ระบบอนุญาตหรือไม่
+            $requiredRole = $validTransitions[$currentStatus][$newStatus];
+            if ($userRole !== $requiredRole) {
+                // 💡 [ตัวเลือกเสริม]: ถ้านายท่านอยากให้ 'admin' ทำแทน 'user' ได้เสมอ ก็สามารถเพิ่มเงื่อนไข `&& $userRole !== 'admin'` ได้นะคะ
+                return response()->json([
+                    'status'  => 'error',
+                    'cur'=> $request->user() ? 1:0,
+                    'message' => "ไม่มีสิทธิ์ดำเนินการค่ะ! (ระบบอนุญาตเฉพาะระดับ '{$requiredRole}' สำหรับการเปลี่ยนเป็นสถานะ '{$newStatus}')"
+                ], 403); // ใช้ 403 Forbidden สำหรับปัญหาเรื่องสิทธิ์ค่ะ
+            }
+
+            // 5. ถ้าผ่านด่านทั้งหมด ก็อัปเดตสถานะลง DB เลยค่ะ
+            $booking->update(['status' => $newStatus]);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
+                'data'    => [
+                    'booking_id' => $booking->id,
+                    'status'     => $booking->status
+                ]
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+            
+            // แอบดูว่าหา Model ไหนไม่เจอ จะได้แจ้ง Frontend ถูกค่ะ
+            $modelName = class_basename($e->getModel()); 
+            
+            return response()->json([
+                'status'  => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ"
+            ], 404); // ปิ๊งป่อง! แจ้งเตือนแบบ 404 Not Found ถูกต้องตามหลักเป๊ะๆ ✨
+
+        }catch (\Exception $e) {
+            Log::error("Failed to update booking status: " . $e->getMessage());
+            
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'ระบบขัดข้องระหว่างอัปเดตสถานะค่ะ'
+            ], 500);
+        }
+    }
 }

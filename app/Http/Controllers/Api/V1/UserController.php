@@ -26,7 +26,7 @@ class UserController extends Controller
             'password' => 'required|string|min:8',
             'role' => 'sometimes|string|in:user,admin',
             'title' => 'nullable|string',
-            'hone' => 'nullable|string',
+            'phone' => 'nullable|string',
             'nationality' => 'nullable|string',
             'is_ku_member' => 'sometimes|boolean',
         ]);
@@ -58,7 +58,7 @@ class UserController extends Controller
             'password' => 'sometimes|string|min:8',
             'role' => 'sometimes|string|in:user,admin',
             'title' => 'nullable|string',
-            'hone' => 'nullable|string',
+            'phone' => 'nullable|string',
             'nationality' => 'nullable|string',
             'is_ku_member' => 'sometimes|boolean',
         ]);
