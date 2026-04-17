@@ -5,24 +5,40 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Booking extends Model
 {
-    use HasFactory,HasUuids;
+    use HasFactory, HasUuids;
 
-    // 1. ปลดล็อกให้เซฟข้อมูลได้ทุกฟิลด์ (เพราะใน Controller เรา Validate มาอย่างดีแล้วค่ะ!)
+    // ปลดล็อกให้เซฟข้อมูลได้ทุกฟิลด์
     protected $guarded = []; 
 
-    // 2. บอก Laravel ว่า Primary Key ของเราไม่ใช่ตัวเลขเรียงลำดับนะ
-    public $incrementing = false;
+    // เพิ่ม Casts ให้ข้อมูลพวกวันที่และสถานะพร้อมใช้เสมอ
+    protected $casts = [
+        'check_in' => 'date',
+        'check_out' => 'date',
+        'is_ku_member' => 'boolean',
+        'total_amount' => 'integer',
+        'is_paid' => 'boolean',
+        'payment_deadline' => 'datetime',
+    ];
 
-    // 3. บอก Laravel ว่า ID ของเราเป็นประเภท String (UUID)
-    protected $keyType = 'string';
-
-    // นำไปวางในไฟล์ Booking.php นะคะนายท่าน
-    public function bookingAddons()
+    public function user(): BelongsTo
     {
-        return $this->hasMany(Addon::class);
+        return $this->belongsTo(User::class);
+    }
+
+    public function addon(): HasOne
+    {
+        return $this->hasOne(Addon::class);
     }
     
+    // 🌟 เปลี่ยนเป็น HasMany และใช้ชื่อ bookingRooms ให้ตรงกับใน Controller ค่ะ
+    public function bookingRooms(): HasMany
+    {
+        return $this->hasMany(BookingRoom::class);
+    }
 }

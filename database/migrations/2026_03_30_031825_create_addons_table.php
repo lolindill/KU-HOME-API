@@ -13,11 +13,17 @@ return new class extends Migration
     {
         Schema::create('addons', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->string('name_th')->comment('ชื่อบริการเสริม (ภาษาไทย)');
-            $table->string('name_en')->comment('ชื่อบริการเสริม (ภาษาอังกฤษ)');
-            $table->text('description')->nullable()->comment('รายละเอียดเพิ่มเติม');
-            $table->decimal('price', 10, 2)->comment('ราคาต่อหน่วย/ต่อครั้ง');
-            $table->boolean('is_active')->default(true)->comment('สถานะเปิด/ปิดการใช้งาน');
+            $table->foreignUuid('booking_id')->constrained('bookings')->cascadeOnDelete();
+
+            $table->integer('extra_bed')->default(0);
+            $table->integer('breakfast')->default(0); //quality 
+
+            $table->integer('early_checkIn_price')->default(0);
+            $table->integer('late_checkOut_price')->default(0); //admin set by opinion case
+
+            $table->integer('extra_bed_price')->default(0);
+            $table->integer('breakfast_price')->default(0);
+
             $table->timestamps();
         });
     }

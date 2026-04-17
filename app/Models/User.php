@@ -2,45 +2,44 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens; // 👈 1. เพิ่มน้อง Sanctum เข้ามาตรงนี้นะคะ
+use Laravel\Sanctum\HasApiTokens; 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\HasMany; // 🌟 เพิ่มเข้ามา
 
-//#[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
-    /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, HasUuids;
-    // เปลี่ยนจาก #[Fillable(...)] เป็นตัวแปรปกติ
+
+    // 🌟 หนูแอบแก้คำผิด 'hone' เป็น 'phone' และลบ 'role' ที่ซ้ำกันออกให้นะคะ
     protected $fillable = [
         'name',
         'email',
         'password',
         'role',
-        'role',
         'title',          
-        'hone',           
+        'phone',           
         'nationality',    
         'is_ku_member',
     ];
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
+
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    // 🌟 เพิ่ม Relationship ให้ User สามารถดูประวัติการจองทั้งหมดของตัวเองได้ค่ะ
+    public function bookings(): HasMany
+    {
+        return $this->hasMany(Booking::class);
     }
 
     public $incrementing = false;

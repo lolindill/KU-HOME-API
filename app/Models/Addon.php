@@ -4,30 +4,29 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids; // 🌟 ขาดไม่ได้เลยสำหรับ UUID ค่ะ
+use Illuminate\Database\Eloquent\Concerns\HasUuids; 
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Addon extends Model
 {
     use HasFactory, HasUuids;
 
-    // อนุญาตให้ Mass Assignment ผ่านฟิลด์เหล่านี้ได้
-    protected $fillable = [
-        'name_th',
-        'name_en',
-        'description',
-        'price',
-        'is_active'
-    ];
+    public $timestamps = false;
 
-    // แปลงชนิดข้อมูลให้พร้อมใช้เสมอ
+    // เปลี่ยนมาใช้ guarded ให้เป็นมาตรฐานเดียวกันค่ะ
+    protected $guarded = [];
+
     protected $casts = [
-        'is_active' => 'boolean',
-        'price' => 'decimal:2',
+        'extra_bed' => 'integer',
+        'breakfast' => 'integer',
+        'early_checkIn_price' => 'integer',
+        'late_checkOut_price' => 'integer',
+        'extra_bed_price' => 'integer',
+        'breakfast_price' => 'integer',
     ];
 
-    // 🌟 Relationship: บริการเสริมนี้ถูกเรียกใช้ใน Booking ไหนบ้าง
-    public function bookingAddons()
+    public function booking(): BelongsTo
     {
-        return $this->hasMany(BookingAddon::class);
+        return $this->belongsTo(Booking::class);
     }
 }

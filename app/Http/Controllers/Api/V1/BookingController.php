@@ -8,7 +8,6 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\RoomType;
 use App\Models\Addon;         
-use App\Models\BookingAddon; 
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -40,8 +39,7 @@ class BookingController extends Controller
             ], 500);
         }
     }
-    public function userGetAllBookings(Request $request)
-{
+    public function userGetAllBookings(Request $request){
     try {
         $user = $request->user();
 
@@ -91,45 +89,39 @@ class BookingController extends Controller
             'net_total' => $request->subtotal - $discountAmount
         ]);
     }
-
-    // 🌟 [เพิ่มใหม่] 3️⃣ API แสดงรายการบริการเสริม (Process 2.4 - Choose Add-ons)
-    public function addons()
-    {
-        // ดึงบริการเสริมที่เปิดใช้งานอยู่
-        $addons = Addon::where('is_active', true)->get();
-        
-        return response()->json([
-            'status' => 'success',
-            'data' => $addons
-        ]);
-    }
-
+  
     public function createBooking(Request $request)
     {
-        
         try {
-            
             // 1. ตรวจสอบข้อมูลที่ส่งมา (Validation)
             $validated = $request->validate([
-            'source' => 'required|string',
-            'check_in' => 'required|date|after_or_equal:today',
-            'check_out' => 'required|date|after:check_in',
+                'source' => 'required|string',
+                'check_in' => 'required|date|after_or_equal:today',
+                'check_out' => 'required|date|after:check_in',
 
-            // ข้อมูลห้องพักที่เลือก
-            'booking_rooms' => 'required|array',
-            'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
-            'booking_rooms.*.quantity' => 'required|integer|min:1',
-            'booking_rooms.*.extra_beds' => 'integer|min:0',
+                // ข้อมูลห้องพักที่เลือก
+                'booking_rooms' => 'required|array',
+                'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
+                'booking_rooms.*.quantity' => 'required|integer|min:1',
+                'booking_rooms.*.extra_beds' => 'integer|min:0',
 
-            // 🧍‍♂️ ข้อมูลผู้เข้าพัก (Guest Details Snapshot)
-            'guest_title' => 'nullable|string',
-            'guest_name' => 'required|string',
-            'guest_email' => 'required|email',
-            'guest_phone' => 'required|string',
-            'guest_id_number' => 'nullable|string',
-            'guest_nationality' => 'required|string',
-            'is_ku_member' => 'required|in:true,false,1,0,True,False',
-        ]);
+                // 🧍‍♂️ ข้อมูลผู้เข้าพัก
+                'guest_title' => 'nullable|string',
+                'guest_name' => 'required|string',
+                'guest_email' => 'required|email',
+                'guest_phone' => 'required|string',
+                'guest_id_number' => 'nullable|string',
+                'guest_nationality' => 'required|string',
+                'is_ku_member' => 'required|in:true,false,1,0,True,False',
+
+                // 🌟 เพิ่ม Validation สำหรับบริการเสริม (Add-ons)
+                'addons' => 'nullable|array',
+                'addons.breakfast' => 'nullable|integer|min:0',
+                'addons.breakfast_price' => 'nullable|integer|min:0',
+                'addons.early_checkIn_price' => 'nullable|integer|min:0',
+                'addons.late_checkOut_price' => 'nullable|integer|min:0',
+            ]);
+
             DB::beginTransaction();
 
             // 2. คำนวณจำนวนคืน
@@ -138,34 +130,34 @@ class BookingController extends Controller
             $nights = $checkIn->diffInDays($checkOut);
             if ($nights === 0) $nights = 1;
 
-            // สุ่มเลข Confirmation No. สุดเท่ให้นายท่านค่ะ
             $confirmationNo = Carbon::now()->format('Ym') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT); 
 
             // 3. สร้างข้อมูลการจองหลัก (Booking)
-            // หนูทำการแมปข้อมูล Guest เข้ากับคอลัมน์ใน DB ตาม Migration ใหม่ให้แล้วค่ะ!
             $booking = Booking::create([
-                'confirmation_no' => $confirmationNo, 
-                'user_id' => $request->user()?->id, // ดึง ID จากคนล็อกอิน (ถ้ามี)
-                'booking_type' => 'individual', 
+                'confirmation' => $confirmationNo, // 🌟 หนูเปลี่ยนชื่อให้ตรงกับ Migration ล่าสุด (confirmation)
+                'user_id' => $request->user()?->id,
                 'source' => $validated['source'],
                 'status' => 'draft', 
                 'check_in' => $validated['check_in'], 
                 'check_out' => $validated['check_out'], 
                 
-                // ข้อมูลผู้เข้าพักแบบ Snapshot
                 'guest_title' => $validated['guest_title'],
                 'guest_name' => $validated['guest_name'],
                 'guest_email' => $validated['guest_email'],
                 'guest_phone' => $validated['guest_phone'],
-                'guest_id_number' => $validated['guest_id_number'],
+                
                 'guest_nationality' => $validated['guest_nationality'],
-                'is_ku_member' => $validated['is_ku_member'],
+                'is_ku_member' => filter_var($validated['is_ku_member'], FILTER_VALIDATE_BOOLEAN), // 🌟 แปลงเป็น Boolean ให้ชัวร์ค่ะ
 
-                'total_amount' => 0, // รออัปเดตหลังจากรวมราคาห้องพักค่ะ
+                'total_amount' => 0, 
                 'payment_deadline' => Carbon::now()->addHours(24)
             ]);
             
             $totalAmount = 0;
+            
+            // 🌟 ตัวแปรเก็บยอดรวมของ Add-on เตียงเสริม
+            $totalExtraBedQty = 0;
+            $totalExtraBedPrice = 0;
 
             // 4. บันทึกข้อมูลห้องที่จอง (Booking Rooms)
             foreach ($validated['booking_rooms'] as $roomRequest) {
@@ -178,10 +170,14 @@ class BookingController extends Controller
                     
                     $totalAmount += $subtotal;
 
+                    // 🌟 เก็บยอดสะสมเตียงเสริมเพื่อเอาไปใส่ในตาราง Addons
+                    $totalExtraBedQty += $roomRequest['extra_beds'];
+                    $totalExtraBedPrice += $extraBedTotal;
+
                     BookingRoom::create([
                         'booking_id' => $booking->id, 
                         'room_type_id' => $roomType->id, 
-                        'room_id' => null, // จะระบุตอน Check-in
+                        'room_id' => null, 
                         'extra_beds' => $roomRequest['extra_beds'], 
                         'room_price' => $roomType->rate_daily_general, 
                         'extra_bed_price' => $roomType->extra_bed_price, 
@@ -190,45 +186,35 @@ class BookingController extends Controller
                 }
             }
 
-            // 🌟 [TODO: Add-ons]
-            // if (!empty($validated['addons'])) {
-            //     foreach ($validated['addons'] as $addonRequest) {
-            //         $addon = Addon::findOrFail($addonRequest['addon_id']);
-                    
-            //         // สมมติว่าคิดราคา Add-on เป็นต่อชิ้น/ต่อครั้งที่เลือก (ถ้าต้องคูณจำนวนคืนด้วยก็คูณ $nights ได้เลยค่ะ)
-            //         $addonSubtotal = $addon->price * $addonRequest['quantity'];
-                    
-            //         $totalAmount += $addonSubtotal; // บวกยอด Add-on เข้าไปในราคาสุทธิ
+            // 🌟 5. บันทึกข้อมูลบริการเสริม (Addons) แบบ 1-to-1
+            $breakfastPrice = $request->input('addons.breakfast_price', 0);
+            $earlyCheckInPrice = $request->input('addons.early_checkIn_price', 0);
+            $lateCheckOutPrice = $request->input('addons.late_checkOut_price', 0);
 
-            //         BookingAddon::create([
-            //             'id' => Str::uuid(),
-            //             'booking_id' => $booking->id,
-            //             'addon_id' => $addon->id,
-            //             'quantity' => $addonRequest['quantity'],
-            //             'price' => $addon->price,
-            //             'subtotal' => $addonSubtotal
-            //         ]);
-            //     }
-            // }
+            // บวกราคาบริการเสริมอื่นๆ เข้าไปในยอดรวมการจอง
+            $totalAmount += ($breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice);
 
-
-            // 🌟 [TODO: Billing]
-            // พักไว้ก่อนตามคำสั่งนายท่านค่ะ: บันทึกข้อมูล billing_entities ลงใน Booking
+            Addon::create([
+                'booking_id' => $booking->id,
+                // ข้อมูลเตียงเสริมที่สรุปมาจากทุกห้องรวมกัน
+                'extra_bed' => $totalExtraBedQty,
+                'extra_bed_price' => $totalExtraBedPrice,
+                // ข้อมูลบริการเสริมอื่นๆ ที่ส่งมาจาก Frontend
+                'breakfast' => $request->input('addons.breakfast', 0),
+                'breakfast_price' => $breakfastPrice,
+                'early_checkIn_price' => $earlyCheckInPrice,
+                'late_checkOut_price' => $lateCheckOutPrice,
+            ]);
 
             // อัปเดตยอดรวมสุดท้ายกลับไปที่ Booking
             $booking->update(['total_amount' => $totalAmount]); 
 
             DB::commit();
 
-            // 🌟 [TODO: Payment]
-            // พักไว้ก่อนตามคำสั่งนายท่านค่ะ: เตรียมยิง API Payment ในลำดับถัดไป
-
             return response()->json([
                 'status' => 'success',
-                'message' => 'Booking created successfully',
+                'message' => 'Booking and Add-ons created successfully',
                 'data' => [
-                    'booking_id' => $booking->id,
-                    'confirmation_no' => $booking->confirmation_no,
                     'total_amount' => $booking->total_amount,
                     'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
                 ]
@@ -358,8 +344,12 @@ class BookingController extends Controller
             // 2. กฎการเปลี่ยนสถานะ (State Rules) ควบคู่กับสิทธิ์ (Roles) ที่อนุญาต
             $validTransitions = [
                 'draft' => [
-                    'confirmed' => 'user'||'guest',
-                    'deleted'   => 'user'||'guest',
+                    'paid' => ['user', 'guest'],
+                    'deleted'   => ['user', 'guest'],
+                ],
+                'paid' => [
+                    'comfirmed'  => 'admin',
+                    'cancelled'  => 'admin',
                 ],
                 'confirmed' => [
                     'cancelled'  => 'admin',
@@ -380,14 +370,9 @@ class BookingController extends Controller
             }
 
             // 4. ตรวจสอบ Role ว่าตรงกับที่ระบบอนุญาตหรือไม่
-            $requiredRole = $validTransitions[$currentStatus][$newStatus];
-            if ($userRole !== $requiredRole) {
-                // 💡 [ตัวเลือกเสริม]: ถ้านายท่านอยากให้ 'admin' ทำแทน 'user' ได้เสมอ ก็สามารถเพิ่มเงื่อนไข `&& $userRole !== 'admin'` ได้นะคะ
-                return response()->json([
-                    'status'  => 'error',
-                    'cur'=> $request->user() ? 1:0,
-                    'message' => "ไม่มีสิทธิ์ดำเนินการค่ะ! (ระบบอนุญาตเฉพาะระดับ '{$requiredRole}' สำหรับการเปลี่ยนเป็นสถานะ '{$newStatus}')"
-                ], 403); // ใช้ 403 Forbidden สำหรับปัญหาเรื่องสิทธิ์ค่ะ
+           $requiredRoles = $validTransitions[$currentStatus][$newStatus];
+            if (!in_array($userRole, $requiredRoles)) {
+                return response()->json(['message' => 'ไม่มีสิทธิ์ดำเนินการค่ะ!'], 403);
             }
 
             // 5. ถ้าผ่านด่านทั้งหมด ก็อัปเดตสถานะลง DB เลยค่ะ

@@ -10,10 +10,9 @@ return new class extends Migration
     {
         Schema::create('bookings', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->string('confirmation_no')->unique();
-            $table->uuid('user_id')->nullable(); // ใส่ nullable ไว้ก่อนเผื่อเป็น Walk-in
-            $table->string('booking_type')->default('individual'); // individual | group | monthly
-           
+            $table->string('confirmation')->nullable();
+            $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
+            
             // 📅 ข้อมูลการเข้าพัก
             $table->string('source')->default('online'); // online | admin | line 
             $table->date('check_in');
@@ -24,10 +23,9 @@ return new class extends Migration
             $table->string('guest_name');
             $table->string('guest_email');
             $table->string('guest_phone');
-            $table->string('guest_id_number')->nullable();
+            
             $table->string('guest_nationality')->default('Thai');
             $table->boolean('is_ku_member')->default(false);
-            
             
             $table->integer('total_amount');
             $table->boolean('is_paid')->default(false);
@@ -38,5 +36,10 @@ return new class extends Migration
             
             $table->timestamps();
         });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('bookings');
     }
 };
