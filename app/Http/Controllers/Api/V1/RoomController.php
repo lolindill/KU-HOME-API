@@ -69,7 +69,7 @@ class RoomController extends Controller
         $rooms = Room::with('roomType')
             ->when($statusFilter, function ($query, $statusFilter) {
                 return $query->where('status', $statusFilter);
-            })
+            })  
             ->orderBy('room_number')
             ->get()
             ->map(function ($room) {
@@ -80,7 +80,7 @@ class RoomController extends Controller
                     'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-'
                 ];
             });
-
+     
         return response()->json([
             'status' => 'success',
             'message' => 'Room status list fetched successfully',
@@ -166,5 +166,61 @@ class RoomController extends Controller
         'status' => 'success',
         'data' => $availableRoomTypes
     ]);
-}
+    }
+    // 🧹 6. API เปลี่ยนสถานะห้องพักแบบ Omni (ครอบจักรวาล + รองรับ Bearer Token!)
+   public function updateRoomStatus(Request $request, $id)
+    {
+        // 🌟 ตรวจสอบข้อมูลที่ส่งมา
+        $request->validate([
+            'status' => 'required|in:available,prep_checkIn,Occupied,checkout_makeup,maintenance,reserved_closed,dirty',
+        ]);
+
+        try {
+            // ใช้ findOrFail ถ้าไม่เจอจะเด้งไปเข้า catch ทันทีค่ะ
+            $room = Room::findOrFail($id);
+            $currentStatus = $room->status;
+            $newStatus = $request->status;
+
+            // 🗝️ ดึง UUID ของคนที่เรียก API
+            $userId = $request->user() ? $request->user()->id : null;
+
+            // 🌟 สั่งให้ Model ทำการเปลี่ยนสถานะ
+            $isUpdated = $room->transitionStatusTo($newStatus, $userId);
+
+            // ถ้าสถานะเดิมอยู่แล้ว แจ้งกลับไปสวยๆ ค่ะ
+            if (!$isUpdated) {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Room status is already ' . $newStatus,
+                    'data' => $room
+                ]);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Room status updated to '{$newStatus}' successfully!",
+                'data' => [
+                    'id' => $room->id,
+                    'room_number' => $room->room_number,
+                    'old_status' => $currentStatus,
+                    'new_status' => $room->status,
+                    'status_updated_at' => $room->status_updated_at,
+                    'status_updated_by' => $room->status_updated_by, 
+                ]
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room not found'
+            ], 404);
+
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() ?: 500;
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], $statusCode);
+        }
+    }
 }

@@ -18,58 +18,92 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class BookingController extends Controller
 {   
-    public function GetAllBookings(Request $request)
+    
+
+    public function getBookings(Request $request)
     {
         try {
-           $bookings = Booking::leftJoin('users', 'bookings.user_id', '=', 'users.id')
-            ->select('bookings.*', 'users.name as user_name')
-            ->orderBy('users.name', 'asc')           // เรียงตามชื่อ (คนไม่มีชื่อจะไปรวมกันอยู่บนสุดหรือล่างสุดตาม DB)
-            ->orderBy('bookings.created_at', 'desc') // เรียงตามวันที่สร้าง
-            ->get();
+            // 🛡️ เช็ค User จาก Sanctum ค่ะ
+            $user = $request->user('sanctum');
+            
+            
+
+            // 1. ตรวจสอบสิทธิ์ ถ้าไม่มีทั้ง User (ไม่ได้ล็อกอิน) และไม่ส่ง Guest ID มา หนูจะไม่ให้ผ่านนะคะ! 🛑
+            if (!$user) {
+                return response()->json([
+                    'error' => 'Unauthorized', 
+                    'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!'
+                ], 401);
+            }
+
+            // 2. รับค่าพารามิเตอร์สำหรับการค้นหาและฟิลเตอร์
+            $term = $request->query('term');
+            $roomTypeId = $request->query('room_type', 'all');
+            $checkIn = $request->query('check_in'); 
+            $checkOut = $request->query('check_out');
+
+            // 3. เริ่มต้นสร้าง Query พร้อม Eager Loading (หนูแอบเพิ่ม addon เข้าไปให้ด้วยเผื่อเรียกใช้นะคะ)
+            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'addon'])
+                ->when($user && $user->role === 'admin', function ($q) {
+                // โหลดข้อมูล user เพิ่มเข้าไปเฉพาะเมื่อผู้ใช้ล็อกอินและเป็น admin ค่ะ
+                $q->with('user');
+            });
+
+            // 4. 🌟 แยก Logic สิทธิ์การเข้าถึง (Authorization) ตาม Role
+            if ($user && $user->role === 'admin') {
+                // 👑 แอดมิน: ดูได้ทุกอย่าง ทั้งของ User และ Guest (ดึงผ่านหมด ไม่ต้องใส่ where ดัก)
+                // Filter ต่างๆ ของแอดมินจะไปทำงานในขั้นตอนที่ 5 ค่ะ
+            } elseif ($user) {
+                // 👤 ยูสเซอร์: ดูได้แค่ของตัวเอง หรือถ้ามีเลข Guest ID ที่ตัวเองเคยจองไว้
+                $query->where('user_id', $user->id);
+                
+            } 
+
+            // 5. 🔍 การทำงานของระบบฟิลเตอร์
+            // ถ้าแอดมินสั่ง ฟิลเตอร์จะค้นหาจากทั้งหมด แต่ถ้ายูสเซอร์หรือเกสต์สั่ง ฟิลเตอร์จะทำงานภายใต้ scope ข้อมูลของตัวเองเท่านั้นค่ะ
+            if ($term && method_exists($this, 'applyUserFilter')) {
+                $query = $this->applyUserFilter($query, $term);
+            }
+            
+            if ($checkIn && $checkOut && method_exists($this, 'applyDateFilter')) {
+                $query = $this->applyDateFilter($query, $checkIn, $checkOut);
+            }
+            
+            if ($roomTypeId !== 'all' && method_exists($this, 'applyRoomTypeFilter')) {
+                $query = $this->applyRoomTypeFilter($query, $roomTypeId);
+            }
+
+            // 6. 🎉 ประมวลผลดึงข้อมูลออกมา
+            $bookings = $query->orderBy('created_at', 'desc')->get();
 
             return response()->json([
+                'status' => 'success',
+                'message' => 'ดึงข้อมูลสำเร็จแล้วค่ะนายท่าน! ✨',
+                'count' => $bookings->count(),
+                'role' => $user->id,
+                'search_criteria' => [
+                    'term' => $term,
+                    'check_in' => $checkIn,
+                    'check_out' => $checkOut,
+                    'room_type' => $roomTypeId,
+                    
+                ],
                 'bookings' => $bookings
             ], 200);
 
         } catch (\Exception $e) {
-            Log::error("Server error getting bookings: " . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error("Server error getting bookings: " . $e->getMessage(), [
+                'user_id' => optional($request->user('sanctum'))->id, 
+                'trace' => $e->getTraceAsString()
+            ]);
             
             return response()->json([
-                'error' => 'Server error getting bookings'
+                'error' => 'Server error getting bookings',
+                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาดในระบบ 😭: ' . $e->getMessage() 
             ], 500);
         }
     }
-    public function userGetAllBookings(Request $request){
-    try {
-        $user = $request->user();
 
-        if (!$user) {
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-        $bookings = Booking::where('user_id', $user->id)
-            ->with(['room', 'status']) 
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'status' => 'success',
-            'count' => $bookings->count(),
-            'bookings' => $bookings
-        ], 200);
-
-    } catch (\Exception $e) {
-        Log::error("Server error getting bookings: " . $e->getMessage(), [
-            'user_id' => optional($request->user())->id,
-            'trace' => $e->getTraceAsString()
-        ]);
-        
-        return response()->json([
-            'error' => 'Server error getting bookings',
-            'message' => $e->getMessage() 
-        ], 500);
-    }
-}
-    
     // 2️⃣ API ตรวจสอบรหัสส่วนลด (Process 2.2)
     public function validateDiscount(Request $request)
     {
@@ -103,18 +137,18 @@ class BookingController extends Controller
                 'booking_rooms' => 'required|array',
                 'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
                 'booking_rooms.*.quantity' => 'required|integer|min:1',
-                'booking_rooms.*.extra_beds' => 'integer|min:0',
+                // รับค่า extra_beds มาไว้ใช้คำนวณเฉยๆ แต่เราจะไม่บันทึกลงตาราง booking_rooms ค่ะ
+                'booking_rooms.*.extra_beds' => 'integer|min:0', 
 
                 // 🧍‍♂️ ข้อมูลผู้เข้าพัก
                 'guest_title' => 'nullable|string',
                 'guest_name' => 'required|string',
                 'guest_email' => 'required|email',
                 'guest_phone' => 'required|string',
-                'guest_id_number' => 'nullable|string',
                 'guest_nationality' => 'required|string',
                 'is_ku_member' => 'required|in:true,false,1,0,True,False',
 
-                // 🌟 เพิ่ม Validation สำหรับบริการเสริม (Add-ons)
+                // 🌟 บริการเสริม (Add-ons)
                 'addons' => 'nullable|array',
                 'addons.breakfast' => 'nullable|integer|min:0',
                 'addons.breakfast_price' => 'nullable|integer|min:0',
@@ -124,6 +158,7 @@ class BookingController extends Controller
 
             DB::beginTransaction();
 
+            
             // 2. คำนวณจำนวนคืน
             $checkIn = Carbon::parse($validated['check_in']);
             $checkOut = Carbon::parse($validated['check_out']);
@@ -134,8 +169,8 @@ class BookingController extends Controller
 
             // 3. สร้างข้อมูลการจองหลัก (Booking)
             $booking = Booking::create([
-                'confirmation' => $confirmationNo, // 🌟 หนูเปลี่ยนชื่อให้ตรงกับ Migration ล่าสุด (confirmation)
-                'user_id' => $request->user()?->id,
+                'confirmation' => $confirmationNo, 
+                'user_id' => $request->user('sanctum')?->id,
                 'source' => $validated['source'],
                 'status' => 'draft', 
                 'check_in' => $validated['check_in'], 
@@ -145,9 +180,10 @@ class BookingController extends Controller
                 'guest_name' => $validated['guest_name'],
                 'guest_email' => $validated['guest_email'],
                 'guest_phone' => $validated['guest_phone'],
-                
                 'guest_nationality' => $validated['guest_nationality'],
-                'is_ku_member' => filter_var($validated['is_ku_member'], FILTER_VALIDATE_BOOLEAN), // 🌟 แปลงเป็น Boolean ให้ชัวร์ค่ะ
+                
+                // 🌟 Model มี $casts = ['is_ku_member' => 'boolean'] แล้ว ใช้ filter_var ได้เลยค่ะ
+                'is_ku_member' => $request->boolean('is_ku_member') ? 'true' : 'false', 
 
                 'total_amount' => 0, 
                 'payment_deadline' => Carbon::now()->addHours(24)
@@ -163,27 +199,28 @@ class BookingController extends Controller
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
                 
-                for ($i = 0; $i < $roomRequest['quantity']; $i++) {
+                
                     $roomPriceTotal = $roomType->rate_daily_general * $nights;
-                    $extraBedTotal = ($roomRequest['extra_beds'] * $roomType->extra_bed_price) * $nights;
-                    $subtotal = $roomPriceTotal + $extraBedTotal;
                     
+                    // คำนวณราคาเตียงเสริม (ถ้ามีส่งมา)
+                    $extraBedQty = $roomRequest['extra_beds'] ?? 0;
+                    $extraBedTotal = ($extraBedQty * $roomType->extra_bed_price) * $nights;
+                    
+                    $subtotal = $roomPriceTotal + $extraBedTotal;
                     $totalAmount += $subtotal;
 
                     // 🌟 เก็บยอดสะสมเตียงเสริมเพื่อเอาไปใส่ในตาราง Addons
-                    $totalExtraBedQty += $roomRequest['extra_beds'];
+                    $totalExtraBedQty += $extraBedQty;
                     $totalExtraBedPrice += $extraBedTotal;
 
+                    // 🚨 สร้างข้อมูลห้องพัก โดยยึดตาม Migration ของนายท่านที่มีแค่ 3 ฟิลด์ค่ะ!
                     BookingRoom::create([
                         'booking_id' => $booking->id, 
                         'room_type_id' => $roomType->id, 
-                        'room_id' => null, 
-                        'extra_beds' => $roomRequest['extra_beds'], 
-                        'room_price' => $roomType->rate_daily_general, 
-                        'extra_bed_price' => $roomType->extra_bed_price, 
-                        'subtotal' => $subtotal 
+                        'room_id' => null, // รอ assign ตอน Check-in
+                        // 🧹 หนูเอาฟิลด์ extra_beds, room_price ออกให้แล้วค่ะ!
                     ]);
-                }
+                
             }
 
             // 🌟 5. บันทึกข้อมูลบริการเสริม (Addons) แบบ 1-to-1
@@ -194,12 +231,11 @@ class BookingController extends Controller
             // บวกราคาบริการเสริมอื่นๆ เข้าไปในยอดรวมการจอง
             $totalAmount += ($breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice);
 
+            // 🚨 สร้าง Addon โดยโยนยอดรวมเตียงเสริมจากด้านบนมาใส่ตรงนี้ค่ะ!
             Addon::create([
                 'booking_id' => $booking->id,
-                // ข้อมูลเตียงเสริมที่สรุปมาจากทุกห้องรวมกัน
                 'extra_bed' => $totalExtraBedQty,
                 'extra_bed_price' => $totalExtraBedPrice,
-                // ข้อมูลบริการเสริมอื่นๆ ที่ส่งมาจาก Frontend
                 'breakfast' => $request->input('addons.breakfast', 0),
                 'breakfast_price' => $breakfastPrice,
                 'early_checkIn_price' => $earlyCheckInPrice,
@@ -215,8 +251,10 @@ class BookingController extends Controller
                 'status' => 'success',
                 'message' => 'Booking and Add-ons created successfully',
                 'data' => [
+                    'id' => $booking->id,
                     'total_amount' => $booking->total_amount,
                     'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
+                    'user' => $request->user('sanctum')?->id,
                 ]
             ], 201);
 
@@ -329,55 +367,20 @@ class BookingController extends Controller
         // 1. ตรวจสอบข้อมูล JSON ที่ส่งมา
         $request->validate([
             'booking_id' => 'required|uuid|exists:bookings,id',
-            'status'     => 'required|string|in:draft,confirmed,checked_in,checked_out,cancelled,no_show,deleted'
+            'status'     => 'required|string|in:draft,paid,confirmed,checked_in,checked_out,cancelled,no_show,deleted'
         ]);
 
         try {
             $booking = Booking::findOrFail($request->booking_id);
-            $currentStatus = $booking->status;
             $newStatus = $request->status;
             
-            $user = $request->user('sanctum'); // หรือใช้ auth('sanctum')->user() ก็ได้นะคะ
+            $user = $request->user('sanctum');
             $userRole = $user ? $user->role : 'guest';
             
+            // 🌟 2. สั่งให้ Model ทำงานแทน (โยน Role ไปให้ Model เช็คด้วย)
+            $booking->transitionStatus($newStatus, $userRole);
 
-            // 2. กฎการเปลี่ยนสถานะ (State Rules) ควบคู่กับสิทธิ์ (Roles) ที่อนุญาต
-            $validTransitions = [
-                'draft' => [
-                    'paid' => ['user', 'guest'],
-                    'deleted'   => ['user', 'guest'],
-                ],
-                'paid' => [
-                    'comfirmed'  => 'admin',
-                    'cancelled'  => 'admin',
-                ],
-                'confirmed' => [
-                    'cancelled'  => 'admin',
-                    'checked_in' => 'admin',
-                    'no_show'    => 'admin',
-                ],
-                'checked_in' => [
-                    'checked_out' => 'admin',
-                ],
-            ];
-
-            // 3. ตรวจสอบว่าสถานะปัจจุบันสามารถเปลี่ยนไปเป็นสถานะใหม่ได้หรือไม่
-            if (!array_key_exists($currentStatus, $validTransitions) || !array_key_exists($newStatus, $validTransitions[$currentStatus])) {
-                return response()->json([
-                    'status'  => 'error',
-                    'message' => "ไม่อนุญาตให้เปลี่ยนสถานะจาก '{$currentStatus}' ไปเป็น '{$newStatus}' ตาม Flow ระบบค่ะนายท่าน"
-                ], 422);
-            }
-
-            // 4. ตรวจสอบ Role ว่าตรงกับที่ระบบอนุญาตหรือไม่
-           $requiredRoles = $validTransitions[$currentStatus][$newStatus];
-            if (!in_array($userRole, $requiredRoles)) {
-                return response()->json(['message' => 'ไม่มีสิทธิ์ดำเนินการค่ะ!'], 403);
-            }
-
-            // 5. ถ้าผ่านด่านทั้งหมด ก็อัปเดตสถานะลง DB เลยค่ะ
-            $booking->update(['status' => $newStatus]);
-
+            // 3. ส่ง Response กลับแบบสวยๆ
             return response()->json([
                 'status'  => 'success',
                 'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
@@ -387,23 +390,69 @@ class BookingController extends Controller
                 ]
             ], 200);
 
-        } catch (ModelNotFoundException $e) {
-            DB::rollBack();
-            
-            // แอบดูว่าหา Model ไหนไม่เจอ จะได้แจ้ง Frontend ถูกค่ะ
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             $modelName = class_basename($e->getModel()); 
-            
             return response()->json([
                 'status'  => 'error',
                 'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ"
-            ], 404); // ปิ๊งป่อง! แจ้งเตือนแบบ 404 Not Found ถูกต้องตามหลักเป๊ะๆ ✨
+            ], 404);
 
-        }catch (\Exception $e) {
-            Log::error("Failed to update booking status: " . $e->getMessage());
+        } catch (\Exception $e) {
+            // ดึง HTTP Status Code ที่โยนมาจาก Model (422 หรือ 403) ถ้าไม่มีให้ใช้ 500 ค่ะ
+            $statusCode = $e->getCode() ?: 500;
+            
+            \Illuminate\Support\Facades\Log::error("Failed to update booking status: " . $e->getMessage());
             
             return response()->json([
                 'status'  => 'error',
-                'message' => 'ระบบขัดข้องระหว่างอัปเดตสถานะค่ะ'
+                'message' => $e->getMessage()
+            ], $statusCode);
+        }
+    }
+
+    
+    public function showById(Request $request, string $id)
+    {
+        try {
+            // 🛡️ ตรวจสอบการ Login
+            $user = $request->user('sanctum');
+
+            if (!$user) {
+                return response()->json([
+                    'error' => 'Unauthorized',
+                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!'
+                ], 401);
+            }
+
+            // 1. ดึงข้อมูล Booking พร้อม Relation ที่เกี่ยวข้อง
+            $booking = Booking::with(['user', 'addon', 'bookingRooms.roomType', 'bookingRooms.room'])
+                ->where('id', $id)
+                ->firstOrFail();
+
+            // 2. 🔐 ตรวจสอบสิทธิ์ (Authorization)
+            // ถ้าไม่ใช่ Admin และ ID ผู้ใช้ไม่ตรงกับเจ้าของรายการจอง หนูไม่ให้ดูนะคะ! 🙅‍♀️
+            if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
+                return response()->json([
+                    'error' => 'Forbidden',
+                    'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒'
+                ], 403);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'ดึงข้อมูลการจองเรียบร้อยแล้วค่ะ! ✨',
+                'data' => $booking
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'ไม่พบรหัสการจองนี้ในระบบค่ะนายท่าน 🔎',
+            ], 404);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'เกิดข้อผิดพลาด: ' . $e->getMessage(),
             ], 500);
         }
     }
