@@ -69,7 +69,7 @@ Route::prefix('v1')->group(function () {
         // 🏨 ระบบจองห้องพัก (เฉพาะลูกค้าที่ Login แล้ว)
         Route::controller(BookingController::class)->group(function () {
             Route::get('/get/bookings', 'getBookings');     // http://hotel.test/api/v1/get/bookings
-            Route::get('/bookings/{id}', 'showById')        // http://hotel.test/api/v1/bookings/{id}
+            Route::get('/bookings/{id}', 'showById');      // http://hotel.test/api/v1/bookings/{id}
             
         });
 
