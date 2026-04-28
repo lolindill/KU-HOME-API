@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('addons', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->foreignUuid('booking_id')->constrained('bookings')->cascadeOnDelete();
+            $table->foreignUuid('booking_room_id')->constrained('booking_rooms')->cascadeOnDelete();
 
             $table->integer('extra_bed')->default(0);
             $table->integer('breakfast')->default(0); //quality 

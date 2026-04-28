@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController; 
 use App\Http\Controllers\Api\V1\UserController;
 
+use App\Http\Controllers\Api\V1\ImageController;
+
 // 🌟 API Root / Health Check 
 Route::get('/', function () {
     return response()->json([
@@ -28,6 +30,7 @@ Route::prefix('v1')->group(function () {
     // ==========================================
     // 🔓 โซนสาธารณะ (Public Routes) ไม่ต้อง Login
     // ==========================================
+    Route::post('/upload-image', [ImageController::class, 'store']); //http://hotel.test/api/upload-image
 
     Route::prefix('auth')->controller(AuthController::class)->group(function () {
         Route::post('/login', 'login')->name('login'); // http://hotel.test/api/v1/auth/login
@@ -106,7 +109,7 @@ Route::prefix('v1')->group(function () {
             // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
             Route::controller(RoomController::class)->group(function () {
                 Route::get('/rooms/get', 'allRooms');                           // http://hotel.test/api/v1/rooms/get
-                Route::get('/rooms/status', 'roomStatus');                      // http://hotel.test/api/v1/rooms/status
+                Route::get('/rooms/status/{id}', 'roomStatus');                      // http://hotel.test/api/v1/rooms/status{id}
                 Route::put('/rooms/updateStatus/{id}', 'updateRoomStatus');     // http://hotel.test/api/v1/rooms/updateStatus/{id}
             });
            

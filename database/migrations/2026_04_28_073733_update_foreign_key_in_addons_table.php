@@ -10,20 +10,19 @@ return new class extends Migration
      * Run the migrations.
      */
     public function up(): void
-{
-    Schema::create('images', function (Blueprint $table) {
-        $table->id();
-        $table->string('name')->nullable();
-        $table->string('image_path'); // คอลัมน์สำหรับเก็บที่อยู่ของไฟล์
-        $table->timestamps();
-    });
-}
+    {
+        Schema::table('addons', function (Blueprint $table) {
+            //
+        });
+    }
 
     /**
      * Reverse the migrations.
      */
     public function down(): void
     {
-        Schema::dropIfExists('images');
+        Schema::table('addons', function (Blueprint $table) {
+            //
+        });
     }
 };

@@ -25,8 +25,8 @@ class Addon extends Model
         'breakfast_price' => 'integer',
     ];
 
-    public function booking(): BelongsTo
+    public function bookingRoom(): BelongsTo
     {
-        return $this->belongsTo(Booking::class);
+        return $this->belongsTo(BookingRoom::class);
     }
 }
