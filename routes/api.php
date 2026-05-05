@@ -30,18 +30,22 @@ Route::prefix('v1')->group(function () {
     // ==========================================
     // 🔓 โซนสาธารณะ (Public Routes) ไม่ต้อง Login
     // ==========================================
-    Route::post('/upload-image', [ImageController::class, 'store']); //http://hotel.test/api/upload-image
+    Route::post('/upload-image', [ImageController::class, 'store']); //http://hotel.test/api/v1/upload-image
 
     Route::prefix('auth')->controller(AuthController::class)->group(function () {
         Route::post('/login', 'login')->name('login'); // http://hotel.test/api/v1/auth/login
         Route::post('/register', 'register');          // http://hotel.test/api/v1/auth/register
+
+       
     });
 
     Route::prefix('bookings')->controller(BookingController::class)->group(function () {
         Route::post('/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
         Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
         Route::post('', 'createBooking');               // http://hotel.test/api/v1/bookings
-        Route::put('/update', 'updateStatus');           // http://hotel.test/api/v1/bookings/update
+        Route::put('/update/{id}', 'updateStatus');           // http://hotel.test/api/v1/bookings/update/{id}
+        Route::put('/assignRoom/{id}', 'autoAssignRooms'); /// http://hotel.test/api/v1/bookings/assignRoom/{id}
+
     });
         
 
@@ -86,17 +90,7 @@ Route::prefix('v1')->group(function () {
                 Route::put('/update_profile', 'updateProfile');         // http://hotel.test/api/v1/users/update_profile
             });
         
-        Route::middleware('role:admin')->prefix('frontdesk')->controller(FrontDeskController::class)->group(function () {
-            Route::post('/walk-in', 'walkIn');                              // http://hotel.test/api/v1/frontdesk/walk-in
-
-            Route::prefix('bookings/{booking_id}')->group(function () {
-                Route::post('/check-in', 'checkIn');                        // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-in
-                Route::post('/pay', 'recordPayment');                       // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/pay
-                Route::post('/check-out', 'checkOut');                      // http://hotel.test/api/v1/frontdesk/bookings/{booking_id}/check-out
-            });
         
-             
-        });
 
         // 📊 ระบบแดชบอร์ด แอดมิน และแม่บ้าน
         Route::middleware('role:admin')->group(function () {

@@ -13,6 +13,7 @@ return new class extends Migration
             $table->foreignUuid('room_type_id')->constrained('room_types')->onDelete('cascade'); 
             $table->string('room_number')->unique(); 
             $table->string('status')->default('available'); 
+            $table->integer('builtin_extra_beds')->default(0);
             $table->timestamp('status_updated_at')->nullable();
             $table->uuid('status_updated_by')->nullable();
             $table->timestamps(); 

@@ -30,14 +30,9 @@ class Booking extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function addon(): HasOne
+   public function bookingRooms(): HasMany
     {
-        return $this->hasOne(Addon::class);
-    }
-    
-    public function bookingRooms(): HasMany
-    {
-        return $this->hasMany(BookingRoom::class);
+        return $this->hasMany(BookingRoom::class, 'room_id', 'id');
     }
 
 
@@ -49,8 +44,8 @@ class Booking extends Model
         // กฎการเปลี่ยนสถานะและ Role ที่อนุญาต
         $validTransitions = [
             'draft' => [
-                'paid'      => ['user', 'guest'],
-                'deleted'   => ['user', 'guest'],
+                'paid'      => ['user', 'guest','admin'],
+                'deleted'   => ['user', 'guest','admin'],
             ],
             'paid' => [
                 'confirmed' => ['admin'], // 🌟 หนูแก้คำผิดจาก comfirmed และทำเป็น Array ให้แล้วค่ะ

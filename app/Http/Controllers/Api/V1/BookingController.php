@@ -132,6 +132,19 @@ class BookingController extends Controller
                 'is_ku_member' => 'required|in:true,false,1,0,True,False',
             ]);
 
+            // 🛑 1. ดักจับสายดอง: ถ้านายท่านมีบิล Draft ที่ยังไม่หมดเวลา ห้ามสร้างใหม่เด็ดขาด!
+            $userId = $request->user('sanctum')?->id;
+            if ($userId) {
+                $hasDraft = Booking::where('user_id', $userId)
+                ->where('status', 'draft')
+                ->where('payment_deadline', '>', Carbon::now())
+                ->exists();
+
+                if ($hasDraft) {
+                    throw new \Exception("มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ", 422);
+                    }
+            }
+
             DB::beginTransaction();
 
             $checkIn = Carbon::parse($validated['check_in']);
@@ -417,6 +430,111 @@ class BookingController extends Controller
                 'success' => false,
                 'message' => 'เกิดข้อผิดพลาด: ' . $e->getMessage(),
             ], 500);
+        }
+    }
+
+   public function autoAssignRooms(Request $request, $bookingId)
+    {
+        try {
+            DB::beginTransaction();
+
+            // 🌟 1. โหลดข้อมูลการจอง พร้อมกับห้องพัก และ Addon มาด้วยเลย
+            $booking = Booking::with(['bookingRooms.addon'])->findOrFail($bookingId);
+
+            // =========================================================
+            // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin)
+            // =========================================================
+            $user = $request->user('sanctum');
+            
+            // ถ้านายท่านยังไม่ได้ล็อกอิน
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'นายท่านยังไม่ได้ล็อกอินนะคะ! กรุณาแนบ Token ก่อนทำรายการค่ะ 🔒'
+                ], 401);
+            }
+
+            // ถ้าไม่ใช่ Admin และ ID ไม่ตรงกับคนจอง
+            if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️'
+                ], 403);
+            }
+
+            // =========================================================
+            // 🛡️ ด่านตรวจที่ 2: เช็คสถานะ Booking (ต้อง paid หรือ confirmed เท่านั้น)
+            // =========================================================
+            if (!in_array($booking->status, ['paid', 'confirmed'])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "ยังระบุเลขห้องไม่ได้ค่ะนายท่าน! สถานะปัจจุบันคือ '{$booking->status}' (ต้องจ่ายเงิน 'paid' หรือยืนยัน 'confirmed' ก่อนนะคะ) 💳"
+                ], 422);
+            }
+
+            // =========================================================
+            // 🌟 เริ่มกระบวนการ Assign ห้อง (โค้ดเดิมของนายท่าน)
+            // =========================================================
+            $unassignedRooms = $booking->bookingRooms->whereNull('room_id');
+
+            if ($unassignedRooms->isEmpty()) {
+                return response()->json([
+                    'status' => 'info',
+                    'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨'
+                ]);
+            }
+
+            $checkIn = $booking->check_in;
+            $checkOut = $booking->check_out;
+            $assignedCount = 0;
+
+            foreach ($unassignedRooms as $bookingRoom) {
+                // ดึงจำนวนเตียงเสริม
+                $requestedExtraBeds = $bookingRoom->addon ? $bookingRoom->addon->extra_bed : 0;
+
+                // ค้นหาห้องว่าง พร้อมกับระบบ Priority เตียงเสริม
+                $availableRoom = Room::where('room_type_id', $bookingRoom->room_type_id)
+                    ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
+                        $query->whereHas('booking', function ($bQuery) use ($checkIn, $checkOut) {
+                            $bQuery->whereIn('status', ['paid', 'confirmed', 'checked_in'])
+                                   ->where('check_in', '<', $checkOut)
+                                   ->where('check_out', '>', $checkIn);
+                        });
+                    })
+                    ->whereNotIn('status', ['maintenance', 'reserved_closed'])
+                    ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
+                    ->orderBy('builtin_extra_beds', 'ASC')
+                    ->first();
+
+                if ($availableRoom) {
+                    $bookingRoom->update(['room_id' => $availableRoom->id]);
+                    $assignedCount++;
+                } else {
+                    throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่มีห้องพักว่างให้ระบุหมายเลขได้ในช่วงเวลาดังกล่าวค่ะ 😭");
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
+                'data' => $booking->load('bookingRooms.room')
+            ], 200);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูลการจองนี้ในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ'
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Failed to auto-assign room: " . $e->getMessage());
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: ' . $e->getMessage()
+            ], 422);
         }
     }
 }
