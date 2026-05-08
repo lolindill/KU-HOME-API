@@ -32,7 +32,7 @@ class Booking extends Model
 
    public function bookingRooms(): HasMany
     {
-        return $this->hasMany(BookingRoom::class, 'room_id', 'id');
+        return $this->hasMany(BookingRoom::class, 'booking_id');
     }
 
 

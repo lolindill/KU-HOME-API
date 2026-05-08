@@ -19,6 +19,10 @@ class Room extends Model
     {
         return $this->belongsTo(RoomType::class, 'room_type_id', 'id');
     }
+    public function bookingRooms()
+    {
+        return $this->hasMany(BookingRoom::class, 'room_id');
+    }
 
     // 🌟 ฟังก์ชันใหม่สำหรับจัดการ State Rules ของห้องพักค่ะ
     public function transitionStatusTo(string $newStatus, ?string $updatedByUserId = null)

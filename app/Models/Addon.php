@@ -11,8 +11,6 @@ class Addon extends Model
 {
     use HasFactory, HasUuids;
 
-    public $timestamps = false;
-
     // เปลี่ยนมาใช้ guarded ให้เป็นมาตรฐานเดียวกันค่ะ
     protected $guarded = [];
 

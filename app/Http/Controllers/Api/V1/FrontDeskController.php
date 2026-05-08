@@ -54,16 +54,18 @@ class FrontDeskController extends Controller
             $confirmationNo = Carbon::now()->format('Ym') . '-W' . str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT);
 
             $booking = Booking::create([
-                'id' => Str::uuid(),
                 'user_id' => $guestUser->id,
-                'confirmation_no' => $confirmationNo,
-                'booking_type' => 'walk-in',
+                'confirmation' => $confirmationNo,
                 'source' => 'admin', 
                 'status' => 'checked_in', 
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
-                'adults' => 1,
+                'guest_name' => $validated['guest_name'],
+                'guest_phone' => $validated['guest_phone'],
+                'guest_email' => 'walkin@hotel.local',
+                'guest_nationality' => 'Thai',
                 'total_amount' => $totalAmount,
+                'payment_deadline' => Carbon::now(),
             ]);
 
             BookingRoom::create([

@@ -46,13 +46,13 @@ class BookingController extends Controller
                 $query->where('user_id', $user->id);
             } 
 
-            if ($term && method_exists($this, 'applyUserFilter')) {
+            if ($term) {
                 $query = $this->applyUserFilter($query, $term);
             }
-            if ($checkIn && $checkOut && method_exists($this, 'applyDateFilter')) {
+            if ($checkIn && $checkOut) {
                 $query = $this->applyDateFilter($query, $checkIn, $checkOut);
             }
-            if ($roomTypeId !== 'all' && method_exists($this, 'applyRoomTypeFilter')) {
+            if ($roomTypeId !== 'all') {
                 $query = $this->applyRoomTypeFilter($query, $roomTypeId);
             }
 
@@ -62,7 +62,7 @@ class BookingController extends Controller
                 'status' => 'success',
                 'message' => 'ดึงข้อมูลสำเร็จแล้วค่ะนายท่าน! ✨',
                 'count' => $bookings->count(),
-                'role' => $user->id,
+                'user' => $user->id,
                 'search_criteria' => [
                     'term' => $term,
                     'check_in' => $checkIn,
@@ -450,7 +450,8 @@ class BookingController extends Controller
             if (!$user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'นายท่านยังไม่ได้ล็อกอินนะคะ! กรุณาแนบ Token ก่อนทำรายการค่ะ 🔒'
+                    'message' => 'นายท่านยังไม่ได้ล็อกอินนะคะ! กรุณาแนบ Token ก่อนทำรายการค่ะ 🔒',
+                    'user' => $user
                 ], 401);
             }
 
@@ -473,11 +474,20 @@ class BookingController extends Controller
             }
 
             // =========================================================
-            // 🌟 เริ่มกระบวนการ Assign ห้อง (โค้ดเดิมของนายท่าน)
+            // 🌟 เริ่มกระบวนการ Assign ห้อง (เรียกใช้ Logic จาก Model)
             // =========================================================
-            $unassignedRooms = $booking->bookingRooms->whereNull('room_id');
+            $unassignedRooms = $booking->bookingRooms()->whereNull('room_id')->get();
+            $unassignedRooms->load('addon');
 
             if ($unassignedRooms->isEmpty()) {
+                // เช็คกันเหนียวเผื่อบุ๊กกิ้งนี้ไม่มีห้องเลยจริงๆ
+                if ($booking->bookingRooms()->count() === 0) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'เอ๊ะ! บุ๊กกิ้งนี้ยังไม่มีการจองห้องพักเข้ามาเลยนะคะนายท่าน! 💦'
+                    ], 422);
+                }
+
                 return response()->json([
                     'status' => 'info',
                     'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨'
@@ -489,28 +499,14 @@ class BookingController extends Controller
             $assignedCount = 0;
 
             foreach ($unassignedRooms as $bookingRoom) {
-                // ดึงจำนวนเตียงเสริม
-                $requestedExtraBeds = $bookingRoom->addon ? $bookingRoom->addon->extra_bed : 0;
+                // 🌟 เรียกใช้ Method จาก Model แบบหล่อๆ เท่ๆ ไปเลยค่ะ ไม่มี Parameter มากวนใจ!
+                $isSuccess = $bookingRoom->assignAvailableRoom();
 
-                // ค้นหาห้องว่าง พร้อมกับระบบ Priority เตียงเสริม
-                $availableRoom = Room::where('room_type_id', $bookingRoom->room_type_id)
-                    ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
-                        $query->whereHas('booking', function ($bQuery) use ($checkIn, $checkOut) {
-                            $bQuery->whereIn('status', ['paid', 'confirmed', 'checked_in'])
-                                   ->where('check_in', '<', $checkOut)
-                                   ->where('check_out', '>', $checkIn);
-                        });
-                    })
-                    ->whereNotIn('status', ['maintenance', 'reserved_closed'])
-                    ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
-                    ->orderBy('builtin_extra_beds', 'ASC')
-                    ->first();
-
-                if ($availableRoom) {
-                    $bookingRoom->update(['room_id' => $availableRoom->id]);
+                if ($isSuccess) {
                     $assignedCount++;
                 } else {
-                    throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่มีห้องพักว่างให้ระบุหมายเลขได้ในช่วงเวลาดังกล่าวค่ะ 😭");
+                    // ถ้าหาห้องไม่ได้ ให้ Throw Exception ออกไปให้ Catch ทำงาน
+                    throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่มีห้องพักว่างให้ระบุหมายเลขได้ในช่วงเวลาดังกล่าวค่ะ 😭 (ตรวจสอบห้องประเภท ID: {$bookingRoom->room_type_id})");
                 }
             }
 

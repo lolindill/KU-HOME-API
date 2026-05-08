@@ -108,8 +108,7 @@ Route::prefix('v1')->group(function () {
             });
            
             Route::controller(BookingController::class)->group(function () {                
-                                     // http://hotel.test/api/v1/get/bookings
-                                   // http://hotel.test/api/v1//search/bookings/
+                Route::get('/bookings/search', 'bookingSearch');          // http://hotel.test/api/v1/bookings/search
             });
             
             Route::controller(DashboardController::class)->prefix('housekeeping')->group(function () {
@@ -118,8 +117,10 @@ Route::prefix('v1')->group(function () {
             });
 
              Route::controller(FrontDeskController::class)->prefix('frontdesk')->group(function () {
-                Route::put('/check_in/{booking_id}', 'checkIn');           //  http://hotel.test/api/v1/frontdesk/check_in/{booking_id}
-
+                Route::post('/walkin', 'walkIn');                          // http://hotel.test/api/v1/frontdesk/walkin
+                Route::put('/check_in/{booking_id}', 'checkIn');           // http://hotel.test/api/v1/frontdesk/check_in/{booking_id}
+                Route::put('/check_out/{booking_id}', 'checkOut');         // http://hotel.test/api/v1/frontdesk/check_out/{booking_id}
+                Route::post('/{booking_id}/payment', 'recordPayment');     // http://hotel.test/api/v1/frontdesk/{booking_id}/payment
             }); // ✨ ปิด FrontDeskController
 
         }); 

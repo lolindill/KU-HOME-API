@@ -26,6 +26,8 @@ return new class extends Migration
             $table->string('phone')->nullable();
             $table->string('nationality')->default('Thai');
             $table->boolean('is_ku_member')->default(false);
+
+            
             
         });
 
