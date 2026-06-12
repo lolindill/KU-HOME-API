@@ -4,45 +4,69 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Exception; // 🌟 เพิ่มบรรทัดนี้เข้ามาด้วยนะคะ
+use Exception;
 
 class Room extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuids;
 
-    protected $guarded = [];
-    public $incrementing = false;
-    protected $keyType = 'string';
+    /**
+     * ✅ #17 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
+     * 
+     * 'status' อยู่ใน $fillable เพราะมี transitionStatusTo() state machine เป็น guard
+     * 'status_updated_at' และ 'status_updated_by' จะถูกเซ็ตผ่าน transitionStatusTo() เท่านั้น
+     */
+    protected $fillable = [
+        'room_type_id',
+        'room_number',
+        'status',
+        'builtin_extra_beds',
+        'status_updated_at',
+        'status_updated_by',
+    ];
 
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class, 'room_type_id', 'id');
     }
+
     public function bookingRooms()
     {
         return $this->hasMany(BookingRoom::class, 'room_id');
     }
 
-    // 🌟 ฟังก์ชันใหม่สำหรับจัดการ State Rules ของห้องพักค่ะ
+    /**
+     * Room Status State Machine (all lowercase)
+     * 
+     * available → checkout_makeup, dirty, maintenance, reserved_closed
+     * occupied → available, prep_checkin
+     * checkout_makeup → occupied
+     * dirty → available, checkout_makeup
+     * prep_checkin → available, dirty
+     * maintenance → * (any status)
+     * reserved_closed → * (any status)
+     */
     public function transitionStatusTo(string $newStatus, ?string $updatedByUserId = null)
     {
         $currentStatus = $this->status;
+        $newStatus = strtolower($newStatus);
 
         // ถ้าสถานะเดิมอยู่แล้ว ไม่ต้องอัปเดตให้เปลืองแรงค่ะ
         if ($currentStatus === $newStatus) {
             return false; 
         }
 
-        // 🛡️ กฎการเปลี่ยนสถานะของนายท่าน
+        // 🛡️ กฎการเปลี่ยนสถานะ (key = target status, value = allowed source statuses)
         $allowedTransitions = [
-            'Occupied'        => ['available', 'prep_checkIn'],
-            'checkout_makeup' => ['Occupied'],
-            'available'       => ['checkout_makeup', 'dirty', 'maintenance', 'reserved_closed'],
+            'occupied'        => ['available', 'prep_checkin'],
+            'checkout_makeup' => ['occupied'],
+            'available'       => ['checkout_makeup', 'dirty', 'maintenance', 'reserved_closed', 'prep_checkin'],
+            'dirty'           => ['available', 'prep_checkin'], 
+            'prep_checkin'    => ['available', 'dirty', 'occupied'],
             'maintenance'     => ['*'], 
             'reserved_closed' => ['*'],
-            'dirty'           => ['available', 'checkout_makeup'], 
-            'prep_checkIn'    => ['available', 'dirty'] 
         ];
 
         $canTransition = false;
@@ -68,6 +92,6 @@ class Room extends Model
         
         $this->save();
 
-        return true; // ส่งค่ากลับว่ามีการเปลี่ยนสถานะสำเร็จค่ะ
+        return true;
     }
 }

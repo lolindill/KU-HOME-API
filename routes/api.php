@@ -1,130 +1,116 @@
 <?php
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-
-// 🌟 นำเข้า Controllers ทั้งหมดให้เป็นระเบียบ
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\DashboardController;
-use App\Http\Controllers\Api\V1\PaymentController;
-use App\Http\Controllers\Api\V1\RoomController; 
-use App\Http\Controllers\Api\V1\UserController;
-
 use App\Http\Controllers\Api\V1\ImageController;
 
-// 🌟 API Root / Health Check 
-Route::get('/', function () {
-    return response()->json([
-        'message' => 'Welcome to KU HOME API 🏨✨',
-        'version' => '1.0.0',
-        'status' => 'Active',
-        'timestamp' => now()->toIso8601String()
-    ]);
-}); // http://hotel.test/api
+/*
+|--------------------------------------------------------------------------
+| API Routes — KU HOME API
+|--------------------------------------------------------------------------
+|
+| 🎯 Response Format (Standardized):
+|   Success: { "status": "success", "message": "...", ...fields }
+|   Error:   { "status": "error", "message": "..." }
+|
+| 🚧 = Draft / Testing route (ยังไม่ใช้งานจริง)
+|--------------------------------------------------------------------------
+*/
 
-// 🌟 จัด Group หลัก V1
+// ============================================
+// 🔓 Public Routes
+// ============================================
+
 Route::prefix('v1')->group(function () {
 
-    // ==========================================
-    // 🔓 โซนสาธารณะ (Public Routes) ไม่ต้อง Login
-    // ==========================================
-    Route::post('/upload-image', [ImageController::class, 'store']); //http://hotel.test/api/v1/upload-image
+    // 🔑 Auth
+    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
 
-    Route::prefix('auth')->controller(AuthController::class)->group(function () {
-        Route::post('/login', 'login')->name('login'); // http://hotel.test/api/v1/auth/login
-        Route::post('/register', 'register');          // http://hotel.test/api/v1/auth/register
+    // 🏨 Rooms (public read-only)
+    Route::get('/rooms', [RoomController::class, 'allRooms']);
+    Route::get('/rooms/status', [RoomController::class, 'roomStatus']);
+    Route::get('/rooms/{id}', [RoomController::class, 'getRoomById']);
+    Route::get('/room-types', [RoomController::class, 'allRoomTypes']);
+    Route::get('/room-types/{id}', [RoomController::class, 'getRoomTypeById']);
+    Route::get('/availability', [RoomController::class, 'availability']);
 
-       
-    });
+    // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
+    Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
 
-    Route::prefix('bookings')->controller(BookingController::class)->group(function () {
-        Route::post('/discounts/validate', 'validateDiscount'); // http://hotel.test/api/v1/bookings/discounts/validate
-        Route::get('/addons', 'addons');               // http://hotel.test/api/v1/addons
-        Route::post('', 'createBooking');               // http://hotel.test/api/v1/bookings
-        Route::put('/update/{id}', 'updateStatus');           // http://hotel.test/api/v1/bookings/update/{id}
-        Route::put('/assignRoom/{id}', 'autoAssignRooms'); /// http://hotel.test/api/v1/bookings/assignRoom/{id}
+    // 📅 Booking — Public (Guest สร้างบุ๊กกิ้งได้โดยไม่ต้องล็อกอิน) + Rate Limited
+    Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
+    Route::post('/bookings/lookup', [BookingController::class, 'lookupBooking'])->middleware('throttle:10,1');
 
-    });
-        
+    // 💳 Guest ขอลิงก์ชำระเงินสำหรับบุ๊กกิ้งของตัวเอง + Rate Limited
+    Route::post('/bookings/{id}/request-payment', [PaymentController::class, 'requestPaymentForGuest'])->middleware('throttle:5,1');
 
-    Route::prefix('payments')->group(function () {
-        Route::post('/webhook', [PaymentController::class, 'webhook']); // http://hotel.test/api/v1/payments/webhook
-    });
+    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง
+    Route::post('/upload-image', [ImageController::class, 'upload']);
+});
 
-    
-    Route::controller(RoomController::class)->group(function (){
-        Route::get('/rooms/availability', 'availability'); // http://hotel.test/api/v1/rooms/availability
-        Route::get('/room-types', 'allRoomTypes');          // http://hotel.test/api/v1/room-types
-        Route::get('/rooms/{id}','getRoomById');            // http://hotel.test/api/v1/rooms/{id}
-        Route::get('/room-types/{id}','getRoomTypeById');   // http://hotel.test/api/v1/room-types/{id}
-    });   
-    
-    // ==========================================
-    // 🛡️ โซนหวงห้าม (Protected Routes) ต้องมี Token Sanctum
-    // ==========================================
-    
-    Route::middleware('auth:sanctum')->group(function () {
+// ============================================
+// 🔒 Protected Routes (auth:sanctum)
+// ============================================
 
-        // 🔐 ข้อมูลส่วนตัวและการออกจากระบบ
-        Route::prefix('auth')->controller(AuthController::class)->group(function () {
-            Route::post('/logout', 'logout');          // http://hotel.test/api/v1/auth/logout
-                                                       // http://hotel.test/api/v1/auth/user
+Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
+
+    // 🔑 Auth
+    Route::post('/logout', [AuthController::class, 'logout']);
+
+    // 👤 User Profile (เจ้าของเท่านั้น)
+    Route::get('/me', [UserController::class, 'me']);
+    Route::put('/profile', [UserController::class, 'updateProfile']);
+
+    // 📅 Bookings (เจ้าของบุ๊กกิ้งดูของตัวเองได้)
+    Route::get('/bookings', [BookingController::class, 'getBookings']);
+    Route::get('/bookings/{id}', [BookingController::class, 'showById'])->where('id', '[0-9a-f\-]{36}');
+
+    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
+    Route::post('/bookings/validate-discount', [BookingController::class, 'validateDiscount']);
+
+    // ============================================
+    // 🔐 Admin-only Routes
+    // ============================================
+    Route::middleware('role:admin')->group(function () {
+
+        // 👥 Users (admin only)
+        Route::get('/users', [UserController::class, 'index']);
+        Route::post('/users', [UserController::class, 'store']);
+        Route::get('/users/{id}', [UserController::class, 'show']);
+        Route::put('/users/{id}', [UserController::class, 'update']);
+        Route::delete('/users/{id}', [UserController::class, 'destroy']);
+        Route::put('/users/{id}/verify', [UserController::class, 'verify']);
+
+        // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ, assign ห้อง)
+        Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
+        Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
+
+        // 🛏️ Rooms — เปลี่ยนสถานะห้อง (admin only)
+        Route::put('/rooms/{id}/status', [RoomController::class, 'updateRoomStatus']);
+
+        // 🛎️ Front Desk Operations (admin only)
+        Route::prefix('front-desk')->group(function () {
+            Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);
+            Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
+            Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
+            Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
         });
 
-        // 🏨 ระบบจองห้องพัก (เฉพาะลูกค้าที่ Login แล้ว)
-        Route::controller(BookingController::class)->group(function () {
-            Route::get('/get/bookings', 'getBookings');     // http://hotel.test/api/v1/get/bookings
-            Route::get('/bookings/{id}', 'showById');      // http://hotel.test/api/v1/bookings/{id}
-            
+        // 🧹 Dashboard / Housekeeping (admin only)
+        Route::prefix('dashboard')->group(function () {
+            Route::get('/cleaning-tasks', [DashboardController::class, 'cleaningTasks']);
+            Route::put('/cleaning-tasks/{roomId}', [DashboardController::class, 'updateCleaningStatus']);
         });
 
-        // 💳 ระบบการชำระเงิน
-        Route::prefix('payments')->group(function () {
-            Route::post('/request', [PaymentController::class, 'requestPayment']); // http://hotel.test/api/v1/payments/request
-        });
+        // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
+        Route::post('/payments', [PaymentController::class, 'requestPayment']);
 
-        Route::controller(UserController::class)->prefix('users')->group(function () {
-                Route::get('/self', 'me');                              // http://hotel.test/api/v1/users/self
-                Route::put('/update_profile', 'updateProfile');         // http://hotel.test/api/v1/users/update_profile
-            });
-        
-        
-
-        // 📊 ระบบแดชบอร์ด แอดมิน และแม่บ้าน
-        Route::middleware('role:admin')->group(function () {
-
-            Route::controller(UserController::class)->prefix('users')->group(function () {
-                Route::get('/get', 'index');            // GET http://hotel.test/api/v1/users/get
-                Route::get('/{id}', 'show');            // GET http://hotel.test/api/v1/users/{id}
-                Route::delete('/{id}', 'destroy');      // DELETE http://hotel.test/api/v1/users/{id}
-            });
-            // 🛏️ ดึงสถานะห้องให้พนักงานดู (ย้ายมา RoomController)
-            Route::controller(RoomController::class)->group(function () {
-                Route::get('/rooms/get', 'allRooms');                           // http://hotel.test/api/v1/rooms/get
-                Route::get('/rooms/status/{id}', 'roomStatus');                      // http://hotel.test/api/v1/rooms/status{id}
-                Route::put('/rooms/updateStatus/{id}', 'updateRoomStatus');     // http://hotel.test/api/v1/rooms/updateStatus/{id}
-            });
-           
-            Route::controller(BookingController::class)->group(function () {                
-                Route::get('/bookings/search', 'bookingSearch');          // http://hotel.test/api/v1/bookings/search
-            });
-            
-            Route::controller(DashboardController::class)->prefix('housekeeping')->group(function () {
-                Route::get('/', 'cleaningTasks');                           // http://hotel.test/api/v1/housekeeping
-                Route::post('/{room_id}/status', 'updateCleaningStatus');   // http://hotel.test/api/v1/housekeeping/{room_id}/status
-            });
-
-             Route::controller(FrontDeskController::class)->prefix('frontdesk')->group(function () {
-                Route::post('/walkin', 'walkIn');                          // http://hotel.test/api/v1/frontdesk/walkin
-                Route::put('/check_in/{booking_id}', 'checkIn');           // http://hotel.test/api/v1/frontdesk/check_in/{booking_id}
-                Route::put('/check_out/{booking_id}', 'checkOut');         // http://hotel.test/api/v1/frontdesk/check_out/{booking_id}
-                Route::post('/{booking_id}/payment', 'recordPayment');     // http://hotel.test/api/v1/frontdesk/{booking_id}/payment
-            }); // ✨ ปิด FrontDeskController
-
-        }); 
-
-    }); // 🛑 จบเขตหวงห้าม Sanctum
-    
+    });
 });

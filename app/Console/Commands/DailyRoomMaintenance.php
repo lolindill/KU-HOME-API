@@ -26,7 +26,7 @@ class DailyRoomMaintenance extends Command
         // =========================================================
         $today = Carbon::today();
 
-        // โหลด bookingRooms.booking มาด้วยเพื่อป้องกัน N+1 Query ตอนเรียก $this->booking->check_in ใน Model ค่ะ
+        // โหลด bookingRooms.booking มาด้วยเพื่อป้องกัน N+1 Query ตอนเรียก $this->booking->check_in ใน Model 
         $todayBookings = Booking::with(['bookingRooms.addon', 'bookingRooms.booking'])
             ->whereIn('status', ['paid', 'confirmed'])
             ->whereDate('check_in', $today)
@@ -34,7 +34,6 @@ class DailyRoomMaintenance extends Command
 
         $autoAssigned = 0;
 
-        // เอาตัวแปรที่ไม่ได้ใช้ออกจาก use() ให้หมดค่ะ
         DB::transaction(function () use ($todayBookings, &$autoAssigned) {
             foreach ($todayBookings as $booking) {
                 $unassignedRooms = $booking->bookingRooms->whereNull('room_id');
@@ -77,9 +76,10 @@ class DailyRoomMaintenance extends Command
 
         $flaggedDirty = 0;
         foreach ($staleRooms as $room) {
+            $originalStatus = $room->status;
             $room->transitionStatusTo('dirty');
             $flaggedDirty++;
-            $this->line("  ✓ Flagged room {$room->room_number} as dirty (status was '{$room->status}')");
+            $this->line("  ✓ Flagged room {$room->room_number} as dirty (status was '{$originalStatus}')");
         }
 
         $results['rooms_flagged_dirty'] = $flaggedDirty;

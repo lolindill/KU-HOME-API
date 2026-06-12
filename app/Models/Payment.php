@@ -19,8 +19,12 @@ class Payment extends Model
         'received_by'
     ];
 
+    /**
+     * ✅ #30 Fixed: เปลี่ยน cast จาก decimal:2 เป็น integer
+     * มาตรฐานเดียวกันกับ Booking.total_amount = integer (satang/cents)
+     */
     protected $casts = [
-        'amount' => 'decimal:2',
+        'amount' => 'integer',
     ];
 
     // 🌟 Relationship: กลับไปหาใบจอง

@@ -4,41 +4,36 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Requests\StoreUserRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str; // 👈 เพิ่มสิ่งนี้เข้ามาเพื่อช่วยสร้าง UUID ค่ะ
 
 class AuthController extends Controller
 {
-    // 📝 1. สมัครสมาชิก (Register)
-    public function register(Request $request)
+    // 📝 สมัครสมาชิก
+    public function register(StoreUserRequest $request)
     {
-        
-        // ตรวจสอบความถูกต้องของข้อมูลที่ส่งมา
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8', // ถ้าอยากให้ยืนยันรหัสผ่านด้วย เติม '|confirmed' ได้นะคะ
-        ]);
+        $validated = $request->validated();
 
-        // สร้างข้อมูล User ใหม่ลงฐานข้อมูล
+        // 🛡️ SECURITY: Only pick safe fields — never trust client with role/ver
+        // role defaults to 'user' via DB column default
         $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => $request->password, // ตรงนี้ปล่อยผ่านได้เลยค่ะ เพราะ Model ของนายท่านมี 'password' => 'hashed' คอยเข้ารหัสให้อัตโนมัติแล้ว เก่งสุดๆ!
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => $validated['password'],
         ]);
 
-        // สร้าง Token ให้เลยหลังสมัครเสร็จ จะได้ไม่ต้องไปยิง Login ซ้ำค่ะ
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
         return response()->json([
-            'message' => 'success',
+            'status' => 'success',
+            'message' => 'Registration successful',
             'access_token' => $token,
             'token_type' => 'Bearer'
         ], 201);
     }
 
-    // 🔑 2. เข้าสู่ระบบ (Login)
+    // 🔑 เข้าสู่ระบบ
     public function login(Request $request)
     {
         $request->validate([
@@ -50,26 +45,29 @@ class AuthController extends Controller
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
-                'error' => 'อีเมลหรือรหัสผ่านไม่ถูกต้องค่ะ'
+                'status' => 'error',
+                'message' => 'อีเมลหรือรหัสผ่านไม่ถูกต้องค่ะ'
             ], 401);
         }
         
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
         return response()->json([
-            'message' => 'success',
+            'status' => 'success',
+            'message' => 'Login successful',
             'access_token' => $token,
             'token_type' => 'Bearer'
         ], 200);
     }
 
-    // 🚪 3. ออกจากระบบ (Logout)
+    // 🚪 ออกจากระบบ
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
 
         return response()->json([
-            'message' => 'success',
+            'status' => 'success',
+            'message' => 'Logout successful',
         ], 200);
     }
 }

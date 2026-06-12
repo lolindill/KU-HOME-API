@@ -24,7 +24,7 @@ return new class extends Migration
             $table->string('guest_email');
             $table->string('guest_phone');
             
-            $table->string('guest_nationality')->default('Thai');
+            $table->string('guest_nationality')->nullable()->default('Thai');
             $table->boolean('is_ku_member')->default(false);
             
             $table->integer('total_amount');

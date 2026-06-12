@@ -4,19 +4,22 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
-use App\Models\User; 
-use App\Models\Payment; 
+use App\Models\User;
+use App\Models\Payment;
+use App\Models\Receipt;
 use App\Models\HousekeepingTask;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class FrontDeskController extends Controller
 {
-    // 🌟 1. API สำหรับ Process 3.1 Manage Walk-in Booking
+    // 🌟 1. Walk-in Booking (Admin only)
     public function walkIn(Request $request)
     {
         $validated = $request->validate([
@@ -30,39 +33,38 @@ class FrontDeskController extends Controller
         try {
             DB::beginTransaction();
 
-            // 1. Check Availability & Update Room
             $room = Room::with('roomType')->findOrFail($validated['room_id']);
-            if (!in_array($room->status, ['available', 'prep_checkIn'])) {
+            if (!in_array($room->status, ['available', 'prep_checkin'])) {
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
 
-            // 2. Read and Create User
             $guestUser = User::firstOrCreate(
                 ['phone' => $validated['guest_phone']],
                 [
                     'id' => Str::uuid(),
                     'name' => $validated['guest_name'],
+                    'email' => 'walkin-' . $validated['guest_phone'] . '@hotel.local',
                     'role' => 'guest',
                     'password' => bcrypt(Str::random(10)) 
                 ]
             );
 
-            // 3. Save Booking
             $checkIn = Carbon::now();
             $checkOut = Carbon::now()->addDays($validated['nights']);
             $totalAmount = $room->roomType->rate_daily_general * $validated['nights'];
-            $confirmationNo = Carbon::now()->format('Ym') . '-W' . str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT);
+            $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
                 'user_id' => $guestUser->id,
                 'confirmation' => $confirmationNo,
                 'source' => 'admin', 
-                'status' => 'checked_in', 
+                'status' => 'draft', // immediately transitioned to checked_in below
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
                 'guest_name' => $validated['guest_name'],
                 'guest_phone' => $validated['guest_phone'],
-                'guest_email' => 'walkin@hotel.local',
+                // ✅ #35 Fixed: ใช้ phone ทำให้ email unique ต่อ walk-in guest — lookup เจอได้
+                'guest_email' => 'walkin-' . $validated['guest_phone'] . '@hotel.local',
                 'guest_nationality' => 'Thai',
                 'total_amount' => $totalAmount,
                 'payment_deadline' => Carbon::now(),
@@ -73,42 +75,42 @@ class FrontDeskController extends Controller
                 'booking_id' => $booking->id,
                 'room_type_id' => $room->room_type_id,
                 'room_id' => $room->id,
-                'room_price' => $room->roomType->rate_daily_general,
-                'subtotal' => $totalAmount
             ]);
 
-            // อัปเดตสถานะห้องเป็น Occupied ทันที
-            $room->update([
-                'status' => 'Occupied',
-                'status_updated_at' => Carbon::now(),
-                'status_updated_by' => $validated['verified_by']
-            ]);
+            // 🌟 ใช้ state machine เปลี่ยนสถานะห้องเป็น occupied
+            $room->transitionStatusTo('occupied', $validated['verified_by']);
+
+            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking เป็น checked_in
+            $booking->transitionStatus('checked_in', 'admin');
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Walk-in booking and Check-in completed!',
-                'data' => ['booking_id' => $booking->id, 'room_number' => $room->room_number]
+                'booking_id' => $booking->id,
+                'room_number' => $room->room_number,
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+            Log::error("Walk-in failed: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
         }
     }
 
-    // 🛎️ 2. API สำหรับ Process 3.2 Process Check-In (ใช้ Bearer Token ระบุตัวตน)
+    // 🛎️ 2. Check-In
     public function checkIn(Request $request, $bookingId)
     {   
-        // ✨ เวทมนตร์ของน้องเมด: ถ้าส่งมาเป็น String เดี่ยวๆ ให้แปลงเป็น Array อัตโนมัติค่ะ
         if (is_string($request->input('assigned_rooms'))) {
             $request->merge([
                 'assigned_rooms' => [$request->input('assigned_rooms')]
             ]);
         }
         $validated = $request->validate([
-            // 🌟 ลบ verified_by ออกแล้วค่ะ! เราจะดึงข้อมูลจาก Token แทน
             'assigned_rooms'   => 'nullable|array',
             'assigned_rooms.*' => 'required|uuid|exists:rooms,id',
         ]);
@@ -118,7 +120,6 @@ class FrontDeskController extends Controller
 
             $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
             
-            // 🗝️ ดึงข้อมูล User จาก Token ได้เลยค่ะ มั่นใจ ปลอดภัย 100%
             $user = $request->user();
             if (!$user) {
                 throw new \Exception("Unauthorized: ไม่พบข้อมูลผู้ใช้งานจาก Token ค่ะนายท่าน", 401);
@@ -127,7 +128,7 @@ class FrontDeskController extends Controller
             $userId = $user->id;
             $userRole = $user->role;
 
-            // ✨ จับคู่ห้องพักอัตโนมัติ
+            // จับคู่ห้องพัก
             if (!empty($validated['assigned_rooms'])) {
                 $assignedRooms = $validated['assigned_rooms'];
                 $bookingRooms = $booking->bookingRooms;
@@ -137,6 +138,16 @@ class FrontDeskController extends Controller
                 }
 
                 foreach ($bookingRooms as $index => $bRoom) {
+                    $assignedRoom = Room::findOrFail($assignedRooms[$index]);
+
+                    // ✅ #32 Fixed: ตรวจว่าห้องที่ assign ตรงกับ room type ที่จองไว้
+                    if ($assignedRoom->room_type_id !== $bRoom->room_type_id) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) " .
+                            "ไม่ตรงกับประเภทห้องที่จองไว้ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ"
+                        );
+                    }
+
                     $bRoom->update(['room_id' => $assignedRooms[$index]]);
                 }
                 
@@ -147,13 +158,13 @@ class FrontDeskController extends Controller
 
             foreach ($booking->bookingRooms as $bRoom) {
                 if (!$bRoom->room_id) {
-                    throw new \Exception("หนูไม่สามารถทำการเช็คอินได้ค่ะ เพราะรายการจอง ID {$bRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักเลยค่ะนายท่าน");
+                    throw new \Exception("ไม่สามารถเช็คอินได้ค่ะ รายการจอง ID {$bRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักค่ะนายท่าน");
                 }
 
                 $room = Room::findOrFail($bRoom->room_id);
 
-                // 🌟 สั่งให้ Room Model เปลี่ยนสถานะห้อง และบันทึก $userId จาก Token ลงไปค่ะ
-                $room->transitionStatusTo('Occupied', $userId);
+                // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
+                $room->transitionStatusTo('occupied', $userId);
 
                 $roomUpdates[] = [
                     'room_number' => $room->room_number,
@@ -161,19 +172,17 @@ class FrontDeskController extends Controller
                 ];
             }
 
-            // สั่งให้ Booking Model เปลี่ยนสถานะเป็น checked_in
+            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking
             $booking->transitionStatus('checked_in', $userRole);
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Check-in completed successfully! ห้องพักพร้อมให้บริการแขกแล้วค่ะนายท่าน 🎉',
-                'data' => [
-                    'booking_id' => $booking->id,
-                    'booking_status' => $booking->status,
-                    'room_updates' => $roomUpdates
-                ]
+                'message' => 'Check-in completed successfully! 🎉',
+                'booking_id' => $booking->id,
+                'booking_status' => $booking->status,
+                'room_updates' => $roomUpdates
             ], 200);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -186,17 +195,18 @@ class FrontDeskController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error("Check-in failed: " . $e->getMessage());
             $statusCode = $e->getCode();
             $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Check-in failed: ' . $e->getMessage()
+                'message' => $e->getMessage()
             ], $statusCode);
         }
     }
 
-    // 🧹 3. API สำหรับ Process 3.3 Process Check-Out 
+    // 🧹 3. Check-Out
     public function checkOut(Request $request, $bookingId)
     {
         $validated = $request->validate([
@@ -213,7 +223,7 @@ class FrontDeskController extends Controller
                 throw new \Exception('แขกยังไม่ได้ Check-in เลยค่ะ จะ Check-out ไม่ได้น้า');
             }
 
-            // 🌟 ตรวจสอบยอดชำระเงิน
+            // ตรวจสอบยอดชำระเงิน
             $totalPaid = Payment::where('booking_id', $bookingId)
                             ->where('status', 'completed')
                             ->sum('amount');
@@ -223,8 +233,8 @@ class FrontDeskController extends Controller
                 throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
             }
 
-            // เปลี่ยนสถานะใบจองเป็น "เช็คเอาท์แล้ว" 
-            $booking->update(['status' => 'checked_out']);
+            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking
+            $booking->transitionStatus('checked_out', 'admin');
 
             $bookingRooms = BookingRoom::where('booking_id', $bookingId)->whereNotNull('room_id')->get();
             $roomUpdates = [];
@@ -232,16 +242,8 @@ class FrontDeskController extends Controller
             foreach ($bookingRooms as $bRoom) {
                 $room = Room::findOrFail($bRoom->room_id);
 
-                // 🛑 กฎของนายท่าน: Occupied => checkout_makeup
-                if (strtolower($room->status) !== 'occupied') {
-                     throw new \Exception("หมายเลขห้อง {$room->room_number} ไม่ได้อยู่ในสถานะ Occupied ค่ะ (สถานะปัจจุบัน: {$room->status})");
-                }
-
-                $room->update([
-                    'status' => 'checkout_makeup',
-                    'status_updated_at' => Carbon::now(),
-                    'status_updated_by' => $validated['verified_by']
-                ]);
+                // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง → checkout_makeup
+                $room->transitionStatusTo('checkout_makeup', $validated['verified_by']);
 
                 // ออกใบสั่งงานแม่บ้านทันที
                 $task = HousekeepingTask::create([
@@ -264,31 +266,25 @@ class FrontDeskController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Check-out completed successfully. สร้างงานให้ทีมแม่บ้านเรียบร้อยค่ะ!',
-                'data' => [
-                    'booking_id' => $booking->id,
-                    'booking_status' => $booking->status,
-                    'room_updates' => $roomUpdates
-                ]
+                'booking_id' => $booking->id,
+                'booking_status' => $booking->status,
+                'room_updates' => $roomUpdates
             ], 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error("Check-out failed: " . $e->getMessage());
             return response()->json([
                 'status' => 'error',
-                'message' => 'Check-out failed: ' . $e->getMessage()
+                'message' => $e->getMessage()
             ], 400);
         }
     }
 
-    // 💸 4. API สำหรับบันทึกการรับชำระเงิน
-    public function recordPayment(Request $request, $bookingId)
+    // 💸 4. บันทึกการรับชำระเงิน
+    public function recordPayment(StorePaymentRequest $request, $bookingId)
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:1',
-            'payment_method' => 'required|string|in:cash,credit_card,transfer',
-            'reference_number' => 'nullable|string',
-            'received_by' => 'required|uuid|exists:users,id'
-        ]);
+        $validated = $request->validated();
 
         try {
             DB::beginTransaction();
@@ -301,23 +297,55 @@ class FrontDeskController extends Controller
                 'amount' => $validated['amount'],
                 'payment_method' => $validated['payment_method'],
                 'status' => 'completed',
-                'reference_number' => $validated['reference_number'],
-                'received_by' => $validated['received_by']
+                'reference_number' => $validated['reference_number'] ?? null,
+                'received_by' => $validated['received_by'] ?? null
             ]);
+
+            // ✅ #18 Fixed: อัปเดต is_paid + booking status เมื่อชำระครบแล้ว
+            $totalPaid = Payment::where('booking_id', $booking->id)
+                ->where('status', 'completed')
+                ->sum('amount');
+
+            if ($totalPaid >= $booking->total_amount && !$booking->is_paid) {
+                // ✅ #36 Fix: PostgreSQL boolean strict — ใช้ DB::raw('TRUE') แทน PHP true
+                DB::table('bookings')->where('id', $booking->id)->update([
+                    'is_paid' => DB::raw('TRUE'),
+                    'updated_at' => now(),
+                ]);
+                $booking->refresh();
+
+                // ถ้า booking ยังเป็น draft → เปลี่ยนเป็น paid (สถานะที่รอ admin confirm)
+                // แต่ถ้าเป็น checked_in หรือ confirmed อยู่แล้ว → ไม่ต้องเปลี่ยน status
+                if ($booking->status === 'draft') {
+                    $booking->transitionStatus('paid', 'admin');
+                }
+
+                // สร้าง Receipt
+                Receipt::create([
+                    'receipt_no' => Receipt::generateUniqueReceiptNo(),
+                    'booking_id' => $booking->id,
+                    'payment_id' => $payment->id,
+                    'amount' => $payment->amount,
+                    'billing_name' => $booking->guest_name ?? 'Customer',
+                ]);
+            }
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Payment recorded successfully!',
-                'data' => $payment
+                'payment' => $payment,
+                'booking_is_paid' => $booking->fresh()->is_paid,
+                'booking_status' => $booking->fresh()->status,
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error("Record payment failed: " . $e->getMessage());
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to record payment: ' . $e->getMessage()
+                'message' => $e->getMessage()
             ], 400);
         }
     }

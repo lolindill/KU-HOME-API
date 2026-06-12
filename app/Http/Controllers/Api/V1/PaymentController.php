@@ -4,26 +4,24 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\Payment;
 use App\Models\Receipt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class PaymentController extends Controller
 {
-    // 🌸 เฟส 1: สร้างรายการชำระเงิน (Request Payment)
-    public function requestPayment(Request $request)
+    // 🌸 สร้างรายการชำระเงิน (Request Payment)
+    public function requestPayment(StorePaymentRequest $request)
     {
-        $request->validate([
-            'booking_id' => 'required|uuid|exists:bookings,id',
-            'payment_method' => 'required|string' // เช่น promptpay, credit_card
-        ]);
+        $validated = $request->validated();
 
-        $booking = Booking::findOrFail($request->booking_id);
+        $booking = Booking::findOrFail($validated['booking_id']);
 
-        // เช็คก่อนว่าจ่ายไปหรือยัง จะได้ไม่ซ้ำซ้อนค่ะนายท่าน!
         if ($booking->is_paid) {
             return response()->json([
                 'status' => 'error',
@@ -34,89 +32,189 @@ class PaymentController extends Controller
         try {
             DB::beginTransaction();
 
-            // สร้างรายการ Payment สถานะ 'pending' ตาม Sequence Diagram
             $payment = Payment::create([
                 'booking_id' => $booking->id,
                 'amount' => $booking->total_amount,
-                'payment_method' => $request->payment_method,
+                'payment_method' => $validated['payment_method'],
                 'status' => 'pending' 
             ]);
 
             DB::commit();
 
-            // 🎁 จำลองการสร้าง URL หรือ QR Code สำหรับจ่ายเงิน
             $paymentUrl = "https://gateway.mockbank.com/pay/" . $payment->id;
 
             return response()->json([
                 'status' => 'success',
-                'data' => [
-                    'payment_id' => $payment->id,
-                    'amount' => $payment->amount,
-                    'payment_url' => $paymentUrl
-                ]
+                'message' => 'Payment request created',
+                'payment_id' => $payment->id,
+                'amount' => $payment->amount,
+                'payment_url' => $paymentUrl
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+            Log::error("Payment request failed: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการสร้างรายการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+            ], 500);
         }
     }
 
-    // 🌸 เฟส 3: ธนาคารแจ้งผลกลับมาที่ระบบ (Webhook)
+    /**
+      * 💳 Guest ขอลิงก์ชำระเงินสำหรับบุ๊กกิ้งของตัวเอง (ไม่ต้องล็อกอิน)
+     * ✅ #28 Fixed: บังคับ guest_email required + AND logic เหมือน lookupBooking()
+     */
+    public function requestPaymentForGuest(Request $request, $id)
+    {
+        $request->validate([
+            'guest_email' => 'required|string|email',
+            'guest_phone' => 'nullable|string',
+        ]);
+
+        try {
+            $booking = Booking::findOrFail($id);
+
+            // ✅ #28 Fixed: ยืนยันตัวตนด้วย AND logic (email บังคับ, phone เสริม)
+            $identityMatch = $booking->guest_email === $request->guest_email;
+            if ($request->guest_phone) {
+                $identityMatch = $identityMatch && $booking->guest_phone === $request->guest_phone;
+            }
+
+            if (!$identityMatch) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ข้อมูลไม่ตรงกับรายการจองนะคะนายท่าน กรุณาตรวจสอบอีกครั้งค่ะ 🔒',
+                ], 403);
+            }
+
+            // ตรวจสอบสถานะบุ๊กกิ้ง
+            if ($booking->is_paid) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'รายการจองนี้ชำระเงินแล้วค่ะ',
+                ], 400);
+            }
+
+            if ($booking->status !== 'draft') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "รายการจองนี้สถานะเป็น '{$booking->status}' ไม่สามารถขอชำระเงินได้ค่ะ",
+                ], 400);
+            }
+
+            // ตรวจสอบ deadline
+            if ($booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'หมดเวลาชำระเงินแล้วค่ะนายท่าน กรุณาสร้างรายการจองใหม่นะคะ',
+                ], 400);
+            }
+
+            // สร้าง Payment record
+            $payment = Payment::create([
+                'booking_id' => $booking->id,
+                'amount' => $booking->total_amount,
+                'payment_method' => 'online',
+                'status' => 'pending',
+            ]);
+
+            // สร้าง payment URL (mock — จริงๆ ต้องเรียก Payment Gateway)
+            $paymentUrl = "https://gateway.mockbank.com/pay/" . $payment->id;
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'สร้างรายการชำระเงินเรียบร้อยแล้วค่ะ กรุณาชำระเงินภายในเวลาที่กำหนดนะคะ',
+                'payment_id' => $payment->id,
+                'amount' => $payment->amount,
+                'payment_url' => $paymentUrl,
+                'payment_deadline' => $booking->payment_deadline?->toDateTimeString(),
+            ], 201);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบรายการจองนี้ในระบบค่ะนายท่าน',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error("Guest payment request failed: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    // 🌸 Webhook: ธนาคารแจ้งผลกลับ (draft → paid เท่านั้น, admin confirm เอง)
     public function webhook(Request $request)
     {
-        // ในสถานการณ์จริง นายท่านต้อง Validate Signature จากธนาคารด้วยนะคะ
-        // แต่ตอนนี้หนูทำรับค่าเบื้องต้นให้ก่อนค่ะ
         $request->validate([
             'payment_id' => 'required|uuid|exists:payments,id',
-            'status' => 'required|string', // เช่น success, failed
+            'status' => 'required|string',
             'reference_number' => 'nullable|string'
         ]);
 
         $payment = Payment::findOrFail($request->payment_id);
         $booking = Booking::findOrFail($payment->booking_id);
 
-        // ถ้าธนาคารส่งมาว่าจ่ายสำเร็จ (Success)
         if ($request->status === 'success') {
             try {
                 DB::beginTransaction();
 
-                // 1. อัปเดต PAYMENTS ให้สถานะเป็น 'completed'
+                // ✅ #29 Fixed: เช็ค payment_deadline ก่อน process — ป้องกัน expired booking ถูกจ่าย
+                if ($booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
+                    $payment->update(['status' => 'failed']);
+                    DB::commit();
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'หมดเวลาชำระเงินแล้วค่ะ ไม่สามารถดำเนินการได้',
+                    ], 422);
+                }
+
+                // อัปเดต Payment เป็น completed
                 $payment->update([
                     'status' => 'completed',
                     'reference_number' => $request->reference_number
                 ]);
 
-                // 2. อัปเดต BOOKINGS ให้ is_paid = true และเปลี่ยนสถานะเป็น confirmed
-                $booking->update([
-                    'is_paid' => true,
-                    'status' => 'confirmed'
-                ]);
+                // ✅ #33 Fixed: ใช้ PHP boolean แทน DB::raw('TRUE') — portable ข้าม database
+                $booking->update(['is_paid' => true]);
 
-                // 3. สร้างข้อมูลลงตาราง RECEIPTS
-                $receiptNo = 'REC-' . Carbon::now()->format('Ym') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+                // 🌟 ใช้ state machine เปลี่ยนสถานะ booking → paid (system role)
+                $booking->transitionStatus('paid', 'system');
+
+                // ✅ #19 Fixed: ใช้ atomic counter แทน rand() สร้าง receipt number
+                $receiptNo = Receipt::generateUniqueReceiptNo();
                 
                 Receipt::create([
                     'receipt_no' => $receiptNo,
                     'booking_id' => $booking->id,
                     'payment_id' => $payment->id,
                     'amount' => $payment->amount,
-                    'billing_name' => 'Customer Name', // สามารถรับเพิ่มจาก Frontend ตอนจ่ายเงินได้ค่ะ
+                    'billing_name' => $booking->guest_name ?? 'Customer',
                 ]);
 
                 DB::commit();
 
-                // 4. ตอบกลับ 200 OK ให้ธนาคารทราบว่ารับข้อมูลแล้ว
-                return response()->json(['message' => 'Payment processed successfully'], 200);
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Payment processed successfully. Booking is now paid — waiting for admin to confirm.'
+                ], 200);
 
             } catch (\Exception $e) {
                 DB::rollBack();
-                return response()->json(['message' => 'Internal Server Error'], 500);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Internal Server Error'
+                ], 500);
             }
         }
 
-        // กรณีจ่ายไม่สำเร็จ (Failed)
+        // กรณีจ่ายไม่สำเร็จ
         $payment->update(['status' => 'failed']);
-        return response()->json(['message' => 'Payment failed recorded'], 200);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Payment failed recorded'
+        ], 200);
     }
 }

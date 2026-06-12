@@ -9,14 +9,13 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens; 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Relations\HasMany; // 🌟 เพิ่มเข้ามา
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, HasUuids;
 
-    // 🌟 หนูแอบแก้คำผิด 'hone' เป็น 'phone' และลบ 'role' ที่ซ้ำกันออกให้นะคะ
     protected $fillable = [
         'name',
         'email',
@@ -26,6 +25,7 @@ class User extends Authenticatable
         'phone',           
         'nationality',    
         'is_ku_member',
+        'ver',
     ];
 
     protected function casts(): array
@@ -33,10 +33,11 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_ku_member' => 'boolean',
+            'ver' => 'boolean',
         ];
     }
 
-    // 🌟 เพิ่ม Relationship ให้ User สามารถดูประวัติการจองทั้งหมดของตัวเองได้ค่ะ
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);

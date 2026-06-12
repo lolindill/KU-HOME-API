@@ -11,8 +11,19 @@ class Addon extends Model
 {
     use HasFactory, HasUuids;
 
-    // เปลี่ยนมาใช้ guarded ให้เป็นมาตรฐานเดียวกันค่ะ
-    protected $guarded = [];
+    /**
+     * ✅ #27 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
+     * ป้องกัน mass assignment vulnerability
+     */
+    protected $fillable = [
+        'booking_room_id',
+        'extra_bed',
+        'breakfast',
+        'early_checkIn_price',
+        'late_checkOut_price',
+        'extra_bed_price',
+        'breakfast_price',
+    ];
 
     protected $casts = [
         'extra_bed' => 'integer',

@@ -12,8 +12,14 @@ class BookingRoom extends Model
 {
     use HasFactory, HasUuids;
 
-    // ปลดล็อกให้เซฟข้อมูลได้ทุกฟิลด์
-    protected $guarded = [];
+    /**
+     * ✅ #17 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
+     */
+    protected $fillable = [
+        'booking_id',
+        'room_type_id',
+        'room_id', // nullable — assign ตอน check-in
+    ];
 
     // 🌟 1. เชื่อมกลับไปหาข้อมูล Booking หลัก
     public function booking(): BelongsTo

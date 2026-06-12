@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\UpdateBookingRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
-use App\Models\Addon;         
+use App\Models\Addon;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -25,7 +27,7 @@ class BookingController extends Controller
             
             if (!$user) {
                 return response()->json([
-                    'error' => 'Unauthorized', 
+                    'status' => 'error', 
                     'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!'
                 ], 401);
             }
@@ -56,12 +58,12 @@ class BookingController extends Controller
                 $query = $this->applyRoomTypeFilter($query, $roomTypeId);
             }
 
-            $bookings = $query->orderBy('created_at', 'desc')->get();
+            $perPage = $request->query('per_page', 15);
+            $bookings = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'ดึงข้อมูลสำเร็จแล้วค่ะนายท่าน! ✨',
-                'count' => $bookings->count(),
                 'user' => $user->id,
                 'search_criteria' => [
                     'term' => $term,
@@ -69,27 +71,33 @@ class BookingController extends Controller
                     'check_out' => $checkOut,
                     'room_type' => $roomTypeId,
                 ],
-                'bookings' => $bookings
+                'bookings' => $bookings->items(),
+                'pagination' => [
+                    'current_page' => $bookings->currentPage(),
+                    'last_page' => $bookings->lastPage(),
+                    'per_page' => $bookings->perPage(),
+                    'total' => $bookings->total(),
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             Log::error("Server error getting bookings: " . $e->getMessage(), [
-                'user_id' => optional($request->user('sanctum'))->id, 
-                'trace' => $e->getTraceAsString()
+                'user_id' => optional($request->user('sanctum'))->id,
             ]);
             
             return response()->json([
-                'error' => 'Server error getting bookings',
-                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาดในระบบ 😭: ' . $e->getMessage() 
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
             ], 500);
         }
     }
 
+    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
     public function validateDiscount(Request $request)
     {
         $request->validate([
             'code' => 'required|string',
-            'subtotal' => 'required|numeric'
+            'subtotal' => 'required|numeric',
         ]);
 
         $discountAmount = 0;
@@ -104,33 +112,10 @@ class BookingController extends Controller
         ]);
     }
   
-    public function createBooking(Request $request)
+    public function createBooking(StoreBookingRequest $request)
     {
         try {
-            $validated = $request->validate([
-                'source' => 'required|string',
-                'check_in' => 'required|date|after_or_equal:today',
-                'check_out' => 'required|date|after:check_in',
-
-                'booking_rooms' => 'required|array',
-                'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
-                'booking_rooms.*.quantity' => 'required|integer|min:1', 
-                'booking_rooms.*.extra_beds' => 'integer|min:0', 
-
-                // 🌟 ย้าย Validation ของ Addon เข้ามาไว้ในระดับห้องพักแต่ละห้องแทนค่ะ
-                'booking_rooms.*.addons' => 'nullable|array',
-                'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
-                'booking_rooms.*.addons.breakfast_price' => 'nullable|integer|min:0',
-                'booking_rooms.*.addons.early_checkIn_price' => 'nullable|integer|min:0',
-                'booking_rooms.*.addons.late_checkOut_price' => 'nullable|integer|min:0',
-
-                'guest_title' => 'nullable|string',
-                'guest_name' => 'required|string',
-                'guest_email' => 'required|email',
-                'guest_phone' => 'required|string',
-                'guest_nationality' => 'required|string',
-                'is_ku_member' => 'required|in:true,false,1,0,True,False',
-            ]);
+            $validated = $request->validated();
 
             // 🛑 1. ดักจับสายดอง: ถ้านายท่านมีบิล Draft ที่ยังไม่หมดเวลา ห้ามสร้างใหม่เด็ดขาด!
             $userId = $request->user('sanctum')?->id;
@@ -142,7 +127,17 @@ class BookingController extends Controller
 
                 if ($hasDraft) {
                     throw new \Exception("มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ", 422);
-                    }
+                }
+            } elseif (!empty($validated['guest_email'])) {
+                // 🆕 เช็ค Draft สำหรับ Guest (ใช้ guest_email ตรวจสอบ)
+                $hasDraft = Booking::where('guest_email', $validated['guest_email'])
+                    ->where('status', 'draft')
+                    ->where('payment_deadline', '>', Carbon::now())
+                    ->exists();
+
+                if ($hasDraft) {
+                    throw new \Exception("มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ", 422);
+                }
             }
 
             DB::beginTransaction();
@@ -152,12 +147,11 @@ class BookingController extends Controller
             $nights = $checkIn->diffInDays($checkOut) ?: 1;
 
             $requestedRoomTypes = [];
-            $totalGuests = 0; 
 
+            // ✅ #34 Fixed: ลบ $totalGuests (dead code) — ไม่ได้ใช้
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $rtId = $roomRequest['room_type_id'];
                 $requestedRoomTypes[$rtId] = ($requestedRoomTypes[$rtId] ?? 0) + 1; 
-                $totalGuests += $roomRequest['quantity'];
             }
 
             foreach ($requestedRoomTypes as $rtId => $requestedRoomCount) {
@@ -178,13 +172,13 @@ class BookingController extends Controller
                 }
             }
 
-            $confirmationNo = Carbon::now()->format('Ym') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT); 
+            $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
                 'confirmation' => $confirmationNo, 
                 'user_id' => $request->user('sanctum')?->id,
                 'source' => $validated['source'],
-                'status' => 'draft', 
+                'status' => 'draft',
                 'check_in' => $validated['check_in'], 
                 'check_out' => $validated['check_out'], 
                 
@@ -192,8 +186,8 @@ class BookingController extends Controller
                 'guest_name' => $validated['guest_name'],
                 'guest_email' => $validated['guest_email'],
                 'guest_phone' => $validated['guest_phone'],
-                'guest_nationality' => $validated['guest_nationality'],
-                'is_ku_member' => $request->boolean('is_ku_member') ? 'true' : 'false', 
+                'guest_nationality' => $validated['guest_nationality'] ?? null,
+                'children' => $validated['children'] ?? 0,
 
                 'total_amount' => 0, 
                 'payment_deadline' => Carbon::now()->addHours(24)
@@ -244,24 +238,29 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'Booking and Add-ons created successfully',
-                'data' => [
-                    'id' => $booking->id,
-                    'total_amount' => $booking->total_amount,
-                    'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
-                    'user' => $request->user('sanctum')?->id,
-                ]
+                'booking_id' => $booking->id,
+                'total_amount' => $booking->total_amount,
+                'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
+                'user_id' => $request->user('sanctum')?->id,
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Failed to create booking: " . $e->getMessage());
             
-            $statusCode = $e->getCode() === 422 ? 422 : 500;
+            // 🛡️ #40 Fixed: Business logic errors (422) ส่ง message ได้, unexpected errors ซ่อน
+            if ($e->getCode() == 422) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage()
+                ], 422);
+            }
+
+            Log::error("Failed to create booking: " . $e->getMessage());
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to create booking: ' . $e->getMessage()
-            ], $statusCode);
+                'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+            ], 500);
         }
     }
 
@@ -271,18 +270,21 @@ class BookingController extends Controller
             return $query;
         }
 
-        return $query->where(function ($q) use ($term) {
+        // 🛡️ Escape LIKE wildcards เพื่อป้องกัน wildcard abuse (#24)
+        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $term);
+
+        return $query->where(function ($q) use ($escaped, $term) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
-                  ->orWhereHas('user', function ($userQuery) use ($term) {
-                      $userQuery->where('name', 'LIKE', '%' . $term . '%');
+                  ->orWhereHas('user', function ($userQuery) use ($escaped) {
+                      $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
                   })
-                  ->orWhere('guest_name', 'LIKE', '%' . $term . '%');
+                  ->orWhere('guest_name', 'LIKE', '%' . $escaped . '%');
             } else {
-                $q->whereHas('user', function ($userQuery) use ($term) {
-                    $userQuery->where('name', 'LIKE', '%' . $term . '%');
+                $q->whereHas('user', function ($userQuery) use ($escaped) {
+                    $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
                 })
-                ->orWhere('guest_name', 'LIKE', '%' . $term . '%');
+                ->orWhere('guest_name', 'LIKE', '%' . $escaped . '%');
             }
         });
     }
@@ -313,41 +315,6 @@ class BookingController extends Controller
         });
     }
 
-    public function bookingSearch(Request $request)
-    {
-        try {
-            $term = $request->query('term');
-            $roomTypeId = $request->query('room_type', 'all');
-            $checkIn = $request->query('check_in', Carbon::today()->toDateString());
-            $checkOut = $request->query('check_out', Carbon::today()->toDateString());
-
-            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'user']);
-
-            $query = $this->applyUserFilter($query, $term);
-            $query = $this->applyDateFilter($query, $checkIn, $checkOut);
-            $query = $this->applyRoomTypeFilter($query, $roomTypeId);
-
-            $bookings = $query->orderBy('check_in', 'asc')->get();
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Search completed successfully!',
-                'total' => $bookings->count(),
-                'search_criteria' => [
-                    'term' => $term,
-                    'check_in' => $checkIn,
-                    'check_out' => $checkOut,
-                    'room_type' => $roomTypeId
-                ],
-                'bookings' => $bookings
-            ], 200);
-
-        } catch (\Exception $e) {
-            Log::error("Server error in booking search: " . $e->getMessage());
-            return response()->json(['error' => 'Server error while searching bookings'], 500);
-        }
-    }
-
     public function updateStatus(Request $request, $id)
     {
         $request->validate([
@@ -366,10 +333,8 @@ class BookingController extends Controller
             return response()->json([
                 'status'  => 'success',
                 'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
-                'data'    => [
-                    'booking_id' => $booking->id,
-                    'status'     => $booking->status
-                ]
+                'booking_id' => $booking->id,
+                'booking_status' => $booking->status,
             ], 200);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -397,38 +362,102 @@ class BookingController extends Controller
 
             if (!$user) {
                 return response()->json([
-                    'error' => 'Unauthorized',
+                    'status' => 'error',
                     'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!'
                 ], 401);
             }
 
-            // 🌟 แก้ไขตรงนี้ด้วยค่ะ เปลี่ยนจาก addon เฉยๆ เป็น bookingRooms.addon 
             $booking = Booking::with(['user', 'bookingRooms.addon', 'bookingRooms.roomType', 'bookingRooms.room'])
                 ->where('id', $id)
                 ->firstOrFail();
 
             if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
                 return response()->json([
-                    'error' => 'Forbidden',
+                    'status' => 'error',
                     'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒'
                 ], 403);
             }
 
             return response()->json([
-                'success' => true,
+                'status' => 'success',
                 'message' => 'ดึงข้อมูลการจองเรียบร้อยแล้วค่ะ! ✨',
-                'data' => $booking
+                'booking' => $booking,
             ], 200);
 
         } catch (ModelNotFoundException $e) {
             return response()->json([
-                'success' => false,
+                'status' => 'error',
                 'message' => 'ไม่พบรหัสการจองนี้ในระบบค่ะนายท่าน 🔎',
             ], 404);
         } catch (\Exception $e) {
+            Log::error("Failed to show booking: " . $e->getMessage());
             return response()->json([
-                'success' => false,
-                'message' => 'เกิดข้อผิดพลาด: ' . $e->getMessage(),
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🔎 Guest ค้นหาบุ๊กกิ้งของตัวเองโดยไม่ต้องล็อกอิน
+     * ใช้ confirmation number + guest_email หรือ guest_phone เพื่อยืนยันตัวตน
+     */
+    public function lookupBooking(Request $request)
+    {
+        // ✅ #21 Fixed: บังคับ guest_email required + AND logic เพื่อป้องกัน brute-force
+        $request->validate([
+            'confirmation' => 'required|string',
+            'guest_email'  => 'required|string|email',
+            'guest_phone'  => 'nullable|string',
+        ]);
+
+        try {
+            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'bookingRooms.addon'])
+                ->where('confirmation', $request->confirmation);
+
+            // ยืนยันตัวตนด้วย AND logic (email บังคับ, phone เสริม)
+            $query->where('guest_email', $request->guest_email);
+            if ($request->guest_phone) {
+                $query->where('guest_phone', $request->guest_phone);
+            }
+
+            $booking = $query->first();
+
+            if (!$booking) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบข้อมูลการจองที่ตรงกันค่ะนายท่าน กรุณาตรวจสอบข้อมูลอีกครั้งนะคะ 🔎',
+                ], 404);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ดึงข้อมูลการจองเรียบร้อยแล้วค่ะ! ✨',
+                'booking' => [
+                    'id' => $booking->id,
+                    'confirmation' => $booking->confirmation,
+                    'status' => $booking->status,
+                    'check_in' => $booking->check_in->toDateString(),
+                    'check_out' => $booking->check_out->toDateString(),
+                    'guest_name' => $booking->guest_name,
+                    'total_amount' => $booking->total_amount,
+                    'is_paid' => $booking->is_paid,
+                    'payment_deadline' => $booking->payment_deadline?->toDateTimeString(),
+                    'booking_rooms' => $booking->bookingRooms->map(function ($br) {
+                        return [
+                            'room_type' => $br->roomType?->name_en,
+                            'room_number' => $br->room?->room_number,
+                            'addon' => $br->addon,
+                        ];
+                    }),
+                ],
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Booking lookup error: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
@@ -440,7 +469,7 @@ class BookingController extends Controller
 
             // 🌟 1. โหลดข้อมูลการจอง พร้อมกับห้องพัก และ Addon มาด้วยเลย
             $booking = Booking::with(['bookingRooms.addon'])->findOrFail($bookingId);
-
+  
             // =========================================================
             // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin)
             // =========================================================
@@ -515,7 +544,7 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
-                'data' => $booking->load('bookingRooms.room')
+                'booking' => $booking->load('bookingRooms.room'),
             ], 200);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {

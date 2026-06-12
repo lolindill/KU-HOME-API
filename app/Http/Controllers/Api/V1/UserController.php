@@ -5,68 +5,53 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use App\Http\Requests\StoreUserRequest;
+use App\Http\Requests\UpdateUserRequest;
 
 class UserController extends Controller
 {
-    
     public function index()
     {
-        // ใช้ paginate แทน all() เพื่อไม่ให้ดึงข้อมูลหนักเกินไปค่ะ
         $users = User::paginate(15); 
-        return response()->json($users);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Users fetched successfully',
+            'users' => $users
+        ]);
     }
 
-    
-    public function store(Request $request)
+    public function store(StoreUserRequest $request)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8',
-            'role' => 'sometimes|string|in:user,admin',
-            'title' => 'nullable|string',
-            'phone' => 'nullable|string',
-            'nationality' => 'nullable|string',
-            'is_ku_member' => 'sometimes|boolean',
-        ]);
-
+        $validated = $request->validated();
         $user = User::create($validated);
 
         return response()->json([
-            'message' => 'สร้างผู้ใช้งานสำเร็จค่ะ',
+            'status' => 'success',
+            'message' => 'สร้างผู้ใช้เรียบร้อยแล้ว',
             'user' => $user
         ], 201);
     }
 
-    
     public function show(string $id)
     {
         $user = User::findOrFail($id);
         
-        return response()->json($user);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'User fetched successfully',
+            'user' => $user
+        ]);
     }
 
-    public function update(Request $request, string $id)
+    public function update(UpdateUserRequest $request, string $id)
     {
         $user = User::findOrFail($id);
-
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            // ตรวจสอบ email ซ้ำ ยกเว้น email ของตัวเองค่ะ
-            'email' => ['sometimes', 'string', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
-            'password' => 'sometimes|string|min:8',
-            'role' => 'sometimes|string|in:user,admin',
-            'title' => 'nullable|string',
-            'phone' => 'nullable|string',
-            'nationality' => 'nullable|string',
-            'is_ku_member' => 'sometimes|boolean',
-        ]);
-
+        $validated = $request->validated();
         $user->update($validated);
 
         return response()->json([
-            'message' => 'อัปเดตข้อมูลสำเร็จเรียบร้อยค่ะ',
+            'status' => 'success',
+            'message' => 'อัปเดตข้อมูลสำเร็จเรียบร้อยแล้ว',
             'user' => $user
         ]);
     }
@@ -77,40 +62,29 @@ class UserController extends Controller
         $user->delete();
 
         return response()->json([
-            'message' => 'ลบผู้ใช้งานสำเร็จแล้วค่ะ'
+            'status' => 'success',
+            'message' => 'ลบผู้ใช้เรียบร้อยแล้ว'
         ]);
     }
 
     public function me(Request $request)
     {
-        // 🪄 ดึงข้อมูลผู้ใช้งานที่กำลังล็อกอินอยู่จาก Token
-        $user = $request->user();
-
         return response()->json([
-            'message' => 'success',
-            'user' => $user
+            'status' => 'success',
+            'message' => 'User profile fetched successfully',
+            'user' => $request->user()
         ]);
     }
 
-    /**
-     * แก้ไขข้อมูลส่วนตัว (Edit Profile) โดยอิงจาก Token
-     */
-    public function updateProfile(Request $request)
+    public function updateProfile(UpdateUserRequest $request)
     {
-        // 🪄 ดึงข้อมูลผู้ใช้งานที่กำลังล็อกอินอยู่
         $user = $request->user();
+        $validated = $request->validated();
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            // 🛡️ เช็คอีเมลซ้ำ แต่ยกเว้นอีเมลของตัวเอง
-            'email' => ['sometimes', 'string', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
-            'password' => 'sometimes|string|min:8',
-            'title' => 'nullable|string',
-            'phone' => 'nullable|string',
-            'nationality' => 'nullable|string',
-        ]);
+        // 🛡️ SECURITY: Users cannot change their own role via profile update
+        // Role changes must go through admin update (PUT /users/{id})
+        unset($validated['role'], $validated['ver']);
 
-        // 🔒 ถ้ามีการส่ง password มาให้ทำการ Hash ก่อนบันทึกนะคะ
         if (isset($validated['password'])) {
             $validated['password'] = bcrypt($validated['password']);
         }
@@ -118,8 +92,29 @@ class UserController extends Controller
         $user->update($validated);
 
         return response()->json([
-            'message' => 'success',
+            'status' => 'success',
+            'message' => 'Profile updated successfully',
             'user' => $user
+        ]);
+    }
+
+    /**
+     * Verify user (admin only) - toggle ver status
+     */
+    public function verify(Request $request, string $id)
+    {
+        $user = User::findOrFail($id);
+
+        $validated = $request->validate([
+            'ver' => 'required|boolean',
+        ]);
+
+        $user->update(['ver' => $validated['ver']]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $validated['ver'] ? 'ยืนยันตัวตนผู้ใช้สำเร็จ' : 'ยกเลิกการยืนยันตัวตนผู้ใช้สำเร็จ',
+            'user' => $user->fresh()
         ]);
     }
 }
