@@ -5,11 +5,11 @@
  * สคริปต์ทดสอบ API แบบ Chain Flow
  * ดึง ID จาก response แล้วส่งต่อไป request ถัดไปอัตโนมัติ
  * 
- * วิธีใช้: php api_test_chain.php
+ * วิธีใช้: php test_scripts/api_test_chain.php
  */
 
-require __DIR__ . '/vendor/autoload.php';
-$app = require __DIR__ . '/bootstrap/app.php';
+require __DIR__ . '/../vendor/autoload.php';
+$app = require __DIR__ . '/../bootstrap/app.php';
 $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
 use App\Models\RoomType;

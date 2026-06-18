@@ -8,11 +8,11 @@
  * Chain: GET room-types → GET rooms → POST login → POST booking → POST payment
  *        → POST webhook → PUT confirm → PUT assign-rooms → POST check-in → POST check-out
  * 
- * วิธีใช้: php api_guide.php
+ * วิธีใช้: php test_scripts/api_guide.php
  */
 
-require __DIR__ . '/vendor/autoload.php';
-$app = require __DIR__ . '/bootstrap/app.php';
+require __DIR__ . '/../vendor/autoload.php';
+$app = require __DIR__ . '/../bootstrap/app.php';
 $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
 // ════════════════════════════════════════════════════════════════

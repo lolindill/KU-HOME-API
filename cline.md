@@ -198,6 +198,27 @@ Valid room statuses: `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_
 - **Naming:** `DD_M_YY.md` (เช่น `16_5_26.md` = พฤษภาคม 2026, `16_6_26.md` = มิถุนายน 2026)
 - **ดูเพิ่มเติม:** `process/README.md`
 
+## Test Scripts (`test_scripts/`)
+
+โฟลเดอร์รวมสคริปต์ทดสอบ API แบบ manual (ไม่ใช่ PHPUnit) — รันจาก **root directory** เท่านั้น
+
+| ไฟล์ | ประเภท | รายละเอียด |
+|---|---|---|
+| `api_guide.php` | API Test | Full lifecycle: Seed → Booking → Payment → Confirm → Check-in → Check-out (auto cleanup) |
+| `api_test_chain.php` | API Test | 10-phase chained integration test |
+| `test_get_bookings.php` | API Test | Quick test: Login + GET /bookings |
+| `quick_test.php` | DB Utility | Set user role to admin + list all users |
+| `tinker_test.php` | Tinker Snippet | สำหรับ copy-paste ลง `php artisan tinker` |
+
+```bash
+php test_scripts/api_guide.php          # 🔗 Full Chain Guide (แนะนำ)
+php test_scripts/api_test_chain.php     # 🔗 Chained Integration Test
+php test_scripts/test_get_bookings.php  # 📋 Quick GET /bookings test
+php test_scripts/quick_test.php         # 🔧 Set admin role + list users
+```
+
+> **หมายเหตุ**: `setup_test.php` ถูกลบแล้ว (ซ้ำกับ `quick_test.php`), `move_form_SB_plan.md` ลบแล้ว (ใช้เสร็จ), `api_bin_output.txt` อยู่ใน `.gitignore`
+
 ## Conventions
 - **Language**: Code comments often in Thai with emoji markers
 - **Error responses**: Some error messages are in Thai
