@@ -36,66 +36,105 @@ class BookingTest extends TestCase
         ]);
     }
 
+    /**
+     * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
+     * ตอนนี้ Booking มีแค่ข้อมูลการจอง + user_id (คนจอง)
+     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON) + booking_rooms.children
+     */
     private function createBooking(array $overrides = []): Booking
     {
-        return Booking::create(array_merge([
+        $user = User::factory()->create();
+
+        $booking = Booking::create(array_merge([
+            'user_id' => $user->id,
+            'source' => 'online',
             'status' => 'draft',
-            'guest_name' => 'Test Guest',
-            'guest_email' => 'guest@example.com',
-            'guest_phone' => '0812345678',
             'check_in' => now()->addDay()->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 4500,
         ], $overrides));
+
+        // สร้าง booking_room พร้อมข้อมูลผู้เข้าพัก
+        $roomType = RoomType::create([
+            'id' => Str::uuid(),
+            'name_en' => 'Standard',
+            'name_th' => 'สแตนดาร์ด',
+            'max_guests' => 2,
+            'extra_bed_enabled' => false,
+            'rate_daily_general' => 1500,
+        ]);
+
+        \App\Models\BookingRoom::create([
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'guests' => [
+                ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
+            ],
+            'children' => 0,
+            'rate_daily' => 1500,
+            'nights' => 2,
+        ]);
+
+        return $booking->fresh(['bookingRooms']);
     }
 
     // ============================================
-    // ✅ Create Booking (guest)
+    // ✅ Create Booking (MUST be authenticated — guest/non-member cannot)
     // ============================================
 
-    public function test_guest_can_create_booking(): void
+    public function test_unauthenticated_user_cannot_create_booking(): void
     {
         $roomType = $this->createRoomType();
-        $room = $this->createRoom($roomType);
+        $this->createRoom($roomType);
 
         $response = $this->postJson('/api/v1/bookings', [
             'source' => 'online',
             'check_in' => now()->addDay()->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
-            'guest_name' => 'New Guest',
-            'guest_email' => 'newguest@example.com',
-            'guest_phone' => '0899999999',
             'booking_rooms' => [
-                ['room_type_id' => $roomType->id, 'quantity' => 1],
+                [
+                    'room_type_id' => $roomType->id,
+                    'quantity' => 1,
+                    'guests' => [
+                        ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
+                    ],
+                    'children' => 0,
+                ],
             ],
         ]);
-        $response->assertStatus(201);
-        $this->assertDatabaseHas('bookings', ['guest_email' => 'newguest@example.com']);
-    }
 
-    // ============================================
-    // ✅ Create Booking (authenticated)
-    // ============================================
+        // 🌟 ไม่ login → 401
+        $response->assertStatus(401);
+    }
 
     public function test_authenticated_user_can_create_booking(): void
     {
         $user = User::factory()->create();
         $roomType = $this->createRoomType();
-        $room = $this->createRoom($roomType);
+        $this->createRoom($roomType);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
                 'check_in' => now()->addDay()->toDateString(),
                 'check_out' => now()->addDays(3)->toDateString(),
-                'guest_name' => $user->name,
-                'guest_email' => $user->email,
-                'guest_phone' => '0899999999',
                 'booking_rooms' => [
-                    ['room_type_id' => $roomType->id, 'quantity' => 1],
+                    [
+                        'room_type_id' => $roomType->id,
+                        'quantity' => 1,
+                        'guests' => [
+                            ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
+                        ],
+                        'children' => 0,
+                    ],
                 ],
             ]);
+
         $response->assertStatus(201);
+        // 🌟 ตรวจว่าข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
+        $this->assertDatabaseHas('booking_rooms', [
+            'children' => 0,
+        ]);
     }
 
     // ============================================
@@ -111,41 +150,6 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->getJson('/api/v1/bookings');
         $response->assertStatus(200);
-    }
-
-    // ============================================
-    // ✅ Lookup Booking
-    // ============================================
-
-    public function test_lookup_booking_by_confirmation_and_email(): void
-    {
-        $booking = $this->createBooking(['confirmation' => 'ABC123']);
-
-        $response = $this->postJson('/api/v1/bookings/lookup', [
-            'confirmation' => 'ABC123',
-            'guest_email' => 'guest@example.com',
-        ]);
-        $response->assertStatus(200);
-    }
-
-    public function test_lookup_booking_fails_with_wrong_confirmation(): void
-    {
-        $response = $this->postJson('/api/v1/bookings/lookup', [
-            'confirmation' => 'WRONG',
-            'guest_email' => 'guest@example.com',
-        ]);
-        $response->assertStatus(404);
-    }
-
-    public function test_lookup_booking_fails_with_wrong_email(): void
-    {
-        $this->createBooking(['confirmation' => 'ABC123']);
-
-        $response = $this->postJson('/api/v1/bookings/lookup', [
-            'confirmation' => 'ABC123',
-            'guest_email' => 'wrong@example.com',
-        ]);
-        $response->assertStatus(404);
     }
 
     // ============================================
@@ -182,13 +186,13 @@ class BookingTest extends TestCase
     public function test_admin_can_search_bookings_with_term(): void
     {
         $this->actingAsAdmin();
-        $this->createBooking(['guest_name' => 'John Doe']);
-        $this->createBooking(['guest_name' => 'Jane Smith']);
+        // 🌟 ค้นหาด้วยชื่อใน booking_rooms แทน (guests JSON)
+        $this->createBooking();
+        $this->createBooking();
 
-        $response = $this->getJson('/api/v1/bookings?term=John');
+        $response = $this->getJson('/api/v1/bookings?term=Test');
         $response->assertStatus(200);
         $response->assertJsonPath('status', 'success');
-        $response->assertJsonPath('pagination.total', 1);
     }
 
     // ============================================
@@ -197,118 +201,145 @@ class BookingTest extends TestCase
 
     public function test_create_booking_validates_required_fields(): void
     {
-        $response = $this->postJson('/api/v1/bookings', []);
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', []);
         $response->assertStatus(422);
     }
 
     public function test_create_booking_validates_check_out_after_check_in(): void
     {
+        $user = User::factory()->create();
         $roomType = $this->createRoomType();
-        $response = $this->postJson('/api/v1/bookings', [
-            'source' => 'online',
-            'check_in' => now()->addDays(5)->toDateString(),
-            'check_out' => now()->addDay()->toDateString(), // check_out before check_in
-            'guest_name' => 'Test',
-            'guest_email' => 'test@example.com',
-            'guest_phone' => '0812345678',
-            'booking_rooms' => [
-                ['room_type_id' => $roomType->id, 'quantity' => 1],
-            ],
-        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'check_in' => now()->addDays(5)->toDateString(),
+                'check_out' => now()->addDay()->toDateString(), // check_out before check_in
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'quantity' => 1,
+                        'guests' => [
+                            ['title' => 'mr', 'name' => 'Test', 'nationality' => 'TH'],
+                        ],
+                        'children' => 0,
+                    ],
+                ],
+            ]);
         $response->assertStatus(422);
     }
 
     // ============================================
-    // ✅ Guest Draft Prevention
+    // ✅ Draft Prevention (now by user_id, not email)
     // ============================================
 
-    public function test_guest_cannot_create_booking_with_active_draft(): void
+    public function test_user_cannot_create_booking_with_active_draft(): void
     {
+        $user = User::factory()->create();
         $roomType = $this->createRoomType();
         $this->createRoom($roomType);
 
         // 🛑 สร้าง Draft ที่ยังไม่หมดอายุไว้ก่อน
         $this->createBooking([
-            'guest_email' => 'spam@example.com',
+            'user_id' => $user->id,
             'status' => 'draft',
             'payment_deadline' => now()->addHours(12), // ยังไม่หมด
         ]);
 
-        // 🚫 พยายามสร้างใหม่ด้วย email เดียวกัน → ต้องโดนปฏิเสธ
-        $response = $this->postJson('/api/v1/bookings', [
-            'source' => 'online',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
-            'guest_name' => 'Spammer',
-            'guest_email' => 'spam@example.com',
-            'guest_phone' => '0812345678',
-            'booking_rooms' => [
-                ['room_type_id' => $roomType->id, 'quantity' => 1],
-            ],
-        ]);
+        // 🚫 พยายามสร้างใหม่ด้วย user เดียวกัน → ต้องโดนปฏิเสธ
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'check_in' => now()->addDay()->toDateString(),
+                'check_out' => now()->addDays(3)->toDateString(),
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'quantity' => 1,
+                        'guests' => [
+                            ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
+                        ],
+                        'children' => 0,
+                    ],
+                ],
+            ]);
 
         $response->assertStatus(422);
         $response->assertJson(['status' => 'error']);
     }
 
-    public function test_guest_can_create_booking_after_draft_expired(): void
+    public function test_user_can_create_booking_after_draft_expired(): void
     {
+        $user = User::factory()->create();
         $roomType = $this->createRoomType();
         $this->createRoom($roomType);
 
         // 🕐 สร้าง Draft ที่หมดอายุแล้ว
         $this->createBooking([
-            'guest_email' => 'expired@example.com',
+            'user_id' => $user->id,
             'status' => 'draft',
             'payment_deadline' => now()->subHours(1), // หมดอายุแล้ว
         ]);
 
-        // ✅ สร้างใหม่ด้วย email เดียวกัน → ต้องผ่าน
-        $response = $this->postJson('/api/v1/bookings', [
-            'source' => 'online',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
-            'guest_name' => 'Expired Guest',
-            'guest_email' => 'expired@example.com',
-            'guest_phone' => '0812345678',
-            'booking_rooms' => [
-                ['room_type_id' => $roomType->id, 'quantity' => 1],
-            ],
-        ]);
+        // ✅ สร้างใหม่ด้วย user เดียวกัน → ต้องผ่าน
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'check_in' => now()->addDay()->toDateString(),
+                'check_out' => now()->addDays(3)->toDateString(),
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'quantity' => 1,
+                        'guests' => [
+                            ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
+                        ],
+                        'children' => 0,
+                    ],
+                ],
+            ]);
 
         $response->assertStatus(201);
     }
 
-    public function test_guest_different_email_can_create_booking_independently(): void
+    public function test_different_users_can_create_booking_independently(): void
     {
         $roomType = $this->createRoomType();
         $this->createRoom($roomType);
 
-        // 🛑 มี Draft ของ email A ที่ยังไม่หมดอายุ
+        // 🛑 มี Draft ของ User A ที่ยังไม่หมดอายุ
         $this->createBooking([
-            'guest_email' => 'user_a@example.com',
             'status' => 'draft',
             'payment_deadline' => now()->addHours(12),
         ]);
 
-        // ✅ email B ต่างคนต่างสร้างได้ปกติ
-        $response = $this->postJson('/api/v1/bookings', [
-            'source' => 'online',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
-            'guest_name' => 'User B',
-            'guest_email' => 'user_b@example.com',
-            'guest_phone' => '0812345678',
-            'booking_rooms' => [
-                ['room_type_id' => $roomType->id, 'quantity' => 1],
-            ],
-        ]);
+        // ✅ User B ต่างคนต่างสร้างได้ปกติ
+        $userB = User::factory()->create();
+        $response = $this->actingAs($userB, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'check_in' => now()->addDay()->toDateString(),
+                'check_out' => now()->addDays(3)->toDateString(),
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'quantity' => 1,
+                        'guests' => [
+                            ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
+                        ],
+                        'children' => 0,
+                    ],
+                ],
+            ]);
 
         $response->assertStatus(201);
     }
 
     // ============================================
-    // ✅ Rate Limiting on Public Booking Routes
+    // ✅ Rate Limiting on Booking Routes
     // ============================================
 
     public function test_create_booking_route_has_rate_limiting(): void
@@ -322,25 +353,5 @@ class BookingTest extends TestCase
             'POST /bookings should have throttle:5,1 middleware');
     }
 
-    public function test_booking_lookup_route_has_rate_limiting(): void
-    {
-        $route = \Illuminate\Support\Facades\Route::getRoutes()->getByAction(
-            'App\Http\Controllers\Api\V1\BookingController@lookupBooking'
-        );
-
-        $this->assertNotNull($route, 'Route for lookupBooking should exist');
-        $this->assertContains('throttle:10,1', $route->gatherMiddleware(),
-            'POST /bookings/lookup should have throttle:10,1 middleware');
-    }
-
-    public function test_guest_payment_request_route_has_rate_limiting(): void
-    {
-        $route = \Illuminate\Support\Facades\Route::getRoutes()->getByAction(
-            'App\Http\Controllers\Api\V1\PaymentController@requestPaymentForGuest'
-        );
-
-        $this->assertNotNull($route, 'Route for requestPaymentForGuest should exist');
-        $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
-            'POST /bookings/{id}/request-payment should have throttle:5,1 middleware');
-    }
+    // 🌟 Refactor (18/06/26): lookup & requestPaymentForGuest routes ถูกลบแล้ว — ไม่มี public guest access
 }

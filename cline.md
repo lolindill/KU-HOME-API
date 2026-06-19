@@ -51,16 +51,16 @@ No `data` wrapper — resources are returned directly at top level (e.g., `booki
 ### Route Groups
 | Group | Auth | Middleware | Key Operations |
 |---|---|---|---|
-| Public | None | — | Login, register, room availability, room types, create booking, booking lookup, guest payment request, payment webhook |
-| Authenticated | `auth:sanctum` | — | Logout, view own bookings, user profile, discount validation |
+| Public | None | — | Login, register, room availability, room types, payment webhook |
+| Authenticated | `auth:sanctum` | — | Logout, view own bookings, create booking, user profile, discount validation |
 | Admin | `auth:sanctum` | `role:admin` | User CRUD, booking status management, room status management, payment requests, housekeeping tasks, front-desk operations |
 
 ### Draft / Testing Routes (🚧)
 These routes exist but are **not for production use**:
 - `POST /upload-image` — Image upload system incomplete
 - `POST /bookings/validate-discount` — Discount system incomplete (only `WELCOME10`)
-- `POST /bookings/lookup` — Guest booking lookup (uses inline validation, no FormRequest)
-- `POST /bookings/{id}/request-payment` — Guest payment request (uses inline validation, no FormRequest)
+
+> 🌟 **Refactor (18/06/26)**: Removed `POST /bookings/lookup` and `POST /bookings/{id}/request-payment` — non-member/guest access disabled. All users must login.
 
 ### Controllers (all in `App\Http\Controllers\Api\V1\`)
 - `AuthController` — login, register, logout
@@ -90,6 +90,9 @@ Booking ──1:N──> Receipt
 BookingRoom ──N:1──> RoomType    (เลือกประเภทห้องตอนจอง)
 BookingRoom ──N:1──> Room        (nullable — assign เลขห้องตอน check-in)
 BookingRoom ──1:1──> Addon       (addon ผูกกับแต่ละ booking room line)
+BookingRoom ──1:N──> Guests      (🌟 เก็บใน JSON column `guests` — รองรับหลายคนต่อห้อง)
+
+AddonRate                     (🌟 default prices แยกตาราง — server-side lookup, ไม่ trust client)
 
 Room ──N:1──> RoomType
 Room ──1:N──> HousekeepingTask
@@ -118,10 +121,18 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### Booking (`app/Models/Booking.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: user_id, confirmation, source, status, check_in, check_out, guest_title, guest_name, guest_email, guest_phone, guest_nationality, is_ku_member, children, total_amount, is_paid, payment_deadline
-- **Casts**: check_in→date, check_out→date, is_ku_member→boolean, total_amount→integer, is_paid→boolean, payment_deadline→datetime, children→integer
+- **Fillable**: user_id, confirmation, source, status, check_in, check_out, total_amount, is_paid, payment_deadline
+- **Casts**: check_in→date, check_out→date, total_amount→integer, is_paid→boolean, payment_deadline→datetime
 - **Status Field**: string, managed by `transitionStatus()` state machine
 - **Confirmation**: Generated via `generateUniqueConfirmation()` — atomic counter with `booking_sequences` table (format: `YYYYMM-XXXXX`)
+- **Accessors**: `primary_guest_name` — resolves the first guest name from `bookingRooms.guests` JSON (fallback: user name or "Customer")
+- 🌟 **Refactor (18/06/26)**: Guest fields (guest_title, guest_name, guest_email, guest_phone, guest_nationality, is_ku_member, children) moved to `booking_rooms`. Booking now only tracks **who booked** via `user_id`.
+
+#### BookingRoom (`app/Models/BookingRoom.php`)
+- **Primary Key**: UUID (HasUuids trait)
+- **Fillable**: booking_id, room_type_id, room_id, guests (JSON), children, rate_daily, nights
+- **Casts**: guests→array, children→integer, rate_daily→integer, nights→integer
+- 🌟 **Refactor (18/06/26)**: `guests` is now a JSON array supporting **multiple guests per room**. Each guest has: `title`, `name`, `nationality`, `is_ku_member`.
 
 #### Room (`app/Models/Room.php`)
 - **Primary Key**: UUID
@@ -141,7 +152,7 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: receipt_no, booking_id, payment_id, amount, billing_name, billing_address
 - **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
-
+  
 ## State Machines
 
 ### Booking Status Flow
@@ -229,6 +240,52 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 - **No events/listeners**: Booking/Payment state changes are synchronous
 - **Draft/testing methods**: Marked with `🚧 DRAFT / TESTING` comment prefix
 
+## ✅ Refactor (2026-06-18): Booking Structure Overhaul
+
+> **สรุปการเปลี่ยนแปลงครั้งใหญ่** — โครงสร้าง booking & booking room ถูก refactor ทั้งระบบ
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+1. **❌ Non-member/Guest access disabled** — `POST /bookings`, `POST /bookings/lookup`, `POST /bookings/{id}/request-payment` ถูกลบจาก public routes
+   - `POST /bookings` ย้ายไป protected (`auth:sanctum`) — ทุกคนต้อง login ก่อนจอง
+   - `lookupBooking()` และ `requestPaymentForGuest()` ใน `PaymentController` ถูกลบทิ้ง
+   - Guest/non-member ไม่สามารถใช้งานระบบ booking ได้โดยตรงอีกต่อไป
+
+2. **🚶 Walk-in ใช้ staff user** — `FrontDeskController::walkIn()` ไม่สร้าง guest user อีกต่อไป
+   - ใช้ `verified_by` (staff/admin ID) เป็น `user_id` ของ booking
+   - ข้อมูลผู้เข้าพักเก็บใน `booking_rooms.guests` (JSON) แทน
+   - Payload ใหม่: `verified_by`, `room_id`, `nights`, `guests[]`, `children`
+
+3. **👥 Guest data moved to `booking_rooms`** — รองรับผู้เข้าพักหลายคนต่อห้อง
+   - ลบ columns: `guest_title`, `guest_name`, `guest_email`, `guest_phone`, `guest_nationality`, `is_ku_member`, `children` จาก `bookings` table
+   - เพิ่ม columns: `guests` (JSON array), `children` ใน `booking_rooms` table
+   - `Booking::primary_guest_name` accessor — ดึงชื่อแขกคนแรกจาก `bookingRooms.guests` JSON
+
+### 📁 Files Changed
+
+| Category | Files |
+|---|---|
+| Migration | `2026_06_18_150000_move_guests_to_booking_rooms.php` |
+| Models | `Booking.php`, `BookingRoom.php` |
+| Controllers | `BookingController.php`, `FrontDeskController.php`, `PaymentController.php` |
+| Requests | `StoreBookingRequest.php`, `UpdateBookingRequest.php` |
+| Routes | `routes/api.php` |
+| Tests | `BookingTest.php`, `FrontDeskTest.php`, `PaymentTest.php`, `RouteProtectionTest.php` |
+
+### 🗄️ Migration Required
+
+⚠️ **ต้องรัน `php artisan migrate` หลังจาก pull code นี้** — migration จะ:
+1. เพิ่ม `guests` (JSON) + `children` (integer) columns ใน `booking_rooms`
+2. ย้ายข้อมูลเดิมจาก `bookings.guest_*` fields ไป `booking_rooms.guests` JSON
+3. ลบ `guest_*` และ `children` columns ออกจาก `bookings`
+
+### 🔄 Draft Prevention Logic
+
+- **ก่อน**: ป้องกัน spam ด้วย `guest_email` (public route)
+- **หลัง**: ป้องกัน spam ด้วย `user_id` (เพราะทุกคนต้อง login แล้ว)
+
+---
+
 ## ✅ Tested Changes (2026-06-05)
 
 > การเปลี่ยนแปลงเหล่านี้ผ่าน automated test ทั้งหมดแล้ว — **121 tests, 164 assertions, 0 failures**
@@ -263,11 +320,11 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 | `tests/Unit/BookingStateTest` | 23 | Booking status state machine (all transitions + role restrictions) |
 | `tests/Unit/RoomStateTest` | 23 | Room status state machine (all transitions + edge cases) |
 | `tests/Feature/AuthTest` | 9 | Register, login, logout, me, 401 |
-| `tests/Feature/BookingTest` | 17 | CRUD, lookup, search via `?term=`, validation, status transitions, guest draft prevention, rate limiting |
-| `tests/Feature/FrontDeskTest` | 6 | Walk-in, check-in, check-out, record payment, room type mismatch validation |
-| `tests/Feature/PaymentTest` | 6 | Payment request, webhook, guest email verification |
+| `tests/Feature/BookingTest` | 14 | CRUD (auth required), search via `?term=`, validation, status transitions, draft prevention (by user_id), rate limiting |
+| `tests/Feature/FrontDeskTest` | 6 | Walk-in (staff user + guests JSON), check-in, check-out, record payment, room type mismatch validation |
+| `tests/Feature/PaymentTest` | 4 | Payment request, webhook (removed guest email verification tests) |
 | `tests/Feature/RoomTest` | 9 | List rooms/types, availability, status update + transitions, availability query consistency |
-| `tests/Feature/RouteProtectionTest` | 19 | Public vs authenticated vs admin route access |
+| `tests/Feature/RouteProtectionTest` | 20 | Public vs authenticated vs admin route access (added create_booking_requires_auth) |
 | `tests/Feature/UserTest` | 6 | User CRUD, profile update, role escalation prevention |
 
 ### Base Test Infrastructure
@@ -332,10 +389,7 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 
 ### 🟠 Major (สำคัญ — ควรแก้ก่อน production)
 
-- **#20: Addon prices มาจาก client — trust client** — `StoreBookingRequest` ยอมรับ `breakfast_price`, `early_checkIn_price`, `late_checkOut_price` จาก request โดยตรง
-  - Client ส่ง `breakfast_price: 0` → ได้ breakfast ฟรี
-  - Server ควร lookup ราคาจาก database เอง
-  - ไฟล์: `StoreBookingRequest.php:37-39`, `BookingController.php:204-206`
+*(ไม่มี — #20 แก้แล้ววันที่ 2026-06-19)*
 
 ### 🟡 Resolved (แก้ไขแล้ววันที่ 2026-06-05)
 

@@ -18,14 +18,7 @@ class UpdateBookingRequest extends FormRequest
             'check_in'           => 'sometimes|required|date',
             'check_out'          => 'sometimes|required|date|after:check_in',
 
-            'guest_title'        => 'nullable|string|max:255',
-            'guest_name'         => 'sometimes|required|string|max:255',
-            'guest_email'        => 'sometimes|required|email|max:255',
-            'guest_phone'        => 'sometimes|required|string|max:255',
-            'guest_nationality'  => 'nullable|string|max:255',
-            'is_ku_member'       => 'nullable|boolean|string',
-            'children'           => 'nullable|integer|min:0',
-
+            // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว (guests JSON + children)
             'total_amount'       => 'nullable|integer|min:0',
             'is_paid'            => 'nullable|boolean',
             'payment_deadline'   => 'nullable|date',

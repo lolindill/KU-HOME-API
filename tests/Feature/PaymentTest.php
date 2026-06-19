@@ -13,13 +13,17 @@ class PaymentTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * 🌟 Refactor (18/06/26): ไม่มี guest fields ใน bookings แล้ว — ใช้ user_id
+     */
     private function createBooking(array $overrides = []): Booking
     {
+        $user = User::factory()->create();
+
         return Booking::create(array_merge([
+            'user_id' => $user->id,
+            'source' => 'online',
             'status' => 'draft',
-            'guest_name' => 'Payment Guest',
-            'guest_email' => 'pay@example.com',
-            'guest_phone' => '0812345678',
             'check_in' => now()->addDay()->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 4500,
@@ -88,41 +92,17 @@ class PaymentTest extends TestCase
         $this->assertEquals('paid', $booking->fresh()->status);
     }
 
-    public function test_webhook_returns_404_for_unknown_payment(): void
+    public function test_webhook_returns_422_for_unknown_payment(): void
     {
         $response = $this->postJson('/api/v1/payment/webhook', [
             'payment_id' => Str::uuid(),
             'status' => 'success',
             'reference_number' => 'VERIFY-123',
         ]);
-        // Validation fails (exists:payments,id) → 422, not 404
+        // Validation fails (exists:payments,id) → 422
         $response->assertStatus(422);
     }
 
-    // ============================================
-    // 🔐 Guest: Request payment for guest booking
-    // ============================================
-
-    public function test_guest_can_request_payment_with_matching_email(): void
-    {
-        // requestPaymentForGuest is a PUBLIC route — identity via email/phone, not auth
-        $booking = $this->createBooking(['status' => 'draft', 'guest_email' => 'guest@example.com']);
-
-        $response = $this->postJson("/api/v1/bookings/{$booking->id}/request-payment", [
-            'guest_email' => 'guest@example.com',
-        ]);
-
-        $response->assertStatus(201);
-    }
-
-    public function test_guest_cannot_request_payment_with_wrong_email(): void
-    {
-        $booking = $this->createBooking(['status' => 'draft', 'guest_email' => 'guest@example.com']);
-
-        $response = $this->postJson("/api/v1/bookings/{$booking->id}/request-payment", [
-            'guest_email' => 'wrong@example.com',
-        ]);
-
-        $response->assertStatus(403);
-    }
+    // 🌟 Refactor (18/06/26): requestPaymentForGuest route ถูกลบแล้ว — non-member ไม่สามารถจอง/ชำระได้โดยตรง
+    // ทุกคนต้อง login และใช้ POST /payments (admin) หรือ POST /front-desk/{id}/payment
 }

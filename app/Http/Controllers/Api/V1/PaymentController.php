@@ -61,89 +61,7 @@ class PaymentController extends Controller
         }
     }
 
-    /**
-      * 💳 Guest ขอลิงก์ชำระเงินสำหรับบุ๊กกิ้งของตัวเอง (ไม่ต้องล็อกอิน)
-     * ✅ #28 Fixed: บังคับ guest_email required + AND logic เหมือน lookupBooking()
-     */
-    public function requestPaymentForGuest(Request $request, $id)
-    {
-        $request->validate([
-            'guest_email' => 'required|string|email',
-            'guest_phone' => 'nullable|string',
-        ]);
-
-        try {
-            $booking = Booking::findOrFail($id);
-
-            // ✅ #28 Fixed: ยืนยันตัวตนด้วย AND logic (email บังคับ, phone เสริม)
-            $identityMatch = $booking->guest_email === $request->guest_email;
-            if ($request->guest_phone) {
-                $identityMatch = $identityMatch && $booking->guest_phone === $request->guest_phone;
-            }
-
-            if (!$identityMatch) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'ข้อมูลไม่ตรงกับรายการจองนะคะนายท่าน กรุณาตรวจสอบอีกครั้งค่ะ 🔒',
-                ], 403);
-            }
-
-            // ตรวจสอบสถานะบุ๊กกิ้ง
-            if ($booking->is_paid) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'รายการจองนี้ชำระเงินแล้วค่ะ',
-                ], 400);
-            }
-
-            if ($booking->status !== 'draft') {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => "รายการจองนี้สถานะเป็น '{$booking->status}' ไม่สามารถขอชำระเงินได้ค่ะ",
-                ], 400);
-            }
-
-            // ตรวจสอบ deadline
-            if ($booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'หมดเวลาชำระเงินแล้วค่ะนายท่าน กรุณาสร้างรายการจองใหม่นะคะ',
-                ], 400);
-            }
-
-            // สร้าง Payment record
-            $payment = Payment::create([
-                'booking_id' => $booking->id,
-                'amount' => $booking->total_amount,
-                'payment_method' => 'online',
-                'status' => 'pending',
-            ]);
-
-            // สร้าง payment URL (mock — จริงๆ ต้องเรียก Payment Gateway)
-            $paymentUrl = "https://gateway.mockbank.com/pay/" . $payment->id;
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'สร้างรายการชำระเงินเรียบร้อยแล้วค่ะ กรุณาชำระเงินภายในเวลาที่กำหนดนะคะ',
-                'payment_id' => $payment->id,
-                'amount' => $payment->amount,
-                'payment_url' => $paymentUrl,
-                'payment_deadline' => $booking->payment_deadline?->toDateTimeString(),
-            ], 201);
-
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'ไม่พบรายการจองนี้ในระบบค่ะนายท่าน',
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error("Guest payment request failed: " . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
-            ], 500);
-        }
-    }
+    // 🌟 Refactor (18/06/26): ลบ requestPaymentForGuest() ออก — non member/guest ใช้งานไม่ได้แล้ว ต้อง login ทุกกรณี
 
     // 🌸 Webhook: ธนาคารแจ้งผลกลับ (draft → paid เท่านั้น, admin confirm เอง)
     public function webhook(Request $request)
@@ -186,12 +104,13 @@ class PaymentController extends Controller
                 // ✅ #19 Fixed: ใช้ atomic counter แทน rand() สร้าง receipt number
                 $receiptNo = Receipt::generateUniqueReceiptNo();
                 
+                // 🌟 Refactor (18/06/26): ใช้ primary_guest_name (จาก booking_rooms) แทน guest_name ที่ถูกลบไปแล้ว
                 Receipt::create([
                     'receipt_no' => $receiptNo,
                     'booking_id' => $booking->id,
                     'payment_id' => $payment->id,
                     'amount' => $payment->amount,
-                    'billing_name' => $booking->guest_name ?? 'Customer',
+                    'billing_name' => $booking->primary_guest_name ?? 'Customer',
                 ]);
 
                 DB::commit();

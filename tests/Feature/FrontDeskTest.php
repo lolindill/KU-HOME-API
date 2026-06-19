@@ -37,21 +37,27 @@ class FrontDeskTest extends TestCase
         ]);
     }
 
+    /**
+     * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
+     */
     private function createBooking(array $overrides = []): Booking
     {
-        return Booking::create(array_merge([
+        $user = User::factory()->create();
+
+        $booking = Booking::create(array_merge([
+            'user_id' => $user->id,
+            'source' => 'online',
             'status' => 'confirmed',
-            'guest_name' => 'Front Desk Guest',
-            'guest_email' => 'fd@example.com',
-            'guest_phone' => '0812345678',
             'check_in' => now()->toDateString(),
             'check_out' => now()->addDays(2)->toDateString(),
             'total_amount' => 3000,
         ], $overrides));
+
+        return $booking;
     }
 
     // ============================================
-    // 🚶 Walk-in
+    // 🚶 Walk-in (Refactored: ใช้ staff + guests JSON)
     // ============================================
 
     public function test_admin_can_walk_in_guest(): void
@@ -61,18 +67,27 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType);
 
+        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[] + children, ไม่มี guest_name/email/phone แล้ว
         $response = $this->postJson('/api/v1/front-desk/walk-in', [
             'verified_by' => $admin->id,
             'room_id' => $room->id,
-            'guest_name' => 'Walk In Guest',
-            'guest_phone' => '0899999999',
             'nights' => 2,
+            'guests' => [
+                ['title' => 'mr', 'name' => 'Walk In Guest', 'nationality' => 'TH'],
+            ],
+            'children' => 0,
         ]);
 
         $response->assertStatus(201);
+        // 🌟 ข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
         $this->assertDatabaseHas('bookings', [
-            'guest_phone' => '0899999999',
+            'user_id' => $admin->id, // 🌟 staff เป็นผู้ถือ booking
+            'source' => 'admin',
             'status' => 'checked_in',
+        ]);
+        $this->assertDatabaseHas('booking_rooms', [
+            'room_id' => $room->id,
+            'children' => 0,
         ]);
     }
 
@@ -84,11 +99,10 @@ class FrontDeskTest extends TestCase
 
         $response = $this->postJson('/api/v1/front-desk/walk-in', [
             'room_id' => $room->id,
-            'guest_name' => 'Walk In Guest',
-            'guest_email' => 'walkin2@example.com',
-            'guest_phone' => '0899999999',
-            'check_in' => now()->toDateString(),
-            'check_out' => now()->addDays(2)->toDateString(),
+            'nights' => 2,
+            'guests' => [
+                ['title' => 'mr', 'name' => 'Walk In Guest'],
+            ],
         ]);
 
         $response->assertStatus(403);
@@ -105,12 +119,14 @@ class FrontDeskTest extends TestCase
         $room = $this->createRoom($roomType);
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Attach room to booking
+        // Attach room to booking — 🌟 ต้องมี guests JSON ตาม structure ใหม่
         BookingRoom::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
             'room_id' => $room->id,
+            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
+            'children' => 0,
         ]);
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
@@ -127,7 +143,8 @@ class FrontDeskTest extends TestCase
 
     public function test_admin_can_check_out_checked_in_booking(): void
     {
-        $this->actingAsAdmin();
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType, 'occupied');
         $booking = $this->createBooking([
@@ -140,6 +157,8 @@ class FrontDeskTest extends TestCase
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
             'room_id' => $room->id,
+            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
+            'children' => 0,
         ]);
 
         // Need a completed payment for check-out to succeed
@@ -151,8 +170,6 @@ class FrontDeskTest extends TestCase
             'status' => 'completed',
         ]);
 
-        $admin = $this->createAdmin();
-        $this->actingAs($admin, 'sanctum');
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
             'verified_by' => $admin->id,
         ]);
@@ -221,11 +238,13 @@ class FrontDeskTest extends TestCase
 
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Booking room expects Standard type
+        // Booking room expects Standard type — 🌟 ต้องมี guests JSON
         BookingRoom::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'room_type_id' => $standardType->id,
+            'guests' => [['title' => 'mr', 'name' => 'Guest', 'nationality' => 'TH']],
+            'children' => 0,
         ]);
 
         // Try to check-in with Deluxe room — should FAIL

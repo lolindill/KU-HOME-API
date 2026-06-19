@@ -14,12 +14,41 @@ class BookingRoom extends Model
 
     /**
      * ✅ #17 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
+     * 🌟 Refactor (18/06/26): ย้ายข้อมูลผู้เข้าพักจาก bookings มาที่ booking_rooms
+     *    รองรับหลายคนผ่าน guests (JSON), บันทึก children แยก
      */
     protected $fillable = [
         'booking_id',
         'room_type_id',
-        'room_id', // nullable — assign ตอน check-in
+        'room_id',  // nullable — assign ตอน check-in
+        'guests',   // JSON: [{ title, name, nationality, is_ku_member }, ...]
+        'children', // int: จำนวนเด็กที่เข้าพักในห้องนี้
     ];
+
+    protected $casts = [
+        'guests' => 'array',
+        'children' => 'integer',
+    ];
+
+    // 🌟 Helper: ดึงผู้เข้าพักคนแรก (primary guest)
+    public function getPrimaryGuestAttribute(): ?array
+    {
+        return $this->guests[0] ?? null;
+    }
+
+    // 🌟 Helper: ดึงชื่อผู้เข้าพักหลักสำหรับ Receipt
+    public function getPrimaryGuestNameAttribute(): string
+    {
+        $primary = $this->primary_guest;
+        if (!$primary) return 'Customer';
+        return trim(($primary['title'] ?? '') . ' ' . ($primary['name'] ?? ''));
+    }
+
+    // 🌟 Helper: นับจำนวนผู้เข้าพักทั้งหมด (ผู้ใหญ่ + เด็ก)
+    public function getTotalGuestsAttribute(): int
+    {
+        return (is_array($this->guests) ? count($this->guests) : 0) + ($this->children ?? 0);
+    }
 
     // 🌟 1. เชื่อมกลับไปหาข้อมูล Booking หลัก
     public function booking(): BelongsTo
@@ -51,7 +80,7 @@ class BookingRoom extends Model
     {
         // ถ้ามีห้องอยู่แล้ว ไม่ต้องหาใหม่ค่ะ ถือว่าสำเร็จเลย
         if ($this->room_id !== null) {
-            return true; 
+            return true;
         }
 
         // 🌟 ดึง check_in และ check_out จาก Booking หลักผ่าน Relation ได้เลยค่ะ!

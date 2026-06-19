@@ -19,7 +19,9 @@ class Booking extends Model
 
     /**
      * ✅ #8 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
-     * 
+     * 🌟 Refactor (18/06/26): ย้ายข้อมูลผู้เข้าพักไปที่ booking_rooms (guests JSON)
+     *    bookings จะเก็บแค่ข้อมูลการจอง + user_id (ลูกค้า) เท่านั้น
+     *
      * 'status' อยู่ใน $fillable เพื่อให้ Booking::create() และ tests ทำงานได้
      * การเปลี่ยนสถานะทั้งหมดควรผ่าน transitionStatus() ซึ่งมี role-based guard คุ้มอยู่
      */
@@ -30,13 +32,6 @@ class Booking extends Model
         'status',
         'check_in',
         'check_out',
-        'guest_title',
-        'guest_name',
-        'guest_email',
-        'guest_phone',
-        'guest_nationality',
-        'is_ku_member',
-        'children',
         'total_amount',
         'is_paid',
         'payment_deadline',
@@ -45,12 +40,32 @@ class Booking extends Model
     protected $casts = [
         'check_in' => 'date',
         'check_out' => 'date',
-        'is_ku_member' => 'boolean',
         'total_amount' => 'integer',
         'is_paid' => 'boolean',
         'payment_deadline' => 'datetime',
-        'children' => 'integer',
     ];
+
+    // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
+    // ใช้สำหรับ Receipt billing_name และแสดงผล — สำรองด้วย user.name
+    public function getPrimaryGuestNameAttribute(): string
+    {
+        $bookingRoom = $this->bookingRooms()
+            ->whereNotNull('guests')
+            ->orderBy('created_at')
+            ->first();
+
+        if ($bookingRoom && $bookingRoom->primary_guest_name !== 'Customer') {
+            return $bookingRoom->primary_guest_name;
+        }
+
+        return $this->user?->name ?? 'Customer';
+    }
+
+    // 🌟 Helper: นับจำนวนผู้เข้าพักรวมทุกห้อง (สำหรับ dashboard / summary)
+    public function getTotalGuestsAttribute(): int
+    {
+        return $this->bookingRooms->sum(fn ($br) => $br->total_guests);
+    }
 
     public function user(): BelongsTo
     {
@@ -64,12 +79,12 @@ class Booking extends Model
 
     /**
      * Booking Status State Machine
-     * 
+     *
      * draft → paid (user, guest, admin), checked_in (admin), deleted (user, guest, admin)
      * paid → confirmed (admin), cancelled (admin)
      * confirmed → cancelled (admin), checked_in (admin), no_show (admin)
      * checked_in → checked_out (admin)
-     * 
+     *
      * Special: 'system' role for webhook (draft → paid only)
      */
     public function transitionStatus(string $newStatus, string $userRole)
@@ -97,7 +112,7 @@ class Booking extends Model
         ];
 
         // เช็คว่า flow ถูกต้องไหม
-        if (!array_key_exists($currentStatus, $validTransitions) || 
+        if (!array_key_exists($currentStatus, $validTransitions) ||
             !array_key_exists($newStatus, $validTransitions[$currentStatus])) {
             throw new Exception("ไม่อนุญาตให้เปลี่ยนสถานะจาก '{$currentStatus}' ไปเป็น '{$newStatus}' ตาม Flow ระบบค่ะนายท่าน", 422);
         }
@@ -114,10 +129,10 @@ class Booking extends Model
 
     /**
      * ✅ #10 Fixed: Atomic counter confirmation number generator
-     * 
+     *
      * ใช้ booking_sequences table + SELECT FOR UPDATE เพื่อป้องกัน collision
      * Format: YYYYMM-XXXXX (เช่น 202606-00001)
-     * 
+     *
      * @return string Confirmation number ที่ unique การันตี
      * @throws Exception ถ้าสร้างไม่สำเร็จหลัง retry
      */

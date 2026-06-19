@@ -20,14 +20,22 @@ use Illuminate\Support\Facades\Log;
 class FrontDeskController extends Controller
 {
     // 🌟 1. Walk-in Booking (Admin only)
+    // 🌟 Refactor (18/06/26): ใช้ staff user (verified_by) เป็นผู้ถือ booking — ข้อมูลแขกไปอยู่ใน booking_rooms.guests
+    // 🌟 แขก walk-in ไม่ต้องสมัครสมาชิก ไม่ใช้ member/guest user อีกต่อไป
     public function walkIn(Request $request)
     {
         $validated = $request->validate([
             'verified_by' => 'required|uuid|exists:users,id',
-            'guest_name' => 'required|string',
-            'guest_phone' => 'required|string',
             'nights' => 'required|integer|min:1',
-            'room_id' => 'required|uuid|exists:rooms,id', 
+            'room_id' => 'required|uuid|exists:rooms,id',
+
+            // 👥 ข้อมูลผู้เข้าพัก (เก็บใน booking_rooms.guests แทน รองรับหลายคนต่อห้อง)
+            'guests' => 'nullable|array',
+            'guests.*.title' => 'nullable|string|max:50',
+            'guests.*.name' => 'nullable|string|max:255',
+            'guests.*.nationality' => 'nullable|string|max:100',
+            'guests.*.is_ku_member' => 'nullable|boolean',
+            'children' => 'nullable|integer|min:0',
         ]);
 
         try {
@@ -38,16 +46,8 @@ class FrontDeskController extends Controller
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
 
-            $guestUser = User::firstOrCreate(
-                ['phone' => $validated['guest_phone']],
-                [
-                    'id' => Str::uuid(),
-                    'name' => $validated['guest_name'],
-                    'email' => 'walkin-' . $validated['guest_phone'] . '@hotel.local',
-                    'role' => 'guest',
-                    'password' => bcrypt(Str::random(10)) 
-                ]
-            );
+            // 🌟 Refactor (18/06/26): ไม่สร้าง guest user แล้ว — ใช้ staff (verified_by) เป็นผู้ถือ booking
+            $staffUser = User::findOrFail($validated['verified_by']);
 
             $checkIn = Carbon::now();
             $checkOut = Carbon::now()->addDays($validated['nights']);
@@ -55,17 +55,13 @@ class FrontDeskController extends Controller
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
-                'user_id' => $guestUser->id,
+                'user_id' => $staffUser->id,
                 'confirmation' => $confirmationNo,
-                'source' => 'admin', 
+                'source' => 'admin',
                 'status' => 'draft', // immediately transitioned to checked_in below
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
-                'guest_name' => $validated['guest_name'],
-                'guest_phone' => $validated['guest_phone'],
-                // ✅ #35 Fixed: ใช้ phone ทำให้ email unique ต่อ walk-in guest — lookup เจอได้
-                'guest_email' => 'walkin-' . $validated['guest_phone'] . '@hotel.local',
-                'guest_nationality' => 'Thai',
+                // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว
                 'total_amount' => $totalAmount,
                 'payment_deadline' => Carbon::now(),
             ]);
@@ -75,6 +71,9 @@ class FrontDeskController extends Controller
                 'booking_id' => $booking->id,
                 'room_type_id' => $room->room_type_id,
                 'room_id' => $room->id,
+                // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักที่นี่
+                'guests' => $validated['guests'] ?? null,
+                'children' => $validated['children'] ?? 0,
             ]);
 
             // 🌟 ใช้ state machine เปลี่ยนสถานะห้องเป็น occupied
@@ -321,12 +320,13 @@ class FrontDeskController extends Controller
                 }
 
                 // สร้าง Receipt
+                // 🌟 Refactor (18/06/26): ใช้ primary_guest_name (จาก booking_rooms) แทน guest_name ที่ถูกลบไปแล้ว
                 Receipt::create([
                     'receipt_no' => Receipt::generateUniqueReceiptNo(),
                     'booking_id' => $booking->id,
                     'payment_id' => $payment->id,
                     'amount' => $payment->amount,
-                    'billing_name' => $booking->guest_name ?? 'Customer',
+                    'billing_name' => $booking->primary_guest_name ?? 'Customer',
                 ]);
             }
 

@@ -62,6 +62,16 @@ class RouteProtectionTest extends TestCase
         $response->assertStatus(401);
     }
 
+    /**
+     * 🌟 Refactor (18/06/26): POST /bookings ย้ายจาก public → protected
+     * Non-member/guest ไม่สามารถจองได้โดยไม่ login อีกต่อไป
+     */
+    public function test_create_booking_requires_auth(): void
+    {
+        $response = $this->postJson('/api/v1/bookings', []);
+        $response->assertStatus(401);
+    }
+
     public function test_me_requires_auth(): void
     {
         $response = $this->getJson('/api/v1/me');

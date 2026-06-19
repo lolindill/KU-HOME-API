@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\AddonRateController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
@@ -44,12 +45,12 @@ Route::prefix('v1')->group(function () {
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
 
-    // 📅 Booking — Public (Guest สร้างบุ๊กกิ้งได้โดยไม่ต้องล็อกอิน) + Rate Limited
-    Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
-    Route::post('/bookings/lookup', [BookingController::class, 'lookupBooking'])->middleware('throttle:10,1');
+    // 🌟 Add-on Rates (public read-only — ให้ frontend แสดงราคา current ได้)
+    Route::get('/addon-rates', [AddonRateController::class, 'index']);
+    Route::get('/addon-rates/{id}', [AddonRateController::class, 'show']);
 
-    // 💳 Guest ขอลิงก์ชำระเงินสำหรับบุ๊กกิ้งของตัวเอง + Rate Limited
-    Route::post('/bookings/{id}/request-payment', [PaymentController::class, 'requestPaymentForGuest'])->middleware('throttle:5,1');
+    // 🌟 Refactor (18/06/26): ลบ public booking/lookup/request-payment — non-member ใช้งานไม่ได้แล้ว ทุกคนต้อง login
+    //    createBooking ย้ายไป protected routes ด้านล่าง
 
     // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง
     Route::post('/upload-image', [ImageController::class, 'upload']);
@@ -71,6 +72,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // 📅 Bookings (เจ้าของบุ๊กกิ้งดูของตัวเองได้)
     Route::get('/bookings', [BookingController::class, 'getBookings']);
     Route::get('/bookings/{id}', [BookingController::class, 'showById'])->where('id', '[0-9a-f\-]{36}');
+
+    // 🌟 Refactor (18/06/26): createBooking ย้ายมานี่ — ต้อง login (auth:sanctum) ทุกกรณี
+    Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
 
     // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
     Route::post('/bookings/validate-discount', [BookingController::class, 'validateDiscount']);
@@ -111,6 +115,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
         // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
         Route::post('/payments', [PaymentController::class, 'requestPayment']);
+
+        // 🌟 Add-on Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
+        Route::put('/addon-rates/{id}', [AddonRateController::class, 'update']);
+        Route::patch('/addon-rates/{id}/toggle', [AddonRateController::class, 'toggleActive']);
 
     });
 });
