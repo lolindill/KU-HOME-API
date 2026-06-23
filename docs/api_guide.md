@@ -149,7 +149,7 @@ Used by `GET /bookings` and `GET /users`:
 
 ### POST `/login` — Login
 
-🔒 **Public** · ⏱ Rate-limited: 5 requests/minute
+🔒 **Public** · ⏱ Rate-limit d: 5 requests/minute
 
 **Request Body:**
 ```json
