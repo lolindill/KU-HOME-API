@@ -150,12 +150,12 @@ class BookingController extends Controller
             foreach ($requestedRoomTypes as $rtId => $requestedRoomCount) {
                 $totalRooms = Room::where('room_type_id', $rtId)->count();
 
+                // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
+                // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
                 $bookedRooms = BookingRoom::where('room_type_id', $rtId)
-                    ->whereHas('booking', function ($query) use ($checkIn, $checkOut) {
-                        $query->whereIn('status', ['paid', 'confirmed', 'checked_in'])
-                              ->where('check_in', '<', $checkOut)
-                              ->where('check_out', '>', $checkIn);
-                    })
+                    ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                    ->where('check_in', '<', $checkOut)
+                    ->where('check_out', '>', $checkIn)
                     ->count();
 
                 $availableRooms = $totalRooms - $bookedRooms;
@@ -172,10 +172,9 @@ class BookingController extends Controller
                 'user_id' => $userId,
                 'source' => $validated['source'],
                 'status' => 'draft',
-                'check_in' => $validated['check_in'], 
-                'check_out' => $validated['check_out'], 
 
-                // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว
+                // 🌟 Refactor (25/06/26): ย้าย check_in/check_out ไปที่ booking_rooms แล้ว
+                // bookings เก็บแค่ container + payment info เท่านั้น
 
                 'total_amount' => 0, 
                 'payment_deadline' => Carbon::now()->addHours(24)
@@ -211,6 +210,10 @@ class BookingController extends Controller
                     'booking_id' => $booking->id,
                     'room_type_id' => $roomType->id,
                     'room_id' => null, // รอจ่ายห้องตอน Check-in
+                    // 🌟 Refactor (25/06/26): วันที่เช็คอิน/เช็คเอาท์อยู่ที่ระดับห้อง (แต่ละห้องต่างวันได้)
+                    'check_in' => $validated['check_in'],
+                    'check_out' => $validated['check_out'],
+                    'status' => 'draft', // BR-level state
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
                     'guests' => $roomRequest['guests'] ?? null,
                     'children' => $roomRequest['children'] ?? 0,
@@ -297,13 +300,16 @@ class BookingController extends Controller
         $startDate = Carbon::parse($checkIn)->startOfDay();
         $endDate = Carbon::parse($checkOut)->endOfDay();
 
-        return $query->where(function ($q) use ($startDate, $endDate) {
-            $q->whereBetween('check_in', [$startDate, $endDate])
-              ->orWhereBetween('check_out', [$startDate, $endDate])
-              ->orWhere(function ($subQ) use ($startDate, $endDate) {
-                  $subQ->where('check_in', '<=', $startDate)
-                       ->where('check_out', '>=', $endDate);
-              });
+        // 🌟 Refactor (25/06/26): วันที่ย้ายไป BR-level แล้ว — filter ผ่าน whereHas('bookingRooms', ...)
+        return $query->whereHas('bookingRooms', function ($br) use ($startDate, $endDate) {
+            $br->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('check_in', [$startDate, $endDate])
+                  ->orWhereBetween('check_out', [$startDate, $endDate])
+                  ->orWhere(function ($subQ) use ($startDate, $endDate) {
+                      $subQ->where('check_in', '<=', $startDate)
+                           ->where('check_out', '>=', $endDate);
+                  });
+            });
         });
     }
 
@@ -321,7 +327,9 @@ class BookingController extends Controller
     public function updateStatus(Request $request, $id)
     {
         $request->validate([
-            'status' => 'required|string|in:draft,paid,confirmed,checked_in,checked_out,cancelled,no_show,deleted'
+            // 🌟 Refactor (25/06/26): booking container states เท่านั้น
+            // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
+            'status' => 'required|string|in:draft,paid,confirmed,complete,cancelled'
         ]);
 
         try {
@@ -465,8 +473,7 @@ class BookingController extends Controller
                 ]);
             }
 
-            $checkIn = $booking->check_in;
-            $checkOut = $booking->check_out;
+            // 🌟 Refactor (25/06/26): BR-level dates แล้ว — assignAvailableRoom() ใช้ $this->check_in/check_out เอง
             $assignedCount = 0;
 
             foreach ($unassignedRooms as $bookingRoom) {

@@ -21,9 +21,9 @@ class StoreBookingRequest extends FormRequest
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไปอยู่ใน booking_rooms (รองรับหลายคน/ห้อง)
             // bookings ไม่รับ guest fields แล้ว
 
+            // 🌟 Refactor (25/06/26): 1 array entry = 1 ห้อง (ไม่มี quantity multiplier แล้ว)
             'booking_rooms'                  => 'required|array',
             'booking_rooms.*.room_type_id'   => 'required|uuid|exists:room_types,id',
-            'booking_rooms.*.quantity'       => 'required|integer|min:1',
             'booking_rooms.*.extra_beds'     => 'nullable|integer|min:0',
 
             // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง (array ของ guests)
@@ -58,8 +58,6 @@ class StoreBookingRequest extends FormRequest
             'booking_rooms.array'            => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
             'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',
             'booking_rooms.*.room_type_id.exists'   => 'ไม่พบประเภทห้องที่ระบุ',
-            'booking_rooms.*.quantity.required'     => 'กรุณาระบุจำนวนห้อง',
-            'booking_rooms.*.quantity.min'          => 'จำนวนห้องต้องอย่างน้อย 1 ห้อง',
         ];
     }
 }

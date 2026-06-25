@@ -45,16 +45,15 @@ class BookingTest extends TestCase
     {
         $user = User::factory()->create();
 
+        // 🌟 Refactor (25/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
         $booking = Booking::create(array_merge([
             'user_id' => $user->id,
             'source' => 'online',
             'status' => 'draft',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 4500,
         ], $overrides));
 
-        // สร้าง booking_room พร้อมข้อมูลผู้เข้าพัก
+        // สร้าง booking_room พร้อมข้อมูลผู้เข้าพัก + check_in/check_out
         $roomType = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard',
@@ -67,6 +66,8 @@ class BookingTest extends TestCase
         \App\Models\BookingRoom::create([
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
+            'check_in' => now()->addDay()->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
             'guests' => [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
@@ -173,8 +174,11 @@ class BookingTest extends TestCase
         $this->actingAsAdmin();
         $booking = $this->createBooking(['status' => 'draft']);
 
+        // 🌟 Refactor (25/06/26): draft → confirmed is now VALID (admin walk-in skip paid)
+        // ต้องใช้ transition ที่ invalid จริงๆ ตาม container state machine
+        // draft → complete ข้ามขั้น paid/confirmed ไม่ได้ค่ะ
         $response = $this->putJson("/api/v1/bookings/update/{$booking->id}", [
-            'status' => 'confirmed', // draft → confirmed is invalid
+            'status' => 'complete',
         ]);
         $response->assertStatus(422);
     }

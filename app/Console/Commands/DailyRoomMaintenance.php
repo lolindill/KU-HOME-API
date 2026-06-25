@@ -26,10 +26,12 @@ class DailyRoomMaintenance extends Command
         // =========================================================
         $today = Carbon::today();
 
-        // โหลด bookingRooms.booking มาด้วยเพื่อป้องกัน N+1 Query ตอนเรียก $this->booking->check_in ใน Model 
+        // 🌟 Refactor (25/06/26): check_in ย้ายไป BR-level แล้ว — filter ผ่าน whereHas('bookingRooms', ...)
         $todayBookings = Booking::with(['bookingRooms.addon', 'bookingRooms.booking'])
             ->whereIn('status', ['paid', 'confirmed'])
-            ->whereDate('check_in', $today)
+            ->whereHas('bookingRooms', function ($br) use ($today) {
+                $br->whereDate('check_in', $today);
+            })
             ->get();
 
         $autoAssigned = 0;

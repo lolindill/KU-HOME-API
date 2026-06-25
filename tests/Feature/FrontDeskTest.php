@@ -38,7 +38,8 @@ class FrontDeskTest extends TestCase
     }
 
     /**
-     * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
+     * 🌟 Refactor (25/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
+     * Container states: draft, paid, confirmed, complete, cancelled (เท่านั้น)
      */
     private function createBooking(array $overrides = []): Booking
     {
@@ -48,12 +49,28 @@ class FrontDeskTest extends TestCase
             'user_id' => $user->id,
             'source' => 'online',
             'status' => 'confirmed',
-            'check_in' => now()->toDateString(),
-            'check_out' => now()->addDays(2)->toDateString(),
             'total_amount' => 3000,
         ], $overrides));
 
         return $booking;
+    }
+
+    /**
+     * 🌟 Helper: สร้าง BookingRoom พร้อม check_in/check_out (จำเป็นสำหรับ BR-level)
+     */
+    private function createBookingRoom(Booking $booking, RoomType $roomType, ?Room $room = null, string $brStatus = 'confirmed'): BookingRoom
+    {
+        return BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room?->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(2)->toDateString(),
+            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
+            'children' => 0,
+            'status' => $brStatus,
+        ]);
     }
 
     // ============================================
@@ -79,14 +96,16 @@ class FrontDeskTest extends TestCase
         ]);
 
         $response->assertStatus(201);
-        // 🌟 ข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
+        // 🌟 Refactor (25/06/26): container = confirmed (walk-in skips draft→paid)
+        // BR-level = checked_in
         $this->assertDatabaseHas('bookings', [
-            'user_id' => $admin->id, // 🌟 staff เป็นผู้ถือ booking
+            'user_id' => $admin->id,
             'source' => 'admin',
-            'status' => 'checked_in',
+            'status' => 'confirmed',
         ]);
         $this->assertDatabaseHas('booking_rooms', [
             'room_id' => $room->id,
+            'status' => 'checked_in',
             'children' => 0,
         ]);
     }
@@ -119,22 +138,18 @@ class FrontDeskTest extends TestCase
         $room = $this->createRoom($roomType);
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Attach room to booking — 🌟 ต้องมี guests JSON ตาม structure ใหม่
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $roomType->id,
-            'room_id' => $room->id,
-            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — ต้องมี check_in/check_out + status
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
             'assigned_rooms' => [$room->id],
         ]);
 
         $response->assertStatus(200);
-        $this->assertEquals('checked_in', $booking->fresh()->status);
+        // 🌟 Container stays at confirmed (check-in is BR-level now)
+        $this->assertEquals('confirmed', $booking->fresh()->status);
+        // 🌟 BR-level = checked_in
+        $this->assertEquals('checked_in', $br->fresh()->status);
     }
 
     // ============================================
@@ -148,18 +163,12 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType, 'occupied');
         $booking = $this->createBooking([
-            'status' => 'checked_in',
+            'status' => 'confirmed',
             'is_paid' => true,
         ]);
 
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $roomType->id,
-            'room_id' => $room->id,
-            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — pre-assigned room + status checked_in
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
 
         // Need a completed payment for check-out to succeed
         \App\Models\Payment::create([
@@ -175,7 +184,10 @@ class FrontDeskTest extends TestCase
         ]);
 
         $response->assertStatus(200);
-        $this->assertEquals('checked_out', $booking->fresh()->status);
+        // 🌟 Refactor (25/06/26): container auto-syncs to complete
+        $this->assertEquals('complete', $booking->fresh()->status);
+        // 🌟 BR-level = checked_out
+        $this->assertEquals('checked_out', $br->fresh()->status);
     }
 
     // ============================================
@@ -185,7 +197,7 @@ class FrontDeskTest extends TestCase
     public function test_admin_can_record_payment(): void
     {
         $this->actingAsAdmin();
-        $booking = $this->createBooking(['status' => 'checked_in', 'total_amount' => 3000]);
+        $booking = $this->createBooking(['status' => 'confirmed', 'total_amount' => 3000]);
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
             'booking_id' => $booking->id,
@@ -238,14 +250,8 @@ class FrontDeskTest extends TestCase
 
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Booking room expects Standard type — 🌟 ต้องมี guests JSON
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $standardType->id,
-            'guests' => [['title' => 'mr', 'name' => 'Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — ต้องมี check_in/check_out + status
+        $this->createBookingRoom($booking, $standardType, null, 'confirmed');
 
         // Try to check-in with Deluxe room — should FAIL
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [

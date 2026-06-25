@@ -7,36 +7,89 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Exception;
 
 class BookingRoom extends Model
 {
     use HasFactory, HasUuids;
 
     /**
-     * ✅ #17 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
-     * 🌟 Refactor (18/06/26): ย้ายข้อมูลผู้เข้าพักจาก bookings มาที่ booking_rooms
-     *    รองรับหลายคนผ่าน guests (JSON), บันทึก children แยก
+     * 🌟 Refactor (25/06/26): Booking Room State Machine
+     *    - เก็บ check_in/check_out + status รายห้อง
+     *    - State: draft → confirmed → {checked_in → checked_out | no_show}
      */
     protected $fillable = [
         'booking_id',
         'room_type_id',
-        'room_id',  // nullable — assign ตอน check-in
-        'guests',   // JSON: [{ title, name, nationality, is_ku_member }, ...]
-        'children', // int: จำนวนเด็กที่เข้าพักในห้องนี้
+        'room_id',     // nullable — assign ตอน check-in
+        'check_in',    // ย้ายมาจาก bookings (แต่ละห้องมีวันที่ต่างกันได้)
+        'check_out',
+        'guests',      // JSON: [{ title, name, nationality, is_ku_member }, ...]
+        'children',    // int: จำนวนเด็กที่เข้าพักในห้องนี้
+        'status',      // draft | confirmed | checked_in | checked_out | no_show
     ];
 
     protected $casts = [
-        'guests' => 'array',
-        'children' => 'integer',
+        'check_in'  => 'date',
+        'check_out' => 'date',
+        'guests'    => 'array',
+        'children'  => 'integer',
     ];
 
-    // 🌟 Helper: ดึงผู้เข้าพักคนแรก (primary guest)
+    // =========================================================
+    // 🚦 State Machine (BR-level)
+    // =========================================================
+
+    /**
+     * BR State Machine:
+     *   draft → confirmed (admin/system)
+     *   confirmed → checked_in (admin)       [walk-in skip มาตรงนี้]
+     *   confirmed → no_show (admin)
+     *   checked_in → checked_out (admin)
+     */
+    public function transitionStatus(string $newStatus, string $userRole = 'admin'): void
+    {
+        $current = $this->status;
+
+        $validTransitions = [
+            'draft' => [
+                'confirmed' => ['admin', 'system'],
+            ],
+            'confirmed' => [
+                'checked_in' => ['admin'],
+                'no_show'    => ['admin'],
+            ],
+            'checked_in' => [
+                'checked_out' => ['admin'],
+            ],
+        ];
+
+        if (!isset($validTransitions[$current]) ||
+            !isset($validTransitions[$current][$newStatus])) {
+            throw new Exception(
+                "ไม่อนุญาตให้เปลี่ยนสถานะห้องจาก '{$current}' → '{$newStatus}' ตาม Flow ระบบค่ะ",
+                422
+            );
+        }
+
+        $requiredRoles = $validTransitions[$current][$newStatus];
+        if (!in_array($userRole, $requiredRoles)) {
+            throw new Exception("ไม่มีสิทธิ์ดำเนินการสถานะห้องค่ะ!", 403);
+        }
+
+        $this->status = $newStatus;
+        $this->save();
+    }
+
+    // =========================================================
+    // 🌟 Helpers: ดึงข้อมูลผู้เข้าพัก
+    // =========================================================
+
     public function getPrimaryGuestAttribute(): ?array
     {
         return $this->guests[0] ?? null;
     }
 
-    // 🌟 Helper: ดึงชื่อผู้เข้าพักหลักสำหรับ Receipt
     public function getPrimaryGuestNameAttribute(): string
     {
         $primary = $this->primary_guest;
@@ -44,25 +97,25 @@ class BookingRoom extends Model
         return trim(($primary['title'] ?? '') . ' ' . ($primary['name'] ?? ''));
     }
 
-    // 🌟 Helper: นับจำนวนผู้เข้าพักทั้งหมด (ผู้ใหญ่ + เด็ก)
     public function getTotalGuestsAttribute(): int
     {
         return (is_array($this->guests) ? count($this->guests) : 0) + ($this->children ?? 0);
     }
 
-    // 🌟 1. เชื่อมกลับไปหาข้อมูล Booking หลัก
+    // =========================================================
+    // 🌟 Relationships
+    // =========================================================
+
     public function booking(): BelongsTo
     {
         return $this->belongsTo(Booking::class);
     }
 
-    // 🌟 2. เชื่อมไปหาประเภทห้องพักที่ลูกค้าเลือกตอนจอง
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class);
     }
 
-    // 🌟 3. เชื่อมไปหาห้องพักจริงๆ (เป็น Nullable เพราะรอ Assign เลขห้องตอนที่ลูกค้ามาเช็คอิน)
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
@@ -74,43 +127,43 @@ class BookingRoom extends Model
     }
 
     // =========================================================
-    // 🌟 New Logic: ฟังก์ชันสำหรับหาห้องว่างและ Assign ให้ตัวเอง
+    // 🌟 Logic: หาห้องว่าง + Assign
     // =========================================================
+
+    /**
+     * หาห้องว่างและ assign ให้ BR ตัวเอง
+     * - ใช้ $this->check_in/check_out (BR-level dates)
+     * - นับตั้งแต่ draft (availability counting = C)
+     */
     public function assignAvailableRoom(): bool
     {
-        // ถ้ามีห้องอยู่แล้ว ไม่ต้องหาใหม่ค่ะ ถือว่าสำเร็จเลย
         if ($this->room_id !== null) {
             return true;
         }
 
-        // 🌟 ดึง check_in และ check_out จาก Booking หลักผ่าน Relation ได้เลยค่ะ!
-        $checkIn = $this->booking->check_in;
-        $checkOut = $this->booking->check_out;
+        $checkIn  = $this->check_in;
+        $checkOut = $this->check_out;
 
-        // ดึงจำนวนเตียงเสริมที่ลูกค้าขอ
         $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
 
-        // ค้นหาห้องว่าง
+        // ค้นหาห้องว่าง — เช็คจาก BR-level ทุกสถานะตั้งแต่ draft ขึ้นไป
         $availableRoom = Room::where('room_type_id', $this->room_type_id)
             ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
-                $query->whereHas('booking', function ($bQuery) use ($checkIn, $checkOut) {
-                    $bQuery->whereIn('status', ['paid', 'confirmed', 'checked_in'])
-                           ->where('check_in', '<', $checkOut)
-                           ->where('check_out', '>', $checkIn);
-                });
+                $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                      ->where('check_in', '<', $checkOut)
+                      ->where('check_out', '>', $checkIn);
             })
             ->whereNotIn('status', ['maintenance', 'reserved_closed'])
             ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
             ->orderBy('builtin_extra_beds', 'ASC')
-            ->lockForUpdate() // ล็อก row ป้องกันคนจองชนกันวินาทีเดียวกัน
+            ->lockForUpdate()
             ->first();
 
-        // ถ้าเจอห้องว่าง ให้อัปเดตตัวเอง
         if ($availableRoom) {
             $this->update(['room_id' => $availableRoom->id]);
-            return true; // แจ้งว่า Assign สำเร็จ
+            return true;
         }
 
-        return false; // แจ้งว่าหาห้องไม่ได้ค่ะ 😭
+        return false;
     }
 }

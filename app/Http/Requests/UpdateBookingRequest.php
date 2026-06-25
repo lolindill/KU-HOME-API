@@ -15,14 +15,16 @@ class UpdateBookingRequest extends FormRequest
     {
         return [
             'source'             => 'sometimes|required|string|in:online,admin,line',
-            'check_in'           => 'sometimes|required|date',
-            'check_out'          => 'sometimes|required|date|after:check_in',
 
+            // 🌟 Refactor (25/06/26): check_in/check_out ย้ายไป BR-level แล้ว — bookings เก็บแค่ container + payment info
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว (guests JSON + children)
             'total_amount'       => 'nullable|integer|min:0',
             'is_paid'            => 'nullable|boolean',
             'payment_deadline'   => 'nullable|date',
-            'status'             => 'sometimes|required|string|in:draft,confirmed,checked_in,checked_out,cancelled,no_show,deleted',
+
+            // 🌟 Refactor (25/06/26): container states เท่านั้น
+            // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
+            'status'             => 'sometimes|required|string|in:draft,paid,confirmed,complete,cancelled',
         ];
     }
 }

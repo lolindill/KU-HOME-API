@@ -30,9 +30,11 @@ class CleanupExpiredDrafts extends Command
         $cleaned = 0;
         foreach ($expiredDrafts as $booking) {
             try {
-                $booking->transitionStatus('deleted', 'system');
+                // 🌟 Refactor (25/06/26): 'deleted' ไม่ใช่ container state ที่ถูกต้องแล้ว
+                // ใช้ 'cancelled' แทน — transitionStatus จะ cascade ไป BookingRoom อัตโนมัติ
+                $booking->transitionStatus('cancelled', 'system');
                 $cleaned++;
-                $this->line("  ✓ Expired draft deleted: {$booking->confirmation} (deadline: {$booking->payment_deadline})");
+                $this->line("  ✓ Expired draft cancelled: {$booking->confirmation} (deadline: {$booking->payment_deadline})");
             } catch (\Exception $e) {
                 $this->warn("  ✗ Failed to delete draft {$booking->confirmation}: {$e->getMessage()}");
                 Log::warning("Failed to cleanup expired draft booking", [

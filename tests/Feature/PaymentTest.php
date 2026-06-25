@@ -14,7 +14,7 @@ class PaymentTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * 🌟 Refactor (18/06/26): ไม่มี guest fields ใน bookings แล้ว — ใช้ user_id
+     * 🌟 Refactor (25/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
      */
     private function createBooking(array $overrides = []): Booking
     {
@@ -24,8 +24,6 @@ class PaymentTest extends TestCase
             'user_id' => $user->id,
             'source' => 'online',
             'status' => 'draft',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 4500,
         ], $overrides));
     }

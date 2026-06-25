@@ -7,6 +7,7 @@ use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 
@@ -117,7 +118,7 @@ class RoomTest extends TestCase
     // ✅ #31: Availability query consistency
     // ============================================
 
-    public function test_deleted_booking_does_not_reduce_availability(): void
+    public function test_cancelled_booking_does_not_reduce_availability(): void
     {
         $roomType = $this->createRoomType();
         $room = Room::create([
@@ -127,14 +128,13 @@ class RoomTest extends TestCase
             'status' => 'available',
         ]);
 
-        // Create a deleted booking — should NOT count as booked
+        // 🌟 Refactor (25/06/26): 'deleted' → 'cancelled'; guest fields + dates ย้ายไป BR-level
+        $user = User::factory()->create();
         $booking = Booking::create([
-            'status' => 'deleted',
-            'guest_name' => 'Deleted Guest',
-            'guest_email' => 'deleted@test.com',
-            'guest_phone' => '0810000000',
-            'check_in' => now()->addDays(1)->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-' . Str::uuid(),
+            'source' => 'admin',
+            'status' => 'cancelled',
             'total_amount' => 3000,
         ]);
 
@@ -142,6 +142,9 @@ class RoomTest extends TestCase
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(1)->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'cancelled',
         ]);
 
         $response = $this->getJson('/api/v1/availability?' . http_build_query([
@@ -153,7 +156,7 @@ class RoomTest extends TestCase
         $roomTypes = $response->json('room_types');
         $found = collect($roomTypes)->firstWhere('room_type_id', $roomType->id);
 
-        // deleted booking should NOT reduce available rooms
+        // cancelled booking should NOT reduce available rooms
         $this->assertEquals(1, $found['available_rooms']);
     }
 
@@ -167,14 +170,13 @@ class RoomTest extends TestCase
             'status' => 'available',
         ]);
 
-        // Create a confirmed booking — SHOULD count as booked
+        // 🌟 Refactor (25/06/26): guest fields + dates ย้ายไป BR-level
+        $user = User::factory()->create();
         $booking = Booking::create([
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-' . Str::uuid(),
+            'source' => 'admin',
             'status' => 'confirmed',
-            'guest_name' => 'Confirmed Guest',
-            'guest_email' => 'confirmed@test.com',
-            'guest_phone' => '0811111111',
-            'check_in' => now()->addDays(1)->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 3000,
         ]);
 
@@ -182,6 +184,9 @@ class RoomTest extends TestCase
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(1)->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'confirmed',
         ]);
 
         $response = $this->getJson('/api/v1/availability?' . http_build_query([

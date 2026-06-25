@@ -20,8 +20,7 @@ use Illuminate\Support\Facades\Log;
 class FrontDeskController extends Controller
 {
     // 🌟 1. Walk-in Booking (Admin only)
-    // 🌟 Refactor (18/06/26): ใช้ staff user (verified_by) เป็นผู้ถือ booking — ข้อมูลแขกไปอยู่ใน booking_rooms.guests
-    // 🌟 แขก walk-in ไม่ต้องสมัครสมาชิก ไม่ใช้ member/guest user อีกต่อไป
+    // 🌟 Refactor (25/06/26): BR-level state machine — BR เริ่มที่ checked_in ตรงๆ (skip draft→confirmed)
     public function walkIn(Request $request)
     {
         $validated = $request->validate([
@@ -46,7 +45,6 @@ class FrontDeskController extends Controller
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
 
-            // 🌟 Refactor (18/06/26): ไม่สร้าง guest user แล้ว — ใช้ staff (verified_by) เป็นผู้ถือ booking
             $staffUser = User::findOrFail($validated['verified_by']);
 
             $checkIn = Carbon::now();
@@ -58,29 +56,32 @@ class FrontDeskController extends Controller
                 'user_id' => $staffUser->id,
                 'confirmation' => $confirmationNo,
                 'source' => 'admin',
-                'status' => 'draft', // immediately transitioned to checked_in below
-                'check_in' => $checkIn,
-                'check_out' => $checkOut,
-                // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว
+                'status' => 'draft', // immediately transitioned to confirmed below
                 'total_amount' => $totalAmount,
                 'payment_deadline' => Carbon::now(),
             ]);
 
-            BookingRoom::create([
+            $bookingRoom = BookingRoom::create([
                 'id' => Str::uuid(),
                 'booking_id' => $booking->id,
                 'room_type_id' => $room->room_type_id,
                 'room_id' => $room->id,
-                // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักที่นี่
+                'check_in' => $checkIn,
+                'check_out' => $checkOut,
                 'guests' => $validated['guests'] ?? null,
                 'children' => $validated['children'] ?? 0,
+                'status' => 'draft',
             ]);
+
+            // 🌟 Refactor (25/06/26): BR สองสเต็ปเพราะ state machine บังคับ draft→confirmed→checked_in
+            $bookingRoom->transitionStatus('confirmed', 'admin');
+            $bookingRoom->transitionStatus('checked_in', 'admin');
 
             // 🌟 ใช้ state machine เปลี่ยนสถานะห้องเป็น occupied
             $room->transitionStatusTo('occupied', $validated['verified_by']);
 
-            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking เป็น checked_in
-            $booking->transitionStatus('checked_in', 'admin');
+            // 🌟 Booking container → confirmed (walk-in skip draft→paid)
+            $booking->transitionStatus('confirmed', 'admin');
 
             DB::commit();
 
@@ -101,7 +102,7 @@ class FrontDeskController extends Controller
         }
     }
 
-    // 🛎️ 2. Check-In
+    // 🛎️ 2. Check-In (BR-level)
     public function checkIn(Request $request, $bookingId)
     {   
         if (is_string($request->input('assigned_rooms'))) {
@@ -165,14 +166,29 @@ class FrontDeskController extends Controller
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
                 $room->transitionStatusTo('occupied', $userId);
 
+                // 🌟 Refactor (25/06/26): BR state machine → checked_in
+                //    BR ต้องเป็น confirmed ก่อน — ถ้ายังเป็น draft ให้ confirmed ก่อน
+                if ($bRoom->status === 'draft') {
+                    $bRoom->transitionStatus('confirmed', 'admin');
+                }
+                $bRoom->transitionStatus('checked_in', 'admin');
+
                 $roomUpdates[] = [
                     'room_number' => $room->room_number,
                     'new_status' => $room->status
                 ];
             }
 
-            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking
-            $booking->transitionStatus('checked_in', $userRole);
+            // 🌟 Booking container → confirmed (ถ้ายังเป็น draft/paid)
+            if (in_array($booking->status, ['draft', 'paid'])) {
+                if ($booking->status === 'draft') {
+                    // paid transition needs admin — walk around via direct save for system-equivalent
+                    $booking->status = 'confirmed';
+                    $booking->save();
+                } else {
+                    $booking->transitionStatus('confirmed', $userRole);
+                }
+            }
 
             DB::commit();
 
@@ -205,7 +221,7 @@ class FrontDeskController extends Controller
         }
     }
 
-    // 🧹 3. Check-Out
+    // 🧹 3. Check-Out (BR-level)
     public function checkOut(Request $request, $bookingId)
     {
         $validated = $request->validate([
@@ -216,10 +232,12 @@ class FrontDeskController extends Controller
         try {
             DB::beginTransaction();
 
-            $booking = Booking::findOrFail($bookingId);
+            $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
 
-            if ($booking->status !== 'checked_in') {
-                throw new \Exception('แขกยังไม่ได้ Check-in เลยค่ะ จะ Check-out ไม่ได้น้า');
+            // 🌟 Refactor (25/06/26): เช็คที่ BR-level ว่าทุกห้อง checked_in หรือไม่
+            $allCheckedIn = $booking->bookingRooms->every(fn ($br) => $br->status === 'checked_in');
+            if (!$allCheckedIn) {
+                throw new \Exception('ยังมีห้องที่ไม่ได้ Check-in อยู่ค่ะ จะ Check-out ไม่ได้น้า');
             }
 
             // ตรวจสอบยอดชำระเงิน
@@ -232,14 +250,15 @@ class FrontDeskController extends Controller
                 throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
             }
 
-            // 🌟 ใช้ state machine เปลี่ยนสถานะ booking
-            $booking->transitionStatus('checked_out', 'admin');
-
-            $bookingRooms = BookingRoom::where('booking_id', $bookingId)->whereNotNull('room_id')->get();
             $roomUpdates = [];
 
-            foreach ($bookingRooms as $bRoom) {
+            foreach ($booking->bookingRooms as $bRoom) {
+                if (!$bRoom->room_id) continue;
+
                 $room = Room::findOrFail($bRoom->room_id);
+
+                // 🌟 Refactor (25/06/26): BR state machine → checked_out
+                $bRoom->transitionStatus('checked_out', 'admin');
 
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง → checkout_makeup
                 $room->transitionStatusTo('checkout_makeup', $validated['verified_by']);
@@ -260,6 +279,9 @@ class FrontDeskController extends Controller
                 ];
             }
 
+            // 🌟 Auto-sync booking container → complete ถ้า BR ทุกห้องจบแล้ว
+            $booking->syncStatusFromRooms();
+
             DB::commit();
 
             return response()->json([
@@ -273,6 +295,47 @@ class FrontDeskController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Check-out failed: " . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    // 🚫 5. Mark No-Show (BR-level) — เพิ่มใหม่
+    public function markNoShow(Request $request, $bookingId)
+    {
+        $validated = $request->validate([
+            'verified_by' => 'required|uuid|exists:users,id',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
+
+            foreach ($booking->bookingRooms as $bRoom) {
+                // 🌟 Refactor (25/06/26): BR confirmed → no_show
+                if ($bRoom->status === 'confirmed') {
+                    $bRoom->transitionStatus('no_show', 'admin');
+                }
+            }
+
+            // 🌟 Auto-sync booking container → complete (no_show ก็ถือว่าจบการจอง)
+            $booking->syncStatusFromRooms();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Booking marked as No-Show แล้วค่ะนายท่าน',
+                'booking_id' => $booking->id,
+                'booking_status' => $booking->status,
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Mark no-show failed: " . $e->getMessage());
             return response()->json([
                 'status' => 'error',
                 'message' => $e->getMessage()
@@ -313,14 +376,12 @@ class FrontDeskController extends Controller
                 ]);
                 $booking->refresh();
 
-                // ถ้า booking ยังเป็น draft → เปลี่ยนเป็น paid (สถานะที่รอ admin confirm)
-                // แต่ถ้าเป็น checked_in หรือ confirmed อยู่แล้ว → ไม่ต้องเปลี่ยน status
+                // 🌟 Refactor (25/06/26): draft → paid (container)
                 if ($booking->status === 'draft') {
                     $booking->transitionStatus('paid', 'admin');
                 }
 
                 // สร้าง Receipt
-                // 🌟 Refactor (18/06/26): ใช้ primary_guest_name (จาก booking_rooms) แทน guest_name ที่ถูกลบไปแล้ว
                 Receipt::create([
                     'receipt_no' => Receipt::generateUniqueReceiptNo(),
                     'booking_id' => $booking->id,

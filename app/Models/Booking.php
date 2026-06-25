@@ -30,16 +30,12 @@ class Booking extends Model
         'confirmation',
         'source',
         'status',
-        'check_in',
-        'check_out',
         'total_amount',
         'is_paid',
         'payment_deadline',
     ];
 
     protected $casts = [
-        'check_in' => 'date',
-        'check_out' => 'date',
         'total_amount' => 'integer',
         'is_paid' => 'boolean',
         'payment_deadline' => 'datetime',
@@ -78,14 +74,16 @@ class Booking extends Model
     }
 
     /**
-     * Booking Status State Machine
+     * 🌟 Refactor (25/06/26): Booking = Container State Machine
      *
-     * draft → paid (user, guest, admin), checked_in (admin), deleted (user, guest, admin)
-     * paid → confirmed (admin), cancelled (admin)
-     * confirmed → cancelled (admin), checked_in (admin), no_show (admin)
-     * checked_in → checked_out (admin)
+     * Booking (container) เก็บสถานะ payment/admin flow:
+     *   draft → paid (user, guest, admin, system webhook)
+     *   draft → confirmed (admin, walk-in เข้าตรงๆ)
+     *   draft → cancelled
+     *   paid → confirmed (admin) / cancelled (admin)
+     *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show) / cancelled
      *
-     * Special: 'system' role for webhook (draft → paid only)
+     * ⚠️ checked_in / checked_out / no_show อยู่ที่ BookingRoom แล้ว (BR-level state machine)
      */
     public function transitionStatus(string $newStatus, string $userRole)
     {
@@ -94,20 +92,16 @@ class Booking extends Model
         $validTransitions = [
             'draft' => [
                 'paid'       => ['user', 'guest', 'admin', 'system'],
-                'checked_in' => ['admin'], // walk-in by admin
-                'deleted'    => ['user', 'guest', 'admin', 'system'],
+                'confirmed'  => ['admin'], // walk-in by admin (skip paid)
+                'cancelled'  => ['user', 'guest', 'admin', 'system'],
             ],
             'paid' => [
                 'confirmed' => ['admin'],
                 'cancelled' => ['admin'],
             ],
             'confirmed' => [
-                'cancelled'  => ['admin'],
-                'checked_in' => ['admin'],
-                'no_show'    => ['admin'],
-            ],
-            'checked_in' => [
-                'checked_out' => ['admin'],
+                'complete'  => ['admin', 'system'], // auto เมื่อ BR ครบ
+                'cancelled' => ['admin'],
             ],
         ];
 
@@ -125,6 +119,32 @@ class Booking extends Model
 
         $this->status = $newStatus;
         $this->save();
+
+        // 🌟 Cascade: เมื่อ container cancelled → BookingRoom ทุกห้องที่ยัง active ให้ cancelled ด้วย
+        if ($newStatus === 'cancelled') {
+            foreach ($this->bookingRooms as $br) {
+                if (!in_array($br->status, ['checked_out', 'no_show', 'cancelled'])) {
+                    $br->status = 'cancelled';
+                    $br->save();
+                }
+            }
+        }
+    }
+
+    /**
+     * 🌟 Helper: อัปเดตสถานะ booking container อัตโนมัติ
+     * - ถ้า BR ทุกห้อง checked_out/no_show → booking → 'complete'
+     */
+    public function syncStatusFromRooms(): void
+    {
+        $rooms = $this->bookingRooms;
+        if ($rooms->isEmpty()) return;
+
+        $allFinished = $rooms->every(fn ($br) => in_array($br->status, ['checked_out', 'no_show']));
+        if ($allFinished && $this->status === 'confirmed') {
+            $this->status = 'complete';
+            $this->save();
+        }
     }
 
     /**
