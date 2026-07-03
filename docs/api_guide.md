@@ -103,10 +103,15 @@ Used by `GET /bookings` and `GET /users`:
 
 ### Roles
 
-| Role   | Description                                |
-|--------|--------------------------------------------|
-| `admin`| Full access — manage users, bookings, rooms |
-| `user` | Member — book & manage own bookings         |
+| Role          | Description                                                |
+|---------------|------------------------------------------------------------|
+| `admin`       | Full access — manage users, bookings, rooms, housekeeping  |
+| `user`        | Member — book & manage own bookings                        |
+| `guest`       | Guest — limited access (legacy/transient)                  |
+| `ku_member`   | KU member — eligible for member rates                      |
+| `staff`       | Staff — operational access                                 |
+| `housekeeping`| Housekeeping team — cleaning task access                   |
+| `system`      | System role — automated transitions (e.g. webhook, cron)   |
 
 > ⚠️ **Note**: Guests/non-members can **no longer** use the booking system. All users must login.
 
@@ -143,13 +148,13 @@ Used by `GET /bookings` and `GET /users`:
 |-------------------------|-----------------------------------------|
 | `name`                  | required, string, max 255               |
 | `email`                 | required, email, unique:users           |
-| `password`              | required, string, min 8, confirmed      |
+| `password`              | required, string, min 8                    |
 
 ---
 
 ### POST `/login` — Login
 
-🔒 **Public** · ⏱ Rate-limit d: 5 requests/minute
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute
 
 **Request Body:**
 ```json
@@ -499,10 +504,11 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "id": "uuid",
       "name_en": "Standard",
       "name_th": "ห้องมาตรฐาน",
+      "max_guests": 2,
+      "extra_bed_enabled": true,
+      "max_extra_beds": 1,
+      "extra_bed_price": 300,
       "rate_daily_general": 1200,
-      "rate_daily_ku": 900,
-      "max_occupancy": 2,
-      "builtin_extra_beds": 1,
       "created_at": "...",
       "updated_at": "..."
     }
@@ -595,8 +601,6 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "confirmation": "202606-00001",
       "source": "online",
       "status": "draft",
-      "check_in": "2026-06-20",
-      "check_out": "2026-06-22",
       "total_amount": 2400,
       "is_paid": false,
       "payment_deadline": "2026-06-19T11:00:00.000000Z",
@@ -608,6 +612,8 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
           "booking_id": "booking-uuid",
           "room_type_id": "rt-uuid",
           "room_id": null,
+          "check_in": "2026-06-20",
+          "check_out": "2026-06-22",
           "guests": [
             { "title": "Mr.", "name": "Somchai", "nationality": "Thai", "is_ku_member": false }
           ],
@@ -641,12 +647,11 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 ```json
 {
   "source": "online",
-  "check_in": "2026-06-20",
-  "check_out": "2026-06-22",
   "booking_rooms": [
     {
       "room_type_id": "rt-uuid",
-      "quantity": 1,
+      "check_in": "2026-06-20",
+      "check_out": "2026-06-22",
       "extra_beds": 0,
       "guests": [
         {
@@ -662,21 +667,27 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
         "early_checkin": false,
         "late_checkout": false
       }
+    },
+    {
+      "room_type_id": "rt-uuid",
+      "check_in": "2026-06-21",
+      "check_out": "2026-06-23"
     }
   ]
 }
 ```
+
+> 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.
 
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
-| `check_in`                                  | required, date, ≥ today                       |
-| `check_out`                                 | required, date, > check_in                    |
 | `booking_rooms`                             | required, array                               |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
-| `booking_rooms.*.quantity`                  | required, integer, min 1                      |
+| `booking_rooms.*.check_in`                  | required, date, ≥ today                       |
+| `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
 | `booking_rooms.*.extra_beds`                | nullable, integer, min 0                      |
 | `booking_rooms.*.guests`                    | nullable, array                               |
 | `booking_rooms.*.guests.*.title`            | nullable, string, max 50                      |
@@ -688,7 +699,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 | `booking_rooms.*.addons.early_checkin`      | nullable, boolean                             |
 | `booking_rooms.*.addons.late_checkout`      | nullable, boolean                             |
 
-> 💡 **Pricing**: Server calculates all prices from `room_types.rate_daily_*` and `addon_rates.default_price`. Client **cannot** send prices (prevents manipulation). `booking_rooms.*.quantity` is the requested count — server creates that many identical BookingRoom rows.
+> 💡 **Pricing**: Server calculates all prices from `room_types.rate_daily_general` and `addon_rates.default_price`. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 
 **Response `201`:**
 ```json
@@ -736,8 +747,6 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
     "confirmation": "202606-00001",
     "source": "online",
     "status": "paid",
-    "check_in": "2026-06-20",
-    "check_out": "2026-06-22",
     "total_amount": 2400,
     "is_paid": true,
     "payment_deadline": "...",
@@ -748,6 +757,8 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
         "booking_id": "booking-uuid",
         "room_type_id": "rt-uuid",
         "room_id": "room-uuid-or-null",
+        "check_in": "2026-06-20",
+        "check_out": "2026-06-22",
         "guests": [...],
         "children": 0,
         "addon": {...},
@@ -777,8 +788,10 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 }
 ```
 
-**Allowed `status` values:**
-`draft`, `paid`, `confirmed`, `checked_in`, `checked_out`, `cancelled`, `no_show`, `deleted`
+**Allowed `status` values:** *(container-level)*
+`draft`, `paid`, `confirmed`, `complete`
+
+> 🌟 **Refactor (25/06/26)**: `checked_in`/`checked_out`/`no_show` moved to **BookingRoom-level**. The booking container only tracks `draft` → `paid` → `confirmed` → `complete`.
 
 **Response `200`:**
 ```json
@@ -1016,8 +1029,8 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 | Field              | Rule                                                |
 |--------------------|-----------------------------------------------------|
 | `booking_id`       | required, uuid, exists in bookings                  |
-| `amount`           | required, integer, min 1                            |
-| `payment_method`   | required, in: `cash`, `credit_card`, `transfer`, `qr`, `other` |
+| `amount`           | required, integer, min 0                            |
+| `payment_method`   | required, in: `cash`, `credit_card`, `transfer`     |
 | `reference_number` | nullable, string                                    |
 | `received_by`      | nullable, uuid, exists in users                     |
 
@@ -1043,6 +1056,8 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 ---
 
 ## Payments & Webhooks
+
+> ⚠️ **DEMO / Not Production-Ready:** Payment & Webhook endpoints below are functional demos. Schema/enum values (`payment_method`, `status`) may change when the real payment gateway is integrated.
 
 ### POST `/payments` — Request payment (Admin)
 
@@ -1294,7 +1309,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `name`        | string    | Full name                              |
 | `email`       | string    | Unique email                           |
 | `password`    | string    | Hashed (bcrypt)                        |
-| `role`        | enum      | `admin` / `user` (default: `user`)     |
+| `role`        | string    | `user`, `guest`, `ku_member`, `staff`, `admin`, `housekeeping`, `system` (default: `user`) |
 | `ver`         | boolean   | Verified status (default: false)       |
 | `created_at`  | timestamp |                                        |
 | `updated_at`  | timestamp |                                        |
@@ -1309,9 +1324,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `user_id`          | UUID      | FK → users (booking owner — staff for walk-in)          |
 | `confirmation`     | string    | Format: `YYYYMM-XXXXX` (auto-generated, unique)         |
 | `source`           | enum      | `online` / `admin` / `line`                             |
-| `status`           | enum      | See [Booking State Machine](#booking-state-machine)     |
-| `check_in`         | date      |                                                         |
-| `check_out`        | date      |                                                         |
+| `status`           | enum      | Container-level: `draft`, `paid`, `confirmed`, `complete` |
 | `total_amount`     | integer   | In baht (no decimals — integer since 2026-06-05)        |
 | `is_paid`          | boolean   | Default: false                                          |
 | `payment_deadline` | datetime  | For draft bookings (24h from creation)                  |
@@ -1334,6 +1347,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `booking_id`   | UUID      | FK → bookings                                           |
 | `room_type_id` | UUID      | FK → room_types (what was booked)                       |
 | `room_id`      | UUID      | FK → rooms (nullable — assigned at check-in)            |
+| `check_in`     | date      | 🌟 Per-room check-in date (Refactor 02/07/26)            |
+| `check_out`    | date      | 🌟 Per-room check-out date (Refactor 02/07/26)           |
+| `status`       | enum      | BR-level: `draft`, `confirmed`, `checked_in`, `checked_out`, `no_show` |
 | `guests`       | JSON      | Array of `{title, name, nationality, is_ku_member}`     |
 | `children`     | integer   | Number of children in this room                         |
 | `created_at`   | timestamp |                                                         |
@@ -1387,17 +1403,18 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### RoomType
 
-| Field                  | Type    | Description                            |
-|------------------------|---------|----------------------------------------|
-| `id`                   | UUID    | Primary key                            |
-| `name_en`              | string  | English name                           |
-| `name_th`              | string  | Thai name                              |
-| `rate_daily_general`   | integer | Daily rate for general public (baht)   |
-| `rate_daily_ku`        | integer | Daily rate for KU members (baht)       |
-| `max_occupancy`        | integer | Max guests                             |
-| `builtin_extra_beds`   | integer | Default extra bed capacity             |
-| `created_at`           | timestamp |                                      |
-| `updated_at`           | timestamp |                                      |
+| Field                | Type      | Description                              |
+|----------------------|-----------|------------------------------------------|
+| `id`                 | UUID      | Primary key                              |
+| `name_en`            | string    | English name                             |
+| `name_th`            | string    | Thai name                                |
+| `max_guests`         | integer   | Max guests per room                      |
+| `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
+| `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
+| `extra_bed_price`    | integer   | Price per extra bed (baht, default: 0)   |
+| `rate_daily_general` | integer   | Daily rate for general public (baht)     |
+| `created_at`         | timestamp |                                          |
+| `updated_at`         | timestamp |                                          |
 
 **Relationships:**
 - `hasMany Room`
@@ -1444,12 +1461,14 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Payment
 
+> ⚠️ **DEMO** — Payment schema/enum is provisional. `payment_method` may change from `cash / credit_card / transfer` when real gateway integration lands.
+
 | Field              | Type      | Description                                              |
 |--------------------|-----------|---------------------------------------------------------|
 | `id`               | UUID      | Primary key                                             |
 | `booking_id`       | UUID      | FK → bookings                                           |
 | `amount`           | integer   | In baht (integer since 2026-06-05)                      |
-| `payment_method`   | enum      | `cash` / `credit_card` / `transfer` / `qr` / `other`    |
+| `payment_method`   | enum      | `cash` / `credit_card` / `transfer` (DEMO — may change) |
 | `status`           | enum      | `pending` / `completed` / `failed`                      |
 | `reference_number` | string    | Bank/gateway reference (nullable)                       |
 | `received_by`      | UUID      | FK → users (admin who received cash, nullable)          |
@@ -1463,9 +1482,11 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Receipt
 
+> ⚠️ **DEMO** — Receipt generation is tied to the demo payment flow. Fields may change with production gateway integration.
+
 | Field          | Type      | Description                                       |
 |----------------|-----------|---------------------------------------------------|
-| `receipt_no`   | string    | Format: `RCP-YYYYMM-XXXXX` (auto-generated)       |
+| `receipt_no`   | string    | Format: `REC-YYYYMM-XXXXX` (auto-generated)       |
 | `booking_id`   | UUID      | FK → bookings                                     |
 | `payment_id`   | UUID      | FK → payments                                     |
 | `amount`       | integer   | In baht                                           |
@@ -1499,39 +1520,57 @@ Returns tasks with status `pending` or `in_progress`.
 
 ## State Machines
 
-### Booking State Machine
+### Booking State Machine (Container)
+
+> 🌟 **Refactor (03/07/26):** Booking = container เก็บสถานะ payment/admin flow เท่านั้น
+> `checked_in`/`checked_out`/`no_show` ย้ายไปอยู่ที่ **BookingRoom** (BR-level) แล้ว
 
 ```
-                          ┌──────────────────────────────┐
-                          │           cancelled           │ ◄──── admin (from paid/confirmed)
-                          └──────────────────────────────┘
-
-   ┌─────────┐  user/admin  ┌─────────┐  admin   ┌────────────┐  admin   ┌─────────────┐  admin  ┌─────────────┐
-   │  draft  │ ───────────► │   paid  │ ───────► │ confirmed  │ ───────► │ checked_in  │ ──────► │ checked_out │
-   └─────────┘              └─────────┘          └────────────┘          └─────────────┘         └─────────────┘
-       │                        │                      │
-       │ admin (walk-in)        │                      │ admin
-       └────────────────────────┼──────────────────────┴───► no_show
-                                │
-       user/admin/system        │
-       └──────────────────► deleted
-
-   Special: webhook (system role) can do draft → paid only
+   ┌─────────┐  user/guest/admin  ┌─────────┐   admin    ┌────────────┐  admin/system  ┌─────────────┐
+   │  draft  │ ────────────────► │   paid  │ ─────────► │ confirmed  │ ─────────────► │  complete   │
+   └─────────┘                    └─────────┘            └────────────┘                └─────────────┘
+       │                                                       ▲
+       │ admin (walk-in skip paid)                             │
+       └─────────────────────────────────────────────────────┘
 ```
 
-**Valid Transitions:**
+**Valid Transitions (Container):**
 
-| From          | To            | Allowed Roles                    |
-|---------------|---------------|----------------------------------|
-| `draft`       | `paid`        | user, guest, admin, system       |
-| `draft`       | `checked_in`  | admin (walk-in only)             |
-| `draft`       | `deleted`     | user, guest, admin, system       |
-| `paid`        | `confirmed`   | admin                            |
-| `paid`        | `cancelled`   | admin                            |
-| `confirmed`   | `cancelled`   | admin                            |
-| `confirmed`   | `checked_in`  | admin                            |
-| `confirmed`   | `no_show`     | admin                            |
-| `checked_in`  | `checked_out` | admin                            |
+| From          | To            | Allowed Roles              |
+|---------------|---------------|----------------------------|
+| `draft`       | `paid`        | user, guest, admin, system |
+| `draft`       | `confirmed`   | admin (walk-in only)       |
+| `paid`        | `confirmed`   | admin                      |
+| `confirmed`   | `complete`    | admin, system (auto-sync)  |
+
+> ❌ **ไม่มี `cancelled`** — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+> ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
+
+---
+
+### BookingRoom State Machine (BR-level)
+
+> 🌟 **New (25/06/26):** แต่ละห้องมี state machine ของตัวเอง (รองรับหลายห้อง/หลายวันต่อ booking)
+
+```
+   ┌─────────┐  admin/system  ┌────────────┐   admin    ┌─────────────┐   admin   ┌──────────────┐
+   │  draft  │ ─────────────► │ confirmed  │ ─────────► │ checked_in  │ ────────► │ checked_out  │
+   └─────────┘                 └────────────┘            └─────────────┘           └──────────────┘
+                                    │
+                                    │ admin
+                                    └────────────────► no_show
+```
+
+**Valid Transitions (BR-level):**
+
+| From          | To            | Allowed Roles |
+|---------------|---------------|---------------|
+| `draft`       | `confirmed`   | admin, system |
+| `confirmed`   | `checked_in`  | admin         |
+| `confirmed`   | `no_show`     | admin         |
+| `checked_in`  | `checked_out` | admin         |
+
+> **Container auto-sync:** เมื่อ BR ทุกห้องเป็น `checked_out`/`no_show` → booking container → `complete`
 
 ---
 
@@ -1581,17 +1620,21 @@ Returns tasks with status `pending` or `in_progress`.
 
 These endpoints exist but are **not production-ready**:
 
-| Endpoint                            | Status                  |
-|-------------------------------------|-------------------------|
-| `POST /bookings/validate-discount`  | 🚧 Testing only         |
-| `POST /upload-image`                | 🚧 Testing only         |
+| Endpoint / Module                   | Status                          |
+|-------------------------------------|---------------------------------|
+| `POST /payments`                    | 🚧 Demo (mock gateway)          |
+| `POST /payment/webhook`             | 🚧 Demo (signature verify TBD)  |
+| `POST /front-desk/{id}/payment`     | ⚠️ Demo record-payment (admin)  |
+| Receipt model / auto-generation     | ⚠️ Demo (tied to payment flow)  |
+| `POST /bookings/validate-discount`  | 🚧 Testing only                 |
+| `POST /upload-image`                | 🚧 Testing only                 |
 
 ---
 
 ### Pricing Notes
 
 - All prices stored as **integers** (baht, no decimals) since 2026-06-05.
-- Room rates come from `room_types.rate_daily_general` (or `rate_daily_ku` for members).
+- Room rates come from `room_types.rate_daily_general`.
 - Addon rates come from `addon_rates.default_price` — **server-side only** (clients cannot send prices).
 - Pricing formula per room:
   ```
@@ -1609,7 +1652,7 @@ These endpoints exist but are **not production-ready**:
 | Type           | Format                  | Example            |
 |----------------|-------------------------|--------------------|
 | Confirmation # | `YYYYMM-XXXXX`          | `202606-00001`     |
-| Receipt #      | `RCP-YYYYMM-XXXXX`      | `RCP-202606-00001` |
+| Receipt #      | `REC-YYYYMM-XXXXX`      | `REC-202606-00001` |
 
 Both use atomic counters (`booking_sequences` / `receipt_sequences` tables) with `SELECT FOR UPDATE` to prevent collisions.
 
@@ -1631,12 +1674,14 @@ curl -X POST http://localhost/api/v1/bookings \
   -H "Authorization: Bearer 1|your_token_here" \
   -d '{
     "source": "online",
-    "check_in": "2026-07-01",
-    "check_out": "2026-07-03",
     "booking_rooms": [{
       "room_type_id": "rt-uuid",
-      "quantity": 1,
-      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai","is_ku_member":false}]
+      "check_in": "2026-07-01",
+      "check_out": "2026-07-03",
+      "extra_beds": 0,
+      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai","is_ku_member":false}],
+      "children": 0,
+      "addons": {"breakfast": 2, "early_checkin": false, "late_checkout": false}
     }]
   }'
 ```
@@ -1651,4 +1696,4 @@ curl -X POST http://localhost/api/v1/front-desk/booking-uuid/check-in \
 
 ---
 
-*Last updated: 2026-06-19 · KU HOME API v1*
+*Last updated: 2026-06-26 · KU HOME API v1*

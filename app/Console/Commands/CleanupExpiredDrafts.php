@@ -7,10 +7,11 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use App\Models\Booking;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 #[Signature('app:cleanup-expired-drafts')]
-#[Description('Cleanup expired draft bookings whose payment_deadline has passed')]
+#[Description('Hard delete expired draft bookings whose payment_deadline has passed (cascade BR + Addon + Payment)')]
 class CleanupExpiredDrafts extends Command
 {
     public function handle()
@@ -30,11 +31,23 @@ class CleanupExpiredDrafts extends Command
         $cleaned = 0;
         foreach ($expiredDrafts as $booking) {
             try {
-                // 🌟 Refactor (25/06/26): 'deleted' ไม่ใช่ container state ที่ถูกต้องแล้ว
-                // ใช้ 'cancelled' แทน — transitionStatus จะ cascade ไป BookingRoom อัตโนมัติ
-                $booking->transitionStatus('cancelled', 'system');
+                // 🌟 Refactor (29/06/26): Hard delete cascade — ไม่มี 'cancelled' state แล้ว
+                // Final plan: Delete all (BR + Addon + Payment ลบทิ้งหมด)
+                DB::transaction(function () use ($booking) {
+                    foreach ($booking->bookingRooms as $br) {
+                        // ลบ Addon ที่ผูกกับ BR นี้
+                        $br->addon()?->delete();
+                        // ลบ BR เอง
+                        $br->delete();
+                    }
+                    // ลบ Payment ที่ผูกกับ Booking นี้ (ถ้ามี)
+                    $booking->payments()->delete();
+                    // ลบ Booking container เป็นอันดับสุดท้าย
+                    $booking->delete();
+                });
+
                 $cleaned++;
-                $this->line("  ✓ Expired draft cancelled: {$booking->confirmation} (deadline: {$booking->payment_deadline})");
+                $this->line("  ✓ Expired draft deleted: {$booking->confirmation} (deadline: {$booking->payment_deadline})");
             } catch (\Exception $e) {
                 $this->warn("  ✗ Failed to delete draft {$booking->confirmation}: {$e->getMessage()}");
                 Log::warning("Failed to cleanup expired draft booking", [
@@ -45,9 +58,9 @@ class CleanupExpiredDrafts extends Command
             }
         }
 
-        $results = ['expired_drafts_cleaned' => $cleaned];
+        $results = ['expired_drafts_deleted' => $cleaned];
         Log::info('Expired draft cleanup completed', $results);
-        $this->info("  ✓ Cleaned up {$cleaned} expired draft booking(s).");
+        $this->info("  ✓ Hard deleted {$cleaned} expired draft booking(s).");
         $this->info('✅ Cleanup completed successfully.');
 
         return Command::SUCCESS;

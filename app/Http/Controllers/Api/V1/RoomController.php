@@ -138,11 +138,13 @@ class RoomController extends Controller
                 $query->where('status', 'available');
             }])
             ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
-                $query->whereHas('booking', function ($q) use ($checkIn, $checkOut) {
-                    $q->where('check_in', '<', $checkOut)
-                      ->where('check_out', '>', $checkIn)
-                      ->whereIn('status', ['paid', 'confirmed', 'checked_in']);
-                });
+                // 🌟 Refactor (29/06/26): filter ที่ BR-level ตรงๆ ตาม state machine
+                // BR states ที่นับลด availability: draft, confirmed, checked_in
+                // (cancelled/no_show/checked_out ไม่นับลด)
+                // ✅ Consistency: ตรงกับ createBooking() ที่กรองแบบเดียวกัน
+                $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                      ->where('check_in', '<', $checkOut)
+                      ->where('check_out', '>', $checkIn);
             }])
             ->get()
             ->map(function ($type) use ($checkIn, $checkOut) {

@@ -16,6 +16,10 @@ class StoreImageRequest extends FormRequest
         return [
             'name'  => 'nullable|string|max:255',
             'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+            // 🌟 Fix L5 (03/07/26): polymorphic fields ที่ controller อ่านแต่ไม่ได้ validated
+            // (Image model ใช้ $guarded = [] → ไม่ validate แล้วเขียนตรงลง DB ได้)
+            'imageable_id'   => 'nullable|uuid',
+            'imageable_type' => 'nullable|string|max:255',
         ];
     }
 }

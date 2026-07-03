@@ -40,7 +40,7 @@ class FrontDeskController extends Controller
         try {
             DB::beginTransaction();
 
-            $room = Room::with('roomType')->findOrFail($validated['room_id']);
+            $room = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
             if (!in_array($room->status, ['available', 'prep_checkin'])) {
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
@@ -58,7 +58,9 @@ class FrontDeskController extends Controller
                 'source' => 'admin',
                 'status' => 'draft', // immediately transitioned to confirmed below
                 'total_amount' => $totalAmount,
-                'payment_deadline' => Carbon::now(),
+                // 🌟 Fix (03/07/26): walk-in จ่ายเงินสดเสร็จแล้ว ไม่มี payment deadline
+                // (ตั้งเป็น null แทน now() ที่ทำให้ดูเหมือน "หมดอายุทันที")
+                'payment_deadline' => null,
             ]);
 
             $bookingRoom = BookingRoom::create([
@@ -138,7 +140,7 @@ class FrontDeskController extends Controller
                 }
 
                 foreach ($bookingRooms as $index => $bRoom) {
-                    $assignedRoom = Room::findOrFail($assignedRooms[$index]);
+                    $assignedRoom = Room::lockForUpdate()->findOrFail($assignedRooms[$index]);
 
                     // ✅ #32 Fixed: ตรวจว่าห้องที่ assign ตรงกับ room type ที่จองไว้
                     if ($assignedRoom->room_type_id !== $bRoom->room_type_id) {
@@ -161,7 +163,7 @@ class FrontDeskController extends Controller
                     throw new \Exception("ไม่สามารถเช็คอินได้ค่ะ รายการจอง ID {$bRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักค่ะนายท่าน");
                 }
 
-                $room = Room::findOrFail($bRoom->room_id);
+                $room = Room::lockForUpdate()->findOrFail($bRoom->room_id);
 
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
                 $room->transitionStatusTo('occupied', $userId);
@@ -179,16 +181,18 @@ class FrontDeskController extends Controller
                 ];
             }
 
-            // 🌟 Booking container → confirmed (ถ้ายังเป็น draft/paid)
-            if (in_array($booking->status, ['draft', 'paid'])) {
-                if ($booking->status === 'draft') {
-                    // paid transition needs admin — walk around via direct save for system-equivalent
-                    $booking->status = 'confirmed';
-                    $booking->save();
-                } else {
-                    $booking->transitionStatus('confirmed', $userRole);
-                }
+            // 🌟 Fix scrutinize (29/06/26): ลบ bypass state machine
+            // Booking container ต้องผ่าน flow ปกติ: draft → (record payment) → paid → (check-in) → confirmed
+            // ห้ามข้ามขั้นตอนการชำระเงิน — staff ต้อง record payment ก่อนทุกครั้ง
+            if ($booking->status === 'draft') {
+                throw new \Exception(
+                    "ไม่สามารถเช็คอินได้ค่ะนายท่าน เนื่องจากรายการจองยังไม่ได้รับชำระเงิน " .
+                    "กรุณาบันทึกการรับชำระเงินก่อน (draft → paid) แล้วจึงกลับมาเช็คอินนะคะ"
+                );
+            } elseif ($booking->status === 'paid') {
+                $booking->transitionStatus('confirmed', $userRole);
             }
+            // confirmed: ไม่ต้อง transition อะไรเพิ่ม
 
             DB::commit();
 
@@ -224,6 +228,15 @@ class FrontDeskController extends Controller
     // 🧹 3. Check-Out (BR-level)
     public function checkOut(Request $request, $bookingId)
     {
+        // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
+        $user = $request->user();
+        if (!$user || $user->role !== 'admin') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Check-out ได้ค่ะนายท่าน'
+            ], 403);
+        }
+
         $validated = $request->validate([
             'verified_by' => 'required|uuid|exists:users,id',
             'notes' => 'nullable|string'
@@ -302,11 +315,23 @@ class FrontDeskController extends Controller
         }
     }
 
-    // 🚫 5. Mark No-Show (BR-level) — เพิ่มใหม่
+    // 🚫 5. Mark No-Show (BR-level) — รองรับ partial (เลือกเฉพาะห้องได้)
     public function markNoShow(Request $request, $bookingId)
     {
+        // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย
+        $user = $request->user();
+        if (!$user || $user->role !== 'admin') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Mark No-Show ได้ค่ะนายท่าน'
+            ], 403);
+        }
+
         $validated = $request->validate([
-            'verified_by' => 'required|uuid|exists:users,id',
+            'verified_by'        => 'required|uuid|exists:users,id',
+            // 🌟 Fix (03/07/26): รองรับ partial no-show — ถ้าไม่ส่ง = mark ทุกห้องใน booking
+            'booking_room_ids'   => 'nullable|array',
+            'booking_room_ids.*' => 'required|uuid|exists:booking_rooms,id',
         ]);
 
         try {
@@ -314,38 +339,89 @@ class FrontDeskController extends Controller
 
             $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
 
-            foreach ($booking->bookingRooms as $bRoom) {
-                // 🌟 Refactor (25/06/26): BR confirmed → no_show
-                if ($bRoom->status === 'confirmed') {
-                    $bRoom->transitionStatus('no_show', 'admin');
+            // 🛡️ Guard 1: booking ที่จบไปแล้ว ทำอะไรต่อไม่ได้
+            if ($booking->status === 'complete') {
+                throw new \Exception('รายการจองนี้จบสิ้นไปแล้วค่ะ ไม่สามารถ mark No-Show ได้');
+            }
+
+            // 🌟 เลือก BR ที่จะ mark (ถ้าไม่ส่ง booking_room_ids = ทุกห้อง)
+            $targetRooms = !empty($validated['booking_room_ids'])
+                ? $booking->bookingRooms->whereIn('id', $validated['booking_room_ids'])
+                : $booking->bookingRooms;
+
+            if ($targetRooms->isEmpty()) {
+                throw new \Exception('ไม่พบห้องที่ระบุในรายการจองนี้ค่ะนายท่าน');
+            }
+
+            // 🛡️ Guard 2: ทุกห้องที่จะ mark ต้องเป็น confirmed เท่านั้น
+            // (draft ยังไม่ยืนยัน / checked_in เข้าพักแล้ว / checked_out / no_show จบไปแล้ว)
+            foreach ($targetRooms as $bRoom) {
+                if ($bRoom->status !== 'confirmed') {
+                    throw new \Exception(
+                        "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ '{$bRoom->status}' " .
+                        "(ต้องเป็น 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
+                    );
                 }
             }
 
-            // 🌟 Auto-sync booking container → complete (no_show ก็ถือว่าจบการจอง)
+            // 🌟 Fix (03/07/26): ถ้า booking ยังเป็น paid (จ่ายแล้วยังไม่ confirm) → confirmed ก่อน
+            // รองรับสถานการณ์จริง: ลูกค้าจ่ายเงินแล้วแต่ไม่มา ระบบยังปิดการจองได้
+            if ($booking->status === 'paid') {
+                $booking->transitionStatus('confirmed', 'admin');
+            }
+
+            // Mark no-show ทีละห้อง (ใช้ BR state machine)
+            foreach ($targetRooms as $bRoom) {
+                $bRoom->transitionStatus('no_show', 'admin');
+            }
+
+            // 🌟 Auto-sync booking container → complete (ถ้าทุกห้องจบแล้ว)
+            // กรณี partial no-show (ยังมีห้อง confirmed/checked_in) → booking ยังเป็น confirmed รอเหลือห้องจบ
+            $booking->refresh();
             $booking->syncStatusFromRooms();
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Booking marked as No-Show แล้วค่ะนายท่าน',
+                'message' => 'Mark No-Show สำเร็จแล้วค่ะนายท่าน',
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
             ], 200);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
+            $modelName = class_basename($e->getModel());
+            return response()->json([
+                'status' => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน"
+            ], 404);
+
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error("Mark no-show failed: " . $e->getMessage());
+            $statusCode = $e->getCode();
+            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
             return response()->json([
                 'status' => 'error',
                 'message' => $e->getMessage()
-            ], 400);
+            ], $statusCode);
         }
     }
 
     // 💸 4. บันทึกการรับชำระเงิน
     public function recordPayment(StorePaymentRequest $request, $bookingId)
     {
+        // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย
+        $user = $request->user();
+        if (!$user || $user->role !== 'admin') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะบันทึกการรับชำระเงินได้ค่ะนายท่าน'
+            ], 403);
+        }
+
         $validated = $request->validated();
 
         try {
@@ -369,26 +445,26 @@ class FrontDeskController extends Controller
                 ->sum('amount');
 
             if ($totalPaid >= $booking->total_amount && !$booking->is_paid) {
-                // ✅ #36 Fix: PostgreSQL boolean strict — ใช้ DB::raw('TRUE') แทน PHP true
-                DB::table('bookings')->where('id', $booking->id)->update([
-                    'is_paid' => DB::raw('TRUE'),
-                    'updated_at' => now(),
-                ]);
-                $booking->refresh();
+                // 🌟 Fix H3 (03/07/26): unify is_paid write ให้เป็นวิธีเดียวกับ webhook
+                // ใช้ Eloquent update (PHP boolean) แทน DB::raw('TRUE') — portable ข้าม DB + trigger events
+                $booking->update(['is_paid' => true]);
 
                 // 🌟 Refactor (25/06/26): draft → paid (container)
                 if ($booking->status === 'draft') {
                     $booking->transitionStatus('paid', 'admin');
                 }
 
-                // สร้าง Receipt
-                Receipt::create([
-                    'receipt_no' => Receipt::generateUniqueReceiptNo(),
-                    'booking_id' => $booking->id,
-                    'payment_id' => $payment->id,
-                    'amount' => $payment->amount,
-                    'billing_name' => $booking->primary_guest_name ?? 'Customer',
-                ]);
+                // 🌟 Fix M2 (03/07/26): Idempotency guard กัน duplicate receipt
+                // (ถ้า payment_id เดิมเคยออกใบเสร็จแล้ว จะไม่สร้างซ้ำ)
+                if (!Receipt::where('payment_id', $payment->id)->exists()) {
+                    Receipt::create([
+                        'receipt_no' => Receipt::generateUniqueReceiptNo(),
+                        'booking_id' => $booking->id,
+                        'payment_id' => $payment->id,
+                        'amount' => $payment->amount,
+                        'billing_name' => $booking->primary_guest_name ?? 'Customer',
+                    ]);
+                }
             }
 
             DB::commit();

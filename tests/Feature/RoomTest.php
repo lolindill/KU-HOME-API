@@ -44,23 +44,52 @@ class RoomTest extends TestCase
 
     public function test_anyone_can_list_rooms(): void
     {
-        $this->createRoom();
-        $this->createRoom();
+        $roomA = $this->createRoom();
+        $roomB = $this->createRoom();
         $response = $this->getJson('/api/v1/rooms');
         $response->assertStatus(200);
+
+        // 🛡️ Scrutinize: Verify rooms actually returned (not just empty 200)
+        $rooms = $response->json('rooms');
+        $roomIds = collect($rooms)->pluck('id');
+        $this->assertContains($roomA->id, $roomIds, 'Room A should be in the listing');
+        $this->assertContains($roomB->id, $roomIds, 'Room B should be in the listing');
     }
 
     public function test_anyone_can_list_room_types(): void
     {
-        $this->createRoomType();
+        $roomType = $this->createRoomType();
         $response = $this->getJson('/api/v1/room-types');
         $response->assertStatus(200);
+
+        // 🛡️ Scrutinize: Verify room type actually returned
+        $roomTypes = $response->json('room_types') ?? $response->json('data') ?? [];
+        $ids = collect($roomTypes)->pluck('id')->map(fn ($id) => (string) $id);
+        $this->assertContains((string) $roomType->id, $ids, 'Created room type should be in the listing');
     }
 
     public function test_anyone_can_check_availability(): void
     {
-        $response = $this->getJson('/api/v1/availability');
+        $roomType = $this->createRoomType();
+        Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '201',
+            'status' => 'available',
+        ]);
+
+        $response = $this->getJson('/api/v1/availability?' . http_build_query([
+            'check_in' => now()->addDay()->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+        ]));
         $response->assertStatus(200);
+
+        // 🛡️ Scrutinize: Verify availability payload reflects the room we created
+        $roomTypes = $response->json('room_types') ?? [];
+        $found = collect($roomTypes)->firstWhere('room_type_id', $roomType->id);
+        $this->assertNotNull($found, 'Created room type should appear in availability');
+        $this->assertGreaterThanOrEqual(1, $found['available_rooms'] ?? 0,
+            'Available rooms should reflect the room we just created');
     }
 
     // ============================================
@@ -118,7 +147,7 @@ class RoomTest extends TestCase
     // ✅ #31: Availability query consistency
     // ============================================
 
-    public function test_cancelled_booking_does_not_reduce_availability(): void
+    public function test_cancelled_booking_room_does_not_reduce_availability(): void
     {
         $roomType = $this->createRoomType();
         $room = Room::create([
@@ -128,13 +157,15 @@ class RoomTest extends TestCase
             'status' => 'available',
         ]);
 
-        // 🌟 Refactor (25/06/26): 'deleted' → 'cancelled'; guest fields + dates ย้ายไป BR-level
+        // 🌟 Refactor (29/06/26): container ไม่มี 'cancelled' แล้ว — draft หมดอายุถูก hard delete
+        // แต่ BR-level ยังมี 'cancelled' อยู่ (BR states: draft/confirmed/checked_in/checked_out/cancelled/no_show)
+        // การทดสอบนี้ยืนยันว่า BR status='cancelled' จะไม่นับลด availability
         $user = User::factory()->create();
         $booking = Booking::create([
             'user_id' => $user->id,
             'confirmation' => 'TEST-' . Str::uuid(),
             'source' => 'admin',
-            'status' => 'cancelled',
+            'status' => 'confirmed',
             'total_amount' => 3000,
         ]);
 
@@ -144,7 +175,7 @@ class RoomTest extends TestCase
             'room_type_id' => $roomType->id,
             'check_in' => now()->addDays(1)->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
-            'status' => 'cancelled',
+            'status' => 'cancelled', // BR-level cancelled — ไม่นับลด availability
         ]);
 
         $response = $this->getJson('/api/v1/availability?' . http_build_query([
@@ -156,7 +187,7 @@ class RoomTest extends TestCase
         $roomTypes = $response->json('room_types');
         $found = collect($roomTypes)->firstWhere('room_type_id', $roomType->id);
 
-        // cancelled booking should NOT reduce available rooms
+        // BR-level cancelled should NOT reduce available rooms
         $this->assertEquals(1, $found['available_rooms']);
     }
 

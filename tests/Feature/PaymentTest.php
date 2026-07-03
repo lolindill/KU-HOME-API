@@ -101,6 +101,95 @@ class PaymentTest extends TestCase
         $response->assertStatus(422);
     }
 
+    // ============================================
+    // 🌟 Fix H5 (03/07/26): Payment = 1 per booking (QR scenario)
+    // ============================================
+
+    public function test_request_payment_rejects_when_pending_exists(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking();
+
+        // สร้าง pending payment แรกไปแล้ว
+        Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 4500,
+            'payment_method' => 'transfer',
+            'status' => 'pending',
+        ]);
+
+        // ยิง request อีกครั้ง → ต้อง reject (กัน orphan pending payments)
+        $response = $this->postJson('/api/v1/payments', [
+            'booking_id' => $booking->id,
+            'amount' => 4500,
+            'payment_method' => 'transfer',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('รอดำเนินการ', $response->json('message'));
+        // ต้องมี payment เดียว (ไม่สร้างซ้ำ)
+        $this->assertEquals(1, Payment::where('booking_id', $booking->id)->count());
+    }
+
+    // ============================================
+    // 🌟 Fix M2 (03/07/26): Idempotency — webhook duplicate ต้องไม่สร้าง receipt ซ้ำ
+    // ============================================
+
+    public function test_receipt_idempotent_on_duplicate_webhook(): void
+    {
+        $booking = $this->createBooking(['status' => 'draft']);
+        $payment = Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 4500,
+            'payment_method' => 'transfer',
+            'status' => 'pending',
+        ]);
+
+        // ยิง webhook ครั้งที่ 1
+        $this->postJson('/api/v1/payment/webhook', [
+            'payment_id' => $payment->id,
+            'status' => 'success',
+        ])->assertStatus(200);
+
+        // ยิง webhook ซ้ำ (duplicate) อีกครั้ง
+        $this->postJson('/api/v1/payment/webhook', [
+            'payment_id' => $payment->id,
+            'status' => 'success',
+        ])->assertStatus(200);
+
+        // ต้องมี receipt แค่ 1 ใบเท่านั้น (idempotent)
+        $receiptCount = \App\Models\Receipt::where('payment_id', $payment->id)->count();
+        $this->assertEquals(1, $receiptCount, 'Duplicate webhook must not create a second receipt');
+    }
+
+    // ============================================
+    // 🌟 Fix M3 (03/07/26): webhook กับ booking ที่จ่ายแล้ว ต้องไม่ throw 500
+    // ============================================
+
+    public function test_webhook_does_not_crash_when_booking_already_paid(): void
+    {
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $payment = Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 4500,
+            'payment_method' => 'transfer',
+            'status' => 'pending',
+        ]);
+
+        // webhook ยิงมาอีกทีทั้งที่ booking เป็น paid แล้ว → ต้องไม่ throw
+        $response = $this->postJson('/api/v1/payment/webhook', [
+            'payment_id' => $payment->id,
+            'status' => 'success',
+        ]);
+
+        $response->assertStatus(200);
+        // booking ยังคงเป็น paid (ไม่พัง)
+        $this->assertEquals('paid', $booking->fresh()->status);
+    }
+
     // 🌟 Refactor (18/06/26): requestPaymentForGuest route ถูกลบแล้ว — non-member ไม่สามารถจอง/ชำระได้โดยตรง
     // ทุกคนต้อง login และใช้ POST /payments (admin) หรือ POST /front-desk/{id}/payment
 }

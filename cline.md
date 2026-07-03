@@ -26,6 +26,30 @@ composer run test      # Clear config + run PHPUnit tests
 php artisan serve      # Start dev server only
 ```
 
+## 📊 Project Status Report
+
+> ไฟล์รายงานภาพรวมโปรเจกต์เป็น % — ลงรายละเอียดทั้ง 14 โมดูล + Priority Roadmap + Weighted Average
+
+- **ไฟล์:** `docs/project-status.md`
+- **Last Updated:** 2026-06-29
+- **Overall:** ~75% complete, ~60% production-ready
+
+| Module | % |
+|---|---|
+| 🔐 Auth/Login | 70% (ยังไม่เชื่อม KU/Google SSO) |
+| 👤 User CRUD | 100% |
+| 🛏️ Room & RoomType | 100% |
+| 📅 Booking CRUD | 95% |
+| 🚶 Front Desk | 100% |
+| 💳 Payment | **30%** (🔴 ยังไม่มี gateway + HMAC) |
+| 🧾 Receipt | **30%** (🔴 design ยังไม่ final) |
+| 🧹 Housekeeping | **60%** (🟡 items/refill ยังไม่มี detail) |
+| ➕ Addon & AddonRate | 95% |
+| 🖼️ Image Upload | 10% (🚧 draft) |
+| 🎟️ Discount | 20% (🚧 draft) |
+
+---
+
 ## Architecture Overview
 
 ### API Versioning
@@ -121,32 +145,38 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### Booking (`app/Models/Booking.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: user_id, confirmation, source, status, check_in, check_out, total_amount, is_paid, payment_deadline
-- **Casts**: check_in→date, check_out→date, total_amount→integer, is_paid→boolean, payment_deadline→datetime
+- **Fillable**: user_id, confirmation, source, status, total_amount, is_paid, payment_deadline
+- **Casts**: total_amount→integer, is_paid→**PgBoolean** (🌟 Fix 03/07/26 — PostgreSQL strict typing), payment_deadline→datetime
 - **Status Field**: string, managed by `transitionStatus()` state machine
+- **Relationships**: user (BelongsTo), bookingRooms (HasMany), payments (HasMany), receipts (HasMany)
 - **Confirmation**: Generated via `generateUniqueConfirmation()` — atomic counter with `booking_sequences` table (format: `YYYYMM-XXXXX`)
 - **Accessors**: `primary_guest_name` — resolves the first guest name from `bookingRooms.guests` JSON (fallback: user name or "Customer")
+- 🌟 **Refactor (25/06/26)**: `check_in`/`check_out` moved to `booking_rooms` (each room has its own dates). Booking is a pure container tracking payment/admin flow only.
 - 🌟 **Refactor (18/06/26)**: Guest fields (guest_title, guest_name, guest_email, guest_phone, guest_nationality, is_ku_member, children) moved to `booking_rooms`. Booking now only tracks **who booked** via `user_id`.
 
 #### BookingRoom (`app/Models/BookingRoom.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: booking_id, room_type_id, room_id, guests (JSON), children, rate_daily, nights
-- **Casts**: guests→array, children→integer, rate_daily→integer, nights→integer
-- 🌟 **Refactor (18/06/26)**: `guests` is now a JSON array supporting **multiple guests per room**. Each guest has: `title`, `name`, `nationality`, `is_ku_member`.
+- **Fillable**: booking_id, room_type_id, room_id (nullable — assign at check-in), check_in, check_out, guests (JSON), children, status
+- **Casts**: check_in→date, check_out→date, guests→array, children→integer
+- **Status Field**: string, managed by `transitionStatus()` BR-level state machine (draft→confirmed→checked_in→checked_out/no_show)
+- **Relationships**: booking (BelongsTo), roomType (BelongsTo), room (BelongsTo), addon (HasOne)
+- 🌟 **Refactor (25/06/26)**: `check_in`/`check_out` + `status` now live here (BR-level state machine). Each room can have different dates within the same booking.
 
 #### Room (`app/Models/Room.php`)
 - **Primary Key**: UUID
 - **Status Field**: string (all lowercase), managed by `transitionStatusTo()` state machine
-- **Additional fields**: status_updated_at, status_updated_by, built_in_extra_beds
+- **Casts**: status_updated_at→datetime, builtin_extra_beds→integer (🌟 Fix 03/07/26)
+- **Relationships**: roomType (BelongsTo), bookingRooms (HasMany), housekeepingTasks (HasMany)
 
 #### RoomType (`app/Models/RoomType.php`)
 - **Primary Key**: UUID
-- **Casts**: extra_bed_enabled→boolean
+- **Casts**: extra_bed_enabled→**PgBoolean**, max_guests→integer, max_extra_beds→integer, extra_bed_price→integer, rate_daily_general→integer (🌟 Fix 03/07/26)
 
 #### Payment (`app/Models/Payment.php`)
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: booking_id, amount, payment_method, status, reference_number, received_by
 - **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
+- **Relationships**: booking (BelongsTo), receiver (BelongsTo User via received_by), receipts (HasMany)
 
 #### Receipt (`app/Models/Receipt.php`)
 - **Primary Key**: UUID (HasUuids trait)
@@ -155,29 +185,35 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
   
 ## State Machines
 
-### Booking Status Flow
+### Booking Status Flow (Container — 🌟 Refactor 29/06/26: Final, no cancelled)
 ```
-draft ──> paid ──> confirmed ──> checked_in ──> checked_out
-  │         │          │
-  │         │          ├──> cancelled
-  │         │          └──> no_show
-  │         └──> cancelled
-  ├──> checked_in (admin walk-in only)
-  └──> deleted
+draft ──> paid ──> confirmed ──> complete
+  │                    ▲
+  └────────────────────┘ (admin walk-in skips paid)
 
 Role restrictions:
-  draft → paid          : user, guest, admin, system (webhook)
-  draft → checked_in    : admin only (walk-in)
-  draft → deleted       : user, guest, admin
-  paid → confirmed      : admin only
-  paid → cancelled      : admin only
-  confirmed → cancelled : admin only
-  confirmed → checked_in: admin only
-  confirmed → no_show   : admin only
-  checked_in → checked_out : admin only
+  draft → paid       : user, guest, admin, system (webhook)
+  draft → confirmed  : admin only (walk-in — skips payment)
+  paid → confirmed   : admin only
+  confirmed → complete : admin, system (auto when all BR finished)
 ```
 
+**❌ ไม่มี `cancelled` แล้ว** — draft ที่หมดอายุจะถูก **hard delete** โดย `CleanupExpiredDrafts` command
+**⚠️ `checked_in` / `checked_out` / `no_show` อยู่ที่ `BookingRoom` (BR-level state machine) ไม่ใช่ booking container**
+
 **Important**: Webhook only transitions `draft → paid`. Admin must manually confirm to `confirmed`.
+
+### BookingRoom Status Flow (BR-level — 🌟 Refactor 25/06/26)
+```
+draft ──> confirmed ──> checked_in ──> checked_out
+                 │
+                 └──> no_show
+
+Role restrictions (via FrontDeskController):
+  confirmed → checked_in  : admin only
+  checked_in → checked_out: admin only
+  confirmed → no_show     : admin only
+```
 
 ### Room Status Flow (all lowercase)
 ```
@@ -286,6 +322,48 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 
 ---
 
+## ✅ Scrutinize: Test Quality Hardening (2026-06-29)
+
+> ตรวจสอบ test files ทั้งหมดเพื่อหา **false confidence** — tests ที่ assert แค่ status code 200 แต่ไม่เช็คว่าข้อมูลจริงๆ กลับมาถูกต้องไหม เสริม assertions ให้ตรวจจับ bugs ได้จริง
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+เสริม assertions ใน **8 weak tests** ให้ verify payload จริง ไม่ใช่แค่ status code:
+
+| File | Test | เดิม (Weak) | ใหม่ (Hardened) |
+|---|---|---|---|
+| `BookingTest` | `test_authenticated_user_can_create_booking` | เช็คแค่ 201 + `booking_rooms.children` | + ตรวจ `total_amount` calculated server-side (3000), booking linkage, guests JSON content |
+| `BookingTest` | `test_authenticated_user_can_get_own_bookings` | เช็คแค่ 200 | + ใส่ noise booking ของ user อื่น + ยืนยันว่า user เห็นแค่ booking ตัวเอง (no cross-user leak) |
+| `RoomTest` | `test_anyone_can_list_rooms` | เช็คแค่ 200 | + ยืนยันว่า rooms ที่สร้าง ปรากฏในผลลัพธ์ |
+| `RoomTest` | `test_anyone_can_list_room_types` | เช็คแค่ 200 | + ยืนยัน room type ที่สร้าง ปรากฏในผลลัพธ์ (UUID cast เป็น string ก่อนเปรียบเทียบ) |
+| `RoomTest` | `test_anyone_can_check_availability` | เช็คแค่ 200 (ไม่มี parameters เลย!) | + ใส่ check_in/check_out + ยืนยัน available_rooms ≥ 1 |
+| `PaymentTest` | (1 test) | *(เสริมใน session ก่อน)* | — |
+| `UserTest` | (1 test) | *(เสริมใน session ก่อน)* | — |
+
+### 🧪 Test Results (2026-06-29)
+
+```
+BookingTest:  12 passed (24 assertions)
+RoomTest:      9 passed (18 assertions)
+PaymentTest:   4 passed (7 assertions)
+UserTest:      6 passed (11 assertions)
+─────────────────────────────────────────
+Total:        31 passed (60 assertions)
+```
+
+### 💡 Patterns Applied
+
+1. **Negative noise tests** — ใส่ข้อมูลที่ต้องถูกกรองออก (เช่น booking ของ user อื่น) เพื่อยืนยันว่า logic filter ทำงานจริง
+2. **Server-side calculation checks** — verify ว่า `total_amount` ถูกคำนวณที่ server ไม่ใช่ trust จาก client
+3. **Payload content checks** — ไม่ใช่แค่ status code แต่ต้องเช็คว่าข้อมูลที่คาดหวังกลับมาจริงๆ
+4. **UUID type safety** — cast เป็น string ก่อนเปรียบเทียบระหว่าง model object กับ JSON response
+
+### 🔗 Related Session Work
+
+- **FrontDeskController scrutinize** — ตรวจพบ bugs ใน walkIn flow (guest data linkage, amount calculation) และแก้ไขแล้ว
+
+---
+
 ## ✅ Tested Changes (2026-06-05)
 
 > การเปลี่ยนแปลงเหล่านี้ผ่าน automated test ทั้งหมดแล้ว — **121 tests, 164 assertions, 0 failures**
@@ -321,7 +399,7 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 | `tests/Unit/RoomStateTest` | 23 | Room status state machine (all transitions + edge cases) |
 | `tests/Feature/AuthTest` | 9 | Register, login, logout, me, 401 |
 | `tests/Feature/BookingTest` | 14 | CRUD (auth required), search via `?term=`, validation, status transitions, draft prevention (by user_id), rate limiting |
-| `tests/Feature/FrontDeskTest` | 6 | Walk-in (staff user + guests JSON), check-in, check-out, record payment, room type mismatch validation |
+| `tests/Feature/FrontDeskTest` | 8 | Walk-in, check-in (incl. draft rejection), check-out, full integration flow, record payment, room type mismatch |
 | `tests/Feature/PaymentTest` | 4 | Payment request, webhook (removed guest email verification tests) |
 | `tests/Feature/RoomTest` | 9 | List rooms/types, availability, status update + transitions, availability query consistency |
 | `tests/Feature/RouteProtectionTest` | 20 | Public vs authenticated vs admin route access (added create_booking_requires_auth) |
@@ -357,7 +435,7 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 | #27 | Addon model `$guarded = []` → `$fillable` | 2026-06-05 |
 | #28 | `requestPaymentForGuest()` OR logic อ่อนแอ → AND logic + บังคับ `guest_email` | 2026-06-05 |
 | #29 | Webhook ไม่เช็ค `payment_deadline` → เพิ่ม deadline check | 2026-06-05 |
-| #33 | `DB::raw('TRUE')` PostgreSQL-specific → `true` (portable) | 2026-06-05 |
+| #33 | `DB::raw('TRUE')` PostgreSQL-specific → `true` (portable) | 2026-06-05 → 🔄 **Reworked 03/07/26**: `true` พังบน PostgreSQL จริง (PDO ส่ง integer 0/1) → ใช้ **PgBoolean custom cast** แทน (ดู root cause fix) |
 | #34 | `$totalGuests` dead code → ลบแล้ว | 2026-06-05 |
 | #35 | Walk-in `guest_email` ไม่ unique → `walkin-{phone}@hotel.local` | 2026-06-05 |
 | #17 | `Room` + `BookingRoom` `$guarded = []` → `$fillable` + Room เพิ่ม `HasUuids` | 2026-06-04 |
@@ -373,6 +451,65 @@ php test_scripts/quick_test.php         # 🔧 Set admin role + list users
 | #40 | **Security**: Exception message รั่วใน error responses → ซ่อน message สำหรับ unexpected errors, คง message เฉพาะ business logic exceptions | 2026-06-05 |
 | #41 | `Room` model redundant UUID config → ลบ `$incrementing`, `$keyType`, `$guarded` ที่ซ้ำซ้อนเพราะใช้ `HasUuids` trait แล้ว | 2026-06-05 |
 | #30 | Payment/Receipt `amount` type mismatch → standardize เป็น `integer` (satang/cents) ทั้ง DB column + model cast + validation | 2026-06-05 |
+
+---
+
+## ✅ Whole-Project Scrutinize (2026-07-03)
+
+> ตรวจสอบทั้งโปรเจกต์ด้วย `scrutinize` skill — วิเคราะห์ Models/Relations, Controllers/Logic, Requests/Seeders/Docs แบบ end-to-end พบและแก้ bugs **18 ข้อ** (H1 skipped — webhook เป็น mock)
+
+### 🏆 Root Cause Fix: PostgreSQL Strict Boolean Typing
+
+ระหว่างทำงานหนูค้นพบ root cause ที่ซ่อนอยู่: **PostgreSQL strict typing ไม่ยอมรับ integer 0/1 ใน boolean column** แต่ Eloquent `boolean` cast ส่ง PHP `false`/`true` ผ่าน PDO → กลายเป็น integer `0`/`1` → PostgreSQL ปฏิเสธ (Datatype mismatch)
+
+- **ทางแก้เดิม**: `DB::raw('TRUE'/'FALSE')` หรือ string `'true'`/`'false'` กระจัดกระจาย → ไม่สวย และนักพัฒนาใหม่เผลอใช้ PHP bool แล้วพัง
+- **ทางแก้ใหม่**: **`App\Casts\PgBoolean`** (Custom Cast class) — แปลง PHP bool ↔ SQL boolean literal อัตโนมัติ ทำงานได้ทั้ง PostgreSQL (strict) และ MySQL/SQLite (lenient)
+- **Apply ครบทุก boolean column**: `is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`
+
+### 🔴 HIGH (5 ข้อ — แก้ครบ)
+
+| Bug | การแก้ |
+|-----|-------|
+| **H2** orphan `bookings.children` column | migration ใหม่ `2026_07_03_drop_children_from_bookings_table` |
+| **H3** `is_paid` write 2 วิธีไม่สอดคล้อง | unify ผ่าน Eloquent + PgBoolean |
+| **H4** `StorePaymentRequest.booking_id` required-but-ignored | เปลี่ยนเป็น `sometimes` (front-desk ใช้ URL param) |
+| **H5** payment pending ซ้ำ → orphan payments | guard reject ถ้ามี pending อยู่ (1 payment/booking) |
+| **Root** PostgreSQL strict boolean | **PgBoolean custom cast** (ดูด้านบน) |
+
+### 🟡 MEDIUM (4 ข้อ — แก้ครบ)
+
+| Bug | การแก้ |
+|-----|-------|
+| **M1** Seeder ส่ง boolean เป็น string (`'false'`) | ใช้ PHP `false`/`true` จริง (PgBoolean จัดการ) — `RoomSeeder`, `AddonRateSeeder` |
+| **M2** duplicate receipts (webhook ยิงซ้ำ) | idempotency guard `if (!Receipt::where('payment_id')->exists())` |
+| **M3** webhook พังเมื่อ booking จ่ายแล้ว | guard `if ($booking->status === 'draft')` ก่อน transitionStatus |
+| **M4** Dead validation (`status` field) | ลบออกจาก `StorePaymentRequest` + `UpdatePaymentRequest` |
+
+### 🟢 LOW (5 ข้อ — แก้ครบ)
+
+| Bug | การแก้ |
+|-----|-------|
+| **L1** Missing casts | `Room` (+datetime/integer), `HousekeepingTask` (+datetime×2), `RoomType` (+integer×4) |
+| **L2** Missing inverse relationships | `Payment::receipts()`, `HousekeepingTask::room()/assignee()/photos()/inventories()`, `Room::housekeepingTasks()` |
+| **L3** DashboardController set task status ตรงๆ | guard `if ($task->status === 'done') throw` |
+| **L4** Defense-in-depth gap | `checkOut`/`markNoShow`/`recordPayment` เพิ่ม in-controller role check |
+| **L5** ImageController unvalidated polymorphic fields | `StoreImageRequest` +`imageable_id`/`imageable_type` |
+
+### 🧹 Dead Code
+- **DC1**: ลบ dead import `UpdateBookingRequest` ใน `BookingController`
+
+### 📄 Docs Drift (`docs/api_guide.md`)
+- **D1**: State machine section — ลบ `cancelled`/`deleted` ให้ตรง `Booking::transitionStatus` + เพิ่ม BR-level state machine แยก
+- **D2**: Receipt prefix `RCP-` → `REC-`
+- **D3**: `payment_method` enum — ลบ `qr`/`other`
+- **D4**: `amount` rule `min:1` → `min:0`
+- **D5**: `password` rule — ลบ `confirmed`
+
+### 🧪 Test Results (2026-07-03)
+```
+120 passed (206 assertions) — เพิ่มจาก 116 → +4 tests ใหม่
+```
+Tests ใหม่: `test_request_payment_rejects_when_pending_exists`, `test_receipt_idempotent_on_duplicate_webhook`, `test_webhook_does_not_crash_when_booking_already_paid`, `test_record_payment_without_body_booking_id`
 
 ---
 

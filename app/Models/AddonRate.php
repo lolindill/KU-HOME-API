@@ -22,7 +22,8 @@ class AddonRate extends Model
 
     protected $casts = [
         'default_price' => 'integer',
-        'is_active' => 'boolean',
+        // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+        'is_active' => \App\Casts\PgBoolean::class,
     ];
 
     /**
@@ -31,7 +32,8 @@ class AddonRate extends Model
      */
     public static function getPrice(string $code): int
     {
-        $rate = self::where('code', $code)->where('is_active', true)->first();
+        // 🌟 Fix PostgreSQL (03/07/26): where ใช้ DB::raw('TRUE') แทน PHP true
+        $rate = self::where('code', $code)->whereRaw('is_active = TRUE')->first();
         return $rate ? $rate->default_price : 0;
     }
 
@@ -42,7 +44,7 @@ class AddonRate extends Model
     public static function getPrices(array $codes): array
     {
         return self::whereIn('code', $codes)
-            ->where('is_active', true)
+            ->whereRaw('is_active = TRUE')
             ->pluck('default_price', 'code')
             ->toArray();
     }

@@ -29,6 +29,18 @@ class PaymentController extends Controller
             ], 400);
         }
 
+        // 🌟 Fix H5 (03/07/26): Payment = 1 per booking (QR scenario)
+        // ถ้ามี payment pending อยู่แล้ว → reject ไม่สร้างซ้ำ (กัน orphan pending payments)
+        $existingPending = Payment::where('booking_id', $booking->id)
+            ->where('status', 'pending')
+            ->exists();
+        if ($existingPending) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'มีรายการชำระเงินที่รอดำเนินการอยู่แล้วค่ะนายท่าน กรุณารอให้รายการเดิมเสร็จสิ้นก่อนนะคะ'
+            ], 422);
+        }
+
         try {
             DB::beginTransaction();
 
@@ -98,20 +110,27 @@ class PaymentController extends Controller
                 // ✅ #33 Fixed: ใช้ PHP boolean แทน DB::raw('TRUE') — portable ข้าม database
                 $booking->update(['is_paid' => true]);
 
-                // 🌟 ใช้ state machine เปลี่ยนสถานะ booking → paid (system role)
-                $booking->transitionStatus('paid', 'system');
+                // 🌟 Fix M3 (03/07/26): guard state machine — กัน webhook duplicate พัง
+                // ถ้า booking จ่ายแล้ว (paid/confirmed) จะไม่ transition ซ้ำ (draft → paid เท่านั้น)
+                if ($booking->status === 'draft') {
+                    $booking->transitionStatus('paid', 'system');
+                }
 
-                // ✅ #19 Fixed: ใช้ atomic counter แทน rand() สร้าง receipt number
-                $receiptNo = Receipt::generateUniqueReceiptNo();
-                
-                // 🌟 Refactor (18/06/26): ใช้ primary_guest_name (จาก booking_rooms) แทน guest_name ที่ถูกลบไปแล้ว
-                Receipt::create([
-                    'receipt_no' => $receiptNo,
-                    'booking_id' => $booking->id,
-                    'payment_id' => $payment->id,
-                    'amount' => $payment->amount,
-                    'billing_name' => $booking->primary_guest_name ?? 'Customer',
-                ]);
+                // 🌟 Fix M2 (03/07/26): Idempotency guard กัน duplicate receipt
+                // (ถ้า payment_id เดิมเคยออกใบเสร็จแล้ว จะไม่สร้างซ้ำ)
+                if (!Receipt::where('payment_id', $payment->id)->exists()) {
+                    // ✅ #19 Fixed: ใช้ atomic counter แทน rand() สร้าง receipt number
+                    $receiptNo = Receipt::generateUniqueReceiptNo();
+
+                    // 🌟 Refactor (18/06/26): ใช้ primary_guest_name (จาก booking_rooms) แทน guest_name ที่ถูกลบไปแล้ว
+                    Receipt::create([
+                        'receipt_no' => $receiptNo,
+                        'booking_id' => $booking->id,
+                        'payment_id' => $payment->id,
+                        'amount' => $payment->amount,
+                        'billing_name' => $booking->primary_guest_name ?? 'Customer',
+                    ]);
+                }
 
                 DB::commit();
 

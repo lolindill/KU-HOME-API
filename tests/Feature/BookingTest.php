@@ -90,12 +90,11 @@ class BookingTest extends TestCase
 
         $response = $this->postJson('/api/v1/bookings', [
             'source' => 'online',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'booking_rooms' => [
                 [
                     'room_type_id' => $roomType->id,
-                    'quantity' => 1,
+                    'check_in' => now()->addDay()->toDateString(),
+                    'check_out' => now()->addDays(3)->toDateString(),
                     'guests' => [
                         ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
                     ],
@@ -117,12 +116,11 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
                         ],
@@ -132,10 +130,32 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(201);
-        // 🌟 ตรวจว่าข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
+
+        // 🛡️ Scrutinize: Verify booking linkage + total_amount calculated server-side
+        $this->assertDatabaseHas('bookings', [
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+        ]);
+
+        $booking = Booking::where('user_id', $user->id)->latest('created_at')->first();
+        $this->assertNotNull($booking, 'Booking should be created');
+
+        // 🛡️ Verify total_amount calculated server-side (2 nights × 1500 = 3000)
+        $this->assertEquals(3000, $booking->total_amount,
+            'Total amount must be calculated server-side, not trusted from client');
+
+        // 🛡️ Verify booking_rooms with correct room_type linkage + guests JSON
         $this->assertDatabaseHas('booking_rooms', [
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
             'children' => 0,
         ]);
+
+        $bookingRoom = \App\Models\BookingRoom::where('booking_id', $booking->id)->first();
+        $guests = is_string($bookingRoom->guests) ? json_decode($bookingRoom->guests, true) : $bookingRoom->guests;
+        $this->assertEquals($user->name, $guests[0]['name'] ?? null,
+            'Guest name must be stored in booking_rooms.guests JSON, not in bookings table');
     }
 
     // ============================================
@@ -145,12 +165,22 @@ class BookingTest extends TestCase
     public function test_authenticated_user_can_get_own_bookings(): void
     {
         $user = User::factory()->create();
-        $this->createBooking(['user_id' => $user->id]);
-        $this->createBooking(['user_id' => $user->id]);
+        $bookingA = $this->createBooking(['user_id' => $user->id]);
+        $bookingB = $this->createBooking(['user_id' => $user->id]);
+
+        // 🛡️ Noise booking from different user — must NOT appear in results
+        $this->createBooking();
 
         $response = $this->actingAs($user, 'sanctum')
             ->getJson('/api/v1/bookings');
         $response->assertStatus(200);
+
+        // 🛡️ Scrutinize: Verify user only sees THEIR bookings (no cross-user leak)
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($bookingA->id, $bookingIds, 'User should see their own booking A');
+        $this->assertContains($bookingB->id, $bookingIds, 'User should see their own booking B');
+        $this->assertCount(2, $bookingIds,
+            'User should see exactly 2 bookings — other users\' bookings must be filtered out');
     }
 
     // ============================================
@@ -220,12 +250,11 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDays(5)->toDateString(),
-                'check_out' => now()->addDay()->toDateString(), // check_out before check_in
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(5)->toDateString(),
+                        'check_out' => now()->addDay()->toDateString(), // check_out before check_in
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Test', 'nationality' => 'TH'],
                         ],
@@ -257,12 +286,11 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
                         ],
@@ -292,12 +320,11 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
                         ],
@@ -325,12 +352,11 @@ class BookingTest extends TestCase
         $response = $this->actingAs($userB, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
                         ],

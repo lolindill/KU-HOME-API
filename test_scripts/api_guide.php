@@ -163,7 +163,8 @@ use App\Models\Receipt as TestReceipt;
 use App\Models\HousekeepingTask;
 
 // Delete all test bookings (any status) + related data
-$testBookingIds = Booking::where('guest_email', 'like', '%@kuhome.test')->pluck('id')->toArray();
+// (Guest email no longer exists on bookings after refactor — match by confirmation prefix from prior runs)
+$testBookingIds = Booking::where('confirmation', 'like', '%-TEST%')->pluck('id')->toArray();
 if (!empty($testBookingIds)) {
     // Delete related records first (FK constraints)
     TestPayment::whereIn('booking_id', $testBookingIds)->forceDelete();
@@ -296,25 +297,26 @@ $tomorrow = date('Y-m-d', strtotime('+1 day'));
 $dayAfter = date('Y-m-d', strtotime('+3 days'));
 
 $bookingData = [
-    'source'            => 'online',
-    'check_in'          => $tomorrow,
-    'check_out'         => $dayAfter,
-    'guest_title'       => 'Mr.',
-    'guest_name'        => "Guide Test Guest {$TIMESTAMP}",
-    'guest_email'       => $TEST_EMAIL,
-    'guest_phone'       => '081-234-5678',
-    'guest_nationality' => 'Thai',
-    'children'          => 0,
-    'booking_rooms'     => [
+    'source'      => 'online',
+    'check_in'    => $tomorrow,
+    'check_out'   => $dayAfter,
+    'booking_rooms' => [
         [
             'room_type_id' => $ROOM_TYPE_ID,
-            'quantity'     => 1,
             'extra_beds'   => 0,
-            'addons'       => [
-                'breakfast'           => 1,
-                'breakfast_price'     => 200,
-                'early_checkIn_price' => 0,
-                'late_checkOut_price' => 0,
+            'guests'       => [
+                [
+                    'title'        => 'Mr.',
+                    'name'         => "Guide Test Guest {$TIMESTAMP}",
+                    'nationality'  => 'Thai',
+                    'is_ku_member' => false,
+                ],
+            ],
+            'children' => 0,
+            'addons'   => [
+                'breakfast'      => 1,
+                'early_checkin'  => false,
+                'late_checkout'  => false,
             ],
         ],
     ],
@@ -326,7 +328,7 @@ $BOOKING_ID = $r['body']['booking_id'] ?? null;
 $TOTAL_AMOUNT = $r['body']['total_amount'] ?? null;
 chainSave('BOOKING_ID', $BOOKING_ID);
 chainSave('TOTAL_AMOUNT', $TOTAL_AMOUNT);
-echo "    💰 Total Amount: " . ($TOTAL_AMOUNT ? number_format($TOTAL_AMOUNT / 100, 2) . ' THB (satang)' : 'N/A') . "\n";
+echo "    💰 Total Amount: " . ($TOTAL_AMOUNT ? number_format($TOTAL_AMOUNT) . ' THB' : 'N/A') . "\n";
 echo "    ⏰ Payment Deadline: " . ($r['body']['payment_deadline'] ?? 'N/A') . "\n";
 
 if (!$BOOKING_ID) {
@@ -349,7 +351,7 @@ $USER_ID = chainGet('USER_ID');
 
 $r = step(5, 'บันทึกการชำระเงิน (completed → auto draft→paid)', 'POST', "/front-desk/{$BOOKING_ID}/payment", [
     'booking_id'      => $BOOKING_ID,
-    'amount'          => $TOTAL_AMOUNT ?? 100000,
+    'amount'          => $TOTAL_AMOUNT ?? 1000,
     'payment_method'  => 'cash',
     'reference_number' => 'CASH-GUIDE-' . $TIMESTAMP,
     'received_by'     => $USER_ID,

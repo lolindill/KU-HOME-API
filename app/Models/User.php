@@ -33,8 +33,9 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'is_ku_member' => 'boolean',
-            'ver' => 'boolean',
+            // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+            'is_ku_member' => \App\Casts\PgBoolean::class,
+            'ver' => \App\Casts\PgBoolean::class,
         ];
     }
 

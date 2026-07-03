@@ -54,7 +54,8 @@ class BookingStateTest extends TestCase
 
     // ============================================
     // ✅ Booking Container — Valid Transitions
-    // (Container states: draft → paid → confirmed → complete / cancelled)
+    // (Container states: draft → paid → confirmed → complete)
+    // ❌ ไม่มี cancelled — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
     // ============================================
 
     public function test_draft_to_paid_by_user(): void
@@ -92,20 +93,6 @@ class BookingStateTest extends TestCase
         $this->assertEquals('complete', $booking->fresh()->status);
     }
 
-    public function test_draft_to_cancelled_by_user(): void
-    {
-        $booking = $this->createBooking('draft');
-        $booking->transitionStatus('cancelled', 'user');
-        $this->assertEquals('cancelled', $booking->fresh()->status);
-    }
-
-    public function test_paid_to_cancelled_by_admin(): void
-    {
-        $booking = $this->createBooking('paid');
-        $booking->transitionStatus('cancelled', 'admin');
-        $this->assertEquals('cancelled', $booking->fresh()->status);
-    }
-
     // ============================================
     // ❌ Booking Container — Invalid Transitions
     // ============================================
@@ -140,13 +127,6 @@ class BookingStateTest extends TestCase
         $booking->transitionStatus('draft', 'admin');
     }
 
-    public function test_cannot_go_from_cancelled_to_anything(): void
-    {
-        $this->expectException(\Exception::class);
-        $booking = $this->createBooking('cancelled');
-        $booking->transitionStatus('draft', 'admin');
-    }
-
     // ============================================
     // 🔒 Role Restrictions (Container)
     // ============================================
@@ -156,13 +136,6 @@ class BookingStateTest extends TestCase
         $this->expectException(\Exception::class);
         $booking = $this->createBooking('paid');
         $booking->transitionStatus('confirmed', 'user');
-    }
-
-    public function test_paid_to_cancelled_rejected_for_user(): void
-    {
-        $this->expectException(\Exception::class);
-        $booking = $this->createBooking('paid');
-        $booking->transitionStatus('cancelled', 'user');
     }
 
     public function test_confirmed_to_complete_rejected_for_user(): void
@@ -223,22 +196,5 @@ class BookingStateTest extends TestCase
         $booking = $this->createBooking('confirmed', 'confirmed');
         $br = $booking->bookingRooms->first();
         $br->transitionStatus('checked_in', 'user');
-    }
-
-    // ============================================
-    // 🌟 Cascade Test: Container → BookingRoom
-    // ============================================
-
-    public function test_container_cancelled_cascades_to_booking_rooms(): void
-    {
-        $booking = $this->createBooking('paid', 'confirmed');
-        $booking->transitionStatus('cancelled', 'admin');
-
-        $this->assertEquals('cancelled', $booking->fresh()->status);
-        $this->assertEquals(
-            'cancelled',
-            $booking->bookingRooms->first()->fresh()->status,
-            'BookingRoom should be cascade-cancelled when container is cancelled'
-        );
     }
 }

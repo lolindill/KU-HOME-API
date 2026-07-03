@@ -24,7 +24,7 @@ class UpdateBookingRequest extends FormRequest
 
             // 🌟 Refactor (25/06/26): container states เท่านั้น
             // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
-            'status'             => 'sometimes|required|string|in:draft,paid,confirmed,complete,cancelled',
+            'status'             => 'sometimes|required|string|in:draft,paid,confirmed,complete',
         ];
     }
 }

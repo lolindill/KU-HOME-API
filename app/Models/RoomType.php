@@ -19,7 +19,14 @@ class RoomType extends Model
     protected function casts(): array
     {
         return [
-            'extra_bed_enabled' => 'boolean',
+            // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+            'extra_bed_enabled' => \App\Casts\PgBoolean::class,
+            // 🌟 Fix L1 (03/07/26): integer casts สำหรับคอลัมน์ตัวเลข
+            // (rate_daily_general ใช้คูณในการคำนวณราคา — ต้อง cast ให้ตรงกันทั้งระบบ)
+            'max_guests' => 'integer',
+            'max_extra_beds' => 'integer',
+            'extra_bed_price' => 'integer',
+            'rate_daily_general' => 'integer',
         ];
     }
     public function rooms(): HasMany

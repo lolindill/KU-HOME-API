@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Exception;
 
 class Room extends Model
@@ -27,14 +28,26 @@ class Room extends Model
         'status_updated_by',
     ];
 
+    // 🌟 Fix L1 (03/07/26): missing casts — status_updated_at ใช้เป็น Carbon หลายจุด
+    protected $casts = [
+        'status_updated_at' => 'datetime',
+        'builtin_extra_beds' => 'integer',
+    ];
+
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class, 'room_type_id', 'id');
     }
 
-    public function bookingRooms()
+    public function bookingRooms(): HasMany
     {
         return $this->hasMany(BookingRoom::class, 'room_id');
+    }
+
+    // 🌟 Fix L2 (03/07/26): inverse relationship ที่หายไป (FK housekeeping_tasks.room_id)
+    public function housekeepingTasks(): HasMany
+    {
+        return $this->hasMany(HousekeepingTask::class, 'room_id');
     }
 
     /**

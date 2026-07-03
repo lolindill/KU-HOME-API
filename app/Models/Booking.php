@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Database\QueryException;
 use Carbon\Carbon;
 use Exception;
+use App\Models\Payment;
+use App\Models\Receipt;
 
 class Booking extends Model
 {
@@ -37,7 +39,9 @@ class Booking extends Model
 
     protected $casts = [
         'total_amount' => 'integer',
-        'is_paid' => 'boolean',
+        // 🌟 Fix PostgreSQL strict boolean (03/07/26): ใช้ PgBoolean cast แทน 'boolean'
+        // (PDO ส่ง PHP bool → integer 0/1 → PostgreSQL ปฏิเสธ)
+        'is_paid' => \App\Casts\PgBoolean::class,
         'payment_deadline' => 'datetime',
     ];
 
@@ -73,17 +77,28 @@ class Booking extends Model
         return $this->hasMany(BookingRoom::class, 'booking_id');
     }
 
+    // 🌟 Fix (03/07/26): relationship ที่หายไป — CleanupExpiredDrafts เรียก $booking->payments()->delete()
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function receipts(): HasMany
+    {
+        return $this->hasMany(Receipt::class);
+    }
+
     /**
-     * 🌟 Refactor (25/06/26): Booking = Container State Machine
+     * 🌟 Refactor (29/06/26): Booking = Container State Machine (Final — no cancelled)
      *
      * Booking (container) เก็บสถานะ payment/admin flow:
      *   draft → paid (user, guest, admin, system webhook)
      *   draft → confirmed (admin, walk-in เข้าตรงๆ)
-     *   draft → cancelled
-     *   paid → confirmed (admin) / cancelled (admin)
-     *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show) / cancelled
+     *   paid → confirmed (admin)
+     *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show)
      *
-     * ⚠️ checked_in / checked_out / no_show อยู่ที่ BookingRoom แล้ว (BR-level state machine)
+     * ❌ ไม่มี cancelled แล้ว — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+     * ⚠️ checked_in / checked_out / no_show อยู่ที่ BookingRoom (BR-level state machine)
      */
     public function transitionStatus(string $newStatus, string $userRole)
     {
@@ -93,15 +108,12 @@ class Booking extends Model
             'draft' => [
                 'paid'       => ['user', 'guest', 'admin', 'system'],
                 'confirmed'  => ['admin'], // walk-in by admin (skip paid)
-                'cancelled'  => ['user', 'guest', 'admin', 'system'],
             ],
             'paid' => [
                 'confirmed' => ['admin'],
-                'cancelled' => ['admin'],
             ],
             'confirmed' => [
                 'complete'  => ['admin', 'system'], // auto เมื่อ BR ครบ
-                'cancelled' => ['admin'],
             ],
         ];
 
@@ -119,21 +131,15 @@ class Booking extends Model
 
         $this->status = $newStatus;
         $this->save();
-
-        // 🌟 Cascade: เมื่อ container cancelled → BookingRoom ทุกห้องที่ยัง active ให้ cancelled ด้วย
-        if ($newStatus === 'cancelled') {
-            foreach ($this->bookingRooms as $br) {
-                if (!in_array($br->status, ['checked_out', 'no_show', 'cancelled'])) {
-                    $br->status = 'cancelled';
-                    $br->save();
-                }
-            }
-        }
     }
 
     /**
      * 🌟 Helper: อัปเดตสถานะ booking container อัตโนมัติ
      * - ถ้า BR ทุกห้อง checked_out/no_show → booking → 'complete'
+     *
+     * 🌟 Fix scrutinize (29/06/26): ใช้ transitionStatus() แทน direct set เพื่อ enforce state machine
+     * กันกรณี flow ผิดปกติ (เช่น booking ยังเป็น 'paid' แต่ BR จบแล้ว) — state machine จะ throw exception
+     * ทำให้ bug ปรากฏชัดแทนที่จะถูก silent ignore
      */
     public function syncStatusFromRooms(): void
     {
@@ -141,9 +147,10 @@ class Booking extends Model
         if ($rooms->isEmpty()) return;
 
         $allFinished = $rooms->every(fn ($br) => in_array($br->status, ['checked_out', 'no_show']));
-        if ($allFinished && $this->status === 'confirmed') {
-            $this->status = 'complete';
-            $this->save();
+        if ($allFinished && $this->status !== 'complete') {
+            // ใช้ state machine (system role) — confirmed → complete
+            // ถ้า status ปัจจุบันไม่ใช่ confirmed จะ throw exception ให้ผู้เรียกจัดการ (เช่น paid → complete)
+            $this->transitionStatus('complete', 'system');
         }
     }
 

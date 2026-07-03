@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Http\Requests\StoreBookingRequest;
-use App\Http\Requests\UpdateBookingRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
@@ -136,32 +135,48 @@ class BookingController extends Controller
 
             DB::beginTransaction();
 
-            $checkIn = Carbon::parse($validated['check_in']);
-            $checkOut = Carbon::parse($validated['check_out']);
-            $nights = $checkIn->diffInDays($checkOut) ?: 1;
-
-            $requestedRoomTypes = [];
+            // 🌟 Refactor (02/07/26): ย้าย check_in/check_out ไป BR-level — แต่ละห้องมีวันที่ของตัวเอง
+            // ต้องเช็ค availability แบบ per-room-request (group by room_type + ดู overlap ของแต่ละช่วงวัน)
+            $requestedByType = [];
 
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $rtId = $roomRequest['room_type_id'];
-                $requestedRoomTypes[$rtId] = ($requestedRoomTypes[$rtId] ?? 0) + 1; 
+                $requestedByType[$rtId][] = [
+                    'check_in'  => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                ];
             }
 
-            foreach ($requestedRoomTypes as $rtId => $requestedRoomCount) {
+            foreach ($requestedByType as $rtId => $requests) {
                 $totalRooms = Room::where('room_type_id', $rtId)->count();
 
-                // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
-                // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
-                $bookedRooms = BookingRoom::where('room_type_id', $rtId)
-                    ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
-                    ->where('check_in', '<', $checkOut)
-                    ->where('check_out', '>', $checkIn)
-                    ->count();
+                // ตรวจทีละช่วงวันของห้องที่ขอจอง — นับทั้ง existing bookings และ batch requests ที่ overlap
+                // (เพื่อกันกรณีห้อง 2 ห้องใน booking เดียวกันจองช่วงเวลาที่ทับซ้อนกัน)
+                foreach ($requests as $checkReq) {
+                    $checkIn  = Carbon::parse($checkReq['check_in']);
+                    $checkOut = Carbon::parse($checkReq['check_out']);
 
-                $availableRooms = $totalRooms - $bookedRooms;
+                    // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
+                    // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
+                    $existingBooked = BookingRoom::where('room_type_id', $rtId)
+                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->count();
 
-                if ($requestedRoomCount > $availableRooms) {
-                    throw new \Exception("ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ", 422);
+                    // นับห้องใน batch นี้ที่ overlap กับช่วงวันของห้องปัจจุบัน
+                    $batchOverlapping = 0;
+                    foreach ($requests as $otherReq) {
+                        $otherIn  = Carbon::parse($otherReq['check_in']);
+                        $otherOut = Carbon::parse($otherReq['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
+                        throw new \Exception("ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ", 422);
+                    }
                 }
             }
 
@@ -190,6 +205,11 @@ class BookingController extends Controller
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
 
+                // 🌟 Refactor (02/07/26): คำนวณ nights รายห้อง (แต่ละห้องมีวันที่ต่างกันได้)
+                $roomCheckIn  = Carbon::parse($roomRequest['check_in']);
+                $roomCheckOut = Carbon::parse($roomRequest['check_out']);
+                $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
+
                 $roomPriceTotal = $roomType->rate_daily_general * $nights;
                 $extraBedQty = $roomRequest['extra_beds'] ?? 0;
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
@@ -210,9 +230,9 @@ class BookingController extends Controller
                     'booking_id' => $booking->id,
                     'room_type_id' => $roomType->id,
                     'room_id' => null, // รอจ่ายห้องตอน Check-in
-                    // 🌟 Refactor (25/06/26): วันที่เช็คอิน/เช็คเอาท์อยู่ที่ระดับห้อง (แต่ละห้องต่างวันได้)
-                    'check_in' => $validated['check_in'],
-                    'check_out' => $validated['check_out'],
+                    // 🌟 Refactor (02/07/26): วันที่เช็คอิน/เช็คเอาท์อยู่ที่ระดับห้อง (แต่ละห้องต่างวันได้)
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
                     'status' => 'draft', // BR-level state
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
                     'guests' => $roomRequest['guests'] ?? null,
@@ -275,22 +295,33 @@ class BookingController extends Controller
         $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $term);
 
         // 🌟 Refactor (18/06/26): ลบ guest_name (ย้ายไป booking_rooms.guests แล้ว) — ค้นผ่าน user กับ primary_guest_name แทน
-        return $query->where(function ($q) use ($escaped, $term) {
+        // 🌟 Fix scrutinize (29/06/26): JSON_EXTRACT ใช้ได้แค่ MySQL/SQLite — ทำให้ cross-DB compatible
+        $lowerEscaped = '%' . strtolower($escaped) . '%';
+        $guestNameFilter = function ($brQuery) use ($lowerEscaped) {
+            $driver = DB::getDriverName();
+            if (in_array($driver, ['mysql', 'sqlite'])) {
+                $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', [$lowerEscaped]);
+            } elseif ($driver === 'pgsql') {
+                // PostgreSQL: guests #>> '{0,name}' extracts first guest's name as text
+                $brQuery->whereRaw("LOWER(guests #>> '{0,name}') LIKE ?", [$lowerEscaped]);
+            } else {
+                // Fallback: search across whole JSON blob (less precise but safe)
+                $brQuery->whereRaw('LOWER(CAST(guests AS TEXT)) LIKE ?', [$lowerEscaped]);
+            }
+        };
+
+        return $query->where(function ($q) use ($escaped, $term, $guestNameFilter) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
                   ->orWhereHas('user', function ($userQuery) use ($escaped) {
                       $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
                   })
-                  ->orWhereHas('bookingRooms', function ($brQuery) use ($escaped) {
-                      $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', ['%' . strtolower($escaped) . '%']);
-                  });
+                  ->orWhereHas('bookingRooms', $guestNameFilter);
             } else {
                 $q->whereHas('user', function ($userQuery) use ($escaped) {
                     $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
                 })
-                ->orWhereHas('bookingRooms', function ($brQuery) use ($escaped) {
-                    $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', ['%' . strtolower($escaped) . '%']);
-                });
+                ->orWhereHas('bookingRooms', $guestNameFilter);
             }
         });
     }
@@ -329,7 +360,7 @@ class BookingController extends Controller
         $request->validate([
             // 🌟 Refactor (25/06/26): booking container states เท่านั้น
             // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
-            'status' => 'required|string|in:draft,paid,confirmed,complete,cancelled'
+            'status' => 'required|string|in:draft,paid,confirmed,complete'
         ]);
 
         try {

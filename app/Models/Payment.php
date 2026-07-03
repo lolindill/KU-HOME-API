@@ -32,10 +32,16 @@ class Payment extends Model
     {
         return $this->belongsTo(Booking::class);
     }
-    
+
     // 🌟 Relationship: พนักงานที่รับเงิน
     public function receiver()
     {
         return $this->belongsTo(User::class, 'received_by');
+    }
+
+    // 🌟 Fix L2 (03/07/26): inverse relationship ที่หายไป — Receipt เคยมี belongsTo(Payment) ฝ่ายเดียว
+    public function receipts()
+    {
+        return $this->hasMany(Receipt::class);
     }
 }

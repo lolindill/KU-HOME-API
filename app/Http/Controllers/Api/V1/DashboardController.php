@@ -59,6 +59,11 @@ class DashboardController extends Controller
                 throw new \Exception('No active cleaning task found for this room. It might be already clean!');
             }
 
+            // 🌟 Fix L3 (03/07/26): guard กัน regression — งานที่เสร็จแล้ว ห้ามเปลี่ยนสถานะกลับ
+            if ($task->status === 'done') {
+                throw new \Exception('งานทำความสะอาดนี้ทำเสร็จแล้วค่ะนายท่าน ไม่สามารถเปลี่ยนสถานะได้อีกนะคะ');
+            }
+
             // อัปเดตสถานะงาน
             $task->status = $validated['status'];
 

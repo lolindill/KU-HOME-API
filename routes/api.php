@@ -104,6 +104,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);
             Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
             Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
+            Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow']);
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
         });
 
