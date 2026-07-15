@@ -1,15 +1,15 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\V1\AuthController;
-use App\Http\Controllers\Api\V1\UserController;
-use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\AddonRateController;
-use App\Http\Controllers\Api\V1\RoomController;
-use App\Http\Controllers\Api\V1\PaymentController;
-use App\Http\Controllers\Api\V1\FrontDeskController;
+use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\ImageController;
+use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\UserController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -108,12 +108,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
         });
 
-        // 🧹 Dashboard / Housekeeping (admin only)
-        Route::prefix('dashboard')->group(function () {
-            Route::get('/cleaning-tasks', [DashboardController::class, 'cleaningTasks']);
-            Route::put('/cleaning-tasks/{roomId}', [DashboardController::class, 'updateCleaningStatus']);
-        });
-
         // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
         Route::post('/payments', [PaymentController::class, 'requestPayment']);
 
@@ -121,5 +115,23 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/addon-rates/{id}', [AddonRateController::class, 'update']);
         Route::patch('/addon-rates/{id}/toggle', [AddonRateController::class, 'toggleActive']);
 
+        // 🧹 Dashboard / Housekeeping — Admin endpoints (Fix S-B4)
+        Route::prefix('dashboard')->group(function () {
+            Route::get('/tasks', [DashboardController::class, 'listTasks']);
+            Route::post('/tasks', [DashboardController::class, 'createTask']);
+            Route::put('/tasks/{id}/assign', [DashboardController::class, 'assignTask'])
+                ->where('id', '[0-9a-f\-]{36}');
+        });
+    });
+
+    // 🧹 Dashboard / Housekeeping — Shared endpoints (admin OR housekeeping)
+    //    CheckRole middleware: 'role:admin,housekeeping' = OR semantics (เข้าได้ทั้งสอง role)
+    //    อยู่ใต้ prefix('v1') + auth:sanctum อยู่แล้ว จึงใช้ prefix('dashboard') ต่อ
+    Route::middleware('role:admin,housekeeping')->prefix('dashboard')->group(function () {
+        Route::get('/tasks/unassigned', [DashboardController::class, 'unassignedTasks']);
+        Route::post('/tasks/{id}/accept', [DashboardController::class, 'acceptTask'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::patch('/tasks/{id}/status', [DashboardController::class, 'updateStatus'])
+            ->where('id', '[0-9a-f\-]{36}');
     });
 });

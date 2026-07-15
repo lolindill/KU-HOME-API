@@ -3,19 +3,20 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
-use App\Models\Room;
-use App\Models\User;
+use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Receipt;
-use App\Models\HousekeepingTask;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use App\Models\Room;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class FrontDeskController extends Controller
 {
@@ -41,7 +42,7 @@ class FrontDeskController extends Controller
             DB::beginTransaction();
 
             $room = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
-            if (!in_array($room->status, ['available', 'prep_checkin'])) {
+            if (! in_array($room->status, ['available', 'prep_checkin'])) {
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
 
@@ -96,24 +97,25 @@ class FrontDeskController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Walk-in failed: " . $e->getMessage());
+            Log::error('Walk-in failed: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 400);
         }
     }
 
     // 🛎️ 2. Check-In (BR-level)
     public function checkIn(Request $request, $bookingId)
-    {   
+    {
         if (is_string($request->input('assigned_rooms'))) {
             $request->merge([
-                'assigned_rooms' => [$request->input('assigned_rooms')]
+                'assigned_rooms' => [$request->input('assigned_rooms')],
             ]);
         }
         $validated = $request->validate([
-            'assigned_rooms'   => 'nullable|array',
+            'assigned_rooms' => 'nullable|array',
             'assigned_rooms.*' => 'required|uuid|exists:rooms,id',
         ]);
 
@@ -121,22 +123,22 @@ class FrontDeskController extends Controller
             DB::beginTransaction();
 
             $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
-            
+
             $user = $request->user();
-            if (!$user) {
-                throw new \Exception("Unauthorized: ไม่พบข้อมูลผู้ใช้งานจาก Token ค่ะนายท่าน", 401);
+            if (! $user) {
+                throw new \Exception('Unauthorized: ไม่พบข้อมูลผู้ใช้งานจาก Token ค่ะนายท่าน', 401);
             }
-            
+
             $userId = $user->id;
             $userRole = $user->role;
 
             // จับคู่ห้องพัก
-            if (!empty($validated['assigned_rooms'])) {
+            if (! empty($validated['assigned_rooms'])) {
                 $assignedRooms = $validated['assigned_rooms'];
                 $bookingRooms = $booking->bookingRooms;
 
                 if (count($assignedRooms) !== $bookingRooms->count()) {
-                    throw new \Exception("จำนวนห้องที่ส่งมา (".count($assignedRooms).") ไม่ตรงกับจำนวนห้องที่จองไว้ (".$bookingRooms->count().") ค่ะนายท่าน");
+                    throw new \Exception('จำนวนห้องที่ส่งมา ('.count($assignedRooms).') ไม่ตรงกับจำนวนห้องที่จองไว้ ('.$bookingRooms->count().') ค่ะนายท่าน');
                 }
 
                 foreach ($bookingRooms as $index => $bRoom) {
@@ -145,21 +147,21 @@ class FrontDeskController extends Controller
                     // ✅ #32 Fixed: ตรวจว่าห้องที่ assign ตรงกับ room type ที่จองไว้
                     if ($assignedRoom->room_type_id !== $bRoom->room_type_id) {
                         throw new \Exception(
-                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) " .
-                            "ไม่ตรงกับประเภทห้องที่จองไว้ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ"
+                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
+                            'ไม่ตรงกับประเภทห้องที่จองไว้ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ'
                         );
                     }
 
                     $bRoom->update(['room_id' => $assignedRooms[$index]]);
                 }
-                
-                $booking->load('bookingRooms'); 
+
+                $booking->load('bookingRooms');
             }
 
             $roomUpdates = [];
 
             foreach ($booking->bookingRooms as $bRoom) {
-                if (!$bRoom->room_id) {
+                if (! $bRoom->room_id) {
                     throw new \Exception("ไม่สามารถเช็คอินได้ค่ะ รายการจอง ID {$bRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักค่ะนายท่าน");
                 }
 
@@ -177,7 +179,7 @@ class FrontDeskController extends Controller
 
                 $roomUpdates[] = [
                     'room_number' => $room->room_number,
-                    'new_status' => $room->status
+                    'new_status' => $room->status,
                 ];
             }
 
@@ -186,8 +188,8 @@ class FrontDeskController extends Controller
             // ห้ามข้ามขั้นตอนการชำระเงิน — staff ต้อง record payment ก่อนทุกครั้ง
             if ($booking->status === 'draft') {
                 throw new \Exception(
-                    "ไม่สามารถเช็คอินได้ค่ะนายท่าน เนื่องจากรายการจองยังไม่ได้รับชำระเงิน " .
-                    "กรุณาบันทึกการรับชำระเงินก่อน (draft → paid) แล้วจึงกลับมาเช็คอินนะคะ"
+                    'ไม่สามารถเช็คอินได้ค่ะนายท่าน เนื่องจากรายการจองยังไม่ได้รับชำระเงิน '.
+                    'กรุณาบันทึกการรับชำระเงินก่อน (draft → paid) แล้วจึงกลับมาเช็คอินนะคะ'
                 );
             } elseif ($booking->status === 'paid') {
                 $booking->transitionStatus('confirmed', $userRole);
@@ -201,26 +203,27 @@ class FrontDeskController extends Controller
                 'message' => 'Check-in completed successfully! 🎉',
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
-                'room_updates' => $roomUpdates
+                'room_updates' => $roomUpdates,
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        } catch (ModelNotFoundException $e) {
             DB::rollBack();
-            $modelName = class_basename($e->getModel()); 
+            $modelName = class_basename($e->getModel());
+
             return response()->json([
                 'status' => 'error',
-                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน"
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน",
             ], 404);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Check-in failed: " . $e->getMessage());
+            Log::error('Check-in failed: '.$e->getMessage());
             $statusCode = $e->getCode();
             $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
 
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], $statusCode);
         }
     }
@@ -230,16 +233,16 @@ class FrontDeskController extends Controller
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
         $user = $request->user();
-        if (!$user || $user->role !== 'admin') {
+        if (! $user || $user->role !== 'admin') {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Check-out ได้ค่ะนายท่าน'
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Check-out ได้ค่ะนายท่าน',
             ], 403);
         }
 
         $validated = $request->validate([
             'verified_by' => 'required|uuid|exists:users,id',
-            'notes' => 'nullable|string'
+            'notes' => 'nullable|string',
         ]);
 
         try {
@@ -249,15 +252,15 @@ class FrontDeskController extends Controller
 
             // 🌟 Refactor (25/06/26): เช็คที่ BR-level ว่าทุกห้อง checked_in หรือไม่
             $allCheckedIn = $booking->bookingRooms->every(fn ($br) => $br->status === 'checked_in');
-            if (!$allCheckedIn) {
+            if (! $allCheckedIn) {
                 throw new \Exception('ยังมีห้องที่ไม่ได้ Check-in อยู่ค่ะ จะ Check-out ไม่ได้น้า');
             }
 
             // ตรวจสอบยอดชำระเงิน
             $totalPaid = Payment::where('booking_id', $bookingId)
-                            ->where('status', 'completed')
-                            ->sum('amount');
-                            
+                ->where('status', 'completed')
+                ->sum('amount');
+
             if ($totalPaid < $booking->total_amount) {
                 $pendingAmount = $booking->total_amount - $totalPaid;
                 throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
@@ -266,7 +269,9 @@ class FrontDeskController extends Controller
             $roomUpdates = [];
 
             foreach ($booking->bookingRooms as $bRoom) {
-                if (!$bRoom->room_id) continue;
+                if (! $bRoom->room_id) {
+                    continue;
+                }
 
                 $room = Room::findOrFail($bRoom->room_id);
 
@@ -276,19 +281,35 @@ class FrontDeskController extends Controller
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง → checkout_makeup
                 $room->transitionStatusTo('checkout_makeup', $validated['verified_by']);
 
-                // ออกใบสั่งงานแม่บ้านทันที
-                $task = HousekeepingTask::create([
-                    'id' => Str::uuid(),
-                    'room_id' => $room->id,
-                    'status' => 'pending',
-                    'notes' => $validated['notes'] ?? 'Auto-generated from Check-out',
-                    'checked_out_at' => Carbon::now()
-                ]);
+                // 🧹 Phase A (15/07/26): สร้าง housekeeping task — เพิ่ม task_type + duplicate guard (Fix S-B2)
+                //    ก่อนสร้าง → เช็คว่ามี active task ในห้องนี้อยู่แล้วหรือไม่ ถ้ามีไม่สร้างซ้ำ
+                $activeExists = HousekeepingTask::where('room_id', $room->id)
+                    ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                    ->exists();
+
+                if (! $activeExists) {
+                    // checkout_then_in = checkout ที่มี confirmed booking check_in วันนี้ ใน room_type เดียวกัน
+                    // (กรณีรีบเคลียร์ห้องเพราะแขกใหม่จะเข้าทันที)
+                    $rush = BookingRoom::where('room_type_id', $room->room_type_id)
+                        ->whereDate('check_in', Carbon::today())
+                        ->where('status', 'confirmed')
+                        ->exists();
+
+                    $task = HousekeepingTask::create([
+                        'id' => Str::uuid(),
+                        'room_id' => $room->id,
+                        'task_type' => $rush ? 'checkout_then_in' : 'checkout',
+                        'status' => 'unassigned',
+                        'notes' => $validated['notes'] ?? 'Auto-generated from Check-out',
+                    ]);
+                } else {
+                    $task = null;
+                }
 
                 $roomUpdates[] = [
                     'room_number' => $room->room_number,
                     'room_status' => $room->status,
-                    'housekeeping_task_id' => $task->id
+                    'housekeeping_task_id' => $task?->id,
                 ];
             }
 
@@ -302,15 +323,16 @@ class FrontDeskController extends Controller
                 'message' => 'Check-out completed successfully. สร้างงานให้ทีมแม่บ้านเรียบร้อยค่ะ!',
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
-                'room_updates' => $roomUpdates
+                'room_updates' => $roomUpdates,
             ], 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Check-out failed: " . $e->getMessage());
+            Log::error('Check-out failed: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 400);
         }
     }
@@ -320,17 +342,17 @@ class FrontDeskController extends Controller
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย
         $user = $request->user();
-        if (!$user || $user->role !== 'admin') {
+        if (! $user || $user->role !== 'admin') {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Mark No-Show ได้ค่ะนายท่าน'
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Mark No-Show ได้ค่ะนายท่าน',
             ], 403);
         }
 
         $validated = $request->validate([
-            'verified_by'        => 'required|uuid|exists:users,id',
+            'verified_by' => 'required|uuid|exists:users,id',
             // 🌟 Fix (03/07/26): รองรับ partial no-show — ถ้าไม่ส่ง = mark ทุกห้องใน booking
-            'booking_room_ids'   => 'nullable|array',
+            'booking_room_ids' => 'nullable|array',
             'booking_room_ids.*' => 'required|uuid|exists:booking_rooms,id',
         ]);
 
@@ -345,7 +367,7 @@ class FrontDeskController extends Controller
             }
 
             // 🌟 เลือก BR ที่จะ mark (ถ้าไม่ส่ง booking_room_ids = ทุกห้อง)
-            $targetRooms = !empty($validated['booking_room_ids'])
+            $targetRooms = ! empty($validated['booking_room_ids'])
                 ? $booking->bookingRooms->whereIn('id', $validated['booking_room_ids'])
                 : $booking->bookingRooms;
 
@@ -358,7 +380,7 @@ class FrontDeskController extends Controller
             foreach ($targetRooms as $bRoom) {
                 if ($bRoom->status !== 'confirmed') {
                     throw new \Exception(
-                        "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ '{$bRoom->status}' " .
+                        "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ '{$bRoom->status}' ".
                         "(ต้องเป็น 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
                     );
                 }
@@ -389,23 +411,24 @@ class FrontDeskController extends Controller
                 'booking_status' => $booking->status,
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        } catch (ModelNotFoundException $e) {
             DB::rollBack();
             $modelName = class_basename($e->getModel());
+
             return response()->json([
                 'status' => 'error',
-                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน"
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน",
             ], 404);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Mark no-show failed: " . $e->getMessage());
+            Log::error('Mark no-show failed: '.$e->getMessage());
             $statusCode = $e->getCode();
             $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
 
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], $statusCode);
         }
     }
@@ -415,10 +438,10 @@ class FrontDeskController extends Controller
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย
         $user = $request->user();
-        if (!$user || $user->role !== 'admin') {
+        if (! $user || $user->role !== 'admin') {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะบันทึกการรับชำระเงินได้ค่ะนายท่าน'
+                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะบันทึกการรับชำระเงินได้ค่ะนายท่าน',
             ], 403);
         }
 
@@ -436,7 +459,7 @@ class FrontDeskController extends Controller
                 'payment_method' => $validated['payment_method'],
                 'status' => 'completed',
                 'reference_number' => $validated['reference_number'] ?? null,
-                'received_by' => $validated['received_by'] ?? null
+                'received_by' => $validated['received_by'] ?? null,
             ]);
 
             // ✅ #18 Fixed: อัปเดต is_paid + booking status เมื่อชำระครบแล้ว
@@ -444,7 +467,7 @@ class FrontDeskController extends Controller
                 ->where('status', 'completed')
                 ->sum('amount');
 
-            if ($totalPaid >= $booking->total_amount && !$booking->is_paid) {
+            if ($totalPaid >= $booking->total_amount && ! $booking->is_paid) {
                 // 🌟 Fix H3 (03/07/26): unify is_paid write ให้เป็นวิธีเดียวกับ webhook
                 // ใช้ Eloquent update (PHP boolean) แทน DB::raw('TRUE') — portable ข้าม DB + trigger events
                 $booking->update(['is_paid' => true]);
@@ -456,7 +479,7 @@ class FrontDeskController extends Controller
 
                 // 🌟 Fix M2 (03/07/26): Idempotency guard กัน duplicate receipt
                 // (ถ้า payment_id เดิมเคยออกใบเสร็จแล้ว จะไม่สร้างซ้ำ)
-                if (!Receipt::where('payment_id', $payment->id)->exists()) {
+                if (! Receipt::where('payment_id', $payment->id)->exists()) {
                     Receipt::create([
                         'receipt_no' => Receipt::generateUniqueReceiptNo(),
                         'booking_id' => $booking->id,
@@ -479,10 +502,11 @@ class FrontDeskController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Record payment failed: " . $e->getMessage());
+            Log::error('Record payment failed: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 400);
         }
     }

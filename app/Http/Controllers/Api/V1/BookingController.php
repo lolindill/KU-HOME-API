@@ -3,50 +3,51 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Http\Requests\StoreBookingRequest;
+use App\Models\Addon;
+use App\Models\AddonRate;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
-use App\Models\Addon;
-use App\Models\AddonRate;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use App\Services\RoomAllocator\RoomAllocator;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class BookingController extends Controller
-{   
+{
     public function getBookings(Request $request)
     {
         try {
             $user = $request->user('sanctum');
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
-                    'status' => 'error', 
-                    'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!'
+                    'status' => 'error',
+                    'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!',
                 ], 401);
             }
 
             $term = $request->query('term');
             $roomTypeId = $request->query('room_type', 'all');
-            $checkIn = $request->query('check_in'); 
+            $checkIn = $request->query('check_in');
             $checkOut = $request->query('check_out');
 
             // 🌟 เปลี่ยน Eager Loading ตรงนี้ค่ะนายท่าน! จาก addon เป็น bookingRooms.addon
             $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'bookingRooms.addon'])
                 ->when($user && $user->role === 'admin', function ($q) {
-                $q->with('user');
-            });
+                    $q->with('user');
+                });
 
             if ($user && $user->role === 'admin') {
             } elseif ($user) {
                 $query->where('user_id', $user->id);
-            } 
+            }
 
             if ($term) {
                 $query = $this->applyUserFilter($query, $term);
@@ -81,13 +82,13 @@ class BookingController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            Log::error("Server error getting bookings: " . $e->getMessage(), [
+            Log::error('Server error getting bookings: '.$e->getMessage(), [
                 'user_id' => optional($request->user('sanctum'))->id,
             ]);
-            
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
@@ -102,16 +103,16 @@ class BookingController extends Controller
 
         $discountAmount = 0;
         if (strtoupper($request->code) === 'WELCOME10') {
-            $discountAmount = $request->subtotal * 0.10; 
+            $discountAmount = $request->subtotal * 0.10;
         }
 
         return response()->json([
             'status' => 'success',
             'discount_applied' => $discountAmount,
-            'net_total' => $request->subtotal - $discountAmount
+            'net_total' => $request->subtotal - $discountAmount,
         ]);
     }
-  
+
     public function createBooking(StoreBookingRequest $request)
     {
         try {
@@ -120,8 +121,8 @@ class BookingController extends Controller
             // 🛑 1. ดักจับสายดอง: ถ้านายท่านมีบิล Draft ที่ยังไม่หมดเวลา ห้ามสร้างใหม่เด็ดขาด!
             // 🌟 Refactor (18/06/26): Guest/Non-member ใช้งานไม่ได้แล้ว — เช็คแค่ user ที่ล็อกอิน
             $userId = $request->user('sanctum')?->id;
-            if (!$userId) {
-                throw new \Exception("กรุณาล็อกอินก่อนทำการจองค่ะนายท่าน! 🔒", 401);
+            if (! $userId) {
+                throw new \Exception('กรุณาล็อกอินก่อนทำการจองค่ะนายท่าน! 🔒', 401);
             }
 
             $hasDraft = Booking::where('user_id', $userId)
@@ -130,7 +131,7 @@ class BookingController extends Controller
                 ->exists();
 
             if ($hasDraft) {
-                throw new \Exception("มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ", 422);
+                throw new \Exception('มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
             }
 
             DB::beginTransaction();
@@ -142,7 +143,7 @@ class BookingController extends Controller
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $rtId = $roomRequest['room_type_id'];
                 $requestedByType[$rtId][] = [
-                    'check_in'  => $roomRequest['check_in'],
+                    'check_in' => $roomRequest['check_in'],
                     'check_out' => $roomRequest['check_out'],
                 ];
             }
@@ -153,7 +154,7 @@ class BookingController extends Controller
                 // ตรวจทีละช่วงวันของห้องที่ขอจอง — นับทั้ง existing bookings และ batch requests ที่ overlap
                 // (เพื่อกันกรณีห้อง 2 ห้องใน booking เดียวกันจองช่วงเวลาที่ทับซ้อนกัน)
                 foreach ($requests as $checkReq) {
-                    $checkIn  = Carbon::parse($checkReq['check_in']);
+                    $checkIn = Carbon::parse($checkReq['check_in']);
                     $checkOut = Carbon::parse($checkReq['check_out']);
 
                     // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
@@ -167,7 +168,7 @@ class BookingController extends Controller
                     // นับห้องใน batch นี้ที่ overlap กับช่วงวันของห้องปัจจุบัน
                     $batchOverlapping = 0;
                     foreach ($requests as $otherReq) {
-                        $otherIn  = Carbon::parse($otherReq['check_in']);
+                        $otherIn = Carbon::parse($otherReq['check_in']);
                         $otherOut = Carbon::parse($otherReq['check_out']);
                         if ($otherIn < $checkOut && $otherOut > $checkIn) {
                             $batchOverlapping++;
@@ -175,7 +176,7 @@ class BookingController extends Controller
                     }
 
                     if (($existingBooked + $batchOverlapping) > $totalRooms) {
-                        throw new \Exception("ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ", 422);
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
                     }
                 }
             }
@@ -183,7 +184,7 @@ class BookingController extends Controller
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
-                'confirmation' => $confirmationNo, 
+                'confirmation' => $confirmationNo,
                 'user_id' => $userId,
                 'source' => $validated['source'],
                 'status' => 'draft',
@@ -191,10 +192,10 @@ class BookingController extends Controller
                 // 🌟 Refactor (25/06/26): ย้าย check_in/check_out ไปที่ booking_rooms แล้ว
                 // bookings เก็บแค่ container + payment info เท่านั้น
 
-                'total_amount' => 0, 
-                'payment_deadline' => Carbon::now()->addHours(24)
+                'total_amount' => 0,
+                'payment_deadline' => Carbon::now()->addHours(24),
             ]);
-            
+
             $totalAmount = 0;
 
             // 🌟 Refactor (19/06/26): ดึง rate จาก addon_rates (server-side) ทีเดียวจบ
@@ -206,7 +207,7 @@ class BookingController extends Controller
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
 
                 // 🌟 Refactor (02/07/26): คำนวณ nights รายห้อง (แต่ละห้องมีวันที่ต่างกันได้)
-                $roomCheckIn  = Carbon::parse($roomRequest['check_in']);
+                $roomCheckIn = Carbon::parse($roomRequest['check_in']);
                 $roomCheckOut = Carbon::parse($roomRequest['check_out']);
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
@@ -219,8 +220,8 @@ class BookingController extends Controller
                 $addons = $roomRequest['addons'] ?? [];
                 $breakfastQty = $addons['breakfast'] ?? 0;
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = !empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
-                $lateCheckOutPrice = !empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
+                $earlyCheckInPrice = ! empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
+                $lateCheckOutPrice = ! empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
 
                 // รวมยอดของห้องนี้ทั้งหมด
                 $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
@@ -251,7 +252,7 @@ class BookingController extends Controller
                 ]);
             }
 
-            $booking->update(['total_amount' => $totalAmount]); 
+            $booking->update(['total_amount' => $totalAmount]);
 
             DB::commit();
 
@@ -266,21 +267,21 @@ class BookingController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             // 🛡️ #40 Fixed: Business logic errors (422) ส่ง message ได้, unexpected errors ซ่อน
             $code = $e->getCode();
             if (in_array($code, [401, 422])) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => $e->getMessage()
+                    'message' => $e->getMessage(),
                 ], $code);
             }
 
-            Log::error("Failed to create booking: " . $e->getMessage());
-            
+            Log::error('Failed to create booking: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+                'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
@@ -296,7 +297,7 @@ class BookingController extends Controller
 
         // 🌟 Refactor (18/06/26): ลบ guest_name (ย้ายไป booking_rooms.guests แล้ว) — ค้นผ่าน user กับ primary_guest_name แทน
         // 🌟 Fix scrutinize (29/06/26): JSON_EXTRACT ใช้ได้แค่ MySQL/SQLite — ทำให้ cross-DB compatible
-        $lowerEscaped = '%' . strtolower($escaped) . '%';
+        $lowerEscaped = '%'.strtolower($escaped).'%';
         $guestNameFilter = function ($brQuery) use ($lowerEscaped) {
             $driver = DB::getDriverName();
             if (in_array($driver, ['mysql', 'sqlite'])) {
@@ -313,15 +314,15 @@ class BookingController extends Controller
         return $query->where(function ($q) use ($escaped, $term, $guestNameFilter) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
-                  ->orWhereHas('user', function ($userQuery) use ($escaped) {
-                      $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
-                  })
-                  ->orWhereHas('bookingRooms', $guestNameFilter);
+                    ->orWhereHas('user', function ($userQuery) use ($escaped) {
+                        $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
+                    })
+                    ->orWhereHas('bookingRooms', $guestNameFilter);
             } else {
                 $q->whereHas('user', function ($userQuery) use ($escaped) {
-                    $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
+                    $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                 })
-                ->orWhereHas('bookingRooms', $guestNameFilter);
+                    ->orWhereHas('bookingRooms', $guestNameFilter);
             }
         });
     }
@@ -335,11 +336,11 @@ class BookingController extends Controller
         return $query->whereHas('bookingRooms', function ($br) use ($startDate, $endDate) {
             $br->where(function ($q) use ($startDate, $endDate) {
                 $q->whereBetween('check_in', [$startDate, $endDate])
-                  ->orWhereBetween('check_out', [$startDate, $endDate])
-                  ->orWhere(function ($subQ) use ($startDate, $endDate) {
-                      $subQ->where('check_in', '<=', $startDate)
-                           ->where('check_out', '>=', $endDate);
-                  });
+                    ->orWhereBetween('check_out', [$startDate, $endDate])
+                    ->orWhere(function ($subQ) use ($startDate, $endDate) {
+                        $subQ->where('check_in', '<=', $startDate)
+                            ->where('check_out', '>=', $endDate);
+                    });
             });
         });
     }
@@ -347,7 +348,7 @@ class BookingController extends Controller
     private function applyRoomTypeFilter($query, $roomTypeId)
     {
         if (empty($roomTypeId) || $roomTypeId === 'all') {
-            return $query; 
+            return $query;
         }
 
         return $query->whereHas('bookingRooms', function ($q) use ($roomTypeId) {
@@ -360,39 +361,40 @@ class BookingController extends Controller
         $request->validate([
             // 🌟 Refactor (25/06/26): booking container states เท่านั้น
             // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
-            'status' => 'required|string|in:draft,paid,confirmed,complete'
+            'status' => 'required|string|in:draft,paid,confirmed,complete',
         ]);
 
         try {
             $booking = Booking::findOrFail($id);
             $newStatus = $request->status;
-            
+
             $user = $request->user('sanctum');
             $userRole = $user ? $user->role : 'guest';
-            
+
             $booking->transitionStatus($newStatus, $userRole);
 
             return response()->json([
-                'status'  => 'success',
+                'status' => 'success',
                 'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            $modelName = class_basename($e->getModel()); 
+        } catch (ModelNotFoundException $e) {
+            $modelName = class_basename($e->getModel());
+
             return response()->json([
-                'status'  => 'error',
-                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ"
+                'status' => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ",
             ], 404);
 
         } catch (\Exception $e) {
             $statusCode = $e->getCode() ?: 500;
-            Log::error("Failed to update booking status: " . $e->getMessage());
-            
+            Log::error('Failed to update booking status: '.$e->getMessage());
+
             return response()->json([
-                'status'  => 'error',
-                'message' => $e->getMessage()
+                'status' => 'error',
+                'message' => $e->getMessage(),
             ], $statusCode);
         }
     }
@@ -402,10 +404,10 @@ class BookingController extends Controller
         try {
             $user = $request->user('sanctum');
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!'
+                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!',
                 ], 401);
             }
 
@@ -416,7 +418,7 @@ class BookingController extends Controller
             if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒'
+                    'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒',
                 ], 403);
             }
 
@@ -432,7 +434,8 @@ class BookingController extends Controller
                 'message' => 'ไม่พบรหัสการจองนี้ในระบบค่ะนายท่าน 🔎',
             ], 404);
         } catch (\Exception $e) {
-            Log::error("Failed to show booking: " . $e->getMessage());
+            Log::error('Failed to show booking: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
@@ -443,25 +446,25 @@ class BookingController extends Controller
     // 🌟 Refactor (18/06/26): lookupBooking ถูกลบแล้ว — Guest/Non-member ไม่สามารถใช้งานระบบได้
     // นายท่านต้องล็อกอินก่อน แล้วใช้ showById เพื่อดูข้อมูลการจองของตัวเองได้เลยค่ะ
 
-   public function autoAssignRooms(Request $request, $bookingId)
+    public function autoAssignRooms(Request $request, $bookingId)
     {
         try {
             DB::beginTransaction();
 
             // 🌟 1. โหลดข้อมูลการจอง พร้อมกับห้องพัก และ Addon มาด้วยเลย
             $booking = Booking::with(['bookingRooms.addon'])->findOrFail($bookingId);
-  
+
             // =========================================================
             // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin)
             // =========================================================
             $user = $request->user('sanctum');
-            
+
             // ถ้านายท่านยังไม่ได้ล็อกอิน
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'นายท่านยังไม่ได้ล็อกอินนะคะ! กรุณาแนบ Token ก่อนทำรายการค่ะ 🔒',
-                    'user' => $user
+                    'user' => $user,
                 ], 401);
             }
 
@@ -469,17 +472,17 @@ class BookingController extends Controller
             if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️'
+                    'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️',
                 ], 403);
             }
 
             // =========================================================
             // 🛡️ ด่านตรวจที่ 2: เช็คสถานะ Booking (ต้อง paid หรือ confirmed เท่านั้น)
             // =========================================================
-            if (!in_array($booking->status, ['paid', 'confirmed'])) {
+            if (! in_array($booking->status, ['paid', 'confirmed'])) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => "ยังระบุเลขห้องไม่ได้ค่ะนายท่าน! สถานะปัจจุบันคือ '{$booking->status}' (ต้องจ่ายเงิน 'paid' หรือยืนยัน 'confirmed' ก่อนนะคะ) 💳"
+                    'message' => "ยังระบุเลขห้องไม่ได้ค่ะนายท่าน! สถานะปัจจุบันคือ '{$booking->status}' (ต้องจ่ายเงิน 'paid' หรือยืนยัน 'confirmed' ก่อนนะคะ) 💳",
                 ], 422);
             }
 
@@ -494,29 +497,32 @@ class BookingController extends Controller
                 if ($booking->bookingRooms()->count() === 0) {
                     return response()->json([
                         'status' => 'error',
-                        'message' => 'เอ๊ะ! บุ๊กกิ้งนี้ยังไม่มีการจองห้องพักเข้ามาเลยนะคะนายท่าน! 💦'
+                        'message' => 'เอ๊ะ! บุ๊กกิ้งนี้ยังไม่มีการจองห้องพักเข้ามาเลยนะคะนายท่าน! 💦',
                     ], 422);
                 }
 
                 return response()->json([
                     'status' => 'info',
-                    'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨'
+                    'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨',
                 ]);
             }
 
             // 🌟 Refactor (25/06/26): BR-level dates แล้ว — assignAvailableRoom() ใช้ $this->check_in/check_out เอง
+            // 🏨 Phase 5: เปลี่ยนจาก first-available greedy แบบเดิม → RoomAllocator (Hybrid+ v3 cluster algorithm)
+            //    เหตุผล: algorithm ใหม่จัดห้องเป็น cluster (ระยะเดินใกล้กันที่สุด) แทนที่จะ assign ทีละ BR แยกกัน
             $assignedCount = 0;
 
-            foreach ($unassignedRooms as $bookingRoom) {
-                // 🌟 เรียกใช้ Method จาก Model แบบหล่อๆ เท่ๆ ไปเลยค่ะ ไม่มี Parameter มากวนใจ!
-                $isSuccess = $bookingRoom->assignAvailableRoom();
+            $result = app(RoomAllocator::class)->allocate($unassignedRooms);
 
-                if ($isSuccess) {
-                    $assignedCount++;
-                } else {
-                    // ถ้าหาห้องไม่ได้ ให้ Throw Exception ออกไปให้ Catch ทำงาน
-                    throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่มีห้องพักว่างให้ระบุเลขห้องได้ในช่วงเวลาดังกล่าวค่ะ 😭 (ตรวจสอบห้องประเภท ID: {$bookingRoom->room_type_id})");
-                }
+            if (! $result->ok) {
+                $failedTypes = $unassignedRooms->map(fn ($br) => $br->room_type_id)->unique()->implode(', ');
+                $winner = $result->winner ?? 'none';
+                throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่สามารถจัดห้องเป็น cluster ได้ในช่วงเวลาดังกล่าวค่ะ 😭 (room_type_id: {$failedTypes}) — algorithm: {$winner}");
+            }
+
+            foreach ($result->assignments as $brId => $roomId) {
+                BookingRoom::where('id', $brId)->update(['room_id' => $roomId]);
+                $assignedCount++;
             }
 
             DB::commit();
@@ -525,20 +531,26 @@ class BookingController extends Controller
                 'status' => 'success',
                 'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
                 'booking' => $booking->load('bookingRooms.room'),
+                // 🏨 debug info: algorithm ที่ชนะ + cluster cost
+                'allocation' => [
+                    'winner' => $result->winner,
+                    'cost' => round($result->cost, 2),
+                    'algo' => $result->algo,
+                ],
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ไม่พบข้อมูลการจองนี้ในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ'
+                'message' => 'ไม่พบข้อมูลการจองนี้ในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ',
             ], 404);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Failed to auto-assign room: " . $e->getMessage());
-            
+            Log::error('Failed to auto-assign room: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: ' . $e->getMessage()
+                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: '.$e->getMessage(),
             ], 422);
         }
     }

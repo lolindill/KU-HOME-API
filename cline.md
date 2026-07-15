@@ -26,6 +26,121 @@ composer run test      # Clear config + run PHPUnit tests
 php artisan serve      # Start dev server only
 ```
 
+## 📁 Project Structure
+
+```
+hotel/
+├── app/
+│   ├── Casts/
+│   │   └── PgBoolean.php              # 🌟 Custom cast: PHP bool ↔ PostgreSQL boolean (strict typing fix)
+│   ├── Console/Commands/
+│   │   ├── CleanupExpiredDrafts.php   # Scheduled 02:00 — hard-delete expired draft bookings
+│   │   └── DailyRoomMaintenance.php   # Scheduled daily — cluster auto-assign (RoomAllocator) + flag dirty
+│   ├── Http/
+│   │   ├── Controllers/Api/V1/        # All controllers (REST API, /api/v1/)
+│   │   │   ├── AuthController.php     # login, register, logout
+│   │   │   ├── UserController.php     # user CRUD, profile, verification
+│   │   │   ├── BookingController.php  # booking CRUD, status transitions, room assignment (RoomAllocator)
+│   │   │   ├── RoomController.php     # rooms & room types listing, availability
+│   │   │   ├── PaymentController.php  # payment requests, webhooks (⚠️ no HMAC yet)
+│   │   │   ├── FrontDeskController.php# walk-in bookings, check-in/out, record payments (🧹 checkout creates typed task)
+│   │   │   ├── DashboardController.php# 🧹 housekeeping dashboard (Phase A: listTasks/createTask/assignTask/acceptTask/updateStatus)
+│   │   │   ├── AddonRateController.php
+│   │   │   └── ImageController.php    # 🚧 DRAFT image upload
+│   │   ├── Middleware/
+│   │   │   └── CheckRole.php          # role-based authorization (user.role vs allowed roles)
+│   │   └── Requests/                  # 24 Form Requests (Store*/Update* per model)
+│   ├── Models/                        # 13 Eloquent models (most use UUID via HasUuids)
+│   │   ├── User.php                   # UUID PK, role field, PgBoolean casts (is_ku_member, ver)
+│   │   ├── Booking.php                # UUID, confirmation (atomic counter), PgBoolean is_paid
+│   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
+│   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
+│   │   ├── RoomType.php               # PgBoolean extra_bed_enabled
+│   │   ├── Payment.php                # integer amount (satang)
+│   │   ├── Receipt.php                # integer amount, atomic receipt_no
+│   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
+│   │   ├── HousekeepingTask.php / HousekeepingPhoto.php # 🧹 Phase A: task state machine + types
+│   │   ├── StockInventory.php         # 🧹 Phase A: master stock (replaces HousekeepingInventory)
+│   │   └── Image.php                  # 🚧 DRAFT polymorphic
+│   ├── Services/
+│   │   └── RoomAllocator/             # 🏨 Phase 4 (14/07/26): v3 Walking Distance cluster algorithm
+│   │       ├── RoomAllocator.php      # ⭐ Entry: allocate(Collection $brs) → AllocationResult
+│   │       ├── Topology.php           # globalPos() + walkingDist() — port จาก playground
+│   │       ├── Weights.php            # value object โหลดจาก config/allocation.php
+│   │       ├── CostCalculator.php     # cost() (guide) + walkCost() (🏆 Final Judge Σ pairwise)
+│   │       ├── BipartiteMatcher.php   # Kuhn's algorithm (slot ↔ room position)
+│   │       ├── BookingPriority.php    # เรียง queue: Suite → X09 → Twin → Most rooms → Checkout
+│   │       ├── X09Seeder.php          # pin Deluxe 3-bed (builtin≥2) ถ้า booking ต้องการ extra bed
+│   │       ├── Dto/                   # RoomDto, BookingRequestDto, AllocationResult
+│   │       └── Algorithms/            # Algorithm interface + A/C/D/FF + HybridPlus (EA = production)
+│   └── Providers/AppServiceProvider.php  # 🏨 Phase 5 binding: RoomAllocator + Weights (fixed 15/07/26)
+├── routes/
+│   ├── api.php                        # 🎯 All REST routes (/api/v1/, public/auth/admin groups)
+│   ├── console.php                    # Scheduled commands (DailyRoomMaintenance)
+│   └── web.php
+├── database/
+│   ├── migrations/                    # 26 migrations (UUID PKs, PgBoolean, atomic sequences, topology)
+│   │   ├── 2026_06_04_043100_create_booking_sequences_table.php  # confirmation counter
+│   │   ├── 2026_06_04_150000_create_receipt_sequences_table.php  # receipt counter
+│   │   ├── 2026_06_18_150000_move_guests_to_booking_rooms.php    # 🌟 refactor
+│   │   ├── 2026_06_19_110000_create_addon_rates_table.php        # 🌟 server-side pricing
+│   │   ├── 2026_07_03_000000_drop_children_from_bookings_table.php
+│   │   ├── 2026_07_13_105530_add_topology_to_rooms_table.php           # 🏨 floor/side/pos/bed_type
+│   │   └── 2026_07_13_105531_add_bed_preference_to_booking_rooms_table.php # 🏨 twin|any
+│   ├── seeders/                       # DatabaseSeeder, RoomSeeder (100 rooms), UserSeeder, AddonRateSeeder
+│   └── factories/UserFactory.php
+├── tests/
+│   ├── TestCase.php                   # Base: actingAsAdmin(), actingAsUser(), createAdmin()
+│   ├── Feature/                       # 8 files — HTTP integration (SQLite in-memory + RefreshDatabase)
+│   │   ├── AuthTest.php (9)           #  BookingTest.php (14)   FrontDeskTest.php (8)
+│   │   ├── PaymentTest.php (4)        #  RoomTest.php (9)       RouteProtectionTest.php (20)
+│   │   └── UserTest.php (6)
+│   └── Unit/                          # state machine + algorithm coverage
+│       ├── BookingStateTest.php (23)  #  all transitions + role restrictions
+│       ├── RoomStateTest.php (23)     #  all transitions + edge cases
+│       └── RoomAllocator/             # 🏨 Phase 6: algorithm tests (33 tests, 50 assertions)
+│           ├── TopologyTest.php (12)           # globalPos + walkingDist (pure unit)
+│           ├── CostCalculatorTest.php (13)     # cost + walkCost + breakdown (pure unit)
+│           └── RoomAllocatorIntegrationTest.php (8) # end-to-end allocate() via DB
+├── docs/                              # 📚 Documentation & interactive tools
+│   ├── api_guide.md                   # API reference (state machines, enums, validation)
+│   ├── database-er.md                 # ER diagram
+│   ├── project-status.md              # 📊 % complete per module (overall ~75%)
+│   ├── playground.md                  # 🎮 AI agent guide for room-algorithm playground
+│   ├── plan_for_test.md               # Plan: preset cases + metrics (✅ done)
+│   ├── room-algorithm-playground.html # 🎮 Single-file interactive algorithm tester (A-I)
+│   ├── room-algorithm-explainer.html  # Reference doc for algorithms A-E
+│   ├── algo_test/                     # 🏨 v3 playground (Walking Distance Final Judge)
+│   │   ├── room-algorithm-playground-eav3.html        # final algorithm (EA = Hybrid+)
+│   │   └── room-algorithm-flow-explained.md           # 📐 Paper อธิบาย flow + math
+│   ├── test-presets.cjs               # 🧪 node vm test harness (153 runs, 11 assertions)
+│   ├── _extracted.js                  # extracted JS from playground (analyze)
+│   └── API Bin v2 (KU HOME API).xlsx  # API collection export
+├── process/                           # Monthly Process Reports (DD_M_YY.md, every 16th)
+├── test_scripts/                      # Manual API test scripts (php, run from root)
+│   ├── api_guide.php                  # 🔗 Full lifecycle test (recommended)
+│   ├── api_test_chain.php             # 10-phase chained integration test
+│   ├── test_get_bookings.php          # quick GET /bookings
+│   └── quick_test.php                 # set admin role + list users
+├── config/                            # Laravel config (auth, sanctum, database, cors, queue, ...)
+│   └── allocation.php                 # 🏨 Phase 3: weights + caps (env-tunable)
+├── cline.md                           # 📖 This file — project memory for AI agents
+├── plan_re_booking.md / plan_re_booking_final.md  # booking refactor plans (used)
+├── composer.json                      # PHP 8.3, Laravel 13, Sanctum 4, Pint, Pail
+├── package.json                       # Vite (minimal — API-only project)
+└── phpunit.xml                        # SQLite in-memory test config
+```
+
+### Key Conventions in Structure
+- **Controllers**: all under `App\Http\Controllers\Api\V1\` (REST `/api/v1/` prefix)
+- **No API Resources/Transformers**: Models returned directly (no wrapper class)
+- **No Policy classes**: Authorization via `CheckRole` middleware only
+- **UUID everywhere**: Most models use `HasUuids` trait (string PK, `$incrementing=false`)
+- **Boolean columns**: Use `PgBoolean` cast (NOT PHP `true`/`false` directly — PostgreSQL strict typing)
+- **Throttle**: `5,1` on login/booking; `10,1` on lookup routes
+- **Th-file tools**: `docs/room-algorithm-playground.html` + `docs/algo_test/` are single-file HTML+CSS+JS (algorithm R&D)
+- **Service layer**: `app/Services/RoomAllocator/` is the first service namespace (Phase 4, 14/07/26) — pure classes, no container binding, invoked via `app(...)`
+
 ## 📊 Project Status Report
 
 > ไฟล์รายงานภาพรวมโปรเจกต์เป็น % — ลงรายละเอียดทั้ง 14 โมดูล + Priority Roadmap + Weighted Average
@@ -43,7 +158,7 @@ php artisan serve      # Start dev server only
 | 🚶 Front Desk | 100% |
 | 💳 Payment | **30%** (🔴 ยังไม่มี gateway + HMAC) |
 | 🧾 Receipt | **30%** (🔴 design ยังไม่ final) |
-| 🧹 Housekeeping | **60%** (🟡 items/refill ยังไม่มี detail) |
+| 🧹 Housekeeping | **90%** (✅ Phase A refactor done — Phase B WebSocket เหลือ) |
 | ➕ Addon & AddonRate | 95% |
 | 🖼️ Image Upload | 10% (🚧 draft) |
 | 🎟️ Discount | 20% (🚧 draft) |
@@ -156,16 +271,19 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### BookingRoom (`app/Models/BookingRoom.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: booking_id, room_type_id, room_id (nullable — assign at check-in), check_in, check_out, guests (JSON), children, status
+- **Fillable**: booking_id, room_type_id, room_id (nullable — assign at check-in), check_in, check_out, guests (JSON), children, status, bed_preference (🏨 twin|any — Phase 1, 13/07/26)
 - **Casts**: check_in→date, check_out→date, guests→array, children→integer
 - **Status Field**: string, managed by `transitionStatus()` BR-level state machine (draft→confirmed→checked_in→checked_out/no_show)
 - **Relationships**: booking (BelongsTo), roomType (BelongsTo), room (BelongsTo), addon (HasOne)
 - 🌟 **Refactor (25/06/26)**: `check_in`/`check_out` + `status` now live here (BR-level state machine). Each room can have different dates within the same booking.
+- 🏨 **Phase 1 (13/07/26)**: เพิ่ม `bed_preference` ('twin' | null=any) — hard constraint ใน RoomAllocator (ไม่ใช่ soft cost)
 
 #### Room (`app/Models/Room.php`)
 - **Primary Key**: UUID
 - **Status Field**: string (all lowercase), managed by `transitionStatusTo()` state machine
+- **Fillable**: room_type_id, room_number, status, builtin_extra_beds, status_updated_at, status_updated_by, **floor, side, pos, bed_type** (🏨 Phase 1, 13/07/26)
 - **Casts**: status_updated_at→datetime, builtin_extra_beds→integer (🌟 Fix 03/07/26)
+- **Topology** (🏨 Phase 1): `floor` (5-9), `side` (V1/V2A/V2B), `pos` (within side), `bed_type` (double|twin — twin เฉพาะชั้น 8)
 - **Relationships**: roomType (BelongsTo), bookingRooms (HasMany), housekeepingTasks (HasMany)
 
 #### RoomType (`app/Models/RoomType.php`)
@@ -228,14 +346,14 @@ available ──> occupied ──> checkout_makeup ──> available (via housek
 Valid room statuses: `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed`
 
 ## Console Commands
-- `DailyRoomMaintenance` (`app/Console/Commands/DailyRoomMaintenance.php`) — Scheduled daily. Resets room statuses for daily maintenance.
+- `DailyRoomMaintenance` (`app/Console/Commands/DailyRoomMaintenance.php`) — Scheduled daily. 🏨 **Phase 5 (14/07/26)**: เรียง bookings ตาม BookingPriority (Suite → X09 → Twin → Most rooms → Checkout) แล้วเรียก `RoomAllocator` (Hybrid+ v3 cluster) แทน first-available greedy แบบเดิม — booking ที่จัดยากได้สิทธิ์เลือกก่อน
 - `CleanupExpiredDrafts` (`app/Console/Commands/CleanupExpiredDrafts.php`) — Scheduled daily at 02:00. Transitions expired draft bookings (past `payment_deadline`) to `deleted` via `system` role.
 
 ## Database
 - **Current**: PostgreSQL (Supabase)
 - **Future**: Organization's own server
-- **Migrations**: 15+ migrations covering all entities
-- **Seeders**: `DatabaseSeeder`, `RoomSeeder`, `UserSeeder`
+- **Migrations**: 26 migrations covering all entities + topology + bed_preference
+- **Seeders**: `DatabaseSeeder`, `RoomSeeder` (🏨 100 rooms: 5 floors × V1/V2A/V2B), `UserSeeder`, `AddonRateSeeder`
 - **UUIDs**: Most models use UUID primary keys via `HasUuids` trait or manual `$incrementing = false`
 
 ## Monthly Process Reports (`process/`)
@@ -513,7 +631,176 @@ Tests ใหม่: `test_request_payment_rejects_when_pending_exists`, `test_re
 
 ---
 
-## 🔴 Known Unsolved Problems
+## ✅ Room Allocation Algorithm Port (2026-07-14)
+
+> **พอร์ต algorithm v3 (Walking Distance Final Judge) จาก playground เข้า backend** — แทนที่ first-available greedy แบบเดิมด้วย Hybrid+ (EA) cluster algorithm แบบ end-to-end พร้อมใช้งานจริง
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+เปลี่ยนวิธีจัดห้องจาก **"assign ทีละ BR แยกกัน"** (first-available greedy) → **"จัดห้องทั้ง booking เป็น cluster"** (ระยะเดินใกล้กันที่สุด) ตาม algorithm ใน `docs/algo_test/room-algorithm-playground-eav3.html`
+
+| ส่วน | เดิม | ใหม่ |
+|---|---|---|
+| Algorithm | `BookingRoom::assignAvailableRoom()` (first-available greedy ทีละ BR) | `RoomAllocator::allocate()` (Hybrid+ = C+D+A+FF tie-breaker, ทั้ง booking) |
+| Topology | ไม่มี (8 ห้อง 101-302) | `floor`/`side`/`pos`/`bed_type` columns + 100 ห้อง (5 ชั้น × V1/V2A/V2B) |
+| Cost | ไม่มี (sort ตาม builtin_extra_beds) | `costFunction` (guide) + `walkCost` (🏆 Final Judge Σ pairwise) |
+| bed_preference | ไม่มี | hard constraint (`twin` → ต้อง bed_type=twin เท่านั้น) |
+| X09 priority | ไม่มี | pin Deluxe 3-bed ถ้า booking ต้องการ extra bed ก่อนรัน algo |
+
+### 📐 Phase Breakdown
+
+| Phase | ไฟล์ | สิ่งที่ทำ |
+|---|---|---|
+| **1. Schema** | 2 migrations ใหม่ | `rooms` +floor/side/pos/bed_type · `booking_rooms` +bed_preference |
+| **2. Seeder** | `RoomSeeder.php` rewrite | 8 ห้อง → 100 ห้อง (5 ชั้น × 20) ตาม topology KU HOME |
+| **3. Config** | `config/allocation.php` ใหม่ | weights (floor/side/pos/bed/walk) + caps ผ่าน `.env` |
+| **4. Service** | `app/Services/RoomAllocator/` (16 ไฟล์ใหม่) | Topology, Weights, Dto, CostCalculator, BipartiteMatcher, BookingPriority, X09Seeder, 4 algorithms + HybridPlus + RoomAllocator |
+| **5. Wire-up** | `BookingController` + `DailyRoomMaintenance` | เปลี่ยนจาก `assignAvailableRoom()` → `RoomAllocator::allocate()` |
+| **6. Tests** | `tests/Unit/RoomAllocator/` (3 ไฟล์) | 33 tests: Topology (12) + CostCalculator (13) + Integration (8) |
+
+### 🧠 Algorithm Overview (port จาก playground)
+
+**4 algorithms + Hybrid+ tie-breaker (EA = production):**
+- **A (Block Contiguous)** — หาห้องติดกันจริง + bipartite matching · ถ้าไม่เจอ → ok:false → ตัดออก
+- **C (Coordinate + Cost)** — brute-force global min (n≤2 เสมอ · n=3 len≤80 · …) + multi-seed greedy fallback
+- **D (Greedy Seed + Expand)** — seed + proximity expand (|Δfloor| + |ΔglobalPos|×0.5 + side penalty)
+- **FF (Floor-First)** — edge seed + in-floor expand · overflow fallback ถ้าไม่มีชั้นจุครบ
+- **EA (Hybrid+)** — รันทั้ง 4 → filter ok → เลือก min(walkCost) · tie → C ชนะ
+
+**2 ชั้น cost:**
+- `costFunction` (guide) — multi-dimension: floorSpread + sideMismatch + posSpread² + bedWaste + bedPrefPenalty
+- `walkCost` (🏆 Final Judge) — Σ pairwise walking dist × w.walk + floor penalty · ใช้ rank ข้าม algorithm
+
+### 🐛 Bug ที่แก้ระหว่าง port (สำคัญ!)
+
+1. **Mass-assignment protection** — `Room` + `BookingRoom` model ไม่ได้ list topology columns ใน `$fillable` → algorithm ไม่เห็น floor/side/pos/bed_type ทั้งหมด → แก้โดยเพิ่มใน `$fillable`
+2. **bed_preference เป็น hard constraint** — เดิมวางเป็น soft penalty (+100) ใน costFunction ทำให้ Hybrid+ เลือก cluster แน่นที่ผิด preference ได้ → เปลี่ยนเป็น filter ในทุก algorithm (`matchesBedPreference()`)
+3. **`??` ใน string interpolation** `"{$x ?? 'y'}"` ไม่ support → ใช้ตัวแปรแยก
+
+### 📁 Files Changed (22 new + 4 modified)
+
+| Category | Files |
+|---|---|
+| Migrations | `2026_07_13_105530_add_topology_to_rooms_table`, `2026_07_13_105531_add_bed_preference_to_booking_rooms_table` |
+| Config | `config/allocation.php` (new) |
+| Seeder | `RoomSeeder.php` (rewrite — 8 → 100 rooms) |
+| Models | `Room.php` (+fillable), `BookingRoom.php` (+fillable) |
+| Service | `app/Services/RoomAllocator/` (16 new files) |
+| Controllers | `BookingController.php` (autoAssignRooms) |
+| Commands | `DailyRoomMaintenance.php` (priority sort + allocator) |
+| Tests | `tests/Unit/RoomAllocator/` (TopologyTest, CostCalculatorTest, RoomAllocatorIntegrationTest) |
+
+### 🗄️ Migration Required
+
+⚠️ **ต้องรัน `php artisan migrate:fresh --seed`** (นายท่านเลือกใช้ fresh) เพราะ:
+1. Seeder เปลี่ยนจาก 8 → 100 ห้อง (ข้อมูลเดิมใช้ไม่ได้)
+2. Algorithm ต้องการ topology columns ทุกห้อง
+
+### 🚀 การใช้งาน
+
+API endpoint `PUT /api/v1/bookings/{id}/assign-rooms` ทำงานเหมือนเดิม แต่ response มี `allocation` debug info เพิ่ม:
+```json
+{
+  "status": "success",
+  "booking": { ... },
+  "allocation": {
+    "winner": "Coordinate + Cost",   // algorithm ที่ชนะ
+    "cost": 12.0,                    // walkCost (ยิ่งต่ำยิ่ง cluster แน่น)
+    "algo": "Hybrid+ (C+D+A+FF)"
+  }
+}
+```
+
+ปรับ weights ได้ผ่าน `.env`:
+```
+ALLOC_WEIGHT_FLOOR=50
+ALLOC_WEIGHT_SIDE=8
+ALLOC_WEIGHT_POS=3
+ALLOC_WEIGHT_BED=5
+ALLOC_WEIGHT_WALK=1
+```
+
+### 🧪 Test Results (2026-07-14)
+```
+153 passed (256 assertions) — เพิ่มจาก 120 → +33 tests ใหม่ (algorithm)
+```
+Tests ใหม่ครอบคลุม: Topology (globalPos/walkingDist), CostCalculator (cost/walkCost/breakdown), Integration (solo/mixed/X09/twin/cluster/overlap/no-room)
+
+### 🔗 Related Docs
+
+- `docs/algo_test/room-algorithm-playground-eav3.html` — final algorithm playground (EA = Hybrid+)
+- `docs/algo_test/room-algorithm-flow-explained.md` — 📐 Paper อธิบาย flow + math + ตัวอย่าง
+
+---
+
+## ✅ Housekeeping Refactor — Phase A (2026-07-15)
+
+> **เปลี่ยน housekeeping จาก "งานกองกลาง auto ตอน checkout" → "ระบบจัดการงานเต็มรูปแบบ มีหลาย type, assign/accept ได้"**
+>
+> **Decisions (นายท่านเลือก):** D1=Phase A ก่อน (polling), D2=Daily wire สร้าง pre_checkin, D3=Master stock (ลอย)
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+| ส่วน | เดิม | ใหม่ (Phase A) |
+|---|---|---|
+| Task status | `pending \| in_progress \| done` (no state machine) | `unassigned → accepted → in_progress → done` (state machine + lock) |
+| Task type | ไม่มี (แยกด้วย `checked_out_at`) | `pre_checkin \| checkout \| checkout_then_in \| daily \| monthly \| group` |
+| Assign | `assigned_to` มี column แต่ไม่มี code เขียน | housekeeper accept เอง / admin assign (skip accepted) |
+| Routes | `role:admin` ทั้งคู่ | แยก admin (`listTasks/createTask/assignTask`) vs shared `role:admin,housekeeping` (`unassigned/accept/status`) |
+| prep_checkin | dead state (ไม่มี code set) | `DailyRoomMaintenance` Phase 2: set + สร้าง task `pre_checkin` อัตโนมัติ |
+| ห้อง dirty | mark dirty แต่ไม่สร้าง task → ไม่ขึ้น dashboard | mark dirty + สร้าง task `daily` (gap ปิดแล้ว) |
+| Stock | `HousekeepingInventory` (ผูก task) | `StockInventory` (master ลอย — D3) |
+| Dashboard ID | `first()` ตาม `room_id` (สับสนหลาย task/ห้อง) | ใช้ `task_id` (Fix S-B2) |
+
+### 🔴 Scrutinize Findings ที่ปิดหมด
+
+| # | Finding | วิธีแก้ |
+|---|---|---|
+| **S-B1** | `pre_checkin` trigger ไม่มีจุดเกิดจริง | `DailyRoomMaintenance` Phase 2 สร้างให้ (D2) |
+| **S-B2** | `checkout` vs `checkout_then_in` overlap + duplicate | task_id แทน room_id + duplicate guard + auto-detect rush |
+| **S-B3** | ลบ table แต่ `inventories()` relation ค้าง | ลบ relation + import |
+| **S-B4** | housekeeper route/role ไม่มี | แยก routes + seed user + in-controller role check |
+| **L3 (dead code)** | guard `done→*` อยู่หลัง `first()` ที่กรอง done ออกแล้ว | ย้าย guard เข้า `HousekeepingTask::transitionStatus()` — ทำงานจริง |
+
+### 🐛 Bonus Bug ที่เจอระหว่างทำ
+
+- **RoomAllocator binding** — `app(RoomAllocator::class)` พัง (BindingResolutionException) เพราะ container ไม่สามารถ autowire `Weights` (ต้องการ `int $floor` primitive) ได้ → เพิ่ม binding ใน `AppServiceProvider` (existing bug ตั้งแต่ Phase 5 14/07 — `DailyRoomMaintenance` พังใน production จริง ไม่เคยถูก test)
+
+### 📁 Files Changed (Phase A)
+
+| Category | Files |
+|---|---|
+| Migration | `2026_07_15_100000_refactor_housekeeping_tasks_and_add_stock_inventories` (drop `housekeeping_inventories` + add task_type/accepted_at/scheduled_for + create `stock_inventories`) |
+| Models | ❌ `HousekeepingInventory` · ✨ `StockInventory` · ✏️ `HousekeepingTask` (state machine + $fillable) · ✏️ `Room` (prep_checkin transition) |
+| Providers | ✏️ `AppServiceProvider` (RoomAllocator/Weights binding) |
+| Seeder | ✏️ `UserSeeder` (+housekeeping user) |
+| Requests | ✏️ `StoreHousekeepingTaskRequest`, `UpdateHousekeepingTaskRequest` · ✨ `AssignTaskRequest` |
+| Controller | ✏️ `DashboardController` (rewrite — 6 methods) · ✏️ `FrontDeskController::checkOut` |
+| Command | ✏️ `DailyRoomMaintenance` (Phase 2 prep_checkin + Phase 3 dirty+task) |
+| Routes | ✏️ `routes/api.php` (split admin vs shared) |
+| Tests | ✨ `HousekeepingTaskTest` (16 tests) · ✏️ `RouteProtectionTest`, `TestCase` (+housekeeping helpers) |
+
+### 🗄️ Migration Required (Breaking)
+
+⚠️ **ต้องรัน `php artisan migrate:fresh --seed`** เพราะ:
+1. Drop `housekeeping_inventories` table
+2. Status `pending → unassigned` migration
+3. Seeder เพิ่ม housekeeping user
+
+### 🧪 Test Results (2026-07-15)
+```
+173 passed (300 assertions) — เพิ่มจาก 153 → +20 tests ใหม่ (housekeeping)
+```
+Tests ใหม่ครอบคลุม: state machine lifecycle + terminal lock + role gating (admin/housekeeping/user) + duplicate prevention + pre_checkin trigger + checkout_then_in detection + done→available
+
+### 🔗 Phase B (เลื่อน — WebSocket)
+- ทำหลัง polling พิสูจน์ว่าไม่พอ
+- Stack: Laravel Reverb + Echo
+- Auth gap (S-B5): API-only + Sanctum → ใช้ public channel หรือ custom auth driver
+
+---
+
+
 
 > ปัญหาที่ตรวจพบจาก Scrutinize Report แต่ยังไม่ได้แก้ไข (อัปเดต: 2026-06-05)
 

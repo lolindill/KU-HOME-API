@@ -1,0 +1,2012 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KU HOME — คู่มืออัลกอริทึมจัดห้อง (Interactive)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --suite: #bc8cff; --deluxe: #58a6ff; --superior: #3fb950;
+    --orange: #db6d28; --purple: #a371f7;
+    --sidebar-w: 280px;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.7;
+    display: flex; min-height: 100vh;
+  }
+  /* ===== Sidebar ===== */
+  #sidebar {
+    background: var(--panel); border-right: 1px solid var(--border);
+    width: var(--sidebar-w); height: 100vh; position: sticky; top: 0;
+    overflow-y: auto; padding: 18px; flex-shrink: 0;
+  }
+  #sidebar h1 { font-size: 15px; color: var(--accent); margin-bottom: 6px; }
+  #sidebar .sub { font-size: 11px; color: var(--muted); margin-bottom: 18px; line-height: 1.5; }
+  .nav-section { margin-bottom: 16px; }
+  .nav-section h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: var(--muted); margin-bottom: 8px; padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-section a {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    font-size: 13px; color: var(--text); text-decoration: none;
+    border-radius: 4px; margin-bottom: 2px; transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .nav-section a:hover { background: rgba(88,166,255,0.1); color: var(--accent); }
+  .nav-section a.active {
+    background: rgba(88,166,255,0.15); color: var(--accent);
+    border-left-color: var(--accent);
+  }
+  .nav-section a .badge {
+    font-size: 14px; width: 20px; text-align: center;
+  }
+  .nav-section a .tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: auto;
+    background: var(--border); color: var(--muted);
+  }
+  .nav-section a .tag.new { background: var(--green); color: #0d1117; }
+  /* ===== Main ===== */
+  #main {
+    flex: 1; padding: 32px 48px; max-width: 1100px; overflow-x: hidden;
+  }
+  .page-header {
+    margin-bottom: 32px; padding-bottom: 20px;
+    border-bottom: 2px solid var(--border);
+  }
+  .page-header h1 { font-size: 28px; color: var(--accent); margin-bottom: 8px; }
+  .page-header p { font-size: 14px; color: var(--muted); }
+  .page-header .meta {
+    display: flex; gap: 16px; margin-top: 12px; font-size: 12px;
+  }
+  .page-header .meta span {
+    background: var(--panel); padding: 4px 10px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  /* ===== Sections ===== */
+  section {
+    margin-bottom: 48px; scroll-margin-top: 20px;
+  }
+  section > h2 {
+    font-size: 22px; color: var(--accent); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  section > h3 {
+    font-size: 16px; color: var(--text); margin: 20px 0 10px;
+  }
+  section p { font-size: 14px; margin-bottom: 12px; color: var(--text); }
+  section ul, section ol { margin: 10px 0 14px 24px; font-size: 14px; }
+  section li { margin-bottom: 6px; }
+  section strong { color: var(--accent); }
+  section code {
+    background: var(--panel); padding: 2px 6px; border-radius: 3px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 12px;
+    color: var(--orange);
+  }
+  /* ===== Cards ===== */
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px; margin: 16px 0;
+  }
+  .card.info { border-left: 4px solid var(--accent); }
+  .card.tip { border-left: 4px solid var(--green); }
+  .card.warn { border-left: 4px solid var(--yellow); }
+  .card h4 { font-size: 14px; margin-bottom: 8px; }
+  /* ===== Algo header ===== */
+  .algo-header {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
+    padding: 20px; background: var(--panel); border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .algo-icon {
+    width: 56px; height: 56px; border-radius: 12px; display: flex;
+    align-items: center; justify-content: center; font-size: 28px;
+    font-weight: bold; flex-shrink: 0;
+  }
+  .algo-icon.A { background: rgba(188,140,255,0.2); color: var(--suite); border: 2px solid var(--suite); }
+  .algo-icon.B { background: rgba(88,166,255,0.2); color: var(--deluxe); border: 2px solid var(--deluxe); }
+  .algo-icon.C { background: rgba(63,185,80,0.2); color: var(--superior); border: 2px solid var(--superior); }
+  .algo-icon.D { background: rgba(210,153,34,0.2); color: var(--yellow); border: 2px solid var(--yellow); }
+  .algo-icon.E { background: rgba(163,113,247,0.2); color: var(--purple); border: 2px solid var(--purple); }
+  .algo-title h3 { font-size: 20px; margin-bottom: 4px; }
+  .algo-title .tagline { font-size: 13px; color: var(--muted); }
+  .algo-badges { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .algo-badge {
+    font-size: 10px; padding: 3px 8px; border-radius: 12px;
+    background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+  }
+  .algo-badge.green { color: var(--green); border-color: var(--green); }
+  .algo-badge.yellow { color: var(--yellow); border-color: var(--yellow); }
+  .algo-badge.red { color: var(--red); border-color: var(--red); }
+  /* ===== Pros / Cons ===== */
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .pros-cons > div {
+    background: var(--panel); border-radius: 8px; padding: 16px;
+    border: 1px solid var(--border);
+  }
+  .pros-cons h4 { font-size: 13px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .pros h4 { color: var(--green); }
+  .cons h4 { color: var(--red); }
+  .pros-cons ul { margin: 0 0 0 18px; font-size: 13px; }
+  .pros-cons li { margin-bottom: 6px; }
+  /* ===== Pseudocode ===== */
+  .pseudocode {
+    background: #010409; border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px; font-family: "SF Mono", Consolas, monospace; font-size: 12px;
+    line-height: 1.8; overflow-x: auto; margin: 14px 0; color: var(--text);
+    white-space: pre;
+  }
+  .pseudocode .kw { color: var(--purple); }
+  .pseudocode .fn { color: var(--deluxe); }
+  .pseudocode .str { color: var(--green); }
+  .pseudocode .num { color: var(--orange); }
+  .pseudocode .cm { color: var(--muted); }
+  .pseudocode .var { color: var(--yellow); }
+  /* ===== Formula ===== */
+  .formula {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 18px; margin: 12px 0; font-family: "SF Mono", Consolas, monospace;
+    font-size: 13px; line-height: 2;
+  }
+  .formula .line { display: flex; align-items: center; gap: 8px; }
+  .formula .label { color: var(--muted); min-width: 160px; }
+  .formula .expr { color: var(--accent); }
+  .formula .weight { color: var(--yellow); }
+  /* ===== Interactive Demo ===== */
+  .demo-container {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 20px; margin: 20px 0;
+  }
+  .demo-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+  }
+  .demo-header h4 { font-size: 14px; color: var(--accent); }
+  .demo-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  .demo-controls button {
+    background: #21262d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .demo-controls button:hover { background: #30363d; border-color: var(--accent); }
+  .demo-controls button.primary { background: #1f6feb; border-color: #1f6feb; color: white; }
+  .demo-controls button.primary:hover { background: #388bfd; }
+  .demo-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .demo-status {
+    font-size: 12px; color: var(--muted); margin-bottom: 10px;
+    background: var(--bg); padding: 8px 12px; border-radius: 4px;
+    border: 1px solid var(--border); min-height: 36px;
+  }
+  .demo-status .step-num { color: var(--accent); font-weight: bold; }
+  .demo-status .highlight { color: var(--yellow); }
+  /* Mini room grid */
+  .mini-grid {
+    display: flex; gap: 4px; flex-wrap: wrap; margin: 12px 0;
+    padding: 16px; background: var(--bg); border-radius: 6px;
+    border: 1px solid var(--border); position: relative;
+  }
+  .mini-grid-label {
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px; width: 100%;
+  }
+  .mini-room {
+    width: 62px; height: 62px; border-radius: 6px; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: bold; cursor: default; position: relative;
+    transition: all 0.3s; border: 2px solid transparent; user-select: none;
+  }
+  .mini-room.Suite { background: rgba(188,140,255,0.2); color: var(--suite); border-color: rgba(188,140,255,0.4); }
+  .mini-room.Deluxe { background: rgba(88,166,255,0.15); color: var(--deluxe); border-color: rgba(88,166,255,0.4); }
+  .mini-room.Superior { background: rgba(63,185,80,0.15); color: var(--superior); border-color: rgba(63,185,80,0.4); }
+  .mini-room.occupied { opacity: 0.3; background: #21262d !important; color: var(--muted) !important; border-color: var(--border) !important; }
+  .mini-room.occupied::after { content: "🔒"; position: absolute; top: 2px; right: 3px; font-size: 8px; }
+  .mini-room.seed { box-shadow: 0 0 0 2px var(--yellow), 0 0 16px rgba(210,153,34,0.6); transform: scale(1.05); }
+  .mini-room.considering { box-shadow: 0 0 0 2px var(--accent), 0 0 16px rgba(88,166,255,0.7); animation: pulse 1s infinite; }
+  .mini-room.rejected { box-shadow: 0 0 0 2px var(--red); opacity: 0.5; }
+  .mini-room.accepted { box-shadow: 0 0 0 2px var(--green), 0 0 16px rgba(63,185,80,0.6); }
+  .mini-room .num { font-size: 13px; }
+  .mini-room .info { font-size: 8px; opacity: 0.7; }
+  .mini-room .order {
+    position: absolute; top: -6px; left: -6px; width: 18px; height: 18px;
+    background: var(--green); color: #0d1117; border-radius: 50%;
+    font-size: 10px; font-weight: bold; display: flex; align-items: center;
+    justify-content: center;
+  }
+  .mini-room .order.seed-badge { background: var(--yellow); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  /* Graph edges */
+  .graph-canvas { width: 100%; height: 200px; margin: 12px 0; }
+  /* Cost breakdown */
+  .cost-breakdown {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0;
+  }
+  .cost-item {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px; text-align: center;
+  }
+  .cost-item .label { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .cost-item .value { font-size: 18px; font-weight: bold; font-family: monospace; }
+  .cost-item.floor .value { color: var(--deluxe); }
+  .cost-item.side .value { color: var(--purple); }
+  .cost-item.pos .value { color: var(--superior); }
+  .cost-item.bed .value { color: var(--orange); }
+  .cost-total {
+    text-align: center; font-size: 14px; margin-top: 8px; padding: 8px;
+    background: var(--bg); border-radius: 4px; border: 1px solid var(--border);
+  }
+  .cost-total .value { color: var(--yellow); font-weight: bold; font-family: monospace; font-size: 18px; }
+  /* Comparison table */
+  .compare-table {
+    width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px;
+  }
+  .compare-table th, .compare-table td {
+    border: 1px solid var(--border); padding: 10px 12px; text-align: left;
+  }
+  .compare-table th { background: var(--panel); color: var(--accent); font-size: 12px; }
+  .compare-table tr:hover td { background: rgba(88,166,255,0.05); }
+  .compare-table td.center { text-align: center; }
+  .compare-table .check { color: var(--green); }
+  .compare-table .cross { color: var(--red); }
+  .compare-table .partial { color: var(--yellow); }
+  /* Footer */
+  footer {
+    margin-top: 60px; padding: 24px; text-align: center;
+    border-top: 1px solid var(--border); color: var(--muted); font-size: 12px;
+  }
+  /* Responsive */
+  @media (max-width: 900px) {
+    body { flex-direction: column; }
+    #sidebar { width: 100%; height: auto; position: relative; }
+    #main { padding: 20px; }
+    .pros-cons { grid-template-columns: 1fr; }
+    .cost-breakdown { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar">
+  <h1>🏨 KU HOME</h1>
+  <div class="sub">คู่มืออัลกอริทึมจัดห้องแบบโต้ตอบ — อธิบายแต่ละวิธีด้วยตัวอย่างมินิเดโม่</div>
+
+  <div class="nav-section">
+    <h2>📖 ภาพรวม</h2>
+    <a href="#overview"><span class="badge">📋</span> Overview</a>
+    <a href="#problem"><span class="badge">🎯</span> ปัญหา</a>
+    <a href="#topology"><span class="badge">🏢</span> โครงอาคาร</a>
+  </div>
+
+  <div class="nav-section">
+    <h2>🧩 แนวคิดพื้นฐาน</h2>
+    <a href="#cost-function"><span class="badge">💰</span> Cost Function</a>
+    <a href="#overlap"><span class="badge">🔒</span> Overlap Filter</a>
+    <a href="#x09"><span class="badge">🎯</span> X09 Priority</a>
+    <a href="#best-effort"><span class="badge">🛟</span> Best-effort</a>
+  </div>
+
+  <div class="nav-section">
+    <h2>🧠 อัลกอริทึม (5 ตัว)</h2>
+    <a href="#algo-a"><span class="badge">🅰️</span> Block Contiguous <span class="tag">A</span></a>
+    <a href="#algo-b"><span class="badge">🅱️</span> Graph Connected <span class="tag">B</span></a>
+    <a href="#algo-c"><span class="badge">🅲</span> Coordinate + Cost <span class="tag">C</span></a>
+    <a href="#algo-d"><span class="badge">🅳</span> Greedy Seed + Expand <span class="tag">D</span></a>
+    <a href="#algo-e"><span class="badge">⭐</span> Hybrid (C+D) <span class="tag new">แนะนำ</span></a>
+  </div>
+
+  <div class="nav-section">
+    <h2>📊 เปรียบเทียบ</h2>
+    <a href="#compare"><span class="badge">⚖️</span> ตารางเทียบ</a>
+    <a href="#decision"><span class="badge">🤔</span> เลือกอันไหน?</a>
+  </div>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<main id="main">
+
+<div class="page-header">
+  <h1>🏨 KU HOME — คู่มืออัลกอริทึมจัดห้อง</h1>
+  <p>อธิบายอัลกอริทึมจัดห้องทั้ง 5 ตัวของระบบ KU HOME พร้อมตัวอย่างมินิเดโม่แบบโต้ตอบ — กดเล่นได้เลยค่ะ!</p>
+  <div class="meta">
+    <span>📦 5 algorithms</span>
+    <span>🎮 Interactive demos</span>
+    <span>📚 Thai language</span>
+    <span>🔗 <a href="room-algorithm-playground.html" style="color:var(--accent)">← กลับ Playground</a></span>
+  </div>
+</div>
+
+<!-- ===== OVERVIEW ===== -->
+<section id="overview">
+  <h2>📋 Overview — ภาพรวมระบบ</h2>
+
+  <p>ระบบ KU HOME ต้องจัดห้องให้ <strong>booking</strong> ที่ลูกค้าจองมา โดยแต่ละ booking อาจจะขอห้อง <strong>หลายประเภท</strong> (Suite, Deluxe, Superior) และอาจมี <strong>extra bed</strong> ด้วย เป้าหมายคือหาห้องที่:</p>
+  <ol>
+    <li><strong>ว่าง</strong> ในช่วงวันที่จอง (ไม่มี reservation ทับซ้อน)</li>
+    <li><strong>ประเภทตรง</strong> กับที่ขอ</li>
+    <li><strong>อยู่ใกล้กัน</strong> ให้ลูกค้าเดินทางสะดวก (floor เดียวกัน, ฝั่งเดียวกัน, ตำแหน่งใกล้กัน)</li>
+    <li><strong>ไม่สูญเปล่า</strong> — เช่นไม่เอาห้อง 3 เตียงให้คนขอ 1 เตียงถ้ามีทางเลือกอื่น</li>
+  </ol>
+
+  <div class="card info">
+    <h4>💡 ทำไมต้องมีหลายอัลกอริทึม?</h4>
+    <p>เพราะสถานการณ์การจองแตกต่างกันมาก — บางครั้งต้องการห้องติดกันแน่นๆ (กรณีกลุ่ม), บางครั้งต้องการ cost ต่ำสุด (กรณีทั่วไป), และบางครั้งต้องการความเร็ว (กรณีคิวยาวๆ) การมีหลายวิธีแล้วเปรียบเทียบ (Hybrid) จึงให้ผลลัพธ์ดีที่สุดค่ะ</p>
+  </div>
+</section>
+
+<!-- ===== PROBLEM ===== -->
+<section id="problem">
+  <h2>🎯 นิยามปัญหา (Problem Definition)</h2>
+
+  <h3>Input</h3>
+  <ul>
+    <li><strong>Booking</strong> = รายการห้องที่ขอ: <code>[{type, beds}, ...]</code> เช่น <code>[{type:'Deluxe', beds:0}, {type:'Deluxe', beds:0}]</code></li>
+    <li><strong>Dates</strong> = วันเช็คอิน/เช็คเอาท์: <code>{checkIn, checkOut}</code></li>
+    <li><strong>Rooms</strong> = ห้องทั้งหมดในอาคาร 100 ห้อง (20 ห้อง × 5 ชั้น)</li>
+    <li><strong>Weights</strong> = น้ำหนัก cost: <code>{floor, side, pos, bed}</code></li>
+  </ul>
+
+  <h3>Output</h3>
+  <ul>
+    <li><strong>Assignments</strong> = ห้องที่จัดให้แต่ละ request: <code>[room1, room2, ...]</code></li>
+    <li><strong>Cost</strong> = คะแนน "ความไม่ดี" (ต่ำ = ดี)</li>
+    <li><strong>OK/Fail</strong> = จัดได้ครบทุกห้องหรือไม่</li>
+  </ul>
+
+  <h3>เป้าหมาย</h3>
+  <p>หา assignments ที่ <strong>cost ต่ำสุด</strong> โดยที่ทุกห้องใน booking ได้รับห้องที่ถูกต้องและว่าง ✅</p>
+</section>
+
+<!-- ===== TOPOLOGY ===== -->
+<section id="topology">
+  <h2>🏢 โครงอาคาร (Topology)</h2>
+
+  <p>อาคาร KU HOME มี <strong>5 ชั้น</strong> (ชั้น 5-9) แต่ละชั้นมีห้อง <strong>20 ห้อง</strong> แบ่งเป็น 3 ฝั่ง:</p>
+
+  <div class="card">
+    <h4>🗺️ โครงสร้างแต่ละชั้น</h4>
+    <div class="mini-grid-label">ฝั่ง V1 (วิว 1) — 12 ห้อง</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;">
+      <div class="mini-room Suite"><div class="num">X07</div><div class="info">Suite</div></div>
+      <div class="mini-room Deluxe"><div class="num">X08</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe" style="background:rgba(210,153,34,0.2);border-color:var(--yellow);color:var(--yellow)"><div class="num">X09</div><div class="info">⭐3bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X10</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X11</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X12</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X13</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X14</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X15</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X16</div><div class="info">1bed</div></div>
+      <div class="mini-room Deluxe"><div class="num">X17</div><div class="info">1bed</div></div>
+      <div class="mini-room Suite"><div class="num">X18</div><div class="info">Suite</div></div>
+    </div>
+    <div style="text-align:center;font-size:10px;color:var(--muted);padding:6px;border-top:1px dashed var(--border);border-bottom:1px dashed var(--border);margin:6px 0;">═════════ ทางเดิน ═════════</div>
+    <div class="mini-grid-label">ฝั่ง V2A (วิว 2A) — 6 ห้อง</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+      <div class="mini-room Superior"><div class="num">X06</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X05</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X04</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X03</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X02</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X01</div><div class="info">Sup</div></div>
+    </div>
+    <div style="display:inline-block;padding:3px 8px;background:#30363d;border-radius:4px;font-size:10px;color:var(--muted);margin:4px;">🛗 ลิฟต์</div>
+    <div class="mini-grid-label">ฝั่ง V2B (วิว 2B) — 2 ห้อง</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      <div class="mini-room Superior"><div class="num">X20</div><div class="info">Sup</div></div>
+      <div class="mini-room Superior"><div class="num">X19</div><div class="info">Sup</div></div>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>⭐ ห้องพิเศษ: X09</h4>
+    <p>ทุกชั้นมีห้อง <code>X09</code> (509, 609, 709, 809, 909) ที่เป็น <strong>Deluxe 3 เตียง builtin</strong> — เป็นห้องเดียวในอาคารที่มี 3 เตียง จึงได้รับ <strong>สิทธิ์พิเศษ</strong> เมื่อมีคนขอ Deluxe + extra bed</p>
+  </div>
+</section>
+
+<!-- ===== COST FUNCTION ===== -->
+<section id="cost-function">
+  <h2>💰 Cost Function — ฟังก์ชันคำนวณความแย่</h2>
+
+  <p>ทุกอัลกอริทึมจะใช้ <strong>cost function</strong> ตัวเดียวกันในการประเมินว่าชุดห้องที่เลือกมา "แย่แค่ไหน" cost <strong>ต่ำ = ดี</strong>, cost สูง = แย่ โดยคำนวณจาก 4 ปัจจัย:</p>
+
+  <div class="formula">
+    <div class="line"><span class="label">Floor Spread:</span> <span class="expr">(maxFloor − minFloor) × </span><span class="weight">W_floor</span></div>
+    <div class="line"><span class="label">Side Mismatch:</span> <span class="expr">(จำนวนฝั่งที่ต่างกัน) × </span><span class="weight">W_side</span></div>
+    <div class="line"><span class="label">Position Spread:</span> <span class="expr">Σ (maxPos − minPos ในแต่ละฝั่ง) × </span><span class="weight">W_pos</span></div>
+    <div class="line"><span class="label">Bed Waste:</span> <span class="expr">Σ max(0, roomBeds − 1 − requestedBeds) × </span><span class="weight">W_bed</span></div>
+    <div class="line" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px;"><span class="label" style="color:var(--yellow);font-weight:bold;">TOTAL COST:</span> <span style="color:var(--green);font-weight:bold;">floorSpread + sideMismatch + posSpread + bedWaste</span></div>
+  </div>
+
+  <div class="cost-breakdown">
+    <div class="cost-item floor">
+      <div class="label">🏢 Floor Spread</div>
+      <div class="value">×10</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">ชั้นห่างกัน = เดินลำบาก</div>
+    </div>
+    <div class="cost-item side">
+      <div class="label">🚶 Side Mismatch</div>
+      <div class="value">×8</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">ฝั่งต่าง = ข้ามอาคาร</div>
+    </div>
+    <div class="cost-item pos">
+      <div class="label">📏 Position Spread</div>
+      <div class="value">×3</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">ห่างในฝั่ง = เดินไกล</div>
+    </div>
+    <div class="cost-item bed">
+      <div class="label">🛏️ Bed Waste</div>
+      <div class="value">×5</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px;">เตียงเกิน = สูญเปล่า</div>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>💡 ตัวอย่างคำนวณ</h4>
+    <p>สมมติเลือกห้อง <code>508</code> (V1, pos 2) และ <code>612</code> (V1, pos 6):</p>
+    <ul>
+      <li>Floor spread = (6 − 5) × 10 = <strong>10</strong></li>
+      <li>Side mismatch = 0 (ฝั่งเดียวกัน) × 8 = <strong>0</strong></li>
+      <li>Position spread = (6 − 2) × 3 = <strong>12</strong></li>
+      <li>Bed waste = 0 (ทั้งคู่ 1 เตียง ขอ 0 extra) × 5 = <strong>0</strong></li>
+      <li><strong>TOTAL = 22</strong> 😐 (ปานกลาง)</li>
+    </ul>
+    <p>เทียบกับเลือก <code>508</code> + <code>509</code>: floor=0, side=0, pos=3, bed=0 → <strong>TOTAL = 3</strong> ✅ (ดีมาก!)</p>
+  </div>
+
+  <p>น้ำหนัก <code>W_floor=10, W_side=8, W_pos=3, W_bed=5</code> เป็นค่า default ที่เน้นว่า <strong>ชั้นต่างกันแย่สุด</strong> รองลงมาคือฝั่งต่างกัน เป็นต้น — ผู้ใช้สามารถปรับได้ในหน้า Playground ค่ะ</p>
+</section>
+
+<!-- ===== OVERLAP ===== -->
+<section id="overlap">
+  <h2>🔒 Overlap Filtering — กรองห้องที่ถูกจองแล้ว</h2>
+
+  <p>ก่อนที่อัลกอริทึมจะเริ่มทำงาน ระบบจะ <strong>กรองห้องที่มี reservation ทับซ้อน</strong> กับช่วงวันที่ขอจองออกก่อน เพื่อไม่ให้เสนอห้องที่ไม่ว่างจริง</p>
+
+  <h3>เงื่อนไข Overlap</h3>
+  <div class="formula">
+    <div class="line"><span class="label">Overlap เมื่อ:</span> <span class="expr">aIn < bOut <strong>AND</strong> bIn < aOut</span></div>
+  </div>
+  <p>คือ ช่วง [aIn, aOut) กับ [bIn, bOut) มีส่วนทับซ้อน <strong>แม้แต่ 1 วัน</strong> ก็ถือว่า conflict</p>
+
+  <div class="card warn">
+    <h4>⚠️ จุดสำคัญ</h4>
+    <ul>
+      <li>Check-out ของคนเก่าตรงกับ check-in ของคนใหม่ <strong>ไม่นับเป็น overlap</strong> (เพราะใช้ <code>aIn < bOut</code> ไม่ใช่ <code><=</code>)</li>
+      <li>ห้องที่ถูก overlap จะถูก <strong>mark ว่า occupied</strong> และไม่เข้ากระบวนการเลือก</li>
+      <li>Step Explorer จะ <strong>log ห้องที่ถูกกรอง</strong> พร้อมเหตุผล เพื่อให้ debug ได้</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== X09 PRIORITY ===== -->
+<section id="x09">
+  <h2>🎯 X09 Priority Policy — สิทธิ์พิเศษห้อง 3 เตียง</h2>
+
+  <p>เนื่องจากห้อง <code>X09</code> (509-909) เป็นห้อง <strong>Deluxe 3 เตียง builtin</strong> เพียงไม่กี่ห้องในอาคาร ระบบจึงให้สิทธิ์พิเศษ: <strong>ถ้า booking มีคนขอ Deluxe + extra bed → เลือก X09 ก่อนเป็นอันดับแรก</strong></p>
+
+  <div class="card info">
+    <h4>📋 เงื่อนไขการทำงาน</h4>
+    <ol>
+      <li>ตรวจว่า policy <code>X09 priority</code> เปิดอยู่ (default: เปิด)</li>
+      <li>ตรวจว่า booking มี <code>{type:'Deluxe', beds:>0}</code> อย่างน้อย 1 ห้อง</li>
+      <li>หาห้อง X09 ที่ <strong>ว่าง</strong> ในช่วงวันที่ขอ</li>
+      <li>ถ้ามี → เลือก <strong>ชั้นต่ำสุด</strong> ก่อน (เช่น 509 ก่อน 609)</li>
+      <li>จัด X09 ให้ request Deluxe+bed นั้น <strong>ก่อน</strong> ที่อัลกอริทึมจะทำงานต่อ</li>
+    </ol>
+  </div>
+
+  <p>หลังจากจัด X09 แล้ว อัลกอริทึมจะทำงานกับ <strong>request ที่เหลือ</strong> เท่านั้น</p>
+</section>
+
+<!-- ===== BEST EFFORT ===== -->
+<section id="best-effort">
+  <h2>🛟 Best-effort Fallback — เมื่อหาไม่ได้ก็ยังจัดให้</h2>
+
+  <p>อัลกอริทึมบางตัว (A, B) มีเงื่อนไขเข้มงวด เช่น "ต้องติดกันจริง" หรือ "ต้องอยู่ใน component เดียวกัน" ถ้าหาไม่ได้ ระบบมี <strong>fallback</strong>:</p>
+
+  <div class="card tip">
+    <h4>🔄 กลยุทธ์ Best-effort</h4>
+    <p>ถ้าเปิด policy <code>best-effort</code> (default: เปิด) เมื่ออัลกอริทึมหา block/component ไม่ได้ ระบบจะ:</p>
+    <ol>
+      <li>Sort ห้องว่างที่เหลือตาม <code>floor → pos</code></li>
+      <li>เลือกมาจัดให้ <strong>ตามลำดับ</strong> แม้จะไม่ติดกัน</li>
+      <li>Mark ผลลัพธ์ว่า "best-effort" ใน step log</li>
+    </ol>
+    <p>ผลลัพธ์อาจไม่สวย แต่ <strong>อย่างน้อยลูกค้าก็ได้ห้อง</strong> ดีกว่า fail ✅</p>
+  </div>
+</section>
+
+<!-- ===== ALGORITHM A ===== -->
+<section id="algo-a">
+  <h2>🅰️ Algorithm A: Block Contiguous</h2>
+
+  <div class="algo-header">
+    <div class="algo-icon A">A</div>
+    <div class="algo-title">
+      <h3>Block Contiguous — หาห้องติดกันแน่นๆ</h3>
+      <div class="tagline">หากลุ่มห้องที่ pos ต่อเนื่องกันจริง บนชั้นและฝั่งเดียวกัน</div>
+      <div class="algo-badges">
+        <span class="algo-badge green">✅ กลุ่มแน่นสุด</span>
+        <span class="algo-badge yellow">⚠️ อาจ fail ถ้าไม่มี block</span>
+        <span class="algo-badge">O(n×sides×floors)</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>📖 หลักการ</h3>
+  <p>Algorithm A มองหาห้องที่ <strong>ติดกันจริงๆ</strong> คือ:</p>
+  <ul>
+    <li>อยู่ <strong>ชั้นเดียวกัน</strong></li>
+    <li>อยู่ <strong>ฝั่งเดียวกัน</strong> (V1 หรือ V2A หรือ V2B)</li>
+    <li><strong>pos ต่อเนื่องกัน</strong> (เช่น pos 3, 4, 5, 6)</li>
+  </ul>
+  <p>ถ้ามี block ที่ตรงเงื่อนไขหลายชุด จะเลือกชุดที่ <strong>cost ต่ำสุด</strong></p>
+
+  <h3>🔢 Pseudocode</h3>
+  <div class="pseudocode"><span class="cm">// Algorithm A: Block Contiguous</span>
+<span class="kw">function</span> <span class="fn">algoBlock</span>(booking):
+  <span class="kw">for each</span> type <span class="kw">in</span> booking:
+    available = <span class="fn">filterAvailable</span>(type)
+    <span class="kw">if</span> available.length < needed:
+      <span class="kw">return</span> FAIL
+    
+    <span class="cm">// แบ่งตามฝั่ง</span>
+    <span class="kw">for each</span> side <span class="kw">in</span> [V1, V2A, V2B]:
+      rooms = <span class="fn">sortBy</span>(available[side], floor, pos)
+      
+      <span class="cm">// ลองทุก window ขนาด N</span>
+      <span class="kw">for</span> start <span class="kw">in</span> <span class="num">0</span>..rooms.length-N:
+        block = rooms[start : start+N]
+        
+        <span class="cm">// ตรวจว่าติดกันจริง</span>
+        <span class="kw">if</span> <span class="fn">isContiguous</span>(block):
+          cost = <span class="fn">costFunction</span>(block)
+          <span class="kw">if</span> cost < bestCost:
+            bestBlock = block
+    
+    <span class="kw">if</span> bestBlock:
+      <span class="kw">return</span> bestBlock
+    <span class="kw">else if</span> bestEffort:
+      <span class="kw">return</span> <span class="fn">firstNAvailable</span>(sorted)
+    <span class="kw">else</span>:
+      <span class="kw">return</span> FAIL</div>
+
+  <h3>🎮 Interactive Demo</h3>
+  <p>ลองกด <strong>Step</strong> เพื่อดู Algorithm A หา block ติดกัน 3 ห้อง (เน้นว่าต้องติดกันจริง!)</p>
+
+  <div class="demo-container">
+    <div class="demo-header">
+      <h4>🅰️ Block Contiguous Demo — หา 3 Deluxe ติดกัน</h4>
+      <div class="demo-controls">
+        <button class="primary" onclick="demoA.step()">⏭ Step</button>
+        <button onclick="demoA.play()">▶ Play</button>
+        <button onclick="demoA.reset()">⏮ Reset</button>
+      </div>
+    </div>
+    <div class="demo-status" id="demoA-status">กด <strong>Step</strong> เพื่อเริ่มดู Algorithm A ทำงาน ✨</div>
+    <div class="mini-grid" id="demoA-grid"></div>
+    <div class="cost-breakdown" id="demoA-cost" style="display:none;">
+      <div class="cost-item floor"><div class="label">🏢 Floor</div><div class="value" id="demoA-floor">—</div></div>
+      <div class="cost-item side"><div class="label">🚶 Side</div><div class="value" id="demoA-side">—</div></div>
+      <div class="cost-item pos"><div class="label">📏 Position</div><div class="value" id="demoA-pos">—</div></div>
+      <div class="cost-item bed"><div class="label">🛏️ Bed</div><div class="value" id="demoA-bed">—</div></div>
+    </div>
+    <div class="cost-total" id="demoA-total" style="display:none;">
+      💰 Total Cost: <span class="value" id="demoA-total-val">—</span>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ ข้อดี</h4>
+      <ul>
+        <li>ห้อง<strong>ติดกันจริง</strong> ลูกค้าเดินทางสะดวก</li>
+        <li>เหมาะกับ <strong>กลุ่มครอบครัว/เพื่อน</strong> ที่ต้องการอยู่ใกล้กัน</li>
+        <li>Cost มักต่ำ (เพราะติดกัน = pos spread น้อย)</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ ข้อเสีย</h4>
+      <ul>
+        <li>อาจ <strong>fail</strong> ถ้าไม่มี block ว่างพอ (ต้องพึ่ง best-effort)</li>
+        <li>ไม่ optimize cost ทั้งหมด — แค่หา "ติดกัน"</li>
+        <li>ช้ากว่า Greedy เล็กน้อย</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>🎯 Best Use Case</h4>
+    <p>เมื่อ <strong>ความใกล้กันสำคัญสุด</strong> — เช่นกลุ่มนักท่องเที่ยว 5 คน ที่ต้องการอยู่ชั้นเดียวกัน ติดๆ กัน</p>
+  </div>
+</section>
+
+<!-- ===== ALGORITHM B ===== -->
+<section id="algo-b">
+  <h2>🅱️ Algorithm B: Graph Connected</h2>
+
+  <div class="algo-header">
+    <div class="algo-icon B">B</div>
+    <div class="algo-title">
+      <h3>Graph Connected — หากลุ่มใหญ่สุดด้วยกราฟ</h3>
+      <div class="tagline">สร้าง adjacency graph แล้วหา largest connected component</div>
+      <div class="algo-badges">
+        <span class="algo-badge green">✅ ยืดหยุ่น</span>
+        <span class="algo-badge yellow">⚠️ ไม่รับประกันติดกัน</span>
+        <span class="algo-badge">O(n²) + BFS</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>📖 หลักการ</h3>
+  <p>Algorithm B มองห้องเป็น <strong>กราฟ (graph)</strong> — แต่ละห้องคือ node และมี edge เชื่อมถ้า:</p>
+  <ul>
+    <li>อยู่ <strong>ชั้นเดียวกัน</strong></li>
+    <li>อยู่ <strong>ฝั่งเดียวกัน</strong></li>
+    <li><strong>pos ติดกัน</strong> (ต่างกัน 1)</li>
+  </ul>
+  <p>จากนั้นใช้ <strong>BFS</strong> หา <strong>largest connected component</strong> (กลุ่มห้องที่เชื่อมกันได้ใหญ่สุด) แล้วเลือก N ห้องแรกจาก component นั้น</p>
+
+  <h3>🔢 Pseudocode</h3>
+  <div class="pseudocode"><span class="cm">// Algorithm B: Graph Connected Components</span>
+<span class="kw">function</span> <span class="fn">algoGraph</span>(booking):
+  <span class="kw">for each</span> type <span class="kw">in</span> booking:
+    available = <span class="fn">filterAvailable</span>(type)
+    
+    <span class="cm">// Build adjacency list</span>
+    adj = {}
+    <span class="kw">for</span> i, j <span class="kw">in</span> available:
+      <span class="kw">if</span> sameFloor <span class="kw">and</span> sameSide <span class="kw">and</span> |posDiff| == <span class="num">1</span>:
+        <span class="fn">addEdge</span>(adj, i, j)
+    
+    <span class="cm">// BFS หา connected components</span>
+    visited = {}
+    bestComp = []
+    <span class="kw">for</span> room <span class="kw">in</span> available:
+      <span class="kw">if</span> room <span class="kw">not in</span> visited:
+        comp = <span class="fn">BFS</span>(adj, room)
+        <span class="kw">if</span> comp.length > bestComp.length:
+          bestComp = comp
+    
+    <span class="cm">// เลือก N ห้องแรกจาก component ใหญ่สุด</span>
+    <span class="kw">if</span> bestComp.length >= N:
+      <span class="kw">return</span> <span class="fn">sort</span>(bestComp)[:N]
+    <span class="kw">else</span>:
+      <span class="kw">return</span> bestEffort <span class="kw">or</span> FAIL</div>
+
+  <h3>🎮 Interactive Demo</h3>
+  <p>ดู Algorithm B สร้าง graph และหา largest component (ห้องที่เชื่อมเส้นได้ทั้งหมด)</p>
+
+  <div class="demo-container">
+    <div class="demo-header">
+      <h4>🅱️ Graph Connected Demo — หา 3 Deluxe จาก component ใหญ่สุด</h4>
+      <div class="demo-controls">
+        <button class="primary" onclick="demoB.step()">⏭ Step</button>
+        <button onclick="demoB.play()">▶ Play</button>
+        <button onclick="demoB.reset()">⏮ Reset</button>
+      </div>
+    </div>
+    <div class="demo-status" id="demoB-status">กด <strong>Step</strong> เพื่อเริ่มสร้าง graph ✨</div>
+    <div class="mini-grid" id="demoB-grid"></div>
+    <div class="cost-total" id="demoB-total" style="display:none;">
+      💰 Total Cost: <span class="value" id="demoB-total-val">—</span>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ ข้อดี</h4>
+      <ul>
+        <li><strong>ยืดหยุ่น</strong> — ไม่ต้องติดกันแน่น แค่เชื่อมได้</li>
+        <li>หากลุ่มใหญ่สุดที่เป็นไปได้</li>
+        <li>ทนต่อ "ห้องถูกจองกระจัดกระจาย" ได้ดี</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ ข้อเสีย</h4>
+      <ul>
+        <li>ไม่รับประกันว่าห้องจะ <strong>ติดกันจริง</strong></li>
+        <li>เลือก N แรกจาก component — อาจไม่ใช่ชุดที่ cost ต่ำสุด</li>
+        <li>ใช้เวลา O(n²) ในการ build graph</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>🎯 Best Use Case</h4>
+    <p>เมื่ออาคาร <strong>มีห้องว่างกระจัดกระจาย</strong> (occupancy สูง) และต้องการหากลุ่มที่เชื่อมได้แม้ไม่ติดกันสนิท</p>
+  </div>
+</section>
+
+<!-- ===== ALGORITHM C ===== -->
+<section id="algo-c">
+  <h2>🅲 Algorithm C: Coordinate + Cost</h2>
+
+  <div class="algo-header">
+    <div class="algo-icon C">C</div>
+    <div class="algo-title">
+      <h3>Coordinate + Cost — คำนวณทุกชุด เลือกดีสุด</h3>
+      <div class="tagline">ลองทุก combination (ถ้าน้อย) หรือ greedy sort แล้วเลือก cost ต่ำสุด</div>
+      <div class="algo-badges">
+        <span class="algo-badge green">✅ Optimal สุด</span>
+        <span class="algo-badge yellow">⚠️ ช้าถ้าเยอะ</span>
+        <span class="algo-badge">O(C(n,k)) brute</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>📖 หลักการ</h3>
+  <p>Algorithm C เป็นวิธีที่ <strong>หนักแน่นที่สุด</strong> — มันพยายามหาชุดห้องที่ <strong>cost ต่ำสุดจริงๆ</strong> โดย:</p>
+  <ol>
+    <li>ถ้าจำนวนห้องที่ขอ <strong>น้อย (≤4)</strong> และห้องว่าง <strong>ไม่เยอะ (≤30)</strong> → <strong>brute force</strong> ลองทุก combination</li>
+    <li>ถ้าเยอะเกิน → ใช้ <strong>greedy</strong>: sort by floor+pos แล้วเลือก N แรก</li>
+    <li>เลือกชุดที่ <strong>cost ต่ำสุด</strong></li>
+  </ol>
+
+  <h3>🔢 Pseudocode</h3>
+  <div class="pseudocode"><span class="cm">// Algorithm C: Coordinate + Cost</span>
+<span class="kw">function</span> <span class="fn">algoCoordinate</span>(booking):
+  <span class="kw">for each</span> type <span class="kw">in</span> booking:
+    available = <span class="fn">filterAvailable</span>(type)
+    
+    <span class="kw">if</span> N == <span class="num">1</span>:
+      <span class="cm">// เลือกห้องเดียวที่ cost ต่ำสุด</span>
+      best = <span class="fn">sortBy</span>(available, floor, pos)[<span class="num">0</span>]
+      
+    <span class="kw">else if</span> N <= <span class="num">4</span> <span class="kw">and</span> available <= <span class="num">30</span>:
+      <span class="cm">// Brute force!</span>
+      <span class="kw">for each</span> combo <span class="kw">in</span> <span class="fn">combinations</span>(available, N):
+        cost = <span class="fn">costFunction</span>(combo)
+        <span class="kw">if</span> cost < bestCost:
+          bestCombo = combo
+      
+    <span class="kw">else</span>:
+      <span class="cm">// Greedy fallback</span>
+      sorted = <span class="fn">sortBy</span>(available, floor, pos)
+      bestCombo = sorted[:N]
+    
+    <span class="kw">return</span> bestCombo</div>
+
+  <div class="card warn">
+    <h4>🔢 ทำไมต้องจำกัด brute force?</h4>
+    <p>เพราะ <code>C(30, 4)</code> = 27,405 combinations — ยังพอไหว แต่ <code>C(60, 5)</code> = 5,461,512 จะ <strong>ช้ามาก</strong> ระบบจึงใช้ greedy แทนเมื่อเกินเกณฑ์</p>
+  </div>
+
+  <h3>🎮 Interactive Demo</h3>
+  <p>ดู Algorithm C ลองทุก combination แล้วเลือกชุดที่ cost ต่ำสุดจริงๆ</p>
+
+  <div class="demo-container">
+    <div class="demo-header">
+      <h4>🅲 Coordinate + Cost Demo — ลองทุกชุด เลือกดีสุด</h4>
+      <div class="demo-controls">
+        <button class="primary" onclick="demoC.step()">⏭ Step</button>
+        <button onclick="demoC.play()">▶ Play</button>
+        <button onclick="demoC.reset()">⏮ Reset</button>
+      </div>
+    </div>
+    <div class="demo-status" id="demoC-status">กด <strong>Step</strong> เพื่อดู brute-force ทุกชุด ✨</div>
+    <div class="mini-grid" id="demoC-grid"></div>
+    <div class="cost-breakdown" id="demoC-cost" style="display:none;">
+      <div class="cost-item floor"><div class="label">🏢 Floor</div><div class="value" id="demoC-floor">—</div></div>
+      <div class="cost-item side"><div class="label">🚶 Side</div><div class="value" id="demoC-side">—</div></div>
+      <div class="cost-item pos"><div class="label">📏 Position</div><div class="value" id="demoC-pos">—</div></div>
+      <div class="cost-item bed"><div class="label">🛏️ Bed</div><div class="value" id="demoC-bed">—</div></div>
+    </div>
+    <div class="cost-total" id="demoC-total" style="display:none;">
+      💰 Total Cost: <span class="value" id="demoC-total-val">—</span>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ ข้อดี</h4>
+      <ul>
+        <li><strong>Optimal</strong> — หาชุดที่ cost ต่ำสุดจริงๆ (ถ้า brute force)</li>
+        <li>ไม่ต้อง worry เรื่อง block/connected</li>
+        <li>เร็วพอสมควรถ้า N น้อย</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ ข้อเสีย</h4>
+      <ul>
+        <li><strong>ช้ามาก</strong> ถ้า N หรือ available เยอะ</li>
+        <li>Greedy fallback อาจไม่ optimal</li>
+        <li>ไม่รับประกันความ "ติดกัน"</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>🎯 Best Use Case</h4>
+    <p>เมื่อต้องการ <strong>cost ต่ำสุดจริงๆ</strong> และจำนวนห้องที่ขอน้อย (1-4 ห้อง) — เช่นครอบครัวเล็กที่ต้องการห้องดีสุด</p>
+  </div>
+</section>
+
+<!-- ===== ALGORITHM D ===== -->
+<section id="algo-d">
+  <h2>🅳 Algorithm D: Greedy Seed + Expand</h2>
+
+  <div class="algo-header">
+    <div class="algo-icon D">D</div>
+    <div class="algo-title">
+      <h3>Greedy Seed + Expand — เริ่มจากกลาง ขยายออก</h3>
+      <div class="tagline">เลือก seed ที่กลางสุด แล้วเพิ่มห้องใกล้สุดทีละจุด</div>
+      <div class="algo-badges">
+        <span class="algo-badge green">✅ เร็วมาก</span>
+        <span class="algo-badge green">✅ ง่าย</span>
+        <span class="algo-badge yellow">⚠️ ไม่ optimal</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>📖 หลักการ</h3>
+  <p>Algorithm D เป็นวิธี <strong>เร็วและง่าย</strong> — ทำงานเป็นขั้นตอน:</p>
+  <ol>
+    <li><strong>เลือก seed:</strong> sort ห้องว่างทั้งหมด แล้วเลือกห้องตรง <strong>กลาง</strong> (index กลาง)</li>
+    <li><strong>Expand:</strong> เลือกห้องถัดไปที่ <strong>ใกล้ seed ที่สุด</strong> (คำนวณ distance = |floor diff| + |pos diff|×0.5 + side penalty)</li>
+    <li>ทำซ้ำจนกว่าจะครบ N ห้อง</li>
+  </ol>
+
+  <h3>🔢 Pseudocode</h3>
+  <div class="pseudocode"><span class="cm">// Algorithm D: Greedy Seed + Expand</span>
+<span class="kw">function</span> <span class="fn">algoGreedy</span>(booking):
+  <span class="kw">for each</span> type <span class="kw">in</span> booking:
+    available = <span class="fn">filterAvailable</span>(type)
+    sorted = <span class="fn">sortBy</span>(available, floor, pos)
+    
+    <span class="cm">// 1. เลือก seed (กลางสุด)</span>
+    seedIdx = sorted.length / <span class="num">2</span>
+    seed = sorted[seedIdx]
+    chosen = [seed]
+    used = {seed}
+    
+    <span class="cm">// 2. Expand ทีละจุด</span>
+    <span class="kw">while</span> chosen.length < N:
+      candidates = available - used
+      
+      <span class="cm">// เลือกที่ใกล้ seed ที่สุด</span>
+      best = <span class="fn">minBy</span>(candidates, <span class="kw">lambda</span> r:
+        |r.floor - seed.floor| +
+        |r.pos - seed.pos| * <span class="num">0.5</span> +
+        (r.side != seed.side ? <span class="num">10</span> : <span class="num">0</span>)
+      )
+      
+      chosen.<span class="fn">add</span>(best)
+      used.<span class="fn">add</span>(best)
+    
+    <span class="kw">return</span> chosen</div>
+
+  <h3>🎮 Interactive Demo</h3>
+  <p>ดู Algorithm D เลือก seed (สีเหลือง) ก่อน แล้วขยายไปห้องใกล้สุดทีละจุด</p>
+
+  <div class="demo-container">
+    <div class="demo-header">
+      <h4>🅳 Greedy Seed + Expand Demo — seed แรก แล้วขยาย</h4>
+      <div class="demo-controls">
+        <button class="primary" onclick="demoD.step()">⏭ Step</button>
+        <button onclick="demoD.play()">▶ Play</button>
+        <button onclick="demoD.reset()">⏮ Reset</button>
+      </div>
+    </div>
+    <div class="demo-status" id="demoD-status">กด <strong>Step</strong> เพื่อดูการเลือก seed และ expand ✨</div>
+    <div class="mini-grid" id="demoD-grid"></div>
+    <div class="cost-breakdown" id="demoD-cost" style="display:none;">
+      <div class="cost-item floor"><div class="label">🏢 Floor</div><div class="value" id="demoD-floor">—</div></div>
+      <div class="cost-item side"><div class="label">🚶 Side</div><div class="value" id="demoD-side">—</div></div>
+      <div class="cost-item pos"><div class="label">📏 Position</div><div class="value" id="demoD-pos">—</div></div>
+      <div class="cost-item bed"><div class="label">🛏️ Bed</div><div class="value" id="demoD-bed">—</div></div>
+    </div>
+    <div class="cost-total" id="demoD-total" style="display:none;">
+      💰 Total Cost: <span class="value" id="demoD-total-val">—</span>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ ข้อดี</h4>
+      <ul>
+        <li><strong>เร็วมาก</strong> — O(n log n) เท่านั้น</li>
+        <li>เข้าใจง่าย debug ง่าย</li>
+        <li>ทำงานได้แม้ available น้อย</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ ข้อเสีย</h4>
+      <ul>
+        <li><strong>ไม่ optimal</strong> — seed อาจไม่ใช่จุดที่ดีสุด</li>
+        <li>Expand แบบ greedy อาจติด local optimum</li>
+        <li>ไม่รับประกันความติดกัน</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>🎯 Best Use Case</h4>
+    <p>เมื่อต้องการ <strong>ความเร็ว</strong> — เช่นคิวยาวๆ วันหยุด ที่ต้องจัดห้องรวดเร็ว ไม่ต้อง optimal แค่พอใช้</p>
+  </div>
+</section>
+
+<!-- ===== ALGORITHM E ===== -->
+<section id="algo-e">
+  <h2>⭐ Algorithm E: Hybrid (C+D)</h2>
+
+  <div class="algo-header">
+    <div class="algo-icon E">E</div>
+    <div class="algo-title">
+      <h3>Hybrid (C+D) — รันสองตัว เลือกคนชนะ ⭐ แนะนำ</h3>
+      <div class="tagline">รัน Coordinate (C) + Greedy (D) แล้วเลือก result ที่ดีกว่า</div>
+      <div class="algo-badges">
+        <span class="algo-badge green">✅ Best of both</span>
+        <span class="algo-badge green">✅ Default</span>
+        <span class="algo-badge">O(C + D)</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>📖 หลักการ</h3>
+  <p>Algorithm E เป็น <strong>meta-algorithm</strong> — มันไม่ได้คิดเอง แต่ <strong>รัน C และ D พร้อมกัน</strong> แล้ว:</p>
+  <ol>
+    <li>รัน <strong>Algorithm C</strong> (Coordinate + Cost) → ได้ resultC</li>
+    <li>รัน <strong>Algorithm D</strong> (Greedy Seed + Expand) → ได้ resultD</li>
+    <li><strong>เปรียบเทียบ:</strong></li>
+    <ul>
+      <li>ถ้าทั้งคู่ OK → เลือก cost ต่ำกว่า</li>
+      <li>ถ้า OK อันเดียว → เลือกอันนั้น</li>
+      <li>ถ้า fail ทั้งคู่ → return fail</li>
+    </ul>
+  </ol>
+
+  <h3>🔢 Pseudocode</h3>
+  <div class="pseudocode"><span class="cm">// Algorithm E: Hybrid (C + D)</span>
+<span class="kw">function</span> <span class="fn">algoHybrid</span>(booking):
+  <span class="cm">// รันทั้งสองตัว</span>
+  resultC = <span class="fn">algoCoordinate</span>(booking)
+  resultD = <span class="fn">algoGreedy</span>(booking)
+  
+  <span class="cm">// เลือกคนชนะ</span>
+  <span class="kw">if</span> resultC.ok <span class="kw">and</span> resultD.ok:
+    <span class="kw">if</span> resultC.cost <= resultD.cost:
+      <span class="kw">return</span> resultC   <span class="cm">// Coordinate ชนะ</span>
+    <span class="kw">else</span>:
+      <span class="kw">return</span> resultD   <span class="cm">// Greedy ชนะ</span>
+      
+  <span class="kw">else if</span> resultC.ok:
+    <span class="kw">return</span> resultC   <span class="cm">// มี C คนเดียวที่ OK</span>
+    
+  <span class="kw">else if</span> resultD.ok:
+    <span class="kw">return</span> resultD   <span class="cm">// มี D คนเดียวที่ OK</span>
+    
+  <span class="kw">else</span>:
+    <span class="kw">return</span> FAIL       <span class="cm">// ทั้งคู่ fail</span></div>
+
+  <h3>🎮 Interactive Demo</h3>
+  <p>ดู Hybrid รัน C และ D คู่กัน แล้ว "ประกาศผู้ชนะ"</p>
+
+  <div class="demo-container">
+    <div class="demo-header">
+      <h4>⭐ Hybrid Demo — C vs D, เลือกผู้ชนะ</h4>
+      <div class="demo-controls">
+        <button class="primary" onclick="demoE.step()">⏭ Step</button>
+        <button onclick="demoE.play()">▶ Play</button>
+        <button onclick="demoE.reset()">⏮ Reset</button>
+      </div>
+    </div>
+    <div class="demo-status" id="demoE-status">กด <strong>Step</strong> เพื่อดูการแข่งขัน C vs D ✨</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0;">
+      <div>
+        <div class="mini-grid-label" style="color:var(--superior)">🅲 Coordinate + Cost</div>
+        <div class="mini-grid" id="demoE-grid-c" style="min-height:140px;"></div>
+        <div class="cost-total" id="demoE-cost-c" style="margin-top:4px;">
+          Cost C: <span class="value" id="demoE-cost-c-val">—</span>
+        </div>
+      </div>
+      <div>
+        <div class="mini-grid-label" style="color:var(--yellow)">🅳 Greedy Seed+Expand</div>
+        <div class="mini-grid" id="demoE-grid-d" style="min-height:140px;"></div>
+        <div class="cost-total" id="demoE-cost-d" style="margin-top:4px;">
+          Cost D: <span class="value" id="demoE-cost-d-val">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="cost-total" id="demoE-winner" style="display:none;font-size:16px;">
+      🏆 ผู้ชนะ: <span class="value" id="demoE-winner-val">—</span>
+    </div>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ ข้อดี</h4>
+      <ul>
+        <li><strong>ดีที่สุดเสมอ</strong> — เลือก cost ต่ำสุดจากสองตัว</li>
+        <li>C ชนะเมื่อ N น้อย, D ชนะเมื่อ N เยอะ</li>
+        <li>เสถียร — ไม่มีวันแย่กว่า C หรือ D อันเดียว</li>
+        <li>เป็น <strong>default</strong> ของระบบ!</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ ข้อเสีย</h4>
+      <ul>
+        <li>ช้ากว่า C หรือ D อันเดียว ~2 เท่า</li>
+        <li>ใช้ memory มากกว่า (เก็บ 2 results)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card tip">
+    <h4>🎯 Best Use Case</h4>
+    <p><strong>ใช้เป็น default เสมอ!</strong> ยกเว้นกรณีต้องการความเร็วสุดขั้ว (ใช้ D) หรือต้องการติดกันแน่นๆ (ใช้ A)</p>
+  </div>
+</section>
+
+<!-- ===== COMPARISON ===== -->
+<section id="compare">
+  <h2>⚖️ ตารางเปรียบเทียบทั้ง 5 ตัว</h2>
+
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th>A: Block</th>
+        <th>B: Graph</th>
+        <th>C: Coordinate</th>
+        <th>D: Greedy</th>
+        <th>E: Hybrid ⭐</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>ความติดกัน</strong></td>
+        <td class="check">✅ แน่นสุด</td>
+        <td class="partial">🟡 เชื่อมได้</td>
+        <td class="cross">❌ ไม่รับประกัน</td>
+        <td class="cross">❌ ไม่รับประกัน</td>
+        <td class="partial">🟡 แล้วแต่ C/D</td>
+      </tr>
+      <tr>
+        <td><strong>Cost optimal</strong></td>
+        <td class="cross">❌ ไม่ optimal</td>
+        <td class="cross">❌ ไม่ optimal</td>
+        <td class="check">✅ Optimal (brute)</td>
+        <td class="cross">❌ Greedy</td>
+        <td class="check">✅ ดีที่สุด</td>
+      </tr>
+      <tr>
+        <td><strong>ความเร็ว</strong></td>
+        <td class="partial">🟡 ปานกลาง</td>
+        <td class="partial">🟡 ปานกลาง</td>
+        <td class="cross">❌ ช้า (brute)</td>
+        <td class="check">✅ เร็วสุด</td>
+        <td class="partial">🟡 ~2× D</td>
+      </tr>
+      <tr>
+        <td><strong>ทน high occupancy</strong></td>
+        <td class="cross">❌ fail ง่าย</td>
+        <td class="check">✅ ทนดี</td>
+        <td class="check">✅ ทนได้</td>
+        <td class="check">✅ ทนได้</td>
+        <td class="check">✅ ทนดี</td>
+      </tr>
+      <tr>
+        <td><strong>Best-effort fallback</strong></td>
+        <td class="check">✅ มี</td>
+        <td class="check">✅ มี</td>
+        <td class="cross">❌ ไม่มี</td>
+        <td class="cross">❌ ไม่มี</td>
+        <td class="partial">🟡 ถ้า C/D มี</td>
+      </tr>
+      <tr>
+        <td><strong>เหมาะกับ</strong></td>
+        <td>กลุ่ม</td>
+        <td>High occ</td>
+        <td>N น้อย</td>
+        <td>คิวยาว</td>
+        <td><strong>ทั่วไป ⭐</strong></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== DECISION ===== -->
+<section id="decision">
+  <h2>🤔 เลือกอัลกอริทึมไหนดี?</h2>
+
+  <div class="card info">
+    <h4>🌳 Decision Tree</h4>
+    <div class="pseudocode" style="margin-top:12px;"><span class="kw">if</span> ต้องการ default ที่ดีที่สุด:
+    → <span class="str">⭐ Algorithm E (Hybrid)</span>
+
+<span class="kw">else if</span> ลูกค้าเป็นกลุ่ม ต้องการติดกันแน่นๆ:
+    → <span class="str">🅰️ Algorithm A (Block)</span>
+
+<span class="kw">else if</span> อาคารเต็มมาก (high occupancy):
+    → <span class="str">🅱️ Algorithm B (Graph)</span>
+
+<span class="kw">else if</span> ขอห้องน้อย (1-4) และต้องการ optimal:
+    → <span class="str">🅲 Algorithm C (Coordinate)</span>
+
+<span class="kw">else if</span> ต้องการความเร็ว คิวยาว:
+    → <span class="str">🅳 Algorithm D (Greedy)</span>
+
+<span class="kw">else</span>:
+    → <span class="str">⭐ Algorithm E (Hybrid) — ปลอดภัยสุด</span></div>
+  </div>
+
+  <div class="card tip">
+    <h4>💡 คำแนะนำจากหนู</h4>
+    <p>"ถ้าไม่แน่ใจ — ใช้ <strong>Hybrid (E)</strong> ค่ะ! เพราะมันรวมข้อดีของ C และ D เอาไว้ และเป็น default ของระบบ KU HOME อยู่แล้ว เว้นแต่มีเหตุผลเฉพาะ (เช่นต้องการติดกันแน่น = A, หรือต้องการเร็วสุด = D) ถึงค่อยเปลี่ยนค่ะ" ✨</p>
+  </div>
+</section>
+
+<footer>
+  <p>🏨 <strong>KU HOME Algorithm Explainer</strong> — อธิบายอัลกอริทึมจัดห้องทั้ง 5 ตัวพร้อมตัวอย่างโต้ตอบ</p>
+  <p>สร้างโดยน้องเมด 💖 | <a href="room-algorithm-playground.html" style="color:var(--accent)">← กลับ Playground</a></p>
+</footer>
+
+</main>
+
+<script>
+// ============================================================
+// 🎮 Interactive Demo Engine
+// ============================================================
+
+// Build demo rooms (10 Deluxe rooms, some occupied)
+function buildDemoRooms(occupiedNums) {
+  const rooms = [];
+  const baseFloor = 5;
+  for (let i = 0; i < 10; i++) {
+    const pos = i + 1;
+    const num = `${baseFloor}${String(pos + 7).padStart(2, '0')}`; // 508-517
+    rooms.push({
+      num, type: 'Deluxe', side: 'V1', pos, floor: baseFloor, beds: 1,
+      occupied: occupiedNums.includes(num),
+      state: null, // null | 'seed' | 'considering' | 'accepted' | 'rejected'
+      order: null,
+    });
+  }
+  return rooms;
+}
+
+// Render mini grid
+function renderMiniGrid(containerId, rooms) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  rooms.forEach(r => {
+    const el = document.createElement('div');
+    el.className = `mini-room ${r.type}`;
+    if (r.occupied) el.classList.add('occupied');
+    if (r.state === 'seed') el.classList.add('seed');
+    if (r.state === 'considering') el.classList.add('considering');
+    if (r.state === 'accepted') el.classList.add('accepted');
+    if (r.state === 'rejected') el.classList.add('rejected');
+
+    el.innerHTML = `<div class="num">${r.num}</div><div class="info">P${r.pos}</div>`;
+    if (r.order !== null) {
+      const badge = document.createElement('div');
+      badge.className = 'order' + (r.state === 'seed' ? ' seed-badge' : '');
+      badge.textContent = r.order;
+      el.appendChild(badge);
+    }
+    container.appendChild(el);
+  });
+}
+
+// Set status text
+function setStatus(id, html) {
+  document.getElementById(id).innerHTML = html;
+}
+
+// Show cost breakdown
+function showCost(containerId, floor, side, pos, bed, totalId, total) {
+  const container = document.getElementById(containerId);
+  if (container) container.style.display = 'grid';
+  document.getElementById(containerId + '-floor').textContent = floor;
+  document.getElementById(containerId + '-side').textContent = side;
+  document.getElementById(containerId + '-pos').textContent = pos;
+  document.getElementById(containerId + '-bed').textContent = bed;
+  if (totalId) {
+    document.getElementById(totalId).style.display = 'block';
+    document.getElementById(totalId + '-val').textContent = total.toFixed(1);
+  }
+}
+
+// Calculate cost for a set of rooms
+function calcCost(rooms) {
+  if (rooms.length === 0) return { floor: 0, side: 0, pos: 0, bed: 0, total: 0 };
+  const floors = rooms.map(r => r.floor);
+  const floorSpread = (Math.max(...floors) - Math.min(...floors)) * 10;
+  const sides = new Set(rooms.map(r => r.side));
+  const sideMismatch = (sides.size - 1) * 8;
+  let posSpread = 0;
+  [...sides].forEach(side => {
+    const sideRooms = rooms.filter(r => r.side === side).map(r => r.pos);
+    if (sideRooms.length > 1) posSpread += (Math.max(...sideRooms) - Math.min(...sideRooms)) * 3;
+  });
+  const bedWaste = 0; // all 1-bed rooms, no extra bed requested
+  return { floor: floorSpread, side: sideMismatch, pos: posSpread, bed: bedWaste, total: floorSpread + sideMismatch + posSpread + bedWaste };
+}
+
+// Reset room states
+function resetRoomStates(rooms) {
+  rooms.forEach(r => { r.state = null; r.order = null; });
+}
+
+// ============================================================
+// 🅰️ Demo A: Block Contiguous
+// ============================================================
+const demoA = {
+  rooms: buildDemoRooms(['510', '514']), // occupied: P3 (510) and P7 (514) — wait, let me recalc
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+
+  init() {
+    // Recreate with correct occupied
+    this.rooms = [];
+    for (let i = 0; i < 10; i++) {
+      const pos = i + 1;
+      const num = `5${String(pos + 7).padStart(2, '0')}`;
+      this.rooms.push({
+        num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1,
+        occupied: ['510', '514'].includes(num),
+        state: null, order: null,
+      });
+    }
+    this.buildSteps();
+    this.reset();
+  },
+
+  buildSteps() {
+    this.steps = [];
+    const available = this.rooms.filter(r => !r.occupied);
+    const N = 3;
+
+    this.steps.push({
+      msg: `🔍 เริ่ม Algorithm A: ต้องการ <span class="highlight">${N} Deluxe</span> ติดกัน<br>ห้องว่าง: ${available.map(r => r.num).join(', ')} (${available.length} ห้อง)`,
+      action: () => { resetRoomStates(this.rooms); renderMiniGrid('demoA-grid', this.rooms); }
+    });
+
+    // Show occupied as rejected
+    const occupied = this.rooms.filter(r => r.occupied);
+    occupied.forEach((r, i) => {
+      this.steps.push({
+        msg: `❌ ${r.num} <span class="highlight">ถูกจองแล้ว</span> — ไม่สามารถใช้ได้`,
+        action: () => { r.state = 'rejected'; renderMiniGrid('demoA-grid', this.rooms); }
+      });
+    });
+
+    // Slide window to find contiguous block
+    const sides = ['V1'];
+    let bestBlock = null;
+    let bestCost = Infinity;
+
+    for (const side of sides) {
+      const sideRooms = available.filter(r => r.side === side).sort((a, b) => a.pos - b.pos);
+      for (let start = 0; start <= sideRooms.length - N; start++) {
+        const block = sideRooms.slice(start, start + N);
+        const positions = block.map(r => r.pos);
+        let contiguous = true;
+        for (let j = 1; j < positions.length; j++) {
+          if (positions[j] !== positions[j - 1] + 1) { contiguous = false; break; }
+        }
+
+        this.steps.push({
+          msg: `🤔 ลอง block: ${block.map(r => r.num).join(', ')} (pos ${positions.join(',')}) ${contiguous ? '→ <span class="highlight">ติดกัน! ✅</span>' : '→ ไม่ติดกัน ❌'}`,
+          action: () => {
+            resetRoomStates(this.rooms);
+            occupied.forEach(r => r.state = 'rejected');
+            block.forEach(r => r.state = contiguous ? 'considering' : 'rejected');
+            renderMiniGrid('demoA-grid', this.rooms);
+          }
+        });
+
+        if (contiguous) {
+          const cost = calcCost(block);
+          if (cost.total < bestCost) {
+            bestCost = cost.total;
+            bestBlock = block;
+          }
+          this.steps.push({
+            msg: `✅ Block นี้ติดกัน! cost = ${cost.total.toFixed(1)} ${bestBlock === block ? '(ดีสุดตอนนี้)' : ''}`,
+            action: () => {
+              resetRoomStates(this.rooms);
+              occupied.forEach(r => r.state = 'rejected');
+              block.forEach(r => r.state = 'considering');
+              renderMiniGrid('demoA-grid', this.rooms);
+            }
+          });
+        }
+      }
+    }
+
+    if (bestBlock) {
+      const cost = calcCost(bestBlock);
+      this.steps.push({
+        msg: `🎉 เลือก block: <span class="highlight">${bestBlock.map(r => r.num).join(', ')}</span>`,
+        action: () => {
+          resetRoomStates(this.rooms);
+          occupied.forEach(r => r.state = 'rejected');
+          bestBlock.forEach((r, i) => { r.state = 'accepted'; r.order = i + 1; });
+          renderMiniGrid('demoA-grid', this.rooms);
+          showCost('demoA-cost', cost.floor, cost.side, cost.pos, cost.bed, 'demoA-total', cost.total);
+        }
+      });
+    } else {
+      this.steps.push({
+        msg: `❌ ไม่เจอ block ติดกัน — ต้องใช้ best-effort fallback`,
+        action: () => { renderMiniGrid('demoA-grid', this.rooms); }
+      });
+    }
+  },
+
+  step() {
+    if (this.current < this.steps.length - 1) {
+      this.current++;
+      const s = this.steps[this.current];
+      s.action();
+      setStatus('demoA-status', `<span class="step-num">Step ${this.current + 1}/${this.steps.length}:</span> ${s.msg}`);
+    }
+  },
+
+  play() {
+    if (this.playing) {
+      this.stop();
+    } else {
+      if (this.current >= this.steps.length - 1) this.reset();
+      this.playing = true;
+      this.interval = setInterval(() => {
+        if (this.current < this.steps.length - 1) {
+          this.step();
+        } else {
+          this.stop();
+        }
+      }, 1200);
+    }
+  },
+
+  stop() {
+    this.playing = false;
+    if (this.interval) clearInterval(this.interval);
+    this.interval = null;
+  },
+
+  reset() {
+    this.stop();
+    this.current = -1;
+    resetRoomStates(this.rooms);
+    renderMiniGrid('demoA-grid', this.rooms);
+    setStatus('demoA-status', 'กด <strong>Step</strong> เพื่อเริ่มดู Algorithm A ทำงาน ✨');
+    document.getElementById('demoA-cost').style.display = 'none';
+    document.getElementById('demoA-total').style.display = 'none';
+  }
+};
+
+// ============================================================
+// 🅱️ Demo B: Graph Connected
+// ============================================================
+const demoB = {
+  rooms: [],
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+
+  init() {
+    this.rooms = [];
+    for (let i = 0; i < 10; i++) {
+      const pos = i + 1;
+      const num = `5${String(pos + 7).padStart(2, '0')}`;
+      this.rooms.push({
+        num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1,
+        occupied: ['511', '515'].includes(num),
+        state: null, order: null, component: null,
+      });
+    }
+    this.buildSteps();
+    this.reset();
+  },
+
+  buildSteps() {
+    this.steps = [];
+    const available = this.rooms.filter(r => !r.occupied);
+    const occupied = this.rooms.filter(r => r.occupied);
+    const N = 3;
+
+    this.steps.push({
+      msg: `🔍 เริ่ม Algorithm B: หา <span class="highlight">${N} Deluxe</span> จาก connected component`,
+      action: () => { resetRoomStates(this.rooms); renderMiniGrid('demoB-grid', this.rooms); }
+    });
+
+    occupied.forEach(r => {
+      this.steps.push({
+        msg: `❌ ${r.num} ถูกจอง — ตัดออกจาก graph`,
+        action: () => { r.state = 'rejected'; renderMiniGrid('demoB-grid', this.rooms); }
+      });
+    });
+
+    // Build adjacency
+    const adj = {};
+    available.forEach(r => adj[r.num] = []);
+    for (let i = 0; i < available.length; i++) {
+      for (let j = i + 1; j < available.length; j++) {
+        const a = available[i], b = available[j];
+        if (a.floor === b.floor && a.side === b.side && Math.abs(a.pos - b.pos) === 1) {
+          adj[a.num].push(b);
+          adj[b.num].push(a);
+        }
+      }
+    }
+
+    this.steps.push({
+      msg: `🔗 สร้าง graph: ${Object.entries(adj).filter(([k, v]) => v.length > 0).map(([k, v]) => `${k}→[${v.map(r => r.num).join(',')}]`).join('  ')}`,
+      action: () => { resetRoomStates(this.rooms); occupied.forEach(r => r.state = 'rejected'); available.forEach(r => r.state = 'considering'); renderMiniGrid('demoB-grid', this.rooms); }
+    });
+
+    // BFS find components
+    const visited = new Set();
+    let components = [];
+    for (const r of available) {
+      if (visited.has(r.num)) continue;
+      const comp = [];
+      const queue = [r];
+      while (queue.length) {
+        const cur = queue.shift();
+        if (visited.has(cur.num)) continue;
+        visited.add(cur.num);
+        comp.push(cur);
+        for (const n of adj[cur.num]) {
+          if (!visited.has(n.num)) queue.push(n);
+        }
+      }
+      components.push(comp);
+    }
+
+    components.forEach((comp, i) => {
+      this.steps.push({
+        msg: `🟦 Component ${i + 1}: ${comp.map(r => r.num).join(', ')} (${comp.length} ห้อง)`,
+        action: () => {
+          resetRoomStates(this.rooms);
+          occupied.forEach(r => r.state = 'rejected');
+          comp.forEach(r => r.state = 'considering');
+          renderMiniGrid('demoB-grid', this.rooms);
+        }
+      });
+    });
+
+    // Find largest
+    const largest = components.reduce((a, b) => a.length >= b.length ? a : b, []);
+    this.steps.push({
+      msg: `🏆 Component ใหญ่สุด: ${largest.map(r => r.num).join(', ')} (${largest.length} ห้อง)`,
+      action: () => {
+        resetRoomStates(this.rooms);
+        occupied.forEach(r => r.state = 'rejected');
+        largest.forEach(r => r.state = 'considering');
+        renderMiniGrid('demoB-grid', this.rooms);
+      }
+    });
+
+    // Select first N from largest
+    const chosen = largest.sort((a, b) => a.pos - b.pos).slice(0, N);
+    const cost = calcCost(chosen);
+    this.steps.push({
+      msg: `🎉 เลือก ${N} แรก: <span class="highlight">${chosen.map(r => r.num).join(', ')}</span>`,
+      action: () => {
+        resetRoomStates(this.rooms);
+        occupied.forEach(r => r.state = 'rejected');
+        chosen.forEach((r, i) => { r.state = 'accepted'; r.order = i + 1; });
+        renderMiniGrid('demoB-grid', this.rooms);
+        document.getElementById('demoB-total').style.display = 'block';
+        document.getElementById('demoB-total-val').textContent = cost.total.toFixed(1);
+      }
+    });
+  },
+
+  step() {
+    if (this.current < this.steps.length - 1) {
+      this.current++;
+      const s = this.steps[this.current];
+      s.action();
+      setStatus('demoB-status', `<span class="step-num">Step ${this.current + 1}/${this.steps.length}:</span> ${s.msg}`);
+    }
+  },
+
+  play() {
+    if (this.playing) { this.stop(); return; }
+    if (this.current >= this.steps.length - 1) this.reset();
+    this.playing = true;
+    this.interval = setInterval(() => {
+      if (this.current < this.steps.length - 1) this.step();
+      else this.stop();
+    }, 1200);
+  },
+
+  stop() {
+    this.playing = false;
+    if (this.interval) clearInterval(this.interval);
+  },
+
+  reset() {
+    this.stop();
+    this.current = -1;
+    resetRoomStates(this.rooms);
+    renderMiniGrid('demoB-grid', this.rooms);
+    setStatus('demoB-status', 'กด <strong>Step</strong> เพื่อเริ่มสร้าง graph ✨');
+    document.getElementById('demoB-total').style.display = 'none';
+  }
+};
+
+// ============================================================
+// 🅲 Demo C: Coordinate + Cost (brute force)
+// ============================================================
+const demoC = {
+  rooms: [],
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+
+  init() {
+    this.rooms = [];
+    for (let i = 0; i < 10; i++) {
+      const pos = i + 1;
+      const num = `5${String(pos + 7).padStart(2, '0')}`;
+      this.rooms.push({
+        num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1,
+        occupied: ['512'].includes(num),
+        state: null, order: null,
+      });
+    }
+    this.buildSteps();
+    this.reset();
+  },
+
+  buildSteps() {
+    this.steps = [];
+    const available = this.rooms.filter(r => !r.occupied);
+    const occupied = this.rooms.filter(r => r.occupied);
+    const N = 3;
+
+    this.steps.push({
+      msg: `🔍 เริ่ม Algorithm C: ลอง <span class="highlight">ทุก combination</span> เลือก cost ต่ำสุด`,
+      action: () => { resetRoomStates(this.rooms); renderMiniGrid('demoC-grid', this.rooms); }
+    });
+
+    occupied.forEach(r => {
+      this.steps.push({
+        msg: `❌ ${r.num} ถูกจอง`,
+        action: () => { r.state = 'rejected'; renderMiniGrid('demoC-grid', this.rooms); }
+      });
+    });
+
+    // Generate combinations
+    function combos(arr, k) {
+      if (k === 0) return [[]];
+      if (arr.length < k) return [];
+      const [first, ...rest] = arr;
+      return [...combos(rest, k - 1).map(c => [first, ...c]), ...combos(rest, k)];
+    }
+
+    const allCombos = combos(available, N);
+    let bestCombo = null;
+    let bestCost = Infinity;
+    let shownCount = 0;
+    const MAX_SHOW = 6;
+
+    this.steps.push({
+      msg: `🔢 มี ${allCombos.length} combinations ที่เป็นไปได้ — จะแสดง ${MAX_SHOW} ตัวอย่าง`,
+      action: () => {}
+    });
+
+    allCombos.forEach((combo, idx) => {
+      if (shownCount >= MAX_SHOW) return;
+      shownCount++;
+      const cost = calcCost(combo);
+      const isBest = cost.total < bestCost;
+      if (isBest) { bestCost = cost.total; bestCombo = combo; }
+
+      this.steps.push({
+        msg: `🤔 ชุดที่ ${idx + 1}: ${combo.map(r => r.num).join(', ')} → cost = <span class="highlight">${cost.total.toFixed(1)}</span> ${isBest ? '(ดีสุดตอนนี้ ✅)' : ''}`,
+        action: () => {
+          resetRoomStates(this.rooms);
+          occupied.forEach(r => r.state = 'rejected');
+          combo.forEach(r => r.state = 'considering');
+          renderMiniGrid('demoC-grid', this.rooms);
+        }
+      });
+    });
+
+    if (allCombos.length > MAX_SHOW) {
+      this.steps.push({
+        msg: `... และอีก ${allCombos.length - MAX_SHOW} ชุด (ข้ามเพื่อความเร็ว)`,
+        action: () => {}
+      });
+    }
+
+    const cost = calcCost(bestCombo);
+    this.steps.push({
+      msg: `🎉 เลือกชุดที่ cost ต่ำสุด: <span class="highlight">${bestCombo.map(r => r.num).join(', ')}</span> (cost = ${bestCost.toFixed(1)})`,
+      action: () => {
+        resetRoomStates(this.rooms);
+        occupied.forEach(r => r.state = 'rejected');
+        bestCombo.forEach((r, i) => { r.state = 'accepted'; r.order = i + 1; });
+        renderMiniGrid('demoC-grid', this.rooms);
+        showCost('demoC-cost', cost.floor, cost.side, cost.pos, cost.bed, 'demoC-total', cost.total);
+      }
+    });
+  },
+
+  step() {
+    if (this.current < this.steps.length - 1) {
+      this.current++;
+      const s = this.steps[this.current];
+      s.action();
+      setStatus('demoC-status', `<span class="step-num">Step ${this.current + 1}/${this.steps.length}:</span> ${s.msg}`);
+    }
+  },
+
+  play() {
+    if (this.playing) { this.stop(); return; }
+    if (this.current >= this.steps.length - 1) this.reset();
+    this.playing = true;
+    this.interval = setInterval(() => {
+      if (this.current < this.steps.length - 1) this.step();
+      else this.stop();
+    }, 1000);
+  },
+
+  stop() { this.playing = false; if (this.interval) clearInterval(this.interval); },
+
+  reset() {
+    this.stop();
+    this.current = -1;
+    resetRoomStates(this.rooms);
+    renderMiniGrid('demoC-grid', this.rooms);
+    setStatus('demoC-status', 'กด <strong>Step</strong> เพื่อดู brute-force ทุกชุด ✨');
+    document.getElementById('demoC-cost').style.display = 'none';
+    document.getElementById('demoC-total').style.display = 'none';
+  }
+};
+
+// ============================================================
+// 🅳 Demo D: Greedy Seed + Expand
+// ============================================================
+const demoD = {
+  rooms: [],
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+
+  init() {
+    this.rooms = [];
+    for (let i = 0; i < 10; i++) {
+      const pos = i + 1;
+      const num = `5${String(pos + 7).padStart(2, '0')}`;
+      this.rooms.push({
+        num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1,
+        occupied: ['511', '515'].includes(num),
+        state: null, order: null,
+      });
+    }
+    this.buildSteps();
+    this.reset();
+  },
+
+  buildSteps() {
+    this.steps = [];
+    const available = this.rooms.filter(r => !r.occupied);
+    const occupied = this.rooms.filter(r => r.occupied);
+    const N = 3;
+
+    this.steps.push({
+      msg: `🔍 เริ่ม Algorithm D: greedy seed + expand`,
+      action: () => { resetRoomStates(this.rooms); renderMiniGrid('demoD-grid', this.rooms); }
+    });
+
+    occupied.forEach(r => {
+      this.steps.push({
+        msg: `❌ ${r.num} ถูกจอง`,
+        action: () => { r.state = 'rejected'; renderMiniGrid('demoD-grid', this.rooms); }
+      });
+    });
+
+    // Sort and find seed (middle)
+    const sorted = available.slice().sort((a, b) => a.pos - b.pos);
+    const seedIdx = Math.floor(sorted.length / 2);
+    const seed = sorted[seedIdx];
+
+    this.steps.push({
+      msg: `🌱 เลือก <span class="highlight">seed</span>: ${seed.num} (กลางสุด, index ${seedIdx + 1}/${sorted.length})`,
+      action: () => {
+        resetRoomStates(this.rooms);
+        occupied.forEach(r => r.state = 'rejected');
+        seed.state = 'seed';
+        seed.order = 1;
+        renderMiniGrid('demoD-grid', this.rooms);
+      }
+    });
+
+    // Expand
+    const used = new Set([seed.num]);
+    let order = 2;
+    for (let j = 1; j < N; j++) {
+      const candidates = available.filter(r => !used.has(r.num));
+      candidates.sort((a, b) => {
+        const da = Math.abs(a.floor - seed.floor) + Math.abs(a.pos - seed.pos) * 0.5;
+        const db = Math.abs(b.floor - seed.floor) + Math.abs(b.pos - seed.pos) * 0.5;
+        return da - db;
+      });
+
+      // Show considering candidates
+      this.steps.push({
+        msg: `🤔 ห้องใกล้ seed ที่สุด: ${candidates.slice(0, 3).map(r => `${r.num} (d=${(Math.abs(r.floor - seed.floor) + Math.abs(r.pos - seed.pos) * 0.5).toFixed(1)})`).join(', ')}`,
+        action: () => {
+          resetRoomStates(this.rooms);
+          occupied.forEach(r => r.state = 'rejected');
+          seed.state = 'seed'; seed.order = 1;
+          used.forEach(num => {
+            const r = this.rooms.find(x => x.num === num);
+            if (r && r !== seed) { r.state = 'accepted'; }
+          });
+          candidates.slice(0, 3).forEach(r => {
+            if (!used.has(r.num)) r.state = 'considering';
+          });
+          renderMiniGrid('demoD-grid', this.rooms);
+        }
+      });
+
+      const chosen = candidates[0];
+      used.add(chosen.num);
+      this.steps.push({
+        msg: `➕ เลือก <span class="highlight">${chosen.num}</span> (ใกล้ seed สุด)`,
+        action: () => {
+          resetRoomStates(this.rooms);
+          occupied.forEach(r => r.state = 'rejected');
+          seed.state = 'seed'; seed.order = 1;
+          chosen.state = 'accepted'; chosen.order = order++;
+          renderMiniGrid('demoD-grid', this.rooms);
+        }
+      });
+    }
+
+    const chosenRooms = [...used].map(num => this.rooms.find(r => r.num === num));
+    const cost = calcCost(chosenRooms);
+    this.steps.push({
+      msg: `🎉 ผลลัพธ์: <span class="highlight">${chosenRooms.map(r => r.num).join(', ')}</span>`,
+      action: () => {
+        resetRoomStates(this.rooms);
+        occupied.forEach(r => r.state = 'rejected');
+        seed.state = 'seed'; seed.order = 1;
+        let o = 2;
+        chosenRooms.forEach(r => {
+          if (r !== seed) { r.state = 'accepted'; r.order = o++; }
+        });
+        renderMiniGrid('demoD-grid', this.rooms);
+        showCost('demoD-cost', cost.floor, cost.side, cost.pos, cost.bed, 'demoD-total', cost.total);
+      }
+    });
+  },
+
+  step() {
+    if (this.current < this.steps.length - 1) {
+      this.current++;
+      const s = this.steps[this.current];
+      s.action();
+      setStatus('demoD-status', `<span class="step-num">Step ${this.current + 1}/${this.steps.length}:</span> ${s.msg}`);
+    }
+  },
+
+  play() {
+    if (this.playing) { this.stop(); return; }
+    if (this.current >= this.steps.length - 1) this.reset();
+    this.playing = true;
+    this.interval = setInterval(() => {
+      if (this.current < this.steps.length - 1) this.step();
+      else this.stop();
+    }, 1000);
+  },
+
+  stop() { this.playing = false; if (this.interval) clearInterval(this.interval); },
+
+  reset() {
+    this.stop();
+    this.current = -1;
+    resetRoomStates(this.rooms);
+    renderMiniGrid('demoD-grid', this.rooms);
+    setStatus('demoD-status', 'กด <strong>Step</strong> เพื่อดูการเลือก seed และ expand ✨');
+    document.getElementById('demoD-cost').style.display = 'none';
+    document.getElementById('demoD-total').style.display = 'none';
+  }
+};
+
+// ============================================================
+// ⭐ Demo E: Hybrid (C vs D)
+// ============================================================
+const demoE = {
+  roomsC: [],
+  roomsD: [],
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+
+  init() {
+    const occupied = ['511', '514'];
+    this.roomsC = [];
+    this.roomsD = [];
+    for (let i = 0; i < 10; i++) {
+      const pos = i + 1;
+      const num = `5${String(pos + 7).padStart(2, '0')}`;
+      const occ = occupied.includes(num);
+      this.roomsC.push({ num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1, occupied: occ, state: null, order: null });
+      this.roomsD.push({ num, type: 'Deluxe', side: 'V1', pos, floor: 5, beds: 1, occupied: occ, state: null, order: null });
+    }
+    this.buildSteps();
+    this.reset();
+  },
+
+  buildSteps() {
+    this.steps = [];
+    const N = 3;
+
+    this.steps.push({
+      msg: `⭐ เริ่ม Hybrid: รัน C และ D พร้อมกัน`,
+      action: () => {
+        resetRoomStates(this.roomsC);
+        resetRoomStates(this.roomsD);
+        renderMiniGrid('demoE-grid-c', this.roomsC);
+        renderMiniGrid('demoE-grid-d', this.roomsD);
+      }
+    });
+
+    // === Run C (coordinate) ===
+    const availableC = this.roomsC.filter(r => !r.occupied);
+    function combos(arr, k) {
+      if (k === 0) return [[]];
+      if (arr.length < k) return [];
+      const [first, ...rest] = arr;
+      return [...combos(rest, k - 1).map(c => [first, ...c]), ...combos(rest, k)];
+    }
+    const allCombos = combos(availableC, N);
+    let bestC = null, bestCostC = Infinity;
+    allCombos.forEach(combo => {
+      const cost = calcCost(combo);
+      if (cost.total < bestCostC) { bestCostC = cost.total; bestC = combo; }
+    });
+
+    this.steps.push({
+      msg: `🅲 Algorithm C: ลอง ${allCombos.length} combinations → เลือก cost ต่ำสุด`,
+      action: () => {
+        resetRoomStates(this.roomsC);
+        bestC.forEach((r, i) => { r.state = 'accepted'; r.order = i + 1; });
+        renderMiniGrid('demoE-grid-c', this.roomsC);
+        document.getElementById('demoE-cost-c-val').textContent = bestCostC.toFixed(1);
+      }
+    });
+
+    // === Run D (greedy) ===
+    const availableD = this.roomsD.filter(r => !r.occupied);
+    const sorted = availableD.slice().sort((a, b) => a.pos - b.pos);
+    const seedIdx = Math.floor(sorted.length / 2);
+    const seed = sorted[seedIdx];
+    const used = new Set([seed.num]);
+    for (let j = 1; j < N; j++) {
+      const candidates = availableD.filter(r => !used.has(r.num));
+      candidates.sort((a, b) => {
+        const da = Math.abs(a.floor - seed.floor) + Math.abs(a.pos - seed.pos) * 0.5;
+        const db = Math.abs(b.floor - seed.floor) + Math.abs(b.pos - seed.pos) * 0.5;
+        return da - db;
+      });
+      used.add(candidates[0].num);
+    }
+    const bestD = [...used].map(num => this.roomsD.find(r => r.num === num));
+    const bestCostD = calcCost(bestD).total;
+
+    this.steps.push({
+      msg: `🅳 Algorithm D: seed ${seed.num} → expand → ${bestD.map(r => r.num).join(', ')}`,
+      action: () => {
+        resetRoomStates(this.roomsD);
+        const seedRoom = bestD.find(r => r.num === seed.num);
+        seedRoom.state = 'seed'; seedRoom.order = 1;
+        let o = 2;
+        bestD.forEach(r => {
+          if (r.num !== seed.num) { r.state = 'accepted'; r.order = o++; }
+        });
+        renderMiniGrid('demoE-grid-d', this.roomsD);
+        document.getElementById('demoE-cost-d-val').textContent = bestCostD.toFixed(1);
+      }
+    });
+
+    // === Compare ===
+    this.steps.push({
+      msg: `📊 เปรียบเทียบ: C cost = ${bestCostC.toFixed(1)} vs D cost = ${bestCostD.toFixed(1)}`,
+      action: () => {}
+    });
+
+    const winner = bestCostC <= bestCostD ? 'C' : 'D';
+    this.steps.push({
+      msg: `🏆 <span class="highlight">ผู้ชนะ: Algorithm ${winner}</span> (cost = ${(winner === 'C' ? bestCostC : bestCostD).toFixed(1)})`,
+      action: () => {
+        document.getElementById('demoE-winner').style.display = 'block';
+        document.getElementById('demoE-winner-val').textContent = `Algorithm ${winner} (${(winner === 'C' ? bestCostC : bestCostD).toFixed(1)})`;
+      }
+    });
+  },
+
+  step() {
+    if (this.current < this.steps.length - 1) {
+      this.current++;
+      const s = this.steps[this.current];
+      s.action();
+      setStatus('demoE-status', `<span class="step-num">Step ${this.current + 1}/${this.steps.length}:</span> ${s.msg}`);
+    }
+  },
+
+  play() {
+    if (this.playing) { this.stop(); return; }
+    if (this.current >= this.steps.length - 1) this.reset();
+    this.playing = true;
+    this.interval = setInterval(() => {
+      if (this.current < this.steps.length - 1) this.step();
+      else this.stop();
+    }, 1500);
+  },
+
+  stop() { this.playing = false; if (this.interval) clearInterval(this.interval); },
+
+  reset() {
+    this.stop();
+    this.current = -1;
+    resetRoomStates(this.roomsC);
+    resetRoomStates(this.roomsD);
+    renderMiniGrid('demoE-grid-c', this.roomsC);
+    renderMiniGrid('demoE-grid-d', this.roomsD);
+    setStatus('demoE-status', 'กด <strong>Step</strong> เพื่อดูการแข่งขัน C vs D ✨');
+    document.getElementById('demoE-cost-c-val').textContent = '—';
+    document.getElementById('demoE-cost-d-val').textContent = '—';
+    document.getElementById('demoE-winner').style.display = 'none';
+  }
+};
+
+// ============================================================
+// 🚀 Init all demos
+// ============================================================
+demoA.init();
+demoB.init();
+demoC.init();
+demoD.init();
+demoE.init();
+
+// ============================================================
+// 📑 Sidebar active link tracking
+// ============================================================
+const sections = document.querySelectorAll('section');
+const navLinks = document.querySelectorAll('#sidebar a');
+
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(section => {
+    const sectionTop = section.offsetTop - 100;
+    if (window.scrollY >= sectionTop) {
+      current = section.getAttribute('id');
+    }
+  });
+  navLinks.forEach(link => {
+    link.classList.remove('active');
+    if (link.getAttribute('href') === '#' + current) {
+      link.classList.add('active');
+    }
+  });
+});
+</script>
+
+</body>
+</html>

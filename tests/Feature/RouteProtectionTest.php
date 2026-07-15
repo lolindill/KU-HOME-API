@@ -2,9 +2,10 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class RouteProtectionTest extends TestCase
 {
@@ -119,7 +120,6 @@ class RouteProtectionTest extends TestCase
         $response->assertStatus(403);
     }
 
-
     public function test_room_status_update_rejects_non_admin(): void
     {
         $this->actingAsUser();
@@ -141,10 +141,45 @@ class RouteProtectionTest extends TestCase
         $response->assertStatus(403);
     }
 
-    public function test_dashboard_cleaning_tasks_rejects_non_admin(): void
+    public function test_dashboard_list_tasks_rejects_non_admin(): void
     {
         $this->actingAsUser();
-        $response = $this->getJson('/api/v1/dashboard/cleaning-tasks');
+        $response = $this->getJson('/api/v1/dashboard/tasks');
+        $response->assertStatus(403);
+    }
+
+    /**
+     * 🧹 Phase A (15/07/26): housekeeper role ต้องเข้า shared endpoints ได้ แต่ admin-only ห้าม
+     */
+    public function test_housekeeper_can_access_unassigned_tasks(): void
+    {
+        $this->actingAsHousekeeping();
+        $response = $this->getJson('/api/v1/dashboard/tasks/unassigned');
+        $response->assertStatus(200);
+    }
+
+    public function test_housekeeper_cannot_list_all_tasks(): void
+    {
+        $this->actingAsHousekeeping();
+        $response = $this->getJson('/api/v1/dashboard/tasks');
+        $response->assertStatus(403);
+    }
+
+    public function test_housekeeper_cannot_assign_task(): void
+    {
+        $this->actingAsHousekeeping();
+        $response = $this->putJson('/api/v1/dashboard/tasks/'.Str::uuid().'/assign', [
+            'assigned_to' => Str::uuid(),
+        ]);
+        // 404 (task not found) ก็ไม่ใช่ — ต้อง 403 จาก role gate ก่อนเข้า logic
+        // แต่เพราะ endpoint อยู่ใต้ role:admin เลย → 403
+        $response->assertStatus(403);
+    }
+
+    public function test_regular_user_cannot_access_housekeeping_endpoints(): void
+    {
+        $this->actingAsUser();
+        $response = $this->getJson('/api/v1/dashboard/tasks/unassigned');
         $response->assertStatus(403);
     }
 
@@ -169,7 +204,7 @@ class RouteProtectionTest extends TestCase
     public function test_admin_can_access_dashboard(): void
     {
         $this->actingAsAdmin();
-        $response = $this->getJson('/api/v1/dashboard/cleaning-tasks');
+        $response = $this->getJson('/api/v1/dashboard/tasks');
         $response->assertStatus(200);
     }
 }

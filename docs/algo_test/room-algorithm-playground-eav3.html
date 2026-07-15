@@ -1,0 +1,2929 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KU HOME — v3 Walking Distance Final Judge Playground</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --suite: #bc8cff; --deluxe: #58a6ff; --superior: #3fb950;
+    --orange: #db6d28; --purple: #a371f7;
+    --sidebar-w: 320px;
+    --step-h: 280px;
+    --results-h: 220px;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh;
+    display: grid; grid-template-columns: var(--sidebar-w) 6px 1fr;
+    grid-template-rows: 1fr; overflow: hidden;
+  }
+  /* ===== Resizers ===== */
+  .resizer { background: var(--border); position: relative; z-index: 50; transition: background 0.15s; }
+  .resizer:hover, .resizer.active { background: var(--accent); }
+  .resizer-v { cursor: col-resize; }
+  .resizer-h { cursor: row-resize; }
+  .resizer::after {
+    content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 3px; height: 22px; border-radius: 2px; background: rgba(255,255,255,0.15);
+  }
+  .resizer-v::after { width: 3px; height: 22px; }
+  .resizer-h::after { width: 22px; height: 3px; }
+  .resizer:hover::after, .resizer.active::after { background: rgba(255,255,255,0.5); }
+  /* ===== Sidebar ===== */
+  #sidebar {
+    background: var(--panel); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 14px;
+  }
+  #sidebar h1 { font-size: 13px; color: var(--accent); margin-bottom: 4px; }
+  #sidebar .sub { font-size: 10px; color: var(--muted); margin-bottom: 14px; line-height: 1.4; }
+  .section {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; margin-bottom: 10px; background: #0d1117;
+  }
+  .section h2 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  label { font-size: 11px; display: block; margin-bottom: 4px; color: var(--text); }
+  select, input[type="number"], input[type="date"], input[type="text"] {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px;
+    font-size: 11px; margin-bottom: 6px; color-scheme: dark;
+  }
+  select { font-family: inherit; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row > * { flex: 1; }
+  button {
+    background: #21262d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 5px 10px; font-size: 11px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { background: #30363d; border-color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: white; }
+  button.primary:hover { background: #388bfd; }
+  button.danger { background: #da3633; border-color: #da3633; color: white; }
+  button.small { padding: 3px 8px; font-size: 10px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tag {
+    padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: bold;
+  }
+  .tag.Suite { background: var(--suite); color: #0d1117; }
+  .tag.Deluxe { background: var(--deluxe); color: #0d1117; }
+  .tag.Superior { background: var(--superior); color: #0d1117; }
+  .tag.pref { background: #f0883e; color: #0d1117; }
+  .weight-slider { width: 100%; margin-bottom: 6px; accent-color: var(--accent); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; border: 1px solid rgba(255,255,255,0.2); }
+  /* ===== Booking list (sequence) ===== */
+  .ea-list { font-size: 11px; max-height: 240px; overflow-y: auto; margin-bottom: 6px; }
+  .ea-item {
+    padding: 6px; margin-bottom: 4px; background: #21262d; border-radius: 4px;
+    border-left: 4px solid var(--muted);
+  }
+  .ea-item.done { opacity: 1; }
+  .ea-item.failed { border-left-color: var(--red); opacity: 0.7; }
+  .ea-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; margin-bottom: 3px;
+  }
+  .ea-rooms { font-size: 10px; color: var(--muted); display: flex; gap: 2px; flex-wrap: wrap; margin-top: 3px; }
+  .ea-rooms .room-chip {
+    padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: bold;
+    color: #0d1117; background: var(--muted);
+  }
+  .ea-result { font-size: 9px; color: var(--green); margin-top: 3px; }
+  .ea-result.fail { color: var(--red); }
+  .ea-result .badge { padding: 1px 4px; border-radius: 3px; background: rgba(63,185,80,0.2); color: var(--green); font-weight: bold; margin-left: 4px; }
+  /* ===== Main ===== */
+  #main { display: grid; grid-template-rows: 1fr 6px var(--step-h) 6px var(--results-h); overflow: hidden; min-height: 0; }
+  #preview { overflow-y: auto; padding: 14px; }
+  #preview h2 { font-size: 12px; color: var(--accent); margin-bottom: 8px; }
+  .floor-block {
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+    margin-bottom: 10px; background: var(--panel);
+  }
+  .floor-title {
+    font-size: 12px; font-weight: bold; margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .floor-stats { font-size: 9px; color: var(--muted); font-weight: normal; }
+  .side-label {
+    font-size: 9px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 1px; margin: 5px 0 3px;
+  }
+  .room-row {
+    display: flex; gap: 3px; flex-wrap: wrap; align-items: center;
+  }
+  .room {
+    width: 52px; height: 58px; border-radius: 4px; display: flex;
+    flex-direction: column; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: bold; cursor: pointer; border: 2px solid transparent;
+    transition: all 0.2s; position: relative; user-select: none; padding: 1px;
+  }
+  .room:hover { transform: scale(1.08); z-index: 5; }
+  .room.Suite { background: rgba(188,140,255,0.25); color: var(--suite); border-color: var(--suite); }
+  .room.Deluxe { background: rgba(88,166,255,0.2); color: var(--deluxe); border-color: var(--deluxe); }
+  .room.Superior { background: rgba(63,185,80,0.2); color: var(--superior); border-color: var(--superior); }
+  /* [EA] booking fill — override type background tint with booking color (kept semi-transparent so type text stays legible) */
+  .room.bk-claimed { background: var(--bk-color, #21262d) !important; color: #fff !important; border-color: var(--bk-color, var(--border)) !important; }
+  .room.bk-seed { background: #21262d !important; color: var(--yellow) !important; border-color: var(--yellow) !important; }
+  .room.bk-seed::after { content: "🔒"; position: absolute; top: 0; right: 1px; font-size: 7px; }
+  .room.assigned {
+    box-shadow: 0 0 0 2px var(--green), 0 0 12px rgba(63,185,80,0.6);
+    animation: pop 0.3s;
+  }
+  .room.seed { box-shadow: 0 0 0 2px var(--yellow), 0 0 12px rgba(210,153,34,0.6); }
+  .room.considering {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 12px rgba(88,166,255,0.7);
+    animation: pulse 1s infinite;
+  }
+  .room.rejected {
+    box-shadow: 0 0 0 2px var(--red), 0 0 8px rgba(248,81,73,0.5);
+    opacity: 0.6;
+  }
+  .room.accepted {
+    box-shadow: 0 0 0 2px var(--green), 0 0 12px rgba(63,185,80,0.7);
+    animation: pop 0.3s;
+  }
+  @keyframes pop { 0% { transform: scale(1.3); } 100% { transform: scale(1); } }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .room .num { font-size: 11px; line-height: 1.2; }
+  .room .beds { font-size: 8px; opacity: 0.9; line-height: 1; }
+  .room .bk-label { font-size: 7px; opacity: 0.9; line-height: 1; margin-top: 1px; }
+  .room-timeline {
+    display: flex; height: 3px; width: 100%; gap: 0; margin-top: 2px;
+  }
+  .room-timeline .tl-day { flex: 1; min-width: 0; border-radius: 1px; }
+  .room-timeline .tl-day.occ { background: var(--red); }
+  .room-timeline .tl-day.free { background: rgba(63,185,80,0.25); }
+  .corridor {
+    text-align: center; font-size: 8px; color: var(--muted);
+    padding: 3px; border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border); margin: 3px 0; letter-spacing: 2px;
+  }
+  .elevator, .stair {
+    display: inline-block; padding: 3px 7px; background: #30363d;
+    border-radius: 4px; font-size: 8px; color: var(--muted); margin: 0 3px;
+  }
+  .stair { background: #21262d; }
+  /* ===== Modal ===== */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal-content {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; width: 440px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .modal-header-title { font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+  .modal-close {
+    background: none; border: none; color: var(--muted); font-size: 18px;
+    cursor: pointer; padding: 4px 8px;
+  }
+  .modal-close:hover { color: var(--red); }
+  .modal-section { margin-bottom: 14px; }
+  .modal-section h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .modal-info { font-size: 11px; color: var(--text); margin-bottom: 10px; line-height: 1.7; }
+  .modal-timeline { display: flex; gap: 1px; margin-top: 4px; }
+  .modal-timeline .mtl-day {
+    flex: 1; min-width: 0; height: 28px; border-radius: 2px;
+    font-size: 7px; text-align: center; line-height: 28px;
+  }
+  .modal-timeline .mtl-day.occ { background: rgba(248,81,73,0.3); color: var(--red); }
+  .modal-timeline .mtl-day.free { background: rgba(63,185,80,0.1); color: var(--muted); }
+  .modal-timeline-labels { display: flex; gap: 1px; margin-top: 2px; }
+  .modal-timeline-labels span {
+    flex: 1; text-align: center; font-size: 7px; color: var(--muted);
+  }
+  .res-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 5px 8px; margin-bottom: 3px; background: #21262d; border-radius: 4px;
+    font-size: 11px;
+  }
+  .res-item .res-label { font-weight: bold; color: var(--accent); margin-right: 4px; }
+  .res-item .res-dates { color: var(--text); }
+  .res-item .res-type { font-size: 9px; padding: 1px 4px; border-radius: 3px; background: var(--border); color: var(--muted); margin-left: 4px; }
+  /* ===== Step Explorer ===== */
+  #step-explorer {
+    border-top: 2px solid var(--accent); padding: 10px 14px; background: var(--panel);
+    overflow: hidden; display: grid;
+    grid-template-columns: 280px 1fr; gap: 12px; min-height: 0;
+  }
+  #step-controls {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .step-header {
+    font-size: 11px; color: var(--accent); font-weight: bold;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .step-counter { font-size: 10px; color: var(--muted); }
+  .step-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+  .step-buttons button { padding: 4px 8px; font-size: 10px; }
+  .speed-control {
+    display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted);
+  }
+  .speed-control input { accent-color: var(--accent); }
+  #thought-bubble {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px; font-size: 11px; line-height: 1.5; min-height: 60px;
+    color: var(--text); position: relative; white-space: pre-wrap;
+  }
+  #thought-bubble .step-icon { font-size: 14px; margin-right: 4px; }
+  #thought-bubble .step-action { color: var(--accent); font-weight: bold; }
+  #step-log {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px; font-family: "SF Mono", Consolas, monospace; font-size: 10px;
+    line-height: 1.6; overflow-y: auto; max-height: 220px; color: var(--muted);
+  }
+  #step-log .log-entry { padding: 1px 0; }
+  #step-log .log-entry.current { color: var(--accent); background: rgba(88,166,255,0.1); padding: 2px 4px; border-radius: 3px; }
+  #step-log .log-entry.accept { color: var(--green); }
+  #step-log .log-entry.reject { color: var(--red); }
+  #step-log .log-entry.info { color: var(--muted); }
+  .cost-display {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 8px; background: #0d1117; border-radius: 4px;
+    font-size: 10px; border: 1px solid var(--border);
+  }
+  .cost-display .label { color: var(--muted); }
+  .cost-display .value { color: var(--yellow); font-weight: bold; font-family: monospace; }
+  /* Results panel */
+  #results {
+    border-top: 1px solid var(--border); padding: 10px 14px; background: var(--panel);
+    overflow-y: auto; min-height: 0;
+  }
+  .results-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 8px; }
+  .result-card {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px;
+    background: #0d1117; cursor: pointer; transition: all 0.15s;
+  }
+  .result-card:hover { border-color: var(--accent); }
+  .result-card.best { border-color: var(--green); box-shadow: 0 0 8px rgba(63,185,80,0.3); }
+  .result-card .name { font-size: 11px; font-weight: bold; margin-bottom: 3px; }
+  .result-card .metric { font-size: 9px; color: var(--muted); display: flex; justify-content: space-between; }
+  .result-card .metric span { color: var(--text); }
+  .result-card .metric-group { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--border); }
+  .result-card .metric.tiny { font-size: 9px; color: var(--muted); opacity: 0.8; }
+  .result-card.fail { opacity: 0.5; }
+  .result-card.fail .name { color: var(--red); }
+  .result-card.has-steps { cursor: crosshair; }
+  .result-card.has-steps::after { content: "🎬"; float: right; font-size: 10px; }
+  .result-card.ea-card { border-color: var(--purple); }
+  .result-card.ea-card.best { box-shadow: 0 0 10px rgba(163,113,247,0.5); }
+  /* Prompt output */
+  #prompt-box {
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px;
+    background: #0d1117; font-family: "SF Mono", Consolas, monospace;
+    font-size: 10px; color: var(--text); margin-top: 6px;
+    white-space: pre-wrap; max-height: 80px; overflow-y: auto; line-height: 1.5;
+  }
+  .prompt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .prompt-header span { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+  .legend { display: flex; gap: 10px; font-size: 9px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+  .legend-item { display: flex; align-items: center; gap: 3px; }
+  .legend-dot { width: 9px; height: 9px; border-radius: 2px; }
+  .legend-palette { display: flex; gap: 2px; flex-wrap: wrap; max-width: 280px; }
+  .legend-palette .pdot { width: 11px; height: 11px; border-radius: 2px; }
+  .help { font-size: 9px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .date-range-display { font-size: 10px; color: var(--accent); margin-bottom: 6px; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>🏨 KU HOME — v3 Walking Distance</h1>
+  <div class="sub">v3 = v1 algorithms เดิม + <b style="color:var(--purple)">Final Judge</b> ด้วย <code>walkCost</code> (Σ pairwise walking dist ผ่านบันได × w.walk + floor penalty) · แทน costFunction ในการ rank algo</div>
+
+  <div class="section">
+    <h2>🌱 Seed (pre-booked state)</h2>
+    <select id="seed-select"></select>
+    <div class="help" id="seed-desc">—</div>
+    <div class="row" style="margin-top:6px;">
+      <button class="small primary" onclick="applySeedOnly()" style="flex:1;">🔒 Apply Seed</button>
+      <button class="small" onclick="resetSeed()" style="flex:1;">↺ Reset Seed</button>
+    </div>
+    <div class="help" style="margin-top:4px;">เลือก seed แล้วกด <b>Apply Seed</b> เพื่อล็อกห้อง pre-booked บนแผนผัง (ยังไม่รัน algorithm)</div>
+  </div>
+
+  <div class="section">
+    <h2>📦 Case / Sequence</h2>
+    <select id="case-select"></select>
+    <div class="help" id="case-desc">—</div>
+    <button class="small danger" onclick="resetCase()" style="width:100%;margin-top:6px;">↺ Reset Case (booking seq)</button>
+  </div>
+
+  <div class="section">
+    <h2>▶ Run</h2>
+    <button class="primary" onclick="runEA()" id="btn-run-ea" style="width:100%;">▶ Run Hybrid+ (E+A)</button>
+    <button class="small" onclick="runCompareAll()" style="width:100%;margin-top:4px;">⚡ Compare A/C/D/E/EA</button>
+    
+    <button class="small" onclick="exportStateToJson()" style="width:100%;margin-top:4px;background-color:#2ea043;color:white;border-color:#2ea043;">💾 Export State (JSON)</button>
+    
+    <button class="small danger" onclick="resetAll()" style="width:100%;margin-top:4px;">♻ Reset All</button>
+  </div>
+
+  <div class="section">
+    <h2>📋 Booking List</h2>
+    <div class="ea-list" id="ea-list"></div>
+  </div>
+
+  <div class="section">
+    <h2>⚖️ Cost Weights</h2>
+    <label>Floor spread: <span id="w-floor-val">50</span></label>
+    <input type="range" class="weight-slider" id="w-floor" min="0" max="100" value="50" oninput="updateWeights()">
+    <label>Side mismatch: <span id="w-side-val">8</span></label>
+    <input type="range" class="weight-slider" id="w-side" min="0" max="30" value="8" oninput="updateWeights()">
+    <label>Position spread: <span id="w-pos-val">3</span></label>
+    <input type="range" class="weight-slider" id="w-pos" min="0" max="20" value="3" oninput="updateWeights()">
+    <label>Extra bed waste: <span id="w-bed-val">5</span></label>
+    <input type="range" class="weight-slider" id="w-bed" min="0" max="20" value="5" oninput="updateWeights()">
+    <label>🚶 Walking dist (v3 judge): <span id="w-walk-val">1</span></label>
+    <input type="range" class="weight-slider" id="w-walk" min="0" max="20" value="1" oninput="updateWeights()">
+  </div>
+
+</div>
+<div class="resizer resizer-v" id="resizer-sidebar" title="ลากเพื่อปรับความกว้าง sidebar"></div>
+
+<div id="main">
+  <div id="preview">
+    <h2>🏢 แผนผังอาคาร — คลิกห้องเพื่อดู reservation 📅</h2>
+    <div class="date-range-display" id="date-display"></div>
+    <div id="floors"></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--suite)"></div>Suite</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--deluxe)"></div>Deluxe</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--superior)"></div>Superior</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#21262d;border:1px solid var(--yellow)"></div>🔒 Seed (pre-booked)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green);box-shadow:0 0 4px var(--green)"></div>Assigned (run นี้)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--accent);box-shadow:0 0 4px var(--accent)"></div>Considering</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red);box-shadow:0 0 4px var(--red)"></div>Rejected</div>
+      <div class="legend-item">🎨 Booking colors:</div>
+      <div class="legend-palette" id="legend-palette"></div>
+    </div>
+  </div>
+  <div class="resizer resizer-h" id="resizer-step" title="ลากเพื่อปรับความสูง Step Explorer"></div>
+
+  <div id="step-explorer">
+    <div id="step-controls">
+      <div class="step-header">
+        🎬 Step Explorer
+        <span class="step-counter" id="step-counter">0 / 0</span>
+      </div>
+      <div id="thought-bubble">
+        <span style="color:var(--muted)">เลือก seed + case แล้วกด "Run Hybrid+ (E+A)" เพื่อเริ่มค่ะ ✨</span>
+      </div>
+      <div class="step-buttons">
+        <button class="small primary" onclick="stepPlay()" id="btn-play">▶ Play</button>
+        <button class="small" onclick="stepForward()">⏭ Step</button>
+        <button class="small" onclick="stepBackward()">⏮ Back</button>
+        <button class="small danger" onclick="stepReset()">⏮ Reset</button>
+      </div>
+      <div class="speed-control">
+        ⚡ Speed: <input type="range" id="step-speed" min="100" max="2000" value="600" style="flex:1" oninput="updateSpeed()">
+        <span id="speed-val">600ms</span>
+      </div>
+      <div class="cost-display">
+        <span class="label">💰 Current Cost:</span>
+        <span class="value" id="current-cost">—</span>
+      </div>
+    </div>
+    <div id="step-log">
+      <div style="color:var(--muted);padding:4px;">Algorithm log จะปรากฏที่นี่...</div>
+    </div>
+  </div>
+  <div class="resizer resizer-h" id="resizer-results" title="ลากเพื่อปรับความสูง Results"></div>
+
+  <div id="results">
+    <div class="prompt-header">
+      <span>📊 Algorithm Results (คลิกการ์ดเพื่อดู step-by-step)</span>
+      <span id="result-summary" style="color:var(--accent)"></span>
+    </div>
+    <div class="results-grid" id="results-grid"></div>
+    <div class="prompt-header">
+      <span>📝 Prompt Output</span>
+      <button class="small primary" onclick="copyPrompt()">📋 Copy</button>
+    </div>
+    <div id="prompt-box">— ยังไม่ได้ run algorithm ค่ะ กด "Run Hybrid+ (E+A)" ก่อนนะนายท่าน —</div>
+  </div>
+</div>
+
+<!-- ===== Room Reservation Modal ===== -->
+<div id="room-modal" class="modal-overlay" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div class="modal-header-title" id="modal-title">Room XXX</div>
+      <button class="modal-close" onclick="closeRoomModal()">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 📅 Date Utilities (TZ-safe — addDaysLocal/todayLocal ป้องกัน toISOString drift ใต้ TZ+7)
+// ============================================================
+function todayISO() {
+  return new Date().toISOString().split('T')[0];
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+function addDaysLocal(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().split('T')[0];
+}
+function todayLocal() {
+  const dt = new Date();
+  return new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate())).toISOString().split('T')[0];
+}
+const T = (n) => addDaysLocal(todayLocal(), n);
+function daysBetween(d1, d2) {
+  const a = new Date(d1 + 'T00:00:00');
+  const b = new Date(d2 + 'T00:00:00');
+  return Math.round((b - a) / 86400000);
+}
+function fmtDate(dateStr) {
+  return dateStr.substring(5); // MM-DD
+}
+
+// ============================================================
+// 🔄 Overlap / Availability Logic
+// ============================================================
+const TIMELINE_DAYS = 14;
+
+function rangesOverlap(aIn, aOut, bIn, bOut) {
+  return aIn < bOut && bIn < aOut;
+}
+function hasOverlap(room, checkIn, checkOut) {
+  return room.reservations.some(res => rangesOverlap(checkIn, checkOut, res.checkIn, res.checkOut));
+}
+function getOverlap(room, checkIn, checkOut) {
+  return room.reservations.find(res => rangesOverlap(checkIn, checkOut, res.checkIn, res.checkOut));
+}
+function isAvailable(room, checkIn, checkOut) {
+  return !hasOverlap(room, checkIn, checkOut);
+}
+function isRoomOccupiedOn(room, date) {
+  return room.reservations.some(res => res.checkIn <= date && date < res.checkOut);
+}
+function getTimelineStart() {
+  return todayISO();
+}
+
+// ============================================================
+// 🎨 Booking Palette — สีเฉพาะของแต่ละ booking ใน sequence
+//   bookingIdx = -1 → seed (pre-booked, สีเทา/เหลือง)
+//   bookingIdx >= 0 → booking ที่ i ใน sequence (สีใน palette)
+// ============================================================
+const BOOKING_PALETTE = [
+  '#f85149', '#58a6ff', '#3fb950', '#d29922', '#bc8cff',
+  '#db6d28', '#a371f7', '#39c5cf', '#f778ba', '#7ee787',
+  '#ffd700', '#ff6b6b', '#4ecdc4', '#ffe66d', '#c9b1ff',
+];
+function bookingColor(idx) {
+  if (idx < 0) return '#3a3f44'; // seed
+  return BOOKING_PALETTE[idx % BOOKING_PALETTE.length];
+}
+
+// ============================================================
+// 🏢 KU HOME Topology Data
+// ============================================================
+const FLOORS = [5, 6, 7, 8, 9];
+
+function buildRooms() {
+  const rooms = [];
+  FLOORS.forEach(floor => {
+    const v1 = [
+      { num: `${floor}07`, type: 'Suite',    side: 'V1', pos: 1, beds: 1 },
+      { num: `${floor}08`, type: 'Deluxe',   side: 'V1', pos: 2, beds: 1 },
+      { num: `${floor}09`, type: 'Deluxe',   side: 'V1', pos: 3, beds: 3 },
+      { num: `${floor}10`, type: 'Deluxe',   side: 'V1', pos: 4, beds: 1 },
+      { num: `${floor}11`, type: 'Deluxe',   side: 'V1', pos: 5, beds: 1 },
+      { num: `${floor}12`, type: 'Deluxe',   side: 'V1', pos: 6, beds: 1 },
+      { num: `${floor}13`, type: 'Deluxe',   side: 'V1', pos: 7, beds: 1 },
+      { num: `${floor}14`, type: 'Deluxe',   side: 'V1', pos: 8, beds: 1 },
+      { num: `${floor}15`, type: 'Deluxe',   side: 'V1', pos: 9, beds: 1 },
+      { num: `${floor}16`, type: 'Deluxe',   side: 'V1', pos: 10, beds: 1 },
+      { num: `${floor}17`, type: 'Deluxe',   side: 'V1', pos: 11, beds: 1 },
+      { num: `${floor}18`, type: 'Suite',    side: 'V1', pos: 12, beds: 1 },
+    ];
+    const v2a = [
+      { num: `${floor}06`, type: 'Superior', side: 'V2A', pos: 1, beds: 1 },
+      { num: `${floor}05`, type: 'Superior', side: 'V2A', pos: 2, beds: 1 },
+      { num: `${floor}04`, type: 'Superior', side: 'V2A', pos: 3, beds: 1 },
+      { num: `${floor}03`, type: 'Superior', side: 'V2A', pos: 4, beds: 1 },
+      { num: `${floor}02`, type: 'Superior', side: 'V2A', pos: 5, beds: 1 },
+      { num: `${floor}01`, type: 'Superior', side: 'V2A', pos: 6, beds: 1 },
+    ];
+    const v2b = [
+      { num: `${floor}20`, type: 'Superior', side: 'V2B', pos: 1, beds: 1 },
+      { num: `${floor}19`, type: 'Superior', side: 'V2B', pos: 2, beds: 1 },
+    ];
+    rooms.push(...v1, ...v2a, ...v2b);
+  });
+  return rooms.map(r => ({
+    ...r, floor: parseInt(r.num[0]),
+    bed_type: parseInt(r.num[0]) === 8 ? 'twin' : 'double',
+    reservations: [],
+    assigned: false, isSeed: false, state: null
+  }));
+}
+
+// ============================================================
+// 💖 Global Grid System — ศูนย์กลางการแปลงพิกัด
+//   รวม 3 ฝั่ง (V1, V2A, V2B) เป็นเส้นตรง 1D ตามตำแหน่งจริงบนชั้น
+//   - V1:   pos 1-12  → global 1-12
+//   - V2A:  pos 1-6   → global 2-7  (เว้น 1 ให้บันไดซ้าย)
+//   - V2B:  pos 1-2   → global 10-11 (ข้ามลิฟต์ 2 ตัว)
+//   ใช้ร่วมกันทั้ง costFunction, costBreakdown และ Greedy เพื่อความสอดคล้อง
+// ============================================================
+function getGlobalPos(r) {
+  if (r.side === 'V1')  return r.pos;
+  if (r.side === 'V2A') return r.pos + 1;
+  if (r.side === 'V2B') return r.pos + 9;
+  return r.pos;
+}
+
+// ============================================================
+// 🚶 [v3] Walking Distance (Final Judge) — ระยะเดินจริงผ่านบันได 2 ข้าง
+//   วัดเฉพาะแนวนอน (vertical คุมด้วย floorPenalty แยกใน walkCost)
+//   - ชั้นเดียวกัน: |gA - gB|
+//   - ต่างชั้น: ลงบันไดฝั่งหนึ่ง → ข้ามชั้น → เดินเข้าห้อง = min(viaLeft, viaRight)
+//   ไม่พับตัว U เหมือน getStairDist ใน v2 (pos1 กับ pos12 = 11 ไม่ใช่ 0)
+// ============================================================
+const STAIR_LEFT = 1, STAIR_RIGHT = 12;
+
+function getWalkingDist(roomA, roomB) {
+  const gA = getGlobalPos(roomA);
+  const gB = getGlobalPos(roomB);
+  if (roomA.floor === roomB.floor) {
+    return Math.abs(gA - gB);
+  }
+  const viaLeft  = Math.abs(gA - STAIR_LEFT)  + Math.abs(gB - STAIR_LEFT);
+  const viaRight = Math.abs(gA - STAIR_RIGHT) + Math.abs(gB - STAIR_RIGHT);
+  return Math.min(viaLeft, viaRight);
+}
+
+// ============================================================
+// 🏆 [v3] walkCost — Final Judge สำหรับ rank cross-algo
+//   = (Σ pairwise walking dist) × w.walk + (floors-1) × w.floor
+//   - horizontal: sum ทุกคู่ เพื่อจับ scatter ของกลุ่มทั้งหมด
+//   - vertical: floor penalty แยก เพราะ getWalkingDist ไม่มี vertical
+// ============================================================
+function walkCost(pairs) {
+  if (pairs.length === 0) return Infinity;
+  const rooms = pairs.map(p => p.room).filter(r => r);
+  if (rooms.length === 0) return 0;
+  const w = state.weights;
+  // horizontal: sum pairwise
+  let sumWalk = 0;
+  for (let i = 0; i < rooms.length; i++) {
+    for (let j = i + 1; j < rooms.length; j++) {
+      sumWalk += getWalkingDist(rooms[i], rooms[j]);
+    }
+  }
+  // vertical: floor penalty แยก (เหมือน v1)
+  const distinctFloors = new Set(rooms.map(r => r.floor));
+  const floorPenalty = (distinctFloors.size - 1) * w.floor;
+  return sumWalk * w.walk + floorPenalty;
+}
+
+// ============================================================
+// 🎮 State
+// ============================================================
+let state = {
+  rooms: buildRooms(),
+  currentBooking: {
+    checkIn: T(1),
+    checkOut: T(3),
+    rooms: [],
+  },
+  bookingQueue: [],
+  evalDates: { checkIn: T(1), checkOut: T(3) },
+  weights: { floor: 50, side: 8, pos: 3, bed: 5, walk: 1 },
+  lastResults: null,
+  lastBooking: [],
+  selectedAlgo: 'EA',
+  modalRoom: null,
+};
+
+let stepState = {
+  steps: [],
+  current: -1,
+  playing: false,
+  interval: null,
+  speed: 600,
+  activeResult: null,
+};
+
+// ============================================================
+// 🎨 Render — floor map
+// ============================================================
+function render() {
+  const rooms = state.currentBooking.rooms;
+  if (rooms.length === 0) {
+    state.evalDates.checkIn  = state.currentBooking.checkIn;
+    state.evalDates.checkOut = state.currentBooking.checkOut;
+  } else {
+    const allDates = rooms.flatMap(br => [brDates(br).checkIn, brDates(br).checkOut]);
+    state.evalDates.checkIn  = allDates.slice().sort()[0];
+    state.evalDates.checkOut = allDates.slice().sort().at(-1);
+  }
+
+  const distinctDates = new Set(rooms.map(br => `${brDates(br).checkIn}_${brDates(br).checkOut}`));
+  if (rooms.length === 0 || distinctDates.size === 1) {
+    const ci = state.evalDates.checkIn, co = state.evalDates.checkOut;
+    const nights = daysBetween(ci, co);
+    document.getElementById('date-display').textContent =
+      `📅 ${ci} → ${co} (${nights} night${nights !== 1 ? 's' : ''})`;
+  } else {
+    document.getElementById('date-display').textContent =
+      `📅 ${state.evalDates.checkIn} → ${state.evalDates.checkOut} (union · ${distinctDates.size} date-ranges)`;
+  }
+
+  const container = document.getElementById('floors');
+  container.innerHTML = '';
+  FLOORS.forEach(floor => {
+    const floorRooms = state.rooms.filter(r => r.floor === floor);
+    const div = document.createElement('div');
+    div.className = 'floor-block';
+    const occCount = floorRooms.filter(r => hasOverlap(r, state.evalDates.checkIn, state.evalDates.checkOut)).length;
+    const assignedCount = floorRooms.filter(r => r.assigned).length;
+    const resCount = floorRooms.reduce((s, r) => s + r.reservations.length, 0);
+    div.innerHTML = `
+      <div class="floor-title">
+        ชั้น ${floor}${floor === 8 ? ' (twin)' : ''}
+        <span class="floor-stats">${floorRooms.length} ห้อง · 🔒${occCount} occupied · ✅${assignedCount} assigned · 📋${resCount} reservations</span>
+      </div>
+      <div class="side-label">ฝั่งวิว 1 (V1) — Suite · Deluxe · Suite</div>
+      <div class="room-row" id="v1-${floor}"></div>
+      <div class="corridor">═════════ ทางเดิน (CORRIDOR) ═════════</div>
+      <div class="side-label">ฝั่งวิว 2 (V2)</div>
+      <div class="room-row" id="v2-${floor}"></div>
+    `;
+    container.appendChild(div);
+    const v1Row = div.querySelector(`#v1-${floor}`);
+    floorRooms.filter(r => r.side === 'V1').sort((a,b) => a.pos - b.pos).forEach(r => v1Row.appendChild(makeRoomEl(r)));
+    const v2Row = div.querySelector(`#v2-${floor}`);
+    const stairL = document.createElement('span');
+    stairL.className = 'stair'; stairL.textContent = '🪜 บันได';
+    v2Row.appendChild(stairL);
+    floorRooms.filter(r => r.side === 'V2A').sort((a,b) => a.pos - b.pos).forEach(r => v2Row.appendChild(makeRoomEl(r)));
+    const elev1 = document.createElement('span');
+    elev1.className = 'elevator'; elev1.textContent = '🛗 ลิฟต์';
+    const elev2 = document.createElement('span');
+    elev2.className = 'elevator'; elev2.textContent = '🛗 ลิฟต์';
+    v2Row.appendChild(elev1);
+    v2Row.appendChild(elev2);
+    floorRooms.filter(r => r.side === 'V2B').sort((a,b) => a.pos - b.pos).forEach(r => v2Row.appendChild(makeRoomEl(r)));
+    const stairR = document.createElement('span');
+    stairR.className = 'stair'; stairR.textContent = '🪜 บันได';
+    v2Row.appendChild(stairR);
+  });
+  renderEAList();
+}
+
+// [EA] makeRoomEl — fill สี booking ตาม bookingIdx ของ reservation ที่ overlap evalDates
+//   - seed (bookingIdx -1) → bk-seed (สีเทา + ล็อก)
+//   - bookingIdx >= 0 → bk-claimed สีของ booking นั้น (override type tint)
+//   - ห้อง assigned ใน run ปัจจุบันยังได้ green ring ทับบน fill
+function makeRoomEl(r) {
+  const el = document.createElement('div');
+  el.className = `room ${r.type}`;
+
+  // หา reservation ที่ overlap evalDates (เอาอันที่ bookingIdx สูงสุด = ล่าสุด)
+  const overlapRes = r.reservations
+    .filter(res => rangesOverlap(state.evalDates.checkIn, state.evalDates.checkOut, res.checkIn, res.checkOut))
+    .sort((a, b) => (b.bookingIdx ?? -1) - (a.bookingIdx ?? -1))[0];
+
+  if (overlapRes) {
+    const bkIdx = overlapRes.bookingIdx ?? -1;
+    if (bkIdx < 0) {
+      el.classList.add('bk-seed');
+    } else {
+      el.classList.add('bk-claimed');
+      el.style.setProperty('--bk-color', bookingColor(bkIdx));
+    }
+  }
+
+  if (r.assigned) el.classList.add('assigned');
+  if (r.isSeed) el.classList.add('seed');
+  if (r.state === 'considering') el.classList.add('considering');
+  if (r.state === 'rejected') el.classList.add('rejected');
+  if (r.state === 'accepted') el.classList.add('accepted');
+
+  const numDiv = document.createElement('div');
+  numDiv.className = 'num';
+  numDiv.textContent = r.bed_type === 'twin' ? `${r.num} T` : r.num;
+  const bedsDiv = document.createElement('div');
+  bedsDiv.className = 'beds';
+  bedsDiv.textContent = `🛏${r.beds}`;
+  el.appendChild(numDiv);
+  el.appendChild(bedsDiv);
+
+  // [EA] แสดงเลข booking ที่จองห้องนี้ (ถ้ามี)
+  if (overlapRes && (overlapRes.bookingIdx ?? -1) >= 0) {
+    const bkDiv = document.createElement('div');
+    bkDiv.className = 'bk-label';
+    bkDiv.textContent = `#${overlapRes.bookingIdx + 1}`;
+    el.appendChild(bkDiv);
+  }
+
+  // Mini timeline
+  const tl = document.createElement('div');
+  tl.className = 'room-timeline';
+  const start = getTimelineStart();
+  for (let i = 0; i < TIMELINE_DAYS; i++) {
+    const date = addDays(start, i);
+    const dayEl = document.createElement('div');
+    dayEl.className = 'tl-day ' + (isRoomOccupiedOn(r, date) ? 'occ' : 'free');
+    tl.appendChild(dayEl);
+  }
+  el.appendChild(tl);
+
+  el.title = `${r.num} · ${r.type} · ${r.side}/P${r.pos} · ${r.beds} bed · ${r.bed_type || 'double'} · ${r.reservations.length} res — คลิกเพื่อดูรายละเอียด`;
+  el.onclick = (e) => { e.stopPropagation(); openRoomModal(r); };
+  return el;
+}
+
+// [EA] Booking list — โชว์ sequence พร้อมสีของแต่ละ booking
+function renderEAList() {
+  const list = document.getElementById('ea-list');
+  if (state.bookingQueue.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:10px;padding:4px;">ยังไม่มี booking — เลือก case/sequence แล้วกด Run ค่ะ</div>';
+    return;
+  }
+  list.innerHTML = state.bookingQueue.map((b, i) => {
+    const color = bookingColor(i);
+    const statusIcon = b.status === 'done' ? '✅' : b.status === 'failed' ? '❌' : b.status === 'processing' ? '⏳' : '⏸';
+    const roomsStr = b.rooms.map(r => {
+      let label = r.type;
+      if (r.beds && r.beds > 0) label += ` +🛏️${r.beds}`;
+      if (r.bed_preference === 'twin') label += ` (Twin)`;
+      return `<span class="tag ${r.type}">${label}</span>`;
+    }).join(' ');
+    let resultStr = '';
+    if (b.status === 'done' && b.result) {
+      const assigned = b.result.assignments.filter(x => x).map(r => r.num).join(',');
+      const winner = b.result.winner ? ` <span class="badge">${b.result.winner}</span>` : '';
+      resultStr = `<div class="ea-result">→ ${assigned} · cost=${b.result.cost.toFixed(1)}${winner}</div>`;
+    } else if (b.status === 'failed' && b.result) {
+      resultStr = `<div class="ea-result fail">→ FAILED: ไม่มีห้องเพียงพอ</div>`;
+    }
+    const roomChips = (b.result && b.result.assignments)
+      ? b.result.assignments.filter(x => x).map(rm => `<span class="room-chip" style="background:${color}">${rm.num}</span>`).join('')
+      : '';
+    return `<div class="ea-item ${b.status || ''}" style="border-left-color:${color}">
+      <div class="ea-header">
+        <span><span class="swatch" style="background:${color}"></span>${statusIcon} #${i+1}: ${b.checkIn.substring(5)}→${b.checkOut.substring(5)}</span>
+        <span><span class="priority-badge" style="font-size:9px;background:var(--accent,#ffd166);color:#1a1a1a;border-radius:4px;padding:1px 5px;font-weight:600;">${priorityTag(b)}</span> <span style="color:var(--muted);font-size:9px">${b.rooms.length} rooms</span></span>
+      </div>
+      <div class="ea-rooms">${roomsStr}</div>
+      ${roomChips ? `<div class="ea-rooms">${roomChips}</div>` : ''}
+      ${resultStr}
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// 🎮 Controls — Weights & Reset
+// ============================================================
+function updateWeights() {
+  state.weights.floor = parseInt(document.getElementById('w-floor').value);
+  state.weights.side = parseInt(document.getElementById('w-side').value);
+  state.weights.pos = parseInt(document.getElementById('w-pos').value);
+  state.weights.bed = parseInt(document.getElementById('w-bed').value);
+  state.weights.walk = parseInt(document.getElementById('w-walk').value);
+  document.getElementById('w-floor-val').textContent = state.weights.floor;
+  document.getElementById('w-side-val').textContent = state.weights.side;
+  document.getElementById('w-pos-val').textContent = state.weights.pos;
+  document.getElementById('w-bed-val').textContent = state.weights.bed;
+  document.getElementById('w-walk-val').textContent = state.weights.walk;
+}
+
+function resetAll() {
+  stepStop();
+  state.rooms = buildRooms();
+  state.currentBooking = { checkIn: T(1), checkOut: T(3), rooms: [] };
+  state.bookingQueue = [];
+  state.evalDates = { checkIn: state.currentBooking.checkIn, checkOut: state.currentBooking.checkOut };
+  state.lastResults = null;
+  state.lastBooking = [];
+  stepState.steps = [];
+  stepState.current = -1;
+  stepState.activeResult = null;
+  document.getElementById('results-grid').innerHTML = '';
+  document.getElementById('prompt-box').textContent = '— reset แล้วค่ะ ลองใหม่ได้เลย —';
+  document.getElementById('result-summary').textContent = '';
+  document.getElementById('step-counter').textContent = '0 / 0';
+  document.getElementById('current-cost').textContent = '—';
+  document.getElementById('thought-bubble').innerHTML = '<span style="color:var(--muted)">เลือก seed + case แล้วกด "Run Hybrid+ (E+A)" เพื่อเริ่มค่ะ ✨</span>';
+  document.getElementById('step-log').innerHTML = '<div style="color:var(--muted);padding:4px;">Algorithm log จะปรากฏที่นี่...</div>';
+  render();
+}
+
+// ============================================================
+// 🧠 Algorithms — reused from room-algorithm-playground.html (A/C/D/E + new EA)
+// ============================================================
+// Each step: { type: 'info'|'consider'|'accept'|'reject'|'done', room: roomObj|null, thought: string, cost: number, assignedRooms: [roomNums] }
+
+function cloneRoomForResult(r) {
+  if (!r) return null;
+  return {
+    num: r.num, type: r.type, side: r.side, pos: r.pos, beds: r.beds, floor: r.floor,
+    bed_type: r.bed_type || 'double',
+    reservations: r.reservations.map(res => ({ ...res })),
+    assigned: false, isSeed: false, state: null
+  };
+}
+function cloneAssignments(arr) {
+  return arr.map(r => r ? cloneRoomForResult(r) : null);
+}
+
+function getAvailable(roomType, assignedNums, checkIn, checkOut) {
+  const dates = checkIn && checkOut ? { checkIn, checkOut } : state.evalDates;
+  const excluded = assignedNums || new Set();
+  return state.rooms.filter(r =>
+    !excluded.has(r.num) &&
+    !r.assigned &&
+    (roomType === null || r.type === roomType) &&
+    isAvailable(r, dates.checkIn, dates.checkOut)
+  );
+}
+
+// [FIX Bug #3] costFunction รับ pairs [{room, br}]
+function costFunction(pairs) {
+  const w = state.weights;
+  if (pairs.length === 0) return Infinity;
+  const validRooms = pairs.map(p => p.room).filter(r => r);
+  if (validRooms.length === 0) return 0;
+
+  const floors = validRooms.map(r => r.floor);
+  const distinctFloors = new Set(floors);
+  const floorSpread = (distinctFloors.size - 1) * w.floor;
+  
+  const normSides = new Set(validRooms.map(r => r.side.startsWith('V2') ? 'V2' : r.side));
+  const sideMismatch = (normSides.size - 1) * w.side;
+
+  // 💖 อัปเกรด: วัดระยะห่างข้ามฝั่งแบบครอบจักรวาล 12 สล็อต + Exponential
+  let posSpread = 0;
+  const globalPositions = validRooms.map(getGlobalPos);
+
+  if (globalPositions.length > 1) {
+    const distance = Math.max(...globalPositions) - Math.min(...globalPositions);
+    posSpread += (distance ** 2) * w.pos; // หักคะแนนแบบยกกำลังสอง
+  }
+
+  let bedWaste = 0;
+  pairs.forEach(p => {
+    if (p.room && p.br) {
+      const waste = Math.max(0, p.room.beds - 1 - p.br.beds);
+      bedWaste += waste * w.bed;
+    }
+  });
+
+  let bedPrefPenalty = 0;
+  pairs.forEach(p => {
+    if (p.room && p.br && p.br.bed_preference && p.br.bed_preference !== 'any') {
+      if (p.room.bed_type !== p.br.bed_preference) {
+        bedPrefPenalty += 100;
+      }
+    }
+  });
+
+  const total = floorSpread + sideMismatch + posSpread + bedWaste + bedPrefPenalty;
+  return total;
+}
+
+// 💖 เอาโค้ดนี้ไปวางต่อท้าย costFunction ได้เลยค่ะ
+function costBreakdown(pairs) {
+  const w = state.weights;
+  const validRooms = pairs.map(p => p.room).filter(r => r);
+  if (validRooms.length === 0) return { floor: 0, side: 0, pos: 0, bed: 0, pref: 0, walk: 0, total: 0 };
+  
+  const distinctFloors = new Set(validRooms.map(r => r.floor));
+  const floor = (distinctFloors.size - 1) * w.floor;
+  
+  const normSides = new Set(validRooms.map(r => r.side.startsWith('V2') ? 'V2' : r.side));
+  const side = (normSides.size - 1) * w.side;
+  
+  let pos = 0;
+  const globalPositions = validRooms.map(getGlobalPos);
+
+  if (globalPositions.length > 1) {
+    const distance = Math.max(...globalPositions) - Math.min(...globalPositions);
+    pos += (distance ** 2) * w.pos;
+  }
+  
+  let bed = 0;
+  pairs.forEach(p => { 
+    if (p.room && p.br) bed += Math.max(0, p.room.beds - 1 - p.br.beds) * w.bed; 
+  });
+  
+  let pref = 0;
+  pairs.forEach(p => {
+    if (p.room && p.br && p.br.bed_preference && p.br.bed_preference !== 'any') {
+      if (p.room.bed_type !== p.br.bed_preference) pref += 100;
+    }
+  });
+
+  // [v3] walk = final judge value (เท่ากับ result.cost ที่ใช้ rank cross-algo)
+  const walk = walkCost(pairs);
+
+  // [v3] total = walk เพราะนี่คือ final judge (floor/side/pos/bed/pref เก็บไว้ดูเป็น info)
+  return { floor, side, pos, bed, pref, walk, total: walk };
+}
+
+function countContiguousPairs(rooms) {
+  if (rooms.length < 2) return 0;
+  let count = 0;
+  for (let i = 0; i < rooms.length; i++) {
+    for (let j = i + 1; j < rooms.length; j++) {
+      const a = rooms[i], b = rooms[j];
+      if (a.floor === b.floor && a.side === b.side && Math.abs(a.pos - b.pos) === 1) count++;
+    }
+  }
+  return count;
+}
+
+function computeMetrics(result, booking) {
+  const assigned = result.assignments.filter(a => a);
+  if (assigned.length === 0) {
+    return { floors: 0, sides: 0, contiguous: 0, bedWaste: 0, breakdown: { floor: 0, side: 0, pos: 0, bed: 0, pref: 0, walk: 0, total: 0 } };
+  }
+  const pairs = result.assignments.map((r, i) => ({ room: r, br: booking[i] })).filter(p => p.room);
+  const breakdown = costBreakdown(pairs);
+  const floors = new Set(assigned.map(r => r.floor)).size;
+  const sides = new Set(assigned.map(r => r.side.startsWith('V2') ? 'V2' : r.side)).size;
+  const maxPairs = assigned.length - 1;
+  const contiguous = maxPairs > 0 ? Math.round((countContiguousPairs(assigned) / maxPairs) * 100) : 100;
+  return { floors, sides, contiguous, bedWaste: breakdown.bed, breakdown };
+}
+
+function costFromAssigned(assignedRooms, booking) {
+  const pairs = [];
+  for (let i = 0; i < assignedRooms.length && i < booking.length; i++) {
+    if (assignedRooms[i]) {
+      pairs.push({ room: assignedRooms[i], br: booking[i] });
+    }
+  }
+  return costFunction(pairs);
+}
+
+function logOverlapFiltered(result, booking) {
+  let logged = 0;
+  const MAX_LOG = 8;
+  for (const br of booking) {
+    const { checkIn, checkOut } = brDates(br);
+    const filtered = state.rooms.filter(r =>
+      r.type === br.type && hasOverlap(r, checkIn, checkOut)
+    );
+    for (const r of filtered) {
+      if (logged >= MAX_LOG) {
+        result.steps.push({
+          type: 'info', room: null,
+          thought: `... และอีกหลายห้องถูกกรองเพราะ overlap ในช่วง ${fmtDate(checkIn)}-${fmtDate(checkOut)}`,
+          cost: 0, assignedRooms: [],
+        });
+        return;
+      }
+      const ov = getOverlap(r, checkIn, checkOut);
+      result.steps.push({
+        type: 'reject', room: r,
+        thought: `❌ ${r.num} has reservation ${fmtDate(ov.checkIn)}-${fmtDate(ov.checkOut)} overlapping ${fmtDate(checkIn)}-${fmtDate(checkOut)}`,
+        cost: 0, assignedRooms: [],
+      });
+      logged++;
+    }
+  }
+  if (logged === 0) {
+    result.steps.push({
+      type: 'info', room: null,
+      thought: `✅ ไม่มีห้องถูกกรองเพราะ overlap — ทุก type ว่างตาม date ของแต่ละ slot`,
+      cost: 0, assignedRooms: [],
+    });
+  }
+}
+
+// [Per-Room Dates] date ของ slot + fallback global
+function brDates(br) {
+  return {
+    checkIn:  br.checkIn  || state.currentBooking.checkIn,
+    checkOut: br.checkOut || state.currentBooking.checkOut,
+  };
+}
+function isAvailableForBr(room, br) {
+  const { checkIn, checkOut } = brDates(br);
+  return isAvailable(room, checkIn, checkOut);
+}
+
+function getX09IfNeeded(booking) {
+  const idx = booking.findIndex(br => br.type === 'Deluxe' && br.beds > 0);
+  if (idx < 0) return null;
+  const { checkIn, checkOut } = brDates(booking[idx]);
+  const x09Rooms = state.rooms.filter(r =>
+    r.num.endsWith('09') && r.type === 'Deluxe' && r.beds === 3 &&
+    isAvailable(r, checkIn, checkOut)
+  );
+  if (x09Rooms.length === 0) return null;
+  const room = x09Rooms.sort((a, b) => a.floor - b.floor)[0];
+  return { room, idx };
+}
+
+// ============================================================
+// 🥇 Booking Priority — เรียง Queue ก่อน Assign ห้อง
+// Priority: Suite → Extra bed(ถ้า X09 ว่าง) → Twin → Most rooms → Least checkout
+// ============================================================
+// คำนวณ trait ของ booking สำหรับใช้ใน comparator และ render tag
+// (pure function ของ bk + state.rooms ที่ seed แล้วเท่านั้น)
+function computeBookingPriority(bk) {
+  const hasExtraBed = bk.rooms.some(r => r.type === 'Deluxe' && r.beds > 0);
+  const hasX09Free = hasExtraBed && state.rooms.some(rm =>
+    rm.num.endsWith('09') && rm.type === 'Deluxe' && rm.beds === 3 &&
+    isAvailable(rm, bk.checkIn, bk.checkOut)
+  );
+  return {
+    hasSuite:   bk.rooms.some(r => r.type === 'Suite'),
+    hasX09Free,                                                          // Extra bed ถ้า X09 ว่างจริง
+    hasTwin:    bk.rooms.some(r => r.bed_preference === 'twin'),
+    roomCount:  bk.rooms.length,
+    checkOutTs: new Date(bk.checkOut).getTime(),
+  };
+}
+
+// คืน trait สูงสุดของ booking เพื่อแสดง priority tag ใน queue list
+function priorityTag(bk) {
+  const p = computeBookingPriority(bk);
+  if (p.hasSuite)                 return '👑 Suite';
+  if (p.hasX09Free)               return '🛏️ X09';
+  if (p.hasTwin)                  return '👯 Twin';
+  if (p.roomCount >= 2)           return `📦 ${p.roomCount} rooms`;
+  return '📅 Checkout';
+}
+
+// ============================================================
+// 🧩 Bipartite Matching (Kuhn's algorithm)
+// ============================================================
+function bipartiteMatch(adj) {
+  const nSlots = adj.length;
+  let nPos = 0;
+  for (const list of adj) for (const p of list) if (p + 1 > nPos) nPos = p + 1;
+  const matchSlot = new Array(nPos).fill(-1);
+  const matchPos  = new Array(nSlots).fill(-1);
+  function tryAugment(slot, visited) {
+    for (const pos of adj[slot]) {
+      if (visited[pos]) continue;
+      visited[pos] = true;
+      if (matchSlot[pos] === -1 || tryAugment(matchSlot[pos], visited)) {
+        matchSlot[pos] = slot;
+        matchPos[slot] = pos;
+        return true;
+      }
+    }
+    return false;
+  }
+  let matched = 0;
+  for (let slot = 0; slot < nSlots; slot++) {
+    if (tryAugment(slot, new Array(nPos).fill(false))) matched++;
+    else break;
+  }
+  return { matchPos, matched };
+}
+function isPerfectMatch(bm, n) { return bm.matched === n; }
+
+// ============================================================
+// Algorithm A: Block Contiguous
+// ============================================================
+function algoBlock(booking) {
+  const result = { algo: 'Block Contiguous', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `🅰️ Block Contiguous: หาห้องติดกันบนฝั่งเดียวกัน (window + bipartite matching)`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  const types = booking.map(b => b.type);
+  const uniqueTypes = [...new Set(types)];
+  if (uniqueTypes.length > 1) {
+    result.steps.push({ type: 'info', room: null, thought: `⚠️ ต้องการหลาย type (${uniqueTypes.join(', ')}), จะหา block แบบ joint`, cost: 0, assignedRooms: [] });
+  }
+
+  const x09 = getX09IfNeeded(booking);
+  if (x09) {
+    result.assignments[x09.idx] = x09.room;
+    result.seed = x09.room.num;
+    result.steps.push({ type: 'accept', room: x09.room, thought: `🎯 X09 Priority: เลือก ${x09.room.num} (Deluxe 3-bed builtin) สำหรับ slot #${x09.idx}`, cost: 0, assignedRooms: [x09.room.num] });
+  }
+
+  const remaining = booking.map((br, i) => ({ br, i })).filter(({ i }) => !result.assignments[i]);
+
+  if (remaining.length > 0) {
+    const brs = remaining.map(r => r.br);
+    const idxs = remaining.map(r => r.i);
+    const n = remaining.length;
+
+    const neededTypes = [...new Set(brs.map(b => b.type))];
+    const candidates = state.rooms.filter(r =>
+      !result.assignments.some(a => a && a.num === r.num) &&
+      neededTypes.includes(r.type)
+    );
+
+    if (candidates.length < n) {
+      result.steps.push({ type: 'reject', room: null, thought: `❌ ห้องว่างไม่พอ (${candidates.length} < ${n})`, cost: 0, assignedRooms: [] });
+    } else {
+      const byFloorSide = {};
+      candidates.forEach(r => {
+        const key = `${r.floor}_${r.side}`;
+        if (!byFloorSide[key]) byFloorSide[key] = [];
+        byFloorSide[key].push(r);
+      });
+      Object.values(byFloorSide).forEach(arr => arr.sort((a, b) => a.pos - b.pos));
+
+      let bestBlock = null;
+      let windowsTried = 0;
+      const MAX_WINDOWS = 5000;
+      for (const key of Object.keys(byFloorSide)) {
+        if (windowsTried >= MAX_WINDOWS) break;
+        const rooms = byFloorSide[key];
+        for (let start = 0; start <= rooms.length - n; start++) {
+          if (windowsTried >= MAX_WINDOWS) break;
+          const window = rooms.slice(start, start + n);
+          windowsTried++;
+          let contiguous = true;
+          for (let j = 1; j < window.length; j++) {
+            if (window[j].pos !== window[j-1].pos + 1) { contiguous = false; break; }
+          }
+          if (!contiguous) continue;
+
+          const adj = brs.map(br => {
+            const list = [];
+            for (let j = 0; j < window.length; j++) {
+              if (window[j].type === br.type && isAvailableForBr(window[j], br)) list.push(j);
+            }
+            return list;
+          });
+          const bm = bipartiteMatch(adj);
+          if (!isPerfectMatch(bm, n)) continue;
+
+          const pairs = brs.map((br, i) => ({ room: window[bm.matchPos[i]], br }));
+          const cost = costFunction(pairs);
+          if (!bestBlock || cost < bestBlock.cost) {
+            bestBlock = { pairs, cost, window: window.slice() };
+          }
+        }
+      }
+
+      if (bestBlock) {
+        bestBlock.pairs.forEach((p, j) => {
+          result.assignments[idxs[j]] = p.room;
+        });
+        if (!result.seed) result.seed = bestBlock.window[0].num;
+        result.steps.push({
+          type: 'accept', room: bestBlock.window[0],
+          thought: `✅ Block ติดกัน (${windowsTried} windows, matching cost ${bestBlock.cost.toFixed(1)}): ${bestBlock.window.map(r => r.num).join(',')}`,
+          cost: bestBlock.cost, assignedRooms: bestBlock.window.map(r => r.num),
+        });
+      } else {
+        // [EA] best-effort ปิดเสมอใน playground นี้ (A ต้องเป็น contiguous จริง)
+        result.steps.push({ type: 'reject', room: null, thought: `❌ ไม่เจอ block ติดกัน (best-effort ปิดใน E+A)`, cost: 0, assignedRooms: [] });
+      }
+    }
+  }
+
+  result.assignments = cloneAssignments(result.assignments);
+  const allAssigned = result.assignments.every(a => a !== null);
+  result.ok = allAssigned;
+  const pairs = result.assignments.map((r, i) => ({ room: r, br: booking[i] })).filter(p => p.room);
+  result.cost = allAssigned ? walkCost(pairs) : Infinity; // [v3] final judge = walkCost
+
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 สำเร็จ! cost=${result.cost.toFixed(1)}` : `❌ ล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+// ============================================================
+// Algorithm C: Coordinate + Cost
+// ============================================================
+function algoCoordinate(booking) {
+  const result = { algo: 'Coordinate + Cost', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `🅲 Coordinate: คำนวณ cost ทุกชุดแล้วเลือกชุดที่ดีที่สุด`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  const x09 = getX09IfNeeded(booking);
+  if (x09) {
+    result.assignments[x09.idx] = x09.room;
+    result.seed = x09.room.num;
+    result.steps.push({ type: 'accept', room: x09.room, thought: `🎯 X09 Priority: ${x09.room.num} สำหรับ slot #${x09.idx}`, cost: 0, assignedRooms: [x09.room.num] });
+  }
+
+  const remaining = booking.map((br, i) => ({ br, i })).filter(({ i }) => !result.assignments[i]);
+
+  if (remaining.length === 0) {
+    // ทุกห้องถูก X09 priority จัดการหมดแล้ว
+  } else {
+    const neededTypes = [...new Set(remaining.map(r => r.br.type))];
+    const available = state.rooms.filter(r =>
+      !result.assignments.some(a => a && a.num === r.num) &&
+      neededTypes.includes(r.type)
+    );
+
+    const n = remaining.length;
+    const slotAvail = available.filter(r =>
+      remaining.some(({ br }) => br.type === r.type && isAvailableForBr(r, br))
+    );
+
+    if (slotAvail.length < n) {
+      result.steps.push({ type: 'reject', room: null, thought: `❌ ห้องว่างไม่พอ (${slotAvail.length} < ${n})`, cost: 0, assignedRooms: [] });
+    } else {
+      const brs = remaining.map(r => r.br);
+      const idxs = remaining.map(r => r.i);
+      let bestChosen = null;
+      let bestCost = Infinity;
+
+      // 💖 ดึงห้องที่ถูกจองไปแล้ว (เช่น X09) มารอไว้เพื่อคิด Cost รวม
+      const preAssignedPairs = [];
+      result.assignments.forEach((r, i) => {
+        if (r) preAssignedPairs.push({ room: r, br: booking[i] });
+      });
+
+      // 💖 [FIX] ใช้ bruteComboFeasible แทน flat threshold `<= 30`
+      //   ปัญหาเดิม: n=2 (Suite+Superior) เมื่อ slotAvail>30 ตก Greedy → ได้ 507+505 (cost 20)
+      //   แก้: n≤2 เปิด brute เสมอ → เจอ global min เช่น 518+519 (cost 11)
+      const bruteFeasible = bruteComboFeasible(n, slotAvail.length);
+
+      if (n === 1) {
+        for (const r of slotAvail) {
+          if (r.type !== brs[0].type || !isAvailableForBr(r, brs[0])) continue;
+          // 💖 นำ preAssignedPairs มารวมเพื่อคิด Cost
+          const testPairs = [...preAssignedPairs, { room: r, br: brs[0] }];
+          const c = costFunction(testPairs);
+          if (c < bestCost) { bestCost = c; bestChosen = [r]; }
+        }
+      } else if (bruteFeasible) {
+        const combos = combinations(slotAvail, n);
+        for (const combo of combos) {
+          const adj = brs.map(br => {
+            const list = [];
+            for (let j = 0; j < combo.length; j++) {
+              if (combo[j].type === br.type && isAvailableForBr(combo[j], br)) list.push(j);
+            }
+            return list;
+          });
+          const bm = bipartiteMatch(adj);
+          if (!isPerfectMatch(bm, n)) continue;
+          
+          const comboPairs = brs.map((br, i) => ({ room: combo[bm.matchPos[i]], br }));
+          // 💖 นำ preAssignedPairs มารวมเพื่อคิด Cost
+          const testPairs = [...preAssignedPairs, ...comboPairs];
+          const c = costFunction(testPairs);
+          
+          if (c < bestCost) { bestCost = c; bestChosen = comboPairs.map(p => p.room); }
+        }
+      } else {
+        // 💖 [FIX] Multi-seed Greedy fallback (แทน "หยิบอันแรกที่ว่าง")
+        //   เดิม: หยิบ Suite/Superior อันแรกตามลำดับ floor+pos โดยไม่ optimize ระยะ → scattered
+        //   ใหม่: ลอง seed แต่ละตัวของ slot 0 (cap 15 trials) → expand แบบ proximity (เหมือน D)
+        //         → เก็บชุดที่ cost ต่ำสุด เลย cluster แน่นขึ้นแม้ตก fallback
+        const seedType = brs[0].type;
+        const seedPool = slotAvail
+          .filter(r => r.type === seedType && isAvailableForBr(r, brs[0]))
+          .slice().sort((a, b) => a.floor - b.floor || a.pos - b.pos);
+        const seedTrials = seedPool.slice(0, Math.min(15, seedPool.length));
+
+        for (const seedRoom of seedTrials) {
+          const used = new Set([seedRoom.num]);
+          const chosen = [seedRoom];
+          for (let j = 1; j < n; j++) {
+            const cands = slotAvail.filter(r => !used.has(r.num) && r.type === brs[j].type && isAvailableForBr(r, brs[j]));
+            if (cands.length === 0) { chosen.length = 0; break; }
+            cands.sort((a, b) => {
+              const normSide = r => r.side.startsWith('V2') ? 'V2' : r.side;
+              const seedNorm = normSide(seedRoom);
+              const da = Math.abs(a.floor - seedRoom.floor)
+                       + Math.abs(getGlobalPos(a) - getGlobalPos(seedRoom)) * 0.5
+                       + (normSide(a) !== seedNorm ? 10 : 0);
+              const db = Math.abs(b.floor - seedRoom.floor)
+                       + Math.abs(getGlobalPos(b) - getGlobalPos(seedRoom)) * 0.5
+                       + (normSide(b) !== seedNorm ? 10 : 0);
+              return da - db;
+            });
+            chosen.push(cands[0]); used.add(cands[0].num);
+          }
+          if (chosen.length === n) {
+            const comboPairs = chosen.map((r, j) => ({ room: r, br: brs[j] }));
+            const c = costFunction([...preAssignedPairs, ...comboPairs]);
+            if (c < bestCost) { bestCost = c; bestChosen = chosen; }
+          }
+        }
+      }
+
+      if (bestChosen) {
+        bestChosen.forEach((r, j) => {
+          result.assignments[idxs[j]] = r;
+          result.steps.push({ type: 'accept', room: r, thought: `✅ เลือก ${r.num} (joint cost ${bestCost.toFixed(1)})`, cost: bestCost, assignedRooms: bestChosen.map(x => x.num) });
+        });
+        if (!result.seed) result.seed = bestChosen[0].num;
+      }
+    }
+  }
+
+  result.assignments = cloneAssignments(result.assignments);
+  const allAssigned = result.assignments.every(a => a !== null);
+  result.ok = allAssigned;
+  const pairs = result.assignments.map((r, i) => ({ room: r, br: booking[i] })).filter(p => p.room);
+  result.cost = allAssigned ? walkCost(pairs) : Infinity; // [v3] final judge = walkCost
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 cost=${result.cost.toFixed(1)}` : `❌ ล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+function combinations(arr, k) {
+  if (k === 0) return [[]];
+  if (arr.length < k) return [];
+  const [first, ...rest] = arr;
+  const withFirst = combinations(rest, k - 1).map(c => [first, ...c]);
+  const withoutFirst = combinations(rest, k);
+  return [...withFirst, ...withoutFirst];
+}
+
+// 💖 [FIX] bruteComboFeasible — combo-cap formula ปลอดภัยต่อ C(n,k) explosion
+//   แทน `slotAvail.length <= 30` แบบ flat ที่ทำให้เคส n=2 (Suite+Superior) ตก Greedy
+//   - n≤2  เปิดเสมอ (C(100,2)=4950 เร็วมาก) → เจอ global min เช่น 518+519=11
+//   - n≥3  ขยาย threshold ตาม n เพื่อกัน C(n,k) ใหญ่เกิน (~cap 100k combos)
+function bruteComboFeasible(n, len) {
+  if (n <= 0 || len < n) return false;
+  if (n === 1) return true;        // len candidates
+  if (n === 2) return true;        // C(100,2)=4950
+  if (n === 3) return len <= 80;   // C(80,3)≈82k
+  if (n === 4) return len <= 40;   // C(40,4)=91k
+  if (n === 5) return len <= 25;   // C(25,5)≈53k
+  if (n === 6) return len <= 20;   // C(20,6)≈38k
+  return false;                    // n>6 ตก Greedy multi-seed fallback
+}
+
+function permutations(arr) {
+  if (arr.length <= 1) return [arr];
+  const result = [];
+  for (let i = 0; i < arr.length; i++) {
+    const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+    for (const p of permutations(rest)) {
+      result.push([arr[i], ...p]);
+    }
+  }
+  return result;
+}
+
+// ============================================================
+// Algorithm D: Greedy Seed + Expand
+// ============================================================
+function algoGreedy(booking) {
+  const result = { algo: 'Greedy Seed + Expand', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `🅳 Greedy: เลือก seed แล้วขยายไปห้องใกล้สุด`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  const x09 = getX09IfNeeded(booking);
+  if (x09) {
+    result.assignments[x09.idx] = x09.room;
+    result.seed = x09.room.num;
+    result.steps.push({ type: 'accept', room: x09.room, thought: `🎯 X09 Priority seed: ${x09.room.num} (slot #${x09.idx})`, cost: 0, assignedRooms: [x09.room.num] });
+  }
+
+  const remaining = booking.map((br, i) => ({ br, i })).filter(({ i }) => !result.assignments[i]);
+
+  if (remaining.length > 0) {
+    const neededTypes = [...new Set(remaining.map(r => r.br.type))];
+    const allAvailable = state.rooms.filter(r =>
+      !result.assignments.some(a => a && a.num === r.num) &&
+      neededTypes.includes(r.type)
+    );
+
+    const n = remaining.length;
+    if (allAvailable.length < n) {
+      result.steps.push({ type: 'reject', room: null, thought: `❌ ห้องว่างไม่พอ (${allAvailable.length} < ${n})`, cost: 0, assignedRooms: [] });
+    } else {
+      const brs = remaining.map(r => r.br);
+      const idxs = remaining.map(r => r.i);
+
+      const seedCandidates = allAvailable
+        .filter(r => r.type === brs[0].type && isAvailableForBr(r, brs[0]))
+        .slice().sort((a, b) => a.floor - b.floor || a.pos - b.pos);
+      if (seedCandidates.length === 0) {
+        result.steps.push({ type: 'reject', room: null, thought: `❌ ไม่มีห้องว่างสำหรับ seed (slot 0, ${brs[0].type})`, cost: 0, assignedRooms: [] });
+      } else {
+        // 💖 [FIX] Multi-seed: ลอง seed หลายตัว (cap 15) → expand แบบ proximity → เก็บ cost ต่ำสุด
+        //   เดิม: fixed seed = seedCandidates[0] เสมอ → 507+505 (cost 20) สำหรับเคส Suite+Superior
+        //   ใหม่: ลอง seed แต่ละตัวเงียบๆ → ชนะเท่านั้นที่ถูก push accept steps (รักษา animation ไว้)
+        const normSide = r => r.side.startsWith('V2') ? 'V2' : r.side;
+
+        function expandFromSeed(seedRoom) {
+          const usedNums = new Set([seedRoom.num]);
+          const chosen = [seedRoom];
+          const seedFloor = seedRoom.floor;
+          const seedGlobal = getGlobalPos(seedRoom);
+          const seedNormSide = normSide(seedRoom);
+          for (let j = 1; j < n; j++) {
+            const cands = allAvailable.filter(r => !usedNums.has(r.num) && r.type === brs[j].type && isAvailableForBr(r, brs[j]));
+            if (cands.length === 0) return null;
+            cands.sort((a, b) => {
+              const da = Math.abs(a.floor - seedFloor)
+                       + Math.abs(getGlobalPos(a) - seedGlobal) * 0.5
+                       + (normSide(a) !== seedNormSide ? 10 : 0);
+              const db = Math.abs(b.floor - seedFloor)
+                       + Math.abs(getGlobalPos(b) - seedGlobal) * 0.5
+                       + (normSide(b) !== seedNormSide ? 10 : 0);
+              return da - db;
+            });
+            chosen.push(cands[0]); usedNums.add(cands[0].num);
+          }
+          return chosen;
+        }
+
+        const seedTrials = seedCandidates.slice(0, Math.min(15, seedCandidates.length));
+        let bestChosen = null;
+        let bestCost = Infinity;
+        let bestSeed = null;
+        for (const seedRoom of seedTrials) {
+          const chosen = expandFromSeed(seedRoom);
+          if (!chosen) continue;
+          const pairs = chosen.map((r, j) => ({ room: r, br: brs[j] }));
+          const c = costFunction(pairs);
+          if (c < bestCost) { bestCost = c; bestChosen = chosen; bestSeed = seedRoom; }
+        }
+
+        if (bestChosen) {
+          // push accept steps สำหรับชุดที่ชนะเท่านั้น
+          result.assignments[idxs[0]] = bestSeed;
+          if (!result.seed) result.seed = bestSeed.num;
+          result.steps.push({ type: 'accept', room: bestSeed, thought: `🌱 Seed: เลือก ${bestSeed.num} (best of ${seedTrials.length} trials, cost ${bestCost.toFixed(1)})`, cost: bestCost, assignedRooms: [bestSeed.num] });
+          const usedNums = new Set([bestSeed.num]);
+          for (let j = 1; j < n; j++) {
+            const chosen = bestChosen[j];
+            result.assignments[idxs[j]] = chosen;
+            usedNums.add(chosen.num);
+            result.steps.push({ type: 'accept', room: chosen, thought: `➕ Expand: เลือก ${chosen.num} (ใกล้ seed, type ${chosen.type})`, cost: bestCost, assignedRooms: [...usedNums] });
+          }
+        }
+      }
+    }
+  }
+
+  result.assignments = cloneAssignments(result.assignments);
+  const allAssigned = result.assignments.every(a => a !== null);
+  result.ok = allAssigned;
+  const pairs = result.assignments.map((r, i) => ({ room: r, br: booking[i] })).filter(p => p.room);
+  result.cost = allAssigned ? walkCost(pairs) : Infinity; // [v3] final judge = walkCost
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 cost=${result.cost.toFixed(1)}` : `❌ ล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+// ============================================================
+// 🆕 Algorithm FF: Floor-First Greedy
+//   หลักการ: เก็บห้องไว้ในชั้นเดียวด้วย "โครงสร้าง" ไม่ใช่พึ่ง floor weight
+//     Phase A — คำนวณ available pool (เหมือน D)
+//     Phase B — Single-floor attempt: หาชั้นที่จุได้ครบทุก slot ก่อนเสมอ
+//     Phase C — Edge multi-seed + in-floor expand: seed เริ่มที่ปลายซ้าย/ขวา
+//              ของฝั่ง slot 0 ในชั้นนั้น แล้ว expand เฉพาะในชั้นเดียวกัน (ห้ามข้ามชั้น)
+//     Phase D — Overflow fallback: ถ้าไม่มีชั้นไหนจุครบ → เติมชั้นที่จุได้เยอะสุด
+//              แล้วเอาห้องที่เหลือไปชั้นข้างเคียงที่ใกล้สุด (±1, ±2...)
+// ============================================================
+function algoFloorFirst(booking) {
+  const result = { algo: 'Floor-First Greedy', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `🆕 Floor-First: เก็บห้องในชั้นเดียวกัน — seed ที่ edge แล้ว expand ในชั้น (ห้ามข้ามชั้น)`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  // ---- X09 priority seed (เหมือน D) ----
+  const x09 = getX09IfNeeded(booking);
+  if (x09) {
+    result.assignments[x09.idx] = x09.room;
+    result.seed = x09.room.num;
+    result.steps.push({ type: 'accept', room: x09.room, thought: `🎯 X09 Priority seed: ${x09.room.num} (slot #${x09.idx})`, cost: 0, assignedRooms: [x09.room.num] });
+  }
+
+  const remaining = booking.map((br, i) => ({ br, i })).filter(({ i }) => !result.assignments[i]);
+
+  if (remaining.length > 0) {
+    const neededTypes = [...new Set(remaining.map(r => r.br.type))];
+    const allAvailable = state.rooms.filter(r =>
+      !result.assignments.some(a => a && a.num === r.num) &&
+      neededTypes.includes(r.type)
+    );
+
+    const n = remaining.length;
+    const brs = remaining.map(r => r.br);
+    const idxs = remaining.map(r => r.i);
+    const normSide = r => r.side.startsWith('V2') ? 'V2' : r.side;
+
+    if (allAvailable.length < n) {
+      result.steps.push({ type: 'reject', room: null, thought: `❌ ห้องว่างไม่พอ (${allAvailable.length} < ${n})`, cost: 0, assignedRooms: [] });
+    } else {
+      // ---- Phase B: หาชั้นที่ "จุได้ครบทุก slot" ----
+      //   ใช้ bipartite matching ตรวจแต่ละชั้น — ถ้า match สมบูรณ์ = ชั้นนี้จุได้ครบ
+      const floorsFit = []; // [{ floor, matchPos: [roomIdx per slot], capacity }]
+      for (const floor of FLOORS) {
+        const floorRooms = allAvailable.filter(r => r.floor === floor);
+        // bipartite matching: slot → index ใน floorRooms
+        const adj = brs.map(br => {
+          const list = [];
+          for (let j = 0; j < floorRooms.length; j++) {
+            if (floorRooms[j].type === br.type && isAvailableForBr(floorRooms[j], br)) list.push(j);
+          }
+          return list;
+        });
+        const bm = bipartiteMatch(adj);
+        if (isPerfectMatch(bm, n)) {
+          floorsFit.push({ floor, matchPos: bm.matchPos, capacity: n });
+        }
+      }
+
+      result.steps.push({ type: 'info', room: null, thought: `🏢 Phase B: ชั้นที่จุครบ → [${floorsFit.map(f => 'F' + f.floor).join(', ') || 'ไม่มี'}]`, cost: 0, assignedRooms: [] });
+
+      let bestChosen = null;
+      let bestCost = Infinity;
+      let bestSeed = null;
+
+      // ---- helper: expand เฉพาะในชั้นเดียวกับ seed (ห้ามข้ามชั้น) ----
+      const expandInFloor = (seedRoom, floor) => {
+        const usedNums = new Set([seedRoom.num]);
+        const chosen = [seedRoom];
+        const seedGlobal = getGlobalPos(seedRoom);
+        const seedNormSide = normSide(seedRoom);
+        for (let j = 1; j < n; j++) {
+          const cands = allAvailable.filter(r =>
+            !usedNums.has(r.num) && r.floor === floor &&
+            r.type === brs[j].type && isAvailableForBr(r, brs[j])
+          );
+          if (cands.length === 0) return null;
+          // เรียงตามระยะ global pos จาก seed (ในชั้นเดียวกัน) + side penalty
+          //   ไม่มี floor term เพราะอยู่ชั้นเดียวกันอยู่แล้ว
+          cands.sort((a, b) => {
+            const da = Math.abs(getGlobalPos(a) - seedGlobal) * 0.5
+                     + (normSide(a) !== seedNormSide ? 10 : 0);
+            const db = Math.abs(getGlobalPos(b) - seedGlobal) * 0.5
+                     + (normSide(b) !== seedNormSide ? 10 : 0);
+            return da - db;
+          });
+          chosen.push(cands[0]); usedNums.add(cands[0].num);
+        }
+        return chosen;
+      };
+
+      // ---- helper: เติมชั้น bestFloor ให้เต็มตาม matching แล้วห้องที่เหลือ → ชั้นข้างเคียงใกล้สุด ----
+      const buildOverflowChosen = (bestFloor, matchPos) => {
+        const floorRooms = allAvailable.filter(r => r.floor === bestFloor);
+        // slot ที่ match ในชั้นนี้
+        const matchedSlots = new Set();
+        for (let s = 0; s < n; s++) {
+          if (matchPos[s] !== -1 && matchPos[s] !== undefined) matchedSlots.add(s);
+        }
+        const chosen = new Array(n).fill(null);
+        const usedNums = new Set();
+        matchedSlots.forEach(s => {
+          const room = floorRooms[matchPos[s]];
+          chosen[s] = room; usedNums.add(room.num);
+        });
+        const seed = chosen[0] || chosen.find(x => x);
+        // slot ที่ยังไม่ match → หาในชั้นข้างเคียงเรียงตามระยะ |Δfloor|
+        const remainingSlots = [];
+        for (let s = 0; s < n; s++) if (!chosen[s]) remainingSlots.push(s);
+        const otherFloors = FLOORS.filter(f => f !== bestFloor)
+          .sort((a, b) => Math.abs(a - bestFloor) - Math.abs(b - bestFloor));
+        for (const s of remainingSlots) {
+          let placed = false;
+          for (const f of otherFloors) {
+            // edge seed ของฝั่ง slot นี้ในชั้น f ที่ยังว่าง
+            const cands = allAvailable.filter(r =>
+              !usedNums.has(r.num) && r.floor === f &&
+              r.type === brs[s].type && isAvailableForBr(r, brs[s])
+            );
+            if (cands.length > 0) {
+              cands.sort((a, b) => a.pos - b.pos); // เอาปลายซ้าย (edge)
+              chosen[s] = cands[0]; usedNums.add(cands[0].num); placed = true;
+              break;
+            }
+          }
+          if (!placed) return null; // ไม่สามารถจุ slot นี้ได้เลย → fail
+        }
+        return { chosen, seed };
+      };
+
+      // ---- Phase C: ลอง edge seed ในแต่ละชั้นที่จุครบ ----
+      if (floorsFit.length > 0) {
+        for (const { floor } of floorsFit) {
+          // seed candidates = เฉพาะ slot 0 type, edge (pos ต่ำสุด + สูงสุดของฝั่ง) ในชั้นนี้
+          const slot0Type = brs[0].type;
+          const slot0Rooms = allAvailable.filter(r =>
+            r.floor === floor && r.type === slot0Type && isAvailableForBr(r, brs[0])
+          );
+          if (slot0Rooms.length === 0) continue;
+
+          // จัดกลุ่มตามฝั่ง → เลือก edge (pos ต่ำสุด + สูงสุด) ของแต่ละฝั่ง
+          const bySide = {};
+          slot0Rooms.forEach(r => {
+            const s = r.side;
+            if (!bySide[s]) bySide[s] = [];
+            bySide[s].push(r);
+          });
+          const edgeSeeds = [];
+          Object.values(bySide).forEach(arr => {
+            arr.sort((a, b) => a.pos - b.pos);
+            edgeSeeds.push(arr[0]);                       // ปลายซ้าย
+            if (arr.length > 1) edgeSeeds.push(arr[arr.length - 1]); // ปลายขวา
+          });
+
+          for (const seedRoom of edgeSeeds) {
+            const chosen = expandInFloor(seedRoom, floor);
+            if (!chosen) continue;
+            const pairs = chosen.map((r, j) => ({ room: r, br: brs[j] }));
+            const c = costFunction(pairs);
+            if (c < bestCost) { bestCost = c; bestChosen = chosen; bestSeed = seedRoom; }
+          }
+        }
+      }
+
+      // ---- Phase D: Overflow fallback (ไม่มีชั้นไหนจุครบ) ----
+      if (!bestChosen) {
+        result.steps.push({ type: 'info', room: null, thought: `⚠️ Phase D: ไม่มีชั้นไหนจุครบ → overflow: เติมชั้นที่จุได้เยอะสุด แล้วเอาห้องที่เหลือไปชั้นข้างเคียง`, cost: 0, assignedRooms: [] });
+
+        // หาชั้นที่จุได้เยอะสุด (max matching per floor)
+        let bestFloor = null;
+        let bestFloorFit = -1;
+        let bestFloorMatch = null;
+        for (const floor of FLOORS) {
+          const floorRooms = allAvailable.filter(r => r.floor === floor);
+          const adj = brs.map(br => {
+            const list = [];
+            for (let j = 0; j < floorRooms.length; j++) {
+              if (floorRooms[j].type === br.type && isAvailableForBr(floorRooms[j], br)) list.push(j);
+            }
+            return list;
+          });
+          // greedy count matching (ไม่ต้อง perfect) — จำนวน slot ที่ match ได้
+          const bm = bipartiteMatch(adj);
+          if (bm.matched > bestFloorFit) {
+            bestFloorFit = bm.matched;
+            bestFloor = floor;
+            bestFloorMatch = bm.matchPos;
+          }
+        }
+
+        if (bestFloorFit <= 0) {
+          result.steps.push({ type: 'reject', room: null, thought: `❌ Phase D: ไม่สามารถจุได้แม้แต่ 1 ห้อง`, cost: 0, assignedRooms: [] });
+        } else {
+          const overflow = buildOverflowChosen(bestFloor, bestFloorMatch);
+          if (overflow) {
+            bestChosen = overflow.chosen;
+            bestSeed = overflow.seed;
+            // cost คำนวณปกติ (floor weight 50 จะตกลงที่ห้องข้ามชั้น — แสดงให้เห็นว่าเป็น fallback)
+            const pairs = bestChosen.map((r, j) => ({ room: r, br: brs[j] }));
+            bestCost = costFunction(pairs);
+          }
+        }
+      }
+
+      // ---- commit ผลลัพธ์ ----
+      if (bestChosen) {
+        result.assignments[idxs[0]] = bestSeed;
+        if (!result.seed) result.seed = bestSeed.num;
+        result.steps.push({ type: 'accept', room: bestSeed, thought: `🌱 Edge seed: ${bestSeed.num} (best cost ${bestCost.toFixed(1)})`, cost: bestCost, assignedRooms: [bestSeed.num] });
+        const usedNums = new Set([bestSeed.num]);
+        for (let j = 1; j < n; j++) {
+          const chosen = bestChosen[j];
+          result.assignments[idxs[j]] = chosen;
+          usedNums.add(chosen.num);
+          const sameFloor = chosen.floor === bestSeed.floor;
+          result.steps.push({ type: 'accept', room: chosen, thought: `➕ ${sameFloor ? 'In-floor expand' : 'Overflow (ชั้นข้างเคียง)'}: ${chosen.num} (type ${chosen.type})`, cost: bestCost, assignedRooms: [...usedNums] });
+        }
+      }
+    }
+  }
+
+  result.assignments = cloneAssignments(result.assignments);
+  const allAssigned = result.assignments.every(a => a !== null);
+  result.ok = allAssigned;
+  const pairs = result.assignments.map((r, i) => ({ room: r, br: booking[i] })).filter(p => p.room);
+  result.cost = allAssigned ? walkCost(pairs) : Infinity; // [v3] final judge = walkCost
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 cost=${result.cost.toFixed(1)}` : `❌ ล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+// ============================================================
+// Algorithm E: Hybrid (Coordinate + Greedy)
+// ============================================================
+function algoHybrid(booking) {
+  const result = { algo: 'Hybrid (C+D)', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `⭐ Hybrid: รัน Coordinate + Greedy แล้วเลือก cost ต่ำสุด`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  const coordResult = algoCoordinate(JSON.parse(JSON.stringify(booking)));
+  const greedyResult = algoGreedy(JSON.parse(JSON.stringify(booking)));
+
+  let best = null;
+  if (coordResult.ok && greedyResult.ok) {
+    best = coordResult.cost <= greedyResult.cost ? coordResult : greedyResult;
+  } else if (coordResult.ok) {
+    best = coordResult;
+  } else if (greedyResult.ok) {
+    best = greedyResult;
+  } else {
+    best = coordResult;
+  }
+
+  result.assignments = cloneAssignments(best.assignments);
+  result.seed = best.seed;
+  result.ok = best.ok;
+  result.cost = best.cost;
+  result.steps.push({ type: 'info', room: null, thought: `📊 Coordinate cost=${coordResult.cost === Infinity ? '∞' : coordResult.cost.toFixed(1)}, Greedy cost=${greedyResult.cost === Infinity ? '∞' : greedyResult.cost.toFixed(1)} → เลือก ${best.algo}`, cost: 0, assignedRooms: [] });
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 Hybrid เลือก ${best.algo} cost=${result.cost.toFixed(1)}` : `❌ ทั้งคู่ล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+// ============================================================
+// ⭐ Algorithm EA (J): Hybrid+ — C + D + A + FF tie-breaker
+//   - รัน C, D, A, FF (A รันโดย best-effort ปิด เพื่อให้ contiguous จริง)
+//   - กรองเฉพาะ ok → A ไม่เข้าร่วมเมื่อ ok:false
+//   - เลือก cost ต่ำสุด (tie → C ชนะ)
+// ============================================================
+function algoHybridPlus(booking) {
+  const result = { algo: 'Hybrid+ (C+D+A+FF)', steps: [], assignments: new Array(booking.length).fill(null), seed: null, ok: false, cost: Infinity };
+
+  result.steps.push({ type: 'info', room: null, thought: `⭐ Hybrid+: รัน C+D+A+FF tie-breaker — A เข้าร่วมเฉพาะเมื่อหา contiguous block ได้ (ok)`, cost: 0, assignedRooms: [] });
+  logOverlapFiltered(result, booking);
+
+  const coordResult  = algoCoordinate(JSON.parse(JSON.stringify(booking)));
+  const greedyResult = algoGreedy(JSON.parse(JSON.stringify(booking)));
+  const blockResult  = algoBlock(JSON.parse(JSON.stringify(booking)));
+  const ffResult     = algoFloorFirst(JSON.parse(JSON.stringify(booking)));
+
+  // กรองเฉพาะ ok — A ที่หา block ไม่ได้จะถูกตัดออก
+  const candidates = [coordResult, greedyResult, blockResult, ffResult].filter(r => r.ok);
+  let best = null;
+  for (const r of candidates) {
+    if (!best || r.cost < best.cost) best = r; // tie → candidate แรก (C) ชนะ
+  }
+  if (!best) best = coordResult; // ทั้งหมดล้มเหลว → default coordinate
+
+  const cStr = coordResult.cost === Infinity ? '∞' : coordResult.cost.toFixed(1);
+  const dStr = greedyResult.cost === Infinity ? '∞' : greedyResult.cost.toFixed(1);
+  const aStr = blockResult.ok
+    ? (blockResult.cost === Infinity ? '∞' : blockResult.cost.toFixed(1))
+    : '✗(ไม่เข้าร่วม)';
+  const fStr = ffResult.cost === Infinity ? '∞' : ffResult.cost.toFixed(1);
+
+  result.assignments = cloneAssignments(best.assignments);
+  result.seed = best.seed;
+  result.ok = best.ok;
+  result.cost = best.cost;
+  result.winner = best.algo; // [EA] track ว่าตัวไหนชนะ เพื่อโชว์ใน booking list
+  result.steps.push({ type: 'info', room: null, thought: `📊 C=${cStr}, D=${dStr}, A=${aStr}, FF=${fStr} → เลือก ${best.algo}${blockResult.ok ? '' : ' (A ไม่ ok จึงตัดออก)'}`, cost: 0, assignedRooms: [] });
+  result.steps.push({ type: 'done', room: null, thought: result.ok ? `🎉 Hybrid+ เลือก ${best.algo} cost=${result.cost.toFixed(1)}${blockResult.ok && best === blockResult ? ' 🅰️ block ชนะ!' : ''}${best === ffResult ? ' 🆕 floor-first ชนะ!' : ''}` : `❌ ทั้งหมดล้มเหลว`, cost: result.cost, assignedRooms: result.assignments.filter(x => x).map(r => r.num) });
+  return result;
+}
+
+const ALGOS = {
+  A:  { name: 'Block Contiguous',    fn: algoBlock },
+  C:  { name: 'Coordinate + Cost',   fn: algoCoordinate },
+  D:  { name: 'Greedy Seed + Expand',fn: algoGreedy },
+  FF: { name: 'Floor-First Greedy',  fn: algoFloorFirst },
+  E:  { name: 'Hybrid (C+D)',        fn: algoHybrid },
+  EA: { name: 'Hybrid+ (C+D+A)',     fn: algoHybridPlus },
+};
+
+// ============================================================
+// 🎮 Run helpers
+// ============================================================
+function clearAssigned() {
+  state.rooms.forEach(r => {
+    r.assigned = false;
+    r.isSeed = false;
+    r.state = null;
+  });
+}
+
+function applyResult(result) {
+  clearAssigned();
+  const seedNum = result.seed;
+  result.assignments.forEach(r => {
+    if (r) {
+      const room = state.rooms.find(x => x.num === r.num);
+      if (room) {
+        room.assigned = true;
+        if (seedNum && room.num === seedNum) room.isSeed = true;
+      }
+    }
+  });
+  render();
+}
+
+// ============================================================
+// 🌱 SEEDS registry — port จาก test-matrix.cjs (34 entries)
+//   signature: fn(state, ci, co) => void
+// ============================================================
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const TYPE_WEIGHTS = [['Deluxe', 0.4], ['Superior', 0.4], ['Suite', 0.2]];
+function pickType(rng) {
+  const r = rng();
+  let acc = 0;
+  for (const [t, w] of TYPE_WEIGHTS) { acc += w; if (r < acc) return t; }
+  return 'Deluxe';
+}
+
+function randomSeed(rng, count) {
+  return function (state, ci, co) {
+    const today = todayLocal();
+    const pool = [...state.rooms];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const targets = pool.slice(0, Math.min(count, pool.length));
+    targets.forEach(r => {
+      const start = addDaysLocal(today, 1 + Math.floor(rng() * 5));
+      const nights = 1 + Math.floor(rng() * 4);
+      const end = addDaysLocal(start, nights);
+      r.reservations.push({
+        checkIn: start, checkOut: end,
+        label: 'Existing Guest', type: 'seed', bookingIdx: -1,
+      });
+    });
+  };
+}
+
+function rsSeed(rsNum) {
+  const prng = mulberry32(rsNum * 2654435761);
+  const bookedCount = 40 + Math.floor(prng() * 31);
+  return function (state, ci, co) {
+    const pool = [...state.rooms];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(prng() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    pool.slice(0, bookedCount).forEach(r => {
+      const offset = Math.floor(prng() * 5) - 2;
+      const start = addDaysLocal(ci, offset);
+      const nights = 1 + Math.floor(prng() * 3);
+      const end = addDaysLocal(start, nights);
+      r.reservations.push({ checkIn: start, checkOut: end, label: 'Pre-booked', type: 'seed', bookingIdx: -1 });
+    });
+  };
+}
+
+const SEEDS = {
+  // ===== Handcrafted (7) =====
+  'S-CHK': { desc: 'Checkerboard Deluxe ชั้น 5', fn(state, ci, co) {
+    ['508', '510', '512', '514', '516'].forEach(num => {
+      state.rooms.find(r => r.num === num).reservations.push(
+        { checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-HALF': { desc: 'ฝั่งซ้าย Deluxe ชั้น 5', fn(state, ci, co) {
+    ['508', '509', '510', '511', '512'].forEach(num => {
+      state.rooms.find(r => r.num === num).reservations.push(
+        { checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-ADJ': { desc: 'Block 3 ห้องติดกัน (รวม X09)', fn(state, ci, co) {
+    ['508', '509', '510'].forEach(num => {
+      state.rooms.find(r => r.num === num).reservations.push(
+        { checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-CONFLICT': { desc: '508 จอง 2 ช่วง (วัน 1-3 & 5-7)', fn(state, ci, co) {
+    const r = state.rooms.find(x => x.num === '508');
+    r.reservations.push({ checkIn: ci, checkOut: co, label: 'Guest A', type: 'seed', bookingIdx: -1 });
+    r.reservations.push({
+      checkIn: addDaysLocal(ci, 4), checkOut: addDaysLocal(ci, 6),
+      label: 'Guest B', type: 'seed', bookingIdx: -1,
+    });
+  }},
+  'S-PREMIUM': { desc: 'Suite ทุกชั้นเต็ม', fn(state, ci, co) {
+    ['507', '518', '607', '618', '707', '718', '807', '818', '907', '918'].forEach(num => {
+      state.rooms.find(r => r.num === num).reservations.push(
+        { checkIn: ci, checkOut: co, label: 'VIP', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-WEEKEND': { desc: 'Deluxe ชั้น 5-8 เต็ม + 5 ห้องชั้น 9', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe' && r.floor <= 8).forEach(r => {
+      r.reservations.push({ checkIn: ci, checkOut: co, label: 'Weekend', type: 'seed', bookingIdx: -1 });
+    });
+    ['908', '909', '910', '911', '912'].forEach(num => {
+      state.rooms.find(r => r.num === num).reservations.push(
+        { checkIn: ci, checkOut: co, label: 'Weekend', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-TWIN': { desc: 'Deluxe ชั้น 8 (twin) ทั้งชั้น', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe' && r.floor === 8).forEach(r => {
+      r.reservations.push({ checkIn: ci, checkOut: co, label: 'Twin taken', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  // ===== Regression-derived (7) =====
+  'S-NONE': { desc: 'ไม่มี pre-booked (สะอาด)', fn(state, ci, co) {} },
+  'S-508': { desc: 'จอง 508 เต็มช่วง currentBooking', fn(state, ci, co) {
+    state.rooms.find(r => r.num === '508').reservations.push(
+      { checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+  }},
+  'S-508BK2': { desc: '508 back-to-back (checkout=checkin ของ booking)', fn(state, ci, co) {
+    state.rooms.find(r => r.num === '508').reservations.push({
+      checkIn: addDaysLocal(ci, -2), checkOut: ci,
+      label: 'Checkout today', type: 'seed', bookingIdx: -1,
+    });
+  }},
+  'S-F8': { desc: 'Deluxe ทุกห้องยกเว้นชั้น 8 เต็ม', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe' && r.floor !== 8).forEach(r => {
+      r.reservations.push({ checkIn: ci, checkOut: co, label: 'Full', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-X09ONLY': { desc: 'Deluxe ทุกห้องยกเว้น X09 เต็ม', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe' && !r.num.endsWith('09')).forEach(r => {
+      r.reservations.push({ checkIn: ci, checkOut: co, label: 'Full', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-D40': { desc: 'Deluxe 40 ห้องแรกเต็ม', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe').slice(0, 40).forEach(r => {
+      r.reservations.push({ checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+    });
+  }},
+  'S-D5K-': { desc: 'Deluxe ชั้น 5,6,7 ครึ่ง (index เลขคู่)', fn(state, ci, co) {
+    state.rooms.filter(r => r.type === 'Deluxe' && [5, 6, 7].includes(r.floor)).forEach((r, i) => {
+      if (i % 2 === 0) {
+        r.reservations.push({ checkIn: ci, checkOut: co, label: 'Existing', type: 'seed', bookingIdx: -1 });
+      }
+    });
+  }},
+  // ===== Random deterministic (20) =====
+  'S-RND1':  { desc: '~60 mixed spread',     fn: randomSeed(mulberry32(42), 60) },
+  'S-RND2':  { desc: '~55 Deluxe-heavy',     fn: randomSeed(mulberry32(7),  55) },
+  'S-RND3':  { desc: '~65 ชั้น 5,6 heavy',   fn: randomSeed(mulberry32(99), 65) },
+  'S-RND4':  { desc: '~50 checkerboard-ish', fn: randomSeed(mulberry32(13), 50) },
+  'S-RND5':  { desc: '~70 peak',             fn: randomSeed(mulberry32(55), 70) },
+  'S-RND6':  { desc: '~60 mixed types',      fn: randomSeed(mulberry32(3),  60) },
+  'S-RND7':  { desc: '~58 Superior-heavy',   fn: randomSeed(mulberry32(88), 58) },
+  'S-RND8':  { desc: '~62 Suite-heavy',      fn: randomSeed(mulberry32(21), 62) },
+  'S-RND9':  { desc: '~67 clustered',        fn: randomSeed(mulberry32(66), 67) },
+  'S-RND10': { desc: '~53 spread',           fn: randomSeed(mulberry32(11), 53) },
+  'S-RND11': { desc: 'RS1 equivalent (40-70)', fn: rsSeed(1) },
+  'S-RND12': { desc: 'RS2 equivalent (40-70)', fn: rsSeed(2) },
+  'S-RND13': { desc: 'RS3 equivalent (40-70)', fn: rsSeed(3) },
+  'S-RND14': { desc: 'RS4 equivalent (40-70)', fn: rsSeed(4) },
+  'S-RND15': { desc: 'RS5 equivalent (40-70)', fn: rsSeed(5) },
+  'S-RND16': { desc: 'RS6 equivalent (40-70)', fn: rsSeed(6) },
+  'S-RND17': { desc: 'RS7 equivalent (40-70)', fn: rsSeed(7) },
+  'S-RND18': { desc: 'RS8 equivalent (40-70)', fn: rsSeed(8) },
+  'S-RND19': { desc: 'RS9 equivalent (40-70)', fn: rsSeed(9) },
+  'S-RND20': { desc: 'RS10 equivalent (40-70)', fn: rsSeed(10) },
+};
+
+// ============================================================
+// 🎯 CASES registry — port จาก test-matrix.cjs (29 entries)
+// ============================================================
+const CASES = {
+  // ===== Single-shot (12) =====
+  'C-SOLO':  { kind: 'single', desc: 'Solo Deluxe', checkIn: T(1), checkOut: T(3),
+    rooms: [{ type: 'Deluxe', beds: 0 }] },
+  'C-G4':    { kind: 'single', desc: 'Group×4 Deluxe', checkIn: T(1), checkOut: T(3),
+    rooms: Array(4).fill({ type: 'Deluxe', beds: 0 }) },
+  'C-MIX':   { kind: 'single', desc: 'Mixed Suite/Deluxe/Superior', checkIn: T(1), checkOut: T(3),
+    rooms: [
+      { type: 'Suite', beds: 0 },
+      { type: 'Deluxe', beds: 0 }, { type: 'Deluxe', beds: 0 },
+      { type: 'Superior', beds: 0 },
+    ] },
+  'C-FAM':   { kind: 'single', desc: 'Family (extra-bed)', checkIn: T(1), checkOut: T(3),
+    rooms: [{ type: 'Deluxe', beds: 0 }, { type: 'Deluxe', beds: 1 }] },
+  'C-L10':   { kind: 'single', desc: 'Large×10 Deluxe', checkIn: T(1), checkOut: T(3),
+    rooms: Array(10).fill({ type: 'Deluxe', beds: 0 }) },
+  'C-TWIN':  { kind: 'single', desc: '2× Deluxe pref=twin', checkIn: T(1), checkOut: T(3),
+    rooms: Array(2).fill({ type: 'Deluxe', beds: 0, bed_preference: 'twin' }) },
+  'C-SD':    { kind: 'single', desc: 'Suite + Deluxe', checkIn: T(1), checkOut: T(3),
+    rooms: [{ type: 'Suite', beds: 0 }, { type: 'Deluxe', beds: 0 }] },
+  'C-S3':    { kind: 'single', desc: 'Suite×3', checkIn: T(1), checkOut: T(3),
+    rooms: Array(3).fill({ type: 'Suite', beds: 0 }) },
+  'C-D5':    { kind: 'single', desc: 'Deluxe×5', checkIn: T(1), checkOut: T(3),
+    rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+  'C-SUP2':  { kind: 'single', desc: 'Superior×2', checkIn: T(1), checkOut: T(3),
+    rooms: Array(2).fill({ type: 'Superior', beds: 0 }) },
+  'C-TWIN1': { kind: 'single', desc: 'Deluxe×1 pref=twin', checkIn: T(1), checkOut: T(3),
+    rooms: [{ type: 'Deluxe', beds: 0, bed_preference: 'twin' }] },
+  'C-D20':   { kind: 'single', desc: 'Deluxe×20 (impossible)', checkIn: T(1), checkOut: T(3),
+    rooms: Array(20).fill({ type: 'Deluxe', beds: 0 }) },
+  // ===== Per-Room Date cases (4) =====
+  'C-PRD1':  { kind: 'single', desc: 'PRD Deluxe×3 slot2 คนละวัน', checkIn: T(1), checkOut: T(3),
+    rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+    ] },
+  'C-PRD2':  { kind: 'single', desc: 'PRD Mixed×4 ทุก room คนละวัน', checkIn: T(1), checkOut: T(3),
+    rooms: [
+      { type: 'Suite',    beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe',   beds: 0, checkIn: T(2), checkOut: T(4) },
+      { type: 'Deluxe',   beds: 0, checkIn: T(3), checkOut: T(5) },
+      { type: 'Superior', beds: 0, checkIn: T(1), checkOut: T(3) },
+    ] },
+  'C-PRD3':  { kind: 'single', desc: 'PRD Deluxe×4 2 cohort วัน A/B', checkIn: T(1), checkOut: T(3),
+    rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+    ] },
+  'C-PRD4':  { kind: 'single', desc: 'PRD Deluxe×5 staggered dates', checkIn: T(1), checkOut: T(3),
+    rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+      { type: 'Deluxe', beds: 0, checkIn: T(3), checkOut: T(5) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+      { type: 'Deluxe', beds: 0, checkIn: T(5), checkOut: T(7) },
+    ] },
+  // ===== Sequence/Queue (13) =====
+  'SEQ1': { kind: 'sequence', desc: '4× Deluxe×3 ไม่ overlap', queue: [
+    { checkIn: T(1), checkOut: T(4), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(5), checkOut: T(8), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(9), checkOut: T(12), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(13), checkOut: T(16), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ2': { kind: 'sequence', desc: '5× mixed overlap วันเดียว', queue: [
+    { checkIn: T(1), checkOut: T(4), rooms: [{ type: 'Suite', beds: 0 }, { type: 'Deluxe', beds: 0 }] },
+    { checkIn: T(1), checkOut: T(4), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(4), rooms: [{ type: 'Superior', beds: 0 }, { type: 'Superior', beds: 0 }] },
+    { checkIn: T(1), checkOut: T(4), rooms: [{ type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(1), checkOut: T(4), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ3': { kind: 'sequence', desc: '6× Deluxe แล้ว Suite+Superior', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Suite', beds: 0 }] },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Suite', beds: 0 }] },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(2).fill({ type: 'Superior', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(2).fill({ type: 'Superior', beds: 0 }) },
+  ]},
+  'SEQ4': { kind: 'sequence', desc: '4× ทุก booking วันเดียว (peak)', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: Array(4).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(4).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ5': { kind: 'sequence', desc: '7× family extra-bed หลายชุด', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Deluxe', beds: 0 }, { type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(3), checkOut: T(5), rooms: [{ type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Deluxe', beds: 0 }] },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Deluxe', beds: 1 }] },
+  ]},
+  'SEQ6': { kind: 'sequence', desc: '5× back-to-back (co=ci ถัดไป)', queue: [
+    { checkIn: T(1), checkOut: T(4), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(4), checkOut: T(7), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(7), checkOut: T(10), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(10), checkOut: T(13), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(13), checkOut: T(16), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ7': { kind: 'sequence', desc: '4× twin pref ทุก booking', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: Array(2).fill({ type: 'Deluxe', beds: 0, bed_preference: 'twin' }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(2).fill({ type: 'Deluxe', beds: 0, bed_preference: 'twin' }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(2).fill({ type: 'Deluxe', beds: 0, bed_preference: 'twin' }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(2).fill({ type: 'Deluxe', beds: 0, bed_preference: 'twin' }) },
+  ]},
+  'SEQ8': { kind: 'sequence', desc: '6× มี booking ยาว 5 คืน', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(6), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Suite', beds: 0 }] },
+    { checkIn: T(3), checkOut: T(5), rooms: Array(2).fill({ type: 'Superior', beds: 0 }) },
+    { checkIn: T(4), checkOut: T(6), rooms: [{ type: 'Deluxe', beds: 0 }] },
+    { checkIn: T(5), checkOut: T(7), rooms: Array(2).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ9': { kind: 'sequence', desc: '5× Deluxe×5 ทุก booking (stress)', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(5).fill({ type: 'Deluxe', beds: 0 }) },
+  ]},
+  'SEQ10': { kind: 'sequence', desc: '7× random mixed สมจริง', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Deluxe', beds: 0 }, { type: 'Deluxe', beds: 1 }] },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Suite', beds: 0 }, { type: 'Superior', beds: 0 }] },
+    { checkIn: T(1), checkOut: T(3), rooms: Array(3).fill({ type: 'Deluxe', beds: 0 }) },
+    { checkIn: T(3), checkOut: T(5), rooms: Array(2).fill({ type: 'Superior', beds: 0 }) },
+    { checkIn: T(2), checkOut: T(4), rooms: [{ type: 'Deluxe', beds: 0 }] },
+    { checkIn: T(4), checkOut: T(6), rooms: [{ type: 'Deluxe', beds: 0 }, { type: 'Deluxe', beds: 0 }] },
+    { checkIn: T(1), checkOut: T(3), rooms: [{ type: 'Deluxe', beds: 0, bed_preference: 'twin' }] },
+  ]},
+  'SEQ11': { kind: 'sequence', desc: '3× Deluxe×3 intra-booking คนละวัน', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+    ] },
+    { checkIn: T(2), checkOut: T(4), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+      { type: 'Deluxe', beds: 0, checkIn: T(5), checkOut: T(7) },
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+    ] },
+    { checkIn: T(3), checkOut: T(5), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(3), checkOut: T(5) },
+      { type: 'Deluxe', beds: 0, checkIn: T(6), checkOut: T(8) },
+      { type: 'Deluxe', beds: 0, checkIn: T(3), checkOut: T(5) },
+    ] },
+  ]},
+  'SEQ12': { kind: 'sequence', desc: '4× mixed intra+inter per-room overlap', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: [
+      { type: 'Suite',  beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+    ] },
+    { checkIn: T(1), checkOut: T(3), rooms: [
+      { type: 'Deluxe',   beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Superior', beds: 0, checkIn: T(2), checkOut: T(4) },
+    ] },
+    { checkIn: T(2), checkOut: T(4), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+      { type: 'Deluxe', beds: 0, checkIn: T(5), checkOut: T(7) },
+    ] },
+    { checkIn: T(3), checkOut: T(5), rooms: [
+      { type: 'Suite',    beds: 0, checkIn: T(3), checkOut: T(5) },
+      { type: 'Superior', beds: 0, checkIn: T(6), checkOut: T(8) },
+    ] },
+  ]},
+  'SEQ13': { kind: 'sequence', desc: '5× Deluxe×2 หลายช่วง multi-date', queue: [
+    { checkIn: T(1), checkOut: T(3), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(1), checkOut: T(3) },
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+    ] },
+    { checkIn: T(2), checkOut: T(4), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(2), checkOut: T(4) },
+      { type: 'Deluxe', beds: 0, checkIn: T(5), checkOut: T(7) },
+    ] },
+    { checkIn: T(3), checkOut: T(5), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(3), checkOut: T(5) },
+      { type: 'Deluxe', beds: 0, checkIn: T(6), checkOut: T(8) },
+    ] },
+    { checkIn: T(4), checkOut: T(6), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(4), checkOut: T(6) },
+      { type: 'Deluxe', beds: 0, checkIn: T(7), checkOut: T(9) },
+    ] },
+    { checkIn: T(5), checkOut: T(7), rooms: [
+      { type: 'Deluxe', beds: 0, checkIn: T(5), checkOut: T(7) },
+      { type: 'Deluxe', beds: 0, checkIn: T(8), checkOut: T(10) },
+    ] },
+  ]},
+};
+
+// ============================================================
+// 🚀 runEA — ฟังก์ชันหลัก: apply seed + case → run algoHybridPlus
+//   single case: run EA ครั้งเดียว
+//   sequence:    simulate processQueue (run EA ทีละ booking, commit reservations)
+// ============================================================
+// ============================================================
+// 🔒 Seed-only operations (ไม่รัน algorithm — แค่ล็อกห้อง pre-booked บนแผนผัง)
+//   applySeedOnly: reset rooms → apply seed → render (โชว์ 🔒)
+//   resetSeed:     ล้างห้องทั้งหมด → render (กลับสู่สภาพสะอาด)
+// ============================================================
+function applySeedOnly() {
+  stepStop();
+  const seedKey = document.getElementById('seed-select').value;
+  const caseKey = document.getElementById('case-select').value;
+  const seed = SEEDS[seedKey];
+  const caseObj = CASES[caseKey];
+  if (!seed || !caseObj) return;
+
+  // reset rooms + apply seed
+  state.rooms = buildRooms();
+  state.bookingQueue = [];
+  const ci = caseObj.kind === 'single' ? caseObj.checkIn : caseObj.queue[0].checkIn;
+  const co = caseObj.kind === 'single' ? caseObj.checkOut : caseObj.queue[0].checkOut;
+  state.currentBooking.checkIn = ci;
+  state.currentBooking.checkOut = co;
+  state.currentBooking.rooms = [];
+  state.evalDates = { checkIn: ci, checkOut: co };
+  seed.fn(state, ci, co);
+
+  // clear step/results — ยังไม่ได้ run algorithm
+  state.lastResults = null;
+  state.lastBooking = [];
+  stepState.steps = [];
+  stepState.current = -1;
+  stepState.activeResult = null;
+  clearAssigned();
+  document.getElementById('results-grid').innerHTML = '';
+  document.getElementById('prompt-box').textContent = '— seed ถูก apply แล้ว ห้อง 🔒 pre-booked แสดงบนแผนผัง — กด Run เพื่อจัดห้องค่ะ —';
+  document.getElementById('result-summary').textContent = `🔒 Seed "${seedKey}" applied · ${SEEDS[seedKey].desc}`;
+  document.getElementById('step-counter').textContent = '0 / 0';
+  document.getElementById('current-cost').textContent = '—';
+  document.getElementById('thought-bubble').innerHTML = `<span style="color:var(--yellow)">🔒 Seed "${seedKey}" ถูกล็อกแล้ว — ห้อง 🔒 คือ pre-booked ค่ะ กด Run Hybrid+ เพื่อจัดห้องใหม่ ✨</span>`;
+  document.getElementById('step-log').innerHTML = '<div style="color:var(--muted);padding:4px;">🔒 Seed applied — ยังไม่มี algorithm log</div>';
+  render();
+  renderEAList();
+}
+
+// resetSeed: ล้างทุกอย่างกลับสู่สภาพสะอาด (ไม่มี pre-booked)
+function resetSeed() {
+  stepStop();
+  state.rooms = buildRooms();
+  state.currentBooking = { checkIn: T(1), checkOut: T(3), rooms: [] };
+  state.bookingQueue = [];
+  state.evalDates = { checkIn: state.currentBooking.checkIn, checkOut: state.currentBooking.checkOut };
+  state.lastResults = null;
+  state.lastBooking = [];
+  stepState.steps = [];
+  stepState.current = -1;
+  stepState.activeResult = null;
+  clearAssigned();
+  document.getElementById('results-grid').innerHTML = '';
+  document.getElementById('prompt-box').textContent = '— seed ถูก reset แล้ว แผนผังสะอาดทั้งหมด —';
+  document.getElementById('result-summary').textContent = '';
+  document.getElementById('step-counter').textContent = '0 / 0';
+  document.getElementById('current-cost').textContent = '—';
+  document.getElementById('thought-bubble').innerHTML = '<span style="color:var(--muted)">↺ Seed reset แล้ว — แผนผังสะอาด ไม่มี pre-booked ✨</span>';
+  document.getElementById('step-log').innerHTML = '<div style="color:var(--muted);padding:4px;">Algorithm log จะปรากฏที่นี่...</div>';
+  render();
+  renderEAList();
+}
+
+// resetCase: reset เฉพาะ booking sequence + step/results แต่คง seed ไว้
+function resetCase() {
+  stepStop();
+  const seedKey = document.getElementById('seed-select').value;
+  const caseKey = document.getElementById('case-select').value;
+  const seed = SEEDS[seedKey];
+  const caseObj = CASES[caseKey];
+  if (!seed || !caseObj) return;
+
+  // re-apply seed จาก scratch (ปลอดภัย — seed เป็น deterministic)
+  state.rooms = buildRooms();
+  state.bookingQueue = [];
+  const ci = caseObj.kind === 'single' ? caseObj.checkIn : caseObj.queue[0].checkIn;
+  const co = caseObj.kind === 'single' ? caseObj.checkOut : caseObj.queue[0].checkOut;
+  state.currentBooking.checkIn = ci;
+  state.currentBooking.checkOut = co;
+  state.currentBooking.rooms = [];
+  state.evalDates = { checkIn: ci, checkOut: co };
+  seed.fn(state, ci, co);
+
+  // clear booking sequence + results + steps
+  state.lastResults = null;
+  state.lastBooking = [];
+  stepState.steps = [];
+  stepState.current = -1;
+  stepState.activeResult = null;
+  clearAssigned();
+  document.getElementById('results-grid').innerHTML = '';
+  document.getElementById('prompt-box').textContent = '— case/sequence reset แล้ว คง seed 🔒 ไว้ — กด Run เพื่อรันใหม่ค่ะ —';
+  document.getElementById('result-summary').textContent = `↺ Case reset · 🔒 Seed "${seedKey}" คงไว้`;
+  document.getElementById('step-counter').textContent = '0 / 0';
+  document.getElementById('current-cost').textContent = '—';
+  document.getElementById('thought-bubble').innerHTML = '<span style="color:var(--muted)">↺ Case/sequence reset แล้ว — seed 🔒 คงไว้ กด Run Hybrid+ เพื่อรันใหม่ ✨</span>';
+  document.getElementById('step-log').innerHTML = '<div style="color:var(--muted);padding:4px;">Algorithm log จะปรากฏที่นี่...</div>';
+  render();
+  renderEAList();
+}
+
+function applySeedAndCase() {
+  const seedKey = document.getElementById('seed-select').value;
+  const caseKey = document.getElementById('case-select').value;
+  const seed = SEEDS[seedKey];
+  const caseObj = CASES[caseKey];
+  if (!seed || !caseObj) return null;
+
+  // reset rooms + apply seed
+  state.rooms = buildRooms();
+  state.bookingQueue = [];
+  const ci = caseObj.kind === 'single' ? caseObj.checkIn : caseObj.queue[0].checkIn;
+  const co = caseObj.kind === 'single' ? caseObj.checkOut : caseObj.queue[0].checkOut;
+  state.currentBooking.checkIn = ci;
+  state.currentBooking.checkOut = co;
+  state.evalDates = { checkIn: ci, checkOut: co };
+  seed.fn(state, ci, co);
+
+  // สร้าง bookingQueue
+  if (caseObj.kind === 'single') {
+    state.currentBooking.rooms = JSON.parse(JSON.stringify(caseObj.rooms));
+    state.bookingQueue = [{
+      checkIn: caseObj.checkIn, checkOut: caseObj.checkOut,
+      rooms: JSON.parse(JSON.stringify(caseObj.rooms)), status: 'pending',
+    }];
+  } else {
+    state.currentBooking.rooms = JSON.parse(JSON.stringify(caseObj.queue[0].rooms));
+    state.bookingQueue = caseObj.queue.map(b => ({
+      checkIn: b.checkIn, checkOut: b.checkOut,
+      rooms: JSON.parse(JSON.stringify(b.rooms)), status: 'pending',
+    }));
+  }
+
+  // ✨ หนูเพิ่ม Logic การ Sort ตรงนี้ให้แล้วค่ะนายท่าน! ✨
+  // เรียงลำดับ Queue ก่อน Assign ห้อง — Priority 5 ขั้น:
+  //   1. Suite  →  2. Extra bed(ถ้า X09 ว่าง)  →  3. Twin  →  4. Most rooms  →  5. Least checkout
+  state.bookingQueue.sort((a, b) => {
+    const pa = computeBookingPriority(a);
+    const pb = computeBookingPriority(b);
+    if (pa.hasSuite   !== pb.hasSuite)   return pb.hasSuite   - pa.hasSuite;   // 1. Suite ก่อน
+    if (pa.hasX09Free !== pb.hasX09Free) return pb.hasX09Free - pa.hasX09Free; // 2. Extra bed ถ้า X09 ว่างจริง
+    if (pa.hasTwin    !== pb.hasTwin)    return pb.hasTwin    - pa.hasTwin;    // 3. Twin ก่อน
+    if (pa.roomCount  !== pb.roomCount)  return pb.roomCount  - pa.roomCount;  // 4. ห้องเยอะก่อน (desc)
+    return pa.checkOutTs - pb.checkOutTs;                                       // 5. เช็คเอาท์เร็วก่อน (asc)
+  });
+
+  return { seed, caseObj };
+}
+
+// ============================================================
+// 💾 Export Data to JSON
+// ============================================================
+function exportStateToJson() {
+  // ดึงชื่อ Seed และ Case ปัจจุบัน
+  const seedKey = document.getElementById('seed-select').value;
+  const caseKey = document.getElementById('case-select').value;
+
+  // จัดเตรียมข้อมูลที่นายท่านต้องการ
+  const exportData = {
+    meta: {
+      exportedAt: new Date().toISOString(),
+      seedApplied: seedKey,
+      caseApplied: caseKey
+    },
+    // ข้อมูลคิวที่กำลังประมวลผลหรือประมวลผลเสร็จแล้ว
+    sequence: state.bookingQueue.map((b, i) => ({
+      bookingIndex: i,
+      checkIn: b.checkIn,
+      checkOut: b.checkOut,
+      status: b.status,
+      requestedRooms: b.rooms,
+      resultCost: b.result ? b.result.cost : null
+    })),
+    // ข้อมูลแผนผังห้องทั้งหมด พร้อม reservation (ทั้ง seed และที่เพิ่งจอง)
+    roomMap: state.rooms.map(r => ({
+      num: r.num,
+      type: r.type,
+      floor: r.floor,
+      side: r.side,
+      pos: r.pos,
+      beds: r.beds,
+      reservations: r.reservations
+    }))
+  };
+
+  // แปลง Object เป็น JSON String แบบอ่านง่าย (Pretty Print)
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+  
+  // สร้างปุ่มจำลองเพื่อกดโหลดไฟล์ลงเครื่อง
+  const downloadAnchorNode = document.createElement('a');
+  downloadAnchorNode.setAttribute("href", dataStr);
+  
+  // ตั้งชื่อไฟล์ให้มี timestamp จะได้ไม่ทับกันค่ะ
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+  downloadAnchorNode.setAttribute("download", `kuhome_state_${timestamp}.json`);
+  
+  document.body.appendChild(downloadAnchorNode); // Required for Firefox
+  downloadAnchorNode.click();
+  downloadAnchorNode.remove();
+  
+  // แอบเปลี่ยนข้อความใน Prompt Box ให้รู้ว่าโหลดเสร็จแล้ว 🎀
+  document.getElementById('prompt-box').textContent = `✅ Exported JSON successfully!\nFile: kuhome_state_${timestamp}.json`;
+}
+
+function runEA() {
+  const ctx = applySeedAndCase();
+  if (!ctx) return;
+  const btn = document.getElementById('btn-run-ea');
+  btn.textContent = '⏳ Running...'; btn.disabled = true;
+
+  let lastResult = null;
+  let lastBooking = null;
+
+  state.bookingQueue.forEach((booking, i) => {
+    booking.status = 'processing';
+    renderEAList();
+
+    const bookingDates = { checkIn: booking.checkIn, checkOut: booking.checkOut };
+    state.evalDates = bookingDates;
+    state.currentBooking.checkIn = booking.checkIn;
+    state.currentBooking.checkOut = booking.checkOut;
+    clearAssigned();
+    const t0 = performance.now();
+    const res = algoHybridPlus(JSON.parse(JSON.stringify(booking.rooms)));
+    res.time = performance.now() - t0;
+    res.algoKey = 'EA';
+    res.bookingDates = bookingDates;
+
+    if (res.ok) {
+      // commit reservations พร้อม bookingIdx = i (สีของ booking นี้)
+      res.assignments.forEach((r, idx) => {
+        if (r) {
+          const room = state.rooms.find(x => x.num === r.num);
+          if (room) {
+            const br = booking.rooms[idx] || {};
+            room.reservations.push({
+              checkIn:  br.checkIn  || booking.checkIn,
+              checkOut: br.checkOut || booking.checkOut,
+              label: `Booking #${i + 1}`,
+              type: 'queue',
+              bookingIdx: i,
+            });
+          }
+        }
+      });
+      booking.status = 'done';
+      booking.result = res;
+    } else {
+      booking.status = 'failed';
+      booking.result = res;
+    }
+    lastResult = res;
+    lastBooking = booking;
+    renderEAList();
+  });
+
+  if (lastResult) {
+    state.lastResults = { EA: lastResult };
+    state.lastBooking = lastBooking ? lastBooking.rooms : [];
+    stepState.activeResult = lastResult;
+    state.evalDates = lastResult.bookingDates;
+    renderResults(state.lastResults);
+    renderPrompt(lastResult, lastBooking);
+    startStepMode(lastResult);
+    applyResult(lastResult);
+  }
+
+  const doneCount = state.bookingQueue.filter(b => b.status === 'done').length;
+  const failCount = state.bookingQueue.filter(b => b.status === 'failed').length;
+  document.getElementById('result-summary').textContent =
+    `EA: ${doneCount}✅ / ${failCount}❌ / ${state.bookingQueue.length} bookings`;
+
+  btn.textContent = '▶ Run Hybrid+ (E+A)'; btn.disabled = false;
+}
+
+// Compare mode — รันทุก algorithm บน booking แรก (single เท่านั้น, หรือ booking แรกของ sequence)
+function runCompareAll() {
+  const ctx = applySeedAndCase();
+  if (!ctx) return;
+
+  // สำหรับ compare ใช้ booking แรกเท่านั้น (ไม่ commit sequence เพื่อให้เทียบบนสภาพเดียวกัน)
+  const booking0 = state.bookingQueue[0];
+  const bookingDates = { checkIn: booking0.checkIn, checkOut: booking0.checkOut };
+  state.evalDates = bookingDates;
+  state.currentBooking.checkIn = booking0.checkIn;
+  state.currentBooking.checkOut = booking0.checkOut;
+  state.currentBooking.rooms = JSON.parse(JSON.stringify(booking0.rooms));
+  clearAssigned();
+
+  const results = {};
+  let best = null, bestKey = null;
+  Object.keys(ALGOS).forEach(key => {
+    clearAssigned();
+    const t0 = performance.now();
+    const res = ALGOS[key].fn(JSON.parse(JSON.stringify(booking0.rooms)));
+    res.time = performance.now() - t0;
+    res.algoKey = key;
+    res.bookingDates = bookingDates;
+    results[key] = res;
+    if (res.ok && (!best || res.cost < best.cost)) { best = res; bestKey = key; }
+  });
+  state.lastResults = results;
+  state.lastBooking = booking0.rooms;
+  if (best) {
+    stepState.activeResult = best;
+    state.evalDates = best.bookingDates;
+    applyResult(best);
+    startStepMode(best);
+  }
+  // mark booking0 done ใน list (visual เท่านั้น)
+  booking0.status = 'done';
+  booking0.result = results.EA;
+  renderEAList();
+  renderResults(results);
+  if (best) renderPrompt(best, { rooms: booking0.rooms });
+
+  const okCount = Object.values(results).filter(r => r.ok).length;
+  const failCount = Object.values(results).filter(r => !r.ok).length;
+  document.getElementById('result-summary').textContent =
+    `${okCount}✅ / ${failCount}❌ / ${Object.keys(results).length} algos · Best: ${bestKey || '—'} (booking #1 เท่านั้น)`;
+}
+
+// ============================================================
+// 📊 Results rendering
+// ============================================================
+function renderResults(results) {
+  const grid = document.getElementById('results-grid');
+  grid.innerHTML = '';
+  let bestKey = null;
+  let bestCost = Infinity;
+  Object.entries(results).forEach(([key, res]) => {
+    if (res.ok && res.cost < bestCost) { bestCost = res.cost; bestKey = key; }
+  });
+  Object.entries(results).forEach(([key, res]) => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    if (key === bestKey) card.classList.add('best');
+    if (key === 'EA') card.classList.add('ea-card');
+    if (!res.ok) card.classList.add('fail');
+    if (res.steps && res.steps.length > 0) card.classList.add('has-steps');
+    const seedDisplay = res.seed || '—';
+    const booking = state.lastBooking || [];
+    const m = res.ok ? computeMetrics(res, booking) : null;
+    const winnerTag = res.winner ? ` · 🏆${res.winner}` : '';
+    card.innerHTML = `
+      <div class="name">${key}. ${res.algo}</div>
+      <div class="metric"><span>Cost:</span> ${res.ok ? res.cost.toFixed(1) : '❌ FAIL'}${winnerTag}</div>
+      <div class="metric"><span>Time:</span> ${res.time.toFixed(1)}ms</div>
+      <div class="metric"><span>Seed:</span> ${seedDisplay}</div>
+      <div class="metric"><span>Rooms:</span> ${res.assignments.filter(x => x).length}/${res.assignments.length}</div>
+      ${m ? `
+      <div class="metric-group">
+        <div class="metric"><span>Floors:</span> ${m.floors} · <span>Sides:</span> ${m.sides}</div>
+        <div class="metric"><span>Contiguous:</span> ${m.contiguous}%</div>
+        <div class="metric"><span>Bed waste:</span> ${m.bedWaste}</div>
+        <div class="metric tiny">[f${m.breakdown.floor} s${m.breakdown.side} p${m.breakdown.pos} b${m.breakdown.bed}${m.breakdown.pref ? ` +${m.breakdown.pref}` : ''} 🚶w${m.breakdown.walk}]</div>
+      </div>` : ''}
+    `;
+    card.onclick = () => {
+      if (res.steps && res.steps.length > 0) {
+        stepState.activeResult = res;
+        if (res.bookingDates) state.evalDates = res.bookingDates;
+        startStepMode(res);
+        applyResult(res);
+      }
+    };
+    grid.appendChild(card);
+  });
+}
+
+function renderPrompt(result, booking) {
+  const box = document.getElementById('prompt-box');
+  const nights = daysBetween(state.evalDates.checkIn, state.evalDates.checkOut);
+  const lines = [];
+  lines.push(`# Room Assignment Result (Hybrid+ E+A)`);
+  lines.push(`Algorithm: ${result.algo}${result.winner ? ` → winner: ${result.winner}` : ''}`);
+  lines.push(`Dates: ${state.evalDates.checkIn} → ${state.evalDates.checkOut} (${nights}n)`);
+  lines.push(`Cost: ${result.ok ? result.cost.toFixed(2) : 'FAILED'}`);
+  lines.push(`Seed: ${result.seed || 'none'}`);
+  lines.push('');
+  lines.push(`## Assignments`);
+  const rooms = booking.rooms ? booking.rooms : booking;
+  result.assignments.forEach((r, i) => {
+    const br = rooms[i];
+    if (r && br) {
+      lines.push(`- ${r.num} (${r.type}, ${r.beds}bed, ${r.side}/P${r.pos}) → ${br.type}+${br.beds}bed`);
+    }
+  });
+  lines.push('');
+  lines.push(`## Weights`);
+  lines.push(`floor=${state.weights.floor} side=${state.weights.side} pos=${state.weights.pos} bed=${state.weights.bed} walk=${state.weights.walk} (v3 final judge: walkCost = Σ pairwise × walk + (floors-1) × floor)`);
+  box.textContent = lines.join('\n');
+}
+
+function copyPrompt() {
+  const text = document.getElementById('prompt-box').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('#results .prompt-header button');
+    const orig = btn.textContent;
+    btn.textContent = '✅ Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+// ============================================================
+// 🎬 Step Explorer
+// ============================================================
+function startStepMode(result) {
+  stepStop();
+  stepState.steps = result.steps || [];
+  stepState.current = -1;
+  renderStepLog();
+  stepForward();
+}
+
+function renderStepLog() {
+  const log = document.getElementById('step-log');
+  log.innerHTML = stepState.steps.map((step, i) => {
+    const cls = i === stepState.current ? 'current' : step.type;
+    return `<div class="log-entry ${cls}">${step.thought}</div>`;
+  }).join('');
+  document.getElementById('step-counter').textContent = `${stepState.current + 1} / ${stepState.steps.length}`;
+}
+
+function applyStep(step) {
+  clearAssigned();
+  if (stepState.activeResult) {
+    const seedNum = stepState.activeResult.seed;
+    stepState.activeResult.assignments.forEach(r => {
+      if (r) {
+        const room = state.rooms.find(x => x.num === r.num);
+        if (room) {
+          room.assigned = true;
+          if (seedNum && room.num === seedNum) room.isSeed = true;
+        }
+      }
+    });
+  }
+  if (step && step.room) {
+    const room = state.rooms.find(x => x.num === step.room.num);
+    if (room) room.state = step.type === 'reject' ? 'rejected' : step.type === 'accept' ? 'accepted' : 'considering';
+  }
+  if (stepState.activeResult && stepState.activeResult.bookingDates) {
+    state.evalDates = stepState.activeResult.bookingDates;
+  }
+  render();
+}
+
+function stepForward() {
+  if (stepState.current < stepState.steps.length - 1) {
+    stepState.current++;
+    const step = stepState.steps[stepState.current];
+    applyStep(step);
+    renderStepLog();
+    document.getElementById('thought-bubble').innerHTML = `<span class="step-icon">${stepIcon(step.type)}</span><span class="step-action">${step.type.toUpperCase()}:</span> ${step.thought}`;
+    document.getElementById('current-cost').textContent = step.cost === 0 ? '—' : step.cost.toFixed(1);
+    const log = document.getElementById('step-log');
+    const cur = log.querySelector('.current');
+    if (cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function stepBackward() {
+  if (stepState.current > 0) {
+    stepState.current--;
+    const step = stepState.steps[stepState.current];
+    applyStep(step);
+    renderStepLog();
+    document.getElementById('thought-bubble').innerHTML = `<span class="step-icon">${stepIcon(step.type)}</span><span class="step-action">${step.type.toUpperCase()}:</span> ${step.thought}`;
+    document.getElementById('current-cost').textContent = step.cost === 0 ? '—' : step.cost.toFixed(1);
+  }
+}
+
+function stepPlay() {
+  if (stepState.playing) {
+    stepStop();
+  } else {
+    if (stepState.current >= stepState.steps.length - 1) stepReset();
+    stepState.playing = true;
+    document.getElementById('btn-play').textContent = '⏸ Pause';
+    stepState.interval = setInterval(() => {
+      if (stepState.current < stepState.steps.length - 1) {
+        stepForward();
+      } else {
+        stepStop();
+      }
+    }, stepState.speed);
+  }
+}
+
+function stepStop() {
+  stepState.playing = false;
+  if (stepState.interval) clearInterval(stepState.interval);
+  stepState.interval = null;
+  const btn = document.getElementById('btn-play');
+  if (btn) btn.textContent = '▶ Play';
+}
+
+function stepReset() {
+  stepStop();
+  stepState.current = -1;
+  clearAssigned();
+  renderStepLog();
+  document.getElementById('thought-bubble').innerHTML = '<span style="color:var(--muted)">Reset แล้วค่ะ กด Step/Play เพื่อเริ่มใหม่</span>';
+  document.getElementById('current-cost').textContent = '—';
+  render();
+}
+
+function stepIcon(type) {
+  return { info: '💡', consider: '🤔', accept: '✅', reject: '❌', done: '🎉' }[type] || '▸';
+}
+
+function updateSpeed() {
+  stepState.speed = parseInt(document.getElementById('step-speed').value);
+  document.getElementById('speed-val').textContent = `${stepState.speed}ms`;
+  if (stepState.playing) { stepStop(); stepPlay(); }
+}
+
+// ============================================================
+// 🚪 Room Reservation Modal
+// ============================================================
+function openRoomModal(room) {
+  state.modalRoom = room;
+  document.getElementById('modal-title').innerHTML = `${room.num} <span style="font-size:11px;color:var(--muted)">${room.type} · ${room.side}/P${room.pos} · ${room.beds}bed</span>`;
+  renderModalBody(room);
+  document.getElementById('room-modal').style.display = 'flex';
+}
+
+function closeRoomModal() {
+  document.getElementById('room-modal').style.display = 'none';
+  state.modalRoom = null;
+}
+
+function renderModalBody(room) {
+  const body = document.getElementById('modal-body');
+  const start = getTimelineStart();
+  const timelineDays = [];
+  
+  for (let i = 0; i < TIMELINE_DAYS; i++) {
+    const date = addDays(start, i);
+    
+    // ดึง reservation ที่ครอบคลุมวันนี้ (ถ้าทับกันหลายอัน เอาอันล่าสุดหรือ bookingIdx มากสุด)
+    const resForDate = room.reservations
+      .filter(r => r.checkIn <= date && date < r.checkOut)
+      .sort((a, b) => (b.bookingIdx ?? -1) - (a.bookingIdx ?? -1))[0];
+
+    if (resForDate) {
+      const isSeed = (resForDate.bookingIdx ?? -1) < 0;
+      if (isSeed) {
+        // 🔒 วันที่เป็น Seed (Pre-booked) ใช้โทนสีเหลือง
+        timelineDays.push(`<div class="mtl-day" style="background:rgba(210,153,34,0.25); color:var(--yellow); border:1px solid rgba(210,153,34,0.5); line-height:26px;" title="Seed (Pre-booked)">${date.substring(8)}</div>`);
+      } else {
+        // 🎨 วันที่เป็น Case (Run Assign) ใช้สีตามคิว booking นั้นๆ
+        const bgColor = bookingColor(resForDate.bookingIdx);
+        timelineDays.push(`<div class="mtl-day" style="background:${bgColor}; color:#fff; border:1px solid rgba(255,255,255,0.3); line-height:26px;" title="Booking #${resForDate.bookingIdx + 1}">${date.substring(8)}</div>`);
+      }
+    } else {
+      // 🟩 วันที่ห้องว่าง
+      timelineDays.push(`<div class="mtl-day free">${date.substring(8)}</div>`);
+    }
+  }
+
+  const labels = [];
+  for (let i = 0; i < TIMELINE_DAYS; i++) {
+    labels.push(`<span>${addDays(start, i).substring(8)}</span>`);
+  }
+
+  const reservationsList = room.reservations.length === 0
+    ? '<div style="color:var(--muted);font-size:11px;">ยังไม่มี reservation</div>'
+    : room.reservations.map((res, i) => {
+        const bkColor = (res.bookingIdx ?? -1) >= 0 ? bookingColor(res.bookingIdx) : 'var(--yellow)';
+        const bkTag = (res.bookingIdx ?? -1) >= 0
+          ? `<span class="swatch" style="background:${bkColor}"></span>Booking #${res.bookingIdx + 1}`
+          : `🔒 Seed`;
+        return `<div class="res-item">
+          <span>
+            <span class="res-label">${res.label}</span>
+            <span class="res-dates">${res.checkIn} → ${res.checkOut}</span>
+            <span class="res-type">${res.type}</span>
+            <span style="margin-left:6px;font-size:10px;">${bkTag}</span>
+          </span>
+        </div>`;
+      }).join('');
+
+  body.innerHTML = `
+    <div class="modal-section">
+      <h3>📅 Timeline (14 วัน)</h3>
+      <div class="modal-timeline">${timelineDays.join('')}</div>
+      <div class="modal-timeline-labels">${labels.join('')}</div>
+    </div>
+    <div class="modal-section">
+      <h3>📋 Reservations (${room.reservations.length})</h3>
+      ${reservationsList}
+    </div>
+    <div class="modal-section">
+      <h3>ℹ️ Room Info</h3>
+      <div class="modal-info">
+        ${room.num} · ${room.type} · ${room.side}/P${room.pos} · ${room.beds} bed · ${room.bed_type}<br>
+        Floor ${room.floor}${room.floor === 8 ? ' (twin)' : ''} · ${room.reservations.length} reservations
+      </div>
+    </div>
+  `;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeRoomModal();
+});
+document.getElementById('room-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'room-modal') closeRoomModal();
+});
+
+// ============================================================
+// 🔧 Resizable Panels
+// ============================================================
+function makeResizer(el, axis, varName, min, max) {
+  if (!el) return;
+  let startPos = 0, startSize = 0;
+  const beginDrag = (clientPos) => {
+    el.classList.add('active');
+    startPos = clientPos;
+    const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(varName));
+    startSize = isNaN(cur) ? (axis === 'x' ? 320 : 200) : cur;
+    document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', endDrag);
+  };
+  const onMouseMove = (e) => updateDrag(e.clientX, e.clientY);
+  const onTouchMove = (e) => { e.preventDefault(); const t = e.touches[0]; updateDrag(t.clientX, t.clientY); };
+  const updateDrag = (cx, cy) => {
+    const cur = axis === 'x' ? cx : cy;
+    let next = startSize + (cur - startPos);
+    next = Math.max(min, Math.min(max, next));
+    document.documentElement.style.setProperty(varName, next + 'px');
+  };
+  const endDrag = () => {
+    el.classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', endDrag);
+    document.removeEventListener('touchmove', onTouchMove);
+    document.removeEventListener('touchend', endDrag);
+  };
+  el.addEventListener('mousedown', (e) => { e.preventDefault(); beginDrag(e.clientX); });
+  el.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.touches[0]; beginDrag(t.clientX); }, { passive: false });
+  el.addEventListener('dblclick', () => {
+    const def = axis === 'x' ? 320 : (varName === '--step-h' ? 280 : 220);
+    document.documentElement.style.setProperty(varName, def + 'px');
+  });
+}
+
+makeResizer(document.getElementById('resizer-sidebar'), 'x', '--sidebar-w', 240, 600);
+makeResizer(document.getElementById('resizer-step'), 'y', '--step-h', 120, 600);
+makeResizer(document.getElementById('resizer-results'), 'y', '--results-h', 80, 520);
+
+// ============================================================
+// 🚀 Init — populate dropdowns + legend palette
+// ============================================================
+function populateDropdowns() {
+  const seedSel = document.getElementById('seed-select');
+  const caseSel = document.getElementById('case-select');
+
+  const seedGroups = [
+    { label: '🛠️ Handcrafted (7)', keys: ['S-CHK','S-HALF','S-ADJ','S-CONFLICT','S-PREMIUM','S-WEEKEND','S-TWIN'] },
+    { label: '🛡️ Regression-derived (7)', keys: ['S-NONE','S-508','S-508BK2','S-F8','S-X09ONLY','S-D40','S-D5K-'] },
+    { label: '🎲 Random spread (10)', keys: ['S-RND1','S-RND2','S-RND3','S-RND4','S-RND5','S-RND6','S-RND7','S-RND8','S-RND9','S-RND10'] },
+    { label: '🎯 RS-equivalent (10)', keys: ['S-RND11','S-RND12','S-RND13','S-RND14','S-RND15','S-RND16','S-RND17','S-RND18','S-RND19','S-RND20'] },
+  ];
+  seedGroups.forEach(g => {
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    g.keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = `${k} — ${SEEDS[k].desc}`;
+      og.appendChild(opt);
+    });
+    seedSel.appendChild(og);
+  });
+  seedSel.value = 'S-NONE';
+
+  const caseGroups = [
+    { label: '📦 Single cases (12)', keys: ['C-SOLO','C-G4','C-MIX','C-FAM','C-L10','C-TWIN','C-SD','C-S3','C-D5','C-SUP2','C-TWIN1','C-D20'] },
+    { label: '📅 Per-Room Date (4)', keys: ['C-PRD1','C-PRD2','C-PRD3','C-PRD4'] },
+    { label: '🌐 Sequences (13)', keys: ['SEQ1','SEQ2','SEQ3','SEQ4','SEQ5','SEQ6','SEQ7','SEQ8','SEQ9','SEQ10','SEQ11','SEQ12','SEQ13'] },
+  ];
+  caseGroups.forEach(g => {
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    g.keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = `${k} — ${CASES[k].desc}`;
+      og.appendChild(opt);
+    });
+    caseSel.appendChild(og);
+  });
+  caseSel.value = 'C-G4';
+
+  // desc updaters + auto-apply seed เมื่อเปลี่ยน seed/case
+  const updateDesc = () => {
+    document.getElementById('seed-desc').textContent = `${seedSel.value}: ${SEEDS[seedSel.value].desc}`;
+    document.getElementById('case-desc').textContent = `${caseSel.value}: ${CASES[caseSel.value].desc}`;
+  };
+  seedSel.addEventListener('change', () => { updateDesc(); applySeedOnly(); });
+  caseSel.addEventListener('change', () => { updateDesc(); applySeedOnly(); });
+  updateDesc();
+  // auto-apply seed ครั้งแรกเพื่อให้แผนผังโชว์ 🔒 ตั้งแต่เปิดหน้า
+  applySeedOnly();
+}
+
+function populateLegendPalette() {
+  const pal = document.getElementById('legend-palette');
+  pal.innerHTML = BOOKING_PALETTE.map((c, i) =>
+    `<div class="pdot" style="background:${c}" title="Booking #${i+1}"></div>`
+  ).join('');
+}
+
+populateDropdowns();
+populateLegendPalette();
+render();
+</script>
+</body>
+</html>

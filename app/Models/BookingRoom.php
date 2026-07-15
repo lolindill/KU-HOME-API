@@ -2,12 +2,12 @@
 
 namespace App\Models;
 
+use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
-use Exception;
 
 class BookingRoom extends Model
 {
@@ -27,13 +27,15 @@ class BookingRoom extends Model
         'guests',      // JSON: [{ title, name, nationality, is_ku_member }, ...]
         'children',    // int: จำนวนเด็กที่เข้าพักในห้องนี้
         'status',      // draft | confirmed | checked_in | checked_out | no_show
+        // 🏨 Phase 1: bed_preference สำหรับ Room Allocation Algorithm (twin | null=any)
+        'bed_preference',
     ];
 
     protected $casts = [
-        'check_in'  => 'date',
+        'check_in' => 'date',
         'check_out' => 'date',
-        'guests'    => 'array',
-        'children'  => 'integer',
+        'guests' => 'array',
+        'children' => 'integer',
     ];
 
     // =========================================================
@@ -57,15 +59,15 @@ class BookingRoom extends Model
             ],
             'confirmed' => [
                 'checked_in' => ['admin'],
-                'no_show'    => ['admin'],
+                'no_show' => ['admin'],
             ],
             'checked_in' => [
                 'checked_out' => ['admin'],
             ],
         ];
 
-        if (!isset($validTransitions[$current]) ||
-            !isset($validTransitions[$current][$newStatus])) {
+        if (! isset($validTransitions[$current]) ||
+            ! isset($validTransitions[$current][$newStatus])) {
             throw new Exception(
                 "ไม่อนุญาตให้เปลี่ยนสถานะห้องจาก '{$current}' → '{$newStatus}' ตาม Flow ระบบค่ะ",
                 422
@@ -73,8 +75,8 @@ class BookingRoom extends Model
         }
 
         $requiredRoles = $validTransitions[$current][$newStatus];
-        if (!in_array($userRole, $requiredRoles)) {
-            throw new Exception("ไม่มีสิทธิ์ดำเนินการสถานะห้องค่ะ!", 403);
+        if (! in_array($userRole, $requiredRoles)) {
+            throw new Exception('ไม่มีสิทธิ์ดำเนินการสถานะห้องค่ะ!', 403);
         }
 
         $this->status = $newStatus;
@@ -93,8 +95,11 @@ class BookingRoom extends Model
     public function getPrimaryGuestNameAttribute(): string
     {
         $primary = $this->primary_guest;
-        if (!$primary) return 'Customer';
-        return trim(($primary['title'] ?? '') . ' ' . ($primary['name'] ?? ''));
+        if (! $primary) {
+            return 'Customer';
+        }
+
+        return trim(($primary['title'] ?? '').' '.($primary['name'] ?? ''));
     }
 
     public function getTotalGuestsAttribute(): int
@@ -141,7 +146,7 @@ class BookingRoom extends Model
             return true;
         }
 
-        $checkIn  = $this->check_in;
+        $checkIn = $this->check_in;
         $checkOut = $this->check_out;
 
         $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
@@ -150,8 +155,8 @@ class BookingRoom extends Model
         $availableRoom = Room::where('room_type_id', $this->room_type_id)
             ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
                 $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
-                      ->where('check_in', '<', $checkOut)
-                      ->where('check_out', '>', $checkIn);
+                    ->where('check_in', '<', $checkOut)
+                    ->where('check_out', '>', $checkIn);
             })
             ->whereNotIn('status', ['maintenance', 'reserved_closed'])
             ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
@@ -161,6 +166,7 @@ class BookingRoom extends Model
 
         if ($availableRoom) {
             $this->update(['room_id' => $availableRoom->id]);
+
             return true;
         }
 

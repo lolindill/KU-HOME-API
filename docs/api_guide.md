@@ -1008,6 +1008,63 @@ Requires all payments to be completed. Auto-creates housekeeping tasks.
 
 ---
 
+### POST `/front-desk/{bookingId}/mark-no-show` — Mark guest as no-show
+
+🔒 **Admin only**
+
+Marks one or more rooms as `no_show` (BookingRoom-level). Supports **partial no-show** — omit `booking_room_ids` to mark *all* rooms, or specify individual rooms to mark only those. The booking container auto-syncs to `complete` when every room has reached a terminal state (`checked_out` or `no_show`).
+
+**Request Body:**
+```json
+{
+  "verified_by": "admin-uuid",
+  "booking_room_ids": ["br-uuid-1"]
+}
+```
+
+**Validation Rules:**
+
+| Field                  | Rule                                |
+|------------------------|-------------------------------------|
+| `verified_by`          | required, uuid, exists in users     |
+| `booking_room_ids`     | nullable, array                     |
+| `booking_room_ids.*`   | required, uuid, exists in booking_rooms |
+
+> 🛡️ **Guards:**
+> - Booking must **not** already be `complete`
+> - Every targeted room must be in `confirmed` status (draft/checked_in/checked_out/no_show rooms are rejected)
+> - If the booking container is still `paid`, it is transitioned to `confirmed` first so a paid-but-absent booking can still be closed
+
+**Response `200` (partial — some rooms still active):**
+```json
+{
+  "status": "success",
+  "message": "Mark No-Show สำเร็จแล้วค่ะนายท่าน",
+  "booking_id": "booking-uuid",
+  "booking_status": "confirmed"
+}
+```
+
+**Response `200` (all rooms terminal — container auto-completes):**
+```json
+{
+  "status": "success",
+  "message": "Mark No-Show สำเร็จแล้วค่ะนายท่าน",
+  "booking_id": "booking-uuid",
+  "booking_status": "complete"
+}
+```
+
+**Response `422`:**
+```json
+{
+  "status": "error",
+  "message": "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ 'checked_in' (ต้องเป็น 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
+}
+```
+
+---
+
 ### POST `/front-desk/{bookingId}/payment` — Record payment
 
 🔒 **Admin only**
@@ -1696,4 +1753,4 @@ curl -X POST http://localhost/api/v1/front-desk/booking-uuid/check-in \
 
 ---
 
-*Last updated: 2026-06-26 · KU HOME API v1*
+*Last updated: 2026-07-14 · KU HOME API v1*
