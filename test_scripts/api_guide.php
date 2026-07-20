@@ -18,7 +18,7 @@ $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 // ════════════════════════════════════════════════════════════════
 // ✏️ FILLABLE CONFIG — แก้ค่าตรงนี้ได้เลยค่ะนายท่าน!
 // ════════════════════════════════════════════════════════════════
-$BASE_URL     = 'http://hotel.test/api/v1';
+$BASE_URL     = getenv('KUHOME_BASE_URL') ?: 'https://ku-home.ku.ac.th/backend/api/v1';
 $ROOM_TYPE_ID = '';                    // ว่าง = auto-detect จาก GET /room-types
 $ROOM_ID      = '';                    // ว่าง = auto-detect จาก GET /rooms (available)
 $EMAIL        = 'admin@kuhome.com';    // Admin login

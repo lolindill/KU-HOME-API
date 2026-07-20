@@ -28,7 +28,7 @@
 ### Base URL
 
 ```
-http://localhost/api/v1
+https://ku-home.ku.ac.th/backend/api/v1
 ```
 
 ### Authentication
@@ -1719,14 +1719,14 @@ Both use atomic counters (`booking_sequences` / `receipt_sequences` tables) with
 
 **Login:**
 ```bash
-curl -X POST http://localhost/api/v1/login \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"password"}'
 ```
 
 **Create Booking:**
 ```bash
-curl -X POST http://localhost/api/v1/bookings \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 1|your_token_here" \
   -d '{
@@ -1745,7 +1745,7 @@ curl -X POST http://localhost/api/v1/bookings \
 
 **Check-in (Front Desk):**
 ```bash
-curl -X POST http://localhost/api/v1/front-desk/booking-uuid/check-in \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/check-in \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 1|admin_token_here" \
   -d '{"assigned_rooms":["room-uuid-1"]}'
