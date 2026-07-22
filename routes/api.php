@@ -1,10 +1,10 @@
 <?php
 
-use App\Http\Controllers\Api\V1\AddonRateController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
+use App\Http\Controllers\Api\V1\GlobalRateController;
 use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
@@ -45,9 +45,9 @@ Route::prefix('v1')->group(function () {
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
 
-    // 🌟 Add-on Rates (public read-only — ให้ frontend แสดงราคา current ได้)
-    Route::get('/addon-rates', [AddonRateController::class, 'index']);
-    Route::get('/addon-rates/{id}', [AddonRateController::class, 'show']);
+    // 🌟 Refactor (22/07/26): Global Rates (public read-only — รวม room rate + addon rate ในตารางเดียว)
+    Route::get('/global-rates', [GlobalRateController::class, 'index']);
+    Route::get('/global-rates/{id}', [GlobalRateController::class, 'show']);
 
     // 🌟 Refactor (18/06/26): ลบ public booking/lookup/request-payment — non-member ใช้งานไม่ได้แล้ว ทุกคนต้อง login
     //    createBooking ย้ายไป protected routes ด้านล่าง
@@ -111,9 +111,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
         Route::post('/payments', [PaymentController::class, 'requestPayment']);
 
-        // 🌟 Add-on Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
-        Route::put('/addon-rates/{id}', [AddonRateController::class, 'update']);
-        Route::patch('/addon-rates/{id}/toggle', [AddonRateController::class, 'toggleActive']);
+        // 🌟 Refactor (22/07/26): Global Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
+        Route::put('/global-rates/{id}', [GlobalRateController::class, 'update']);
+        Route::patch('/global-rates/{id}/toggle', [GlobalRateController::class, 'toggleActive']);
 
         // 🧹 Dashboard / Housekeeping — Admin endpoints (Fix S-B4)
         Route::prefix('dashboard')->group(function () {

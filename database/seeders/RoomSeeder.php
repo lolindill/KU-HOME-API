@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use Illuminate\Database\Seeder;
@@ -44,38 +45,58 @@ class RoomSeeder extends Seeder
         $deluxeId = Str::uuid();
         $suiteId = Str::uuid();
 
-        RoomType::create([
-            'id' => $standardId,
-            'name_en' => 'Superior',
-            'name_th' => 'ห้องซูพีเรียร์',
-            'max_guests' => 2,
-            'extra_bed_enabled' => false,
-            'max_extra_beds' => 0,
-            'extra_bed_price' => 0,
-            'rate_daily_general' => 1000,
-        ]);
+        // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว
+        // เก็บ daily rate แยกไว้สร้าง GlobalRate rows ทีหลัง (ด้านล่าง)
+        $roomTypeSpecs = [
+            [
+                'id' => $standardId,
+                'name_en' => 'Superior',
+                'name_th' => 'ห้องซูพีเรียร์',
+                'max_guests' => 2,
+                'extra_bed_enabled' => false,
+                'max_extra_beds' => 0,
+                'extra_bed_price' => 0,
+                'daily_rate' => 1000,
+            ],
+            [
+                'id' => $deluxeId,
+                'name_en' => 'Deluxe',
+                'name_th' => 'ห้องดีลักซ์',
+                'max_guests' => 2,
+                'extra_bed_enabled' => true,
+                'max_extra_beds' => 1,
+                'extra_bed_price' => 500,
+                'daily_rate' => 1800,
+            ],
+            [
+                'id' => $suiteId,
+                'name_en' => 'Suite',
+                'name_th' => 'ห้องสวีท',
+                'max_guests' => 4,
+                'extra_bed_enabled' => true,
+                'max_extra_beds' => 2,
+                'extra_bed_price' => 600,
+                'daily_rate' => 3500,
+            ],
+        ];
 
-        RoomType::create([
-            'id' => $deluxeId,
-            'name_en' => 'Deluxe',
-            'name_th' => 'ห้องดีลักซ์',
-            'max_guests' => 2,
-            'extra_bed_enabled' => true,
-            'max_extra_beds' => 1,
-            'extra_bed_price' => 500,
-            'rate_daily_general' => 1800,
-        ]);
+        foreach ($roomTypeSpecs as $spec) {
+            $dailyRate = $spec['daily_rate'];
+            unset($spec['daily_rate']);
+            RoomType::create($spec);
 
-        RoomType::create([
-            'id' => $suiteId,
-            'name_en' => 'Suite',
-            'name_th' => 'ห้องสวีท',
-            'max_guests' => 4,
-            'extra_bed_enabled' => true,
-            'max_extra_beds' => 2,
-            'extra_bed_price' => 600,
-            'rate_daily_general' => 3500,
-        ]);
+            // 🌟 Seed room rate row ใน global_rates (rate_type='daily')
+            GlobalRate::firstOrCreate(
+                ['room_type_id' => $spec['id'], 'rate_type' => 'daily'],
+                [
+                    'code' => null,
+                    'name_en' => $spec['name_en'] . ' Daily',
+                    'name_th' => $spec['name_en'] . ' (ราคารายวัน)',
+                    'default_price' => $dailyRate,
+                    'is_active' => true,
+                ]
+            );
+        }
 
         // 🚪 2. สร้าง 100 ห้องตาม topology KU HOME
         $created = 0;

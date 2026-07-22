@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Receipt;
@@ -50,7 +51,8 @@ class FrontDeskController extends Controller
 
             $checkIn = Carbon::now();
             $checkOut = Carbon::now()->addDays($validated['nights']);
-            $totalAmount = $room->roomType->rate_daily_general * $validated['nights'];
+            // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (rate_type='daily') แทน room_types
+            $totalAmount = GlobalRate::getRoomRate($room->roomType, 'daily') * $validated['nights'];
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([

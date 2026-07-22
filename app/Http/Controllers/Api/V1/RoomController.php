@@ -129,10 +129,12 @@ class RoomController extends Controller
         $request->validate([
             'check_in' => 'nullable|date|after_or_equal:today',
             'check_out' => 'nullable|date|after:check_in',
+            'max_guests' => 'nullable|integer|min:1',
         ]);
 
         $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
         $checkOut = $request->check_out ? Carbon::parse($request->check_out) : Carbon::tomorrow();
+        $maxGuests = $request->query('max_guests');
 
         $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
                 $query->where('status', 'available');
@@ -146,18 +148,33 @@ class RoomController extends Controller
                       ->where('check_in', '<', $checkOut)
                       ->where('check_out', '>', $checkIn);
             }])
+            // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
+            ->when($maxGuests, fn($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
-            ->map(function ($type) use ($checkIn, $checkOut) {
+            ->map(function ($type) use ($checkIn, $checkOut, $maxGuests) {
                 $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
 
                 return [
                     'room_type_id' => $type->id,
                     'name_en' => $type->name_en,
                     'name_th' => $type->name_th,
-                    'available_rooms' => $availableRooms, 
+                    'available_rooms' => $availableRooms,
+                    // 🌟 Embed full room_type object so frontend has all fields
+                    // (max_guests, extra_bed_*, etc.)
+                    // 🌟 Refactor (22/07/26): rate ย้ายไป global_rates แล้ว — ดึงแยกผ่าน API /global-rates
+                    'room_type' => [
+                        'id' => $type->id,
+                        'name_en' => $type->name_en,
+                        'name_th' => $type->name_th,
+                        'max_guests' => $type->max_guests,
+                        'extra_bed_enabled' => $type->extra_bed_enabled,
+                        'max_extra_beds' => $type->max_extra_beds,
+                        'extra_bed_price' => $type->extra_bed_price,
+                    ],
                     'search_criteria' => [
                         'check_in' => $checkIn->toDateString(),
                         'check_out' => $checkOut->toDateString(),
+                        'max_guests' => $maxGuests ? (int) $maxGuests : null,
                     ]
                 ];
             });

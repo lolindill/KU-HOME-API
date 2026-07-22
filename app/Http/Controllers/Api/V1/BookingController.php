@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreBookingRequest;
 use App\Models\Addon;
-use App\Models\AddonRate;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
@@ -198,9 +198,10 @@ class BookingController extends Controller
 
             $totalAmount = 0;
 
-            // 🌟 Refactor (19/06/26): ดึง rate จาก addon_rates (server-side) ทีเดียวจบ
+            // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ
             // ไม่รับ price จาก client อีกต่อไป — ป้องกัน price manipulation (#20)
-            $rates = AddonRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+            // 🌟 Refactor (22/07/26): ย้ายจาก addon_rates → global_rates (rate_type='addon')
+            $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
 
             // 🌟 ปรับลูปให้สร้าง BookingRoom และ Addon ไปพร้อมๆ กันต่อห้องเลยค่ะ
             foreach ($validated['booking_rooms'] as $roomRequest) {
@@ -211,7 +212,8 @@ class BookingController extends Controller
                 $roomCheckOut = Carbon::parse($roomRequest['check_out']);
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
-                $roomPriceTotal = $roomType->rate_daily_general * $nights;
+                // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (rate_type='daily') แทน room_types
+                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
                 $extraBedQty = $roomRequest['extra_beds'] ?? 0;
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;

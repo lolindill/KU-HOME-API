@@ -217,7 +217,9 @@ if (!empty($ROOM_TYPE_ID)) {
         }
         if ($firstType && isset($firstType['id'])) {
             chainSave('ROOM_TYPE_ID', $firstType['id']);
-            echo "    📊 Room Type: {$firstType['name_en']} — rate: {$firstType['rate_daily_general']}/night\n";
+            // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว (ดู /global-rates)
+            $rate = $firstType['rate_daily_general'] ?? '(see /global-rates)';
+            echo "    📊 Room Type: {$firstType['name_en']} — rate: {$rate}/night\n";
         }
     }
 }

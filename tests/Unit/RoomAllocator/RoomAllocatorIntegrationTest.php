@@ -5,6 +5,7 @@ namespace Tests\Unit\RoomAllocator;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Services\RoomAllocator\RoomAllocator;
@@ -64,7 +65,15 @@ final class RoomAllocatorIntegrationTest extends TestCase
                 'extra_bed_enabled' => $extraEnabled,
                 'max_extra_beds' => $maxExtra,
                 'extra_bed_price' => $extraPrice,
-                'rate_daily_general' => $rate,
+            ]);
+            // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว
+            GlobalRate::create([
+                'rate_type' => 'daily',
+                'room_type_id' => $this->typeIds[$key],
+                'code' => null,
+                'name_en' => $en . ' Daily',
+                'default_price' => $rate,
+                'is_active' => true,
             ]);
         }
 

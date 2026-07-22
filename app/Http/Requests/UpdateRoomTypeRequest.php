@@ -20,7 +20,6 @@ class UpdateRoomTypeRequest extends FormRequest
             'extra_bed_enabled'   => 'nullable|boolean',
             'max_extra_beds'      => 'nullable|integer|min:0',
             'extra_bed_price'     => 'nullable|integer|min:0',
-            'rate_daily_general'  => 'sometimes|required|integer|min:0',
         ];
     }
 }

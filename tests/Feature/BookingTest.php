@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Tests\TestCase;
 use App\Models\Booking;
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
@@ -16,14 +17,23 @@ class BookingTest extends TestCase
 
     private function createRoomType(): RoomType
     {
-        return RoomType::create([
+        $rt = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard Double',
             'name_th' => 'สแตนดาร์ด ดับเบิล',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
         ]);
+        // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว — seed ที่นี่
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $rt->id,
+            'code' => null,
+            'name_en' => 'Standard Double Daily',
+            'default_price' => 1500,
+            'is_active' => true,
+        ]);
+        return $rt;
     }
 
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
@@ -60,7 +70,15 @@ class BookingTest extends TestCase
             'name_th' => 'สแตนดาร์ด',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
+        ]);
+        // 🌟 Refactor (22/07/26): seed room rate ใน global_rates
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $roomType->id,
+            'code' => null,
+            'name_en' => 'Standard Daily',
+            'default_price' => 1500,
+            'is_active' => true,
         ]);
 
         \App\Models\BookingRoom::create([

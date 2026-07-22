@@ -192,9 +192,9 @@ if ($ROOM_TYPE_ID) {
 
 test('Availability', 'GET', '/availability', null, null, 200);
 
-$r = test('Addon Rates', 'GET', '/addon-rates', null, null, 200);
+$r = test('Global Rates', 'GET', '/global-rates', null, null, 200);
 $rates = $r['body']['rates'] ?? [];
-echo "    📊 Total addon rates: " . count($rates) . "\n";
+echo "    📊 Total global rates: " . count($rates) . "\n";
 if (!empty($rates)) {
     $ADDON_ID = $rates[0]['id'] ?? null;
     saveId('ADDON_ID', $ADDON_ID);
@@ -379,11 +379,11 @@ if ($USE_ADMIN && $TOKEN) {
             }
         }
 
-        // Addon rate update
+        // Global rate update
         if (!empty($ADDON_ID)) {
-            test('Toggle Addon Rate', 'PATCH', "/addon-rates/{$ADDON_ID}/toggle", null, $TOKEN, 200);
+            test('Toggle Global Rate', 'PATCH', "/global-rates/{$ADDON_ID}/toggle", null, $TOKEN, 200);
             // toggle back to restore state
-            test('Toggle Addon Rate (restore)', 'PATCH', "/addon-rates/{$ADDON_ID}/toggle", null, $TOKEN, 200);
+            test('Toggle Global Rate (restore)', 'PATCH', "/global-rates/{$ADDON_ID}/toggle", null, $TOKEN, 200);
         }
 
         // Request payment for the booking

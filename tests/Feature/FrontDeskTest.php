@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Tests\TestCase;
 use App\Models\Booking;
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\BookingRoom;
@@ -17,14 +18,23 @@ class FrontDeskTest extends TestCase
 
     private function createRoomType(): RoomType
     {
-        return RoomType::create([
+        $rt = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard Double',
             'name_th' => 'สแตนดาร์ด ดับเบิล',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
         ]);
+        // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $rt->id,
+            'code' => null,
+            'name_en' => 'Standard Double Daily',
+            'default_price' => 1500,
+            'is_active' => true,
+        ]);
+        return $rt;
     }
 
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
@@ -325,7 +335,14 @@ class FrontDeskTest extends TestCase
             'name_th' => 'สแตนดาร์ด',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1000,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $standardType->id,
+            'code' => null,
+            'name_en' => 'Standard Daily',
+            'default_price' => 1000,
+            'is_active' => true,
         ]);
 
         $deluxeType = RoomType::create([
@@ -334,7 +351,14 @@ class FrontDeskTest extends TestCase
             'name_th' => 'ดีลักซ์',
             'max_guests' => 4,
             'extra_bed_enabled' => true,
-            'rate_daily_general' => 3000,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $deluxeType->id,
+            'code' => null,
+            'name_en' => 'Deluxe Daily',
+            'default_price' => 3000,
+            'is_active' => true,
         ]);
 
         // Create a DELUXE room (but booking is for STANDARD)
