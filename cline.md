@@ -42,7 +42,7 @@ hotel/
 │   │   │   ├── UserController.php     # user CRUD, profile, verification
 │   │   │   ├── BookingController.php  # booking CRUD, status transitions, room assignment (RoomAllocator)
 │   │   │   ├── RoomController.php     # rooms & room types listing, availability
-│   │   │   ├── PaymentController.php  # payment requests, webhooks (⚠️ no HMAC yet)
+│   │   │   ├── PaymentController.php  # ❄️ FROZEN webhook (410), requestPayment (admin, walk-in cash)
 │   │   │   ├── FrontDeskController.php# walk-in bookings, check-in/out, record payments (🧹 checkout creates typed task)
 │   │   │   ├── DashboardController.php# 🧹 housekeeping dashboard (Phase A: listTasks/createTask/assignTask/acceptTask/updateStatus)
 │   │   │   ├── AddonRateController.php
@@ -56,8 +56,9 @@ hotel/
 │   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
 │   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
 │   │   ├── RoomType.php               # PgBoolean extra_bed_enabled
-│   │   ├── Payment.php                # integer amount (satang)
-│   │   ├── Receipt.php                # integer amount, atomic receipt_no
+│   │   ├── Payment.php                # ❄️ legacy (frozen 24/07/26) — integer amount (satang)
+│   │   ├── Receipt.php                # ❄️ legacy (frozen 24/07/26) — integer amount, atomic receipt_no
+│   │   ├── BookingConfirmation.php    # 🌟 NEW (24/07/26): payment proof table, state machine pending→verified|rejected
 │   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
 │   │   ├── HousekeepingTask.php / HousekeepingPhoto.php # 🧹 Phase A: task state machine + types
 │   │   ├── StockInventory.php         # 🧹 Phase A: master stock (replaces HousekeepingInventory)
@@ -206,7 +207,7 @@ These routes exist but are **not for production use**:
 - `UserController` — user CRUD, profile, verification (Eloquent-based)
 - `BookingController` — booking CRUD, status transitions, room assignment
 - `RoomController` — rooms & room types listing, availability, status updates
-- `PaymentController` — payment requests, webhooks
+- `PaymentController` — ❄️ webhook frozen (410), requestPayment (admin walk-in)
 - `FrontDeskController` — walk-in bookings, check-in, check-out, record payments
 - `ImageController` — 🚧 DRAFT image upload
 - `DashboardController` — housekeeping dashboard (cleaning tasks, status updates)

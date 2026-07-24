@@ -9,7 +9,6 @@ use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
-use App\Models\Receipt;
 use App\Models\Room;
 use App\Models\User;
 use Carbon\Carbon;
@@ -479,17 +478,8 @@ class FrontDeskController extends Controller
                     $booking->transitionStatus('paid', 'admin');
                 }
 
-                // 🌟 Fix M2 (03/07/26): Idempotency guard กัน duplicate receipt
-                // (ถ้า payment_id เดิมเคยออกใบเสร็จแล้ว จะไม่สร้างซ้ำ)
-                if (! Receipt::where('payment_id', $payment->id)->exists()) {
-                    Receipt::create([
-                        'receipt_no' => Receipt::generateUniqueReceiptNo(),
-                        'booking_id' => $booking->id,
-                        'payment_id' => $payment->id,
-                        'amount' => $payment->amount,
-                        'billing_name' => $booking->primary_guest_name ?? 'Customer',
-                    ]);
-                }
+                // ❄️ FROZEN (24/07/26): Receipt table deprecated — ไม่สร้าง receipt row ใหม่อีกต่อไป
+                //    ใช้ booking_confirmations table แทน (ดู POST /bookings/{id}/confirm + admin verify)
             }
 
             DB::commit();

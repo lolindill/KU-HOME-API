@@ -23,6 +23,7 @@ erDiagram
     BOOKINGS ||--|{ BOOKING_ROOMS : "booking_id"
     BOOKINGS ||--o{ PAYMENTS : "booking_id"
     BOOKINGS ||--o{ RECEIPTS : "booking_id"
+    BOOKINGS ||--o{ BOOKING_CONFIRMATIONS : "booking_id"
 
     BOOKING_ROOMS ||--o| ADDONS : "booking_room_id"
 
@@ -52,11 +53,11 @@ erDiagram
         uuid id PK
         string name_en
         string name_th
+        string description "nullable"
         integer max_guests
         boolean extra_bed_enabled "default: false"
         integer max_extra_beds "default: 0"
         integer extra_bed_price "default: 0"
-        integer rate_daily_general
         timestamp created_at
         timestamp updated_at
     }
@@ -136,6 +137,7 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+    ❄️ FROZEN (24/07/26): legacy table — read-only. ใช้ booking_confirmations แทน
 
     RECEIPTS {
         uuid id PK
@@ -146,6 +148,21 @@ erDiagram
         string billing_name "nullable"
         text billing_address "nullable"
         timestamp issued_at "default: current"
+        timestamp created_at
+        timestamp updated_at
+    }
+    ❄️ FROZEN (24/07/26): legacy table — read-only. ใช้ booking_confirmations แทน
+
+    BOOKING_CONFIRMATIONS {
+        uuid id PK
+        uuid booking_id FK "1:N with bookings (history)"
+        string payment_method "nullable, cash|credit_card|transfer"
+        string slip_image "nullable, path ของไฟล์สลิป"
+        timestamp transfer_time "nullable, เวลาที่ลูกค้าแจ้งโอน"
+        string status "default: pending (pending|verified|rejected)"
+        uuid reviewed_by FK "nullable, admin ที่ review"
+        timestamp reviewed_at "nullable"
+        string review_note "nullable, เหตุผล reject"
         timestamp created_at
         timestamp updated_at
     }
@@ -320,9 +337,10 @@ erDiagram
 
 | Field | Valid Values |
 |---|---|
-| `bookings.status` | `draft`, `paid`, `confirmed`, `checked_in`, `checked_out`, `cancelled`, `no_show`, `deleted` |
+| `bookings.status` | `draft`, `paid`, `confirmed`, `complete` |
 | `rooms.status` | `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` |
-| `payments.status` | `pending`, `completed`, `failed` |
+| `payments.status` | `pending`, `completed`, `failed` (❄️ frozen) |
+| `booking_confirmations.status` | `pending`, `verified`, `rejected` |
 | `housekeeping_tasks.status` | `pending`, `in_progress`, `done` |
 | `housekeeping_inventories.condition` | `good`, `damaged`, `missing` |
 | `bookings.source` | `online`, `admin`, `line` |

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
@@ -76,6 +77,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // 🌟 Refactor (18/06/26): createBooking ย้ายมานี่ — ต้อง login (auth:sanctum) ทุกกรณี
     Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
 
+    // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
+    Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])
+        ->where('bookingId', '[0-9a-f\-]{36}')
+        ->middleware('throttle:5,1');
+
     // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
     Route::post('/bookings/validate-discount', [BookingController::class, 'validateDiscount']);
 
@@ -95,6 +101,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ, assign ห้อง)
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
         Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
+
+        // 🌟 Refactor (24/07/26): admin verify/reject booking confirmation (by confirmation_id)
+        //    1:N — admin ระบุ row เฉพาะที่จะ review
+        Route::get('/booking-confirmations/pending', [BookingConfirmationController::class, 'pending']);
+        Route::put('/booking-confirmations/{id}/verify', [BookingConfirmationController::class, 'verify'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::put('/booking-confirmations/{id}/reject', [BookingConfirmationController::class, 'reject'])
+            ->where('id', '[0-9a-f\-]{36}');
 
         // 🛏️ Rooms — เปลี่ยนสถานะห้อง (admin only)
         Route::put('/rooms/{id}/status', [RoomController::class, 'updateRoomStatus']);

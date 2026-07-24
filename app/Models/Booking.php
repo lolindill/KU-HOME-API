@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Exception;
 use App\Models\Payment;
 use App\Models\Receipt;
+use App\Models\BookingConfirmation;
 
 class Booking extends Model
 {
@@ -86,6 +87,16 @@ class Booking extends Model
     public function receipts(): HasMany
     {
         return $this->hasMany(Receipt::class);
+    }
+
+    /**
+     * 🌟 Refactor (24/07/26): Payment confirmations (1:N) — replaces payments/receipts
+     * - เก็บ history ทุกครั้งที่ user ส่งหลักฐานการชำระ
+     * - state machine: pending → verified | rejected
+     */
+    public function confirmations(): HasMany
+    {
+        return $this->hasMany(BookingConfirmation::class, 'booking_id');
     }
 
     /**

@@ -504,11 +504,12 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "id": "uuid",
       "name_en": "Standard",
       "name_th": "ห้องมาตรฐาน",
+      "description": "ห้องมาตรฐานขนาด 28 ตร.ม. พร้อมเตียงควีน",
       "max_guests": 2,
       "extra_bed_enabled": true,
       "max_extra_beds": 1,
       "extra_bed_price": 300,
-      "rate_daily_general": 1200,
+      "daily_rate": 1200,
       "created_at": "...",
       "updated_at": "..."
     }
@@ -699,7 +700,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 | `booking_rooms.*.addons.early_checkin`      | nullable, boolean                             |
 | `booking_rooms.*.addons.late_checkout`      | nullable, boolean                             |
 
-> 💡 **Pricing**: Server calculates all prices from `room_types.rate_daily_general` and `addon_rates.default_price`. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
+> 💡 **Pricing**: Server calculates all prices from `global_rates` (room daily rates via `rate_type='daily'` + `room_type_id`) and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 
 **Response `201`:**
 ```json
@@ -727,6 +728,79 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
   "message": "ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ"
 }
 ```
+
+---
+
+### POST `/bookings/{id}/confirm` — Submit payment confirmation
+
+🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + method + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
+
+🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
+
+**Content-Type**: `multipart/form-data` (เพราะมีไฟล์ slip)
+
+**Request Body**:
+
+| Field             | Type      | Required | Description                                   |
+|-------------------|-----------|----------|-----------------------------------------------|
+| `payment_method`  | string    | ✅       | `cash`, `credit_card`, `transfer`             |
+| `slip_image`      | file      | transfer | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — required_if transfer |
+| `transfer_time`   | datetime  | transfer | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
+
+**Example (transfer)**:
+```bash
+curl -X POST /api/v1/bookings/{id}/confirm \
+  -H "Authorization: Bearer <token>" \
+  -F "payment_method=transfer" \
+  -F "slip_image=@slip.jpg" \
+  -F "transfer_time=2026-07-24T10:30:00Z"
+```
+
+**Response 201**:
+```json
+{
+  "status": "success",
+  "message": "ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน",
+  "confirmation_id": "confirmation-uuid",
+  "confirmation_status": "pending",
+  "booking_status": "paid",
+  "slip_image_url": "/storage/slips/abc123.jpg"
+}
+```
+
+**Guards** (422 on failure):
+- ❌ Booking ไม่ใช่ `draft`/`paid` (paid = re-submit หลัง reject)
+- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว)
+- ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
+- ❌ `transfer` แต่ไม่ส่ง `slip_image`/`transfer_time`
+
+---
+
+### PUT `/booking-confirmations/{id}/verify` — Admin verify slip
+
+🔒 **Admin only** · Pending → verified + booking paid → confirmed
+
+**Request Body**: `{ "review_note": "optional reason" }`
+
+**Response 200**: `{ "status": "success", "confirmation": {...}, "booking_status": "confirmed" }`
+
+---
+
+### PUT `/booking-confirmations/{id}/reject` — Admin reject slip
+
+🔒 **Admin only** · Pending → rejected, **booking ค้าง `paid`** (รอ user ส่ง slip ใหม่ = row ใหม่)
+
+**Request Body**: `{ "review_note": "slip ไม่ชัด" }`
+
+**Response 200**: `{ "status": "success", "confirmation": {...}, "booking_status": "paid" }`
+
+---
+
+### GET `/booking-confirmations/pending` — Admin dashboard list
+
+🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`
+
+**Response 200**: `{ "status": "success", "confirmations": { paginated data } }`
 
 ---
 
@@ -1153,6 +1227,10 @@ Creates a `pending` payment and returns a mock payment URL.
 
 ### POST `/payment/webhook` — Payment gateway callback
 
+> ❄️ **FROZEN (24/07/26)** — Deprecated. Returns `410 GONE`.
+> ใช้ `POST /bookings/{id}/confirm` (user submit slip) + `PUT /booking-confirmations/{id}/verify` (admin verify) แทน
+> ผ่าน `booking_confirmations` table (1:N history + state machine pending→verified|rejected)
+
 🔒 **Public** (called by payment gateway, signature verification TBD)
 
 **Request Body:**
@@ -1184,7 +1262,7 @@ Creates a `pending` payment and returns a mock payment URL.
 > 1. Updates payment → `completed`
 > 2. Sets booking `is_paid = true`
 > 3. Transitions booking `draft → paid` (system role)
-> 4. Generates a receipt
+> 4. ~~Generates a receipt~~ ❄️ FROZEN — receipts table deprecated (24/07/26)
 
 ---
 
@@ -1391,6 +1469,7 @@ Returns tasks with status `pending` or `in_progress`.
 **Relationships:**
 - `belongsTo User` — owner
 - `hasMany BookingRoom` — the rooms in this booking
+- `hasMany BookingConfirmation` — payment proof history (1:N, replaces payments/receipts)
 
 > 🌟 **Refactor (18/06/26)**: Guest name/title/nationality moved from `bookings` to `booking_rooms.guests` JSON. `bookings` no longer stores guest info.
 
@@ -1465,17 +1544,21 @@ Returns tasks with status `pending` or `in_progress`.
 | `id`                 | UUID      | Primary key                              |
 | `name_en`            | string    | English name                             |
 | `name_th`            | string    | Thai name                                |
+| `description`        | string    | Description (nullable)                   |
 | `max_guests`         | integer   | Max guests per room                      |
 | `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
 | `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
 | `extra_bed_price`    | integer   | Price per extra bed (baht, default: 0)   |
-| `rate_daily_general` | integer   | Daily rate for general public (baht)     |
+| `daily_rate`         | integer   | **Virtual** — daily rate (baht) resolved from `global_rates` (rate_type='daily'). 0 if missing/inactive. Always present in API responses. |
 | `created_at`         | timestamp |                                          |
 | `updated_at`         | timestamp |                                          |
+
+> 💡 **Daily rate source (22/07/26):** Room daily rates live in `global_rates` (rows with `rate_type='daily'` + matching `room_type_id`). The backend auto-embeds this value as the virtual `daily_rate` field on every room type response (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`) — frontend does **not** need to call `/global-rates` separately. Use `PUT /global-rates/{id}` to edit the rate.
 
 **Relationships:**
 - `hasMany Room`
 - `hasMany BookingRoom`
+- `hasOne GlobalRate` (daily rate, via `dailyRate()`)
 
 ---
 
@@ -1539,6 +1622,8 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Receipt
 
+> ❄️ **FROZEN (24/07/26)** — Deprecated read-only table. ไม่สร้าง receipt row ใหม่อีกต่อไป
+> ใช้ `booking_confirmations` table แทน (POST /bookings/{id}/confirm + admin verify)
 > ⚠️ **DEMO** — Receipt generation is tied to the demo payment flow. Fields may change with production gateway integration.
 
 | Field          | Type      | Description                                       |
@@ -1554,6 +1639,30 @@ Returns tasks with status `pending` or `in_progress`.
 **Relationships:**
 - `belongsTo Booking`
 - `belongsTo Payment`
+
+---
+
+### BookingConfirmation
+
+🌟 **(24/07/26)** — Replaces payments/receipts. 1:N with bookings (history of every payment proof submitted, even rejected ones).
+
+| Field              | Type      | Description                                              |
+|--------------------|-----------|---------------------------------------------------------|
+| `id`               | UUID      | Primary key                                              |
+| `booking_id`       | UUID      | FK → bookings (1:N, not unique)                          |
+| `payment_method`   | string    | `cash`, `credit_card`, `transfer` (nullable)             |
+| `slip_image`       | string    | Path of slip file in `storage/app/public/slips/...`      |
+| `transfer_time`    | timestamp | Time customer reported transfer (from slip)              |
+| `status`           | string    | `pending`, `verified`, `rejected` (default: pending)     |
+| `reviewed_by`      | UUID      | FK → users (admin who reviewed)                          |
+| `reviewed_at`      | timestamp | When admin reviewed                                     |
+| `review_note`      | string    | Reason (optional, mostly for reject)                     |
+| `created_at`       | timestamp |                                                          |
+| `updated_at`       | timestamp |                                                          |
+
+**Relationships:**
+- `belongsTo Booking`
+- `belongsTo User` (reviewer)
 
 ---
 
@@ -1602,6 +1711,35 @@ Returns tasks with status `pending` or `in_progress`.
 
 > ❌ **ไม่มี `cancelled`** — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
 > ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
+
+---
+
+### BookingConfirmation State Machine (24/07/26)
+
+🌟 **Replaces payments/receipts flow.** 1:N with bookings — เก็บ history ทุกครั้งที่ user ส่งหลักฐานการชำระ (แม้ reject)
+
+```
+   ┌─────────┐  admin   ┌──────────┐
+   │ pending │ ───────► │ verified │ (terminal — booking paid → confirmed)
+   └─────────┘          └──────────┘
+       │
+       │ admin
+       ▼
+   ┌──────────┐
+   │ rejected │ (terminal — booking ค้าง paid, user สร้าง row ใหม่ถ้าจะลองอีก)
+   └──────────┘
+```
+
+**Valid Transitions:**
+
+| From       | To         | Allowed Roles | Side effect on booking          |
+|------------|------------|---------------|---------------------------------|
+| `pending`  | `verified` | admin         | booking `paid → confirmed`     |
+| `pending`  | `rejected` | admin         | (none — booking stays `paid`)  |
+
+> ✅ `verified` + `rejected` = terminal (ไม่ย้อนกลับ — จะแก้ทำ row ใหม่แทน เพื่อรักษา audit trail)
+> ✅ **1 pending max guard** — ถ้ามี pending อยู่แล้ว → POST confirm จะ 422 (กัน spam)
+> ✅ User re-submit หลัง reject → สร้าง row ใหม่ status=pending (row rejected เก่ายังอยู่ใน history)
 
 ---
 
@@ -1691,8 +1829,8 @@ These endpoints exist but are **not production-ready**:
 ### Pricing Notes
 
 - All prices stored as **integers** (baht, no decimals) since 2026-06-05.
-- Room rates come from `room_types.rate_daily_general`.
-- Addon rates come from `addon_rates.default_price` — **server-side only** (clients cannot send prices).
+- Room rates come from `global_rates` (rows where `rate_type='daily'` + matching `room_type_id`).
+- Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
 - Pricing formula per room:
   ```
   subtotal = (room_type.rate × nights)

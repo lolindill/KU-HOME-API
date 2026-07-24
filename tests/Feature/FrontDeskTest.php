@@ -298,7 +298,9 @@ class FrontDeskTest extends TestCase
         // 🌟 Fixed: assert full state transition จริงๆ
         $this->assertEquals('paid', $booking->fresh()->status, 'Booking should transition draft → paid');
         $this->assertTrue($booking->fresh()->is_paid, 'Booking is_paid should be true');
-        $this->assertDatabaseHas('receipts', ['booking_id' => $booking->id]);
+        // ❄️ FROZEN (24/07/26): Receipt table deprecated — recordPayment ไม่สร้าง receipt แล้ว
+        //    flow payment confirmation ย้ายไป booking_confirmations table (POST /bookings/{id}/confirm + admin verify)
+        $this->assertDatabaseMissing('receipts', ['booking_id' => $booking->id]);
     }
 
     /**

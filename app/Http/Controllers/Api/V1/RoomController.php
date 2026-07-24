@@ -94,7 +94,8 @@ class RoomController extends Controller
     // 🏷️ ดึงข้อมูลประเภทห้องพักทั้งหมด
     public function allRoomTypes()
     {
-        $roomTypes = RoomType::all();
+        // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1 (rate มาจาก global_rates)
+        $roomTypes = RoomType::with('dailyRateRow')->get();
 
         return response()->json([
             'status' => 'success',
@@ -107,7 +108,8 @@ class RoomController extends Controller
     // 🏷️ ดึงข้อมูลประเภทห้องพักตาม ID
     public function getRoomTypeById($id)
     {
-        $roomType = RoomType::find($id);
+        // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1
+        $roomType = RoomType::with('dailyRateRow')->find($id);
 
         if (!$roomType) {
             return response()->json([
@@ -148,6 +150,8 @@ class RoomController extends Controller
                       ->where('check_in', '<', $checkOut)
                       ->where('check_out', '>', $checkIn);
             }])
+            // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1 (rate มาจาก global_rates)
+            ->with('dailyRateRow')
             // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
             ->when($maxGuests, fn($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
@@ -161,7 +165,7 @@ class RoomController extends Controller
                     'available_rooms' => $availableRooms,
                     // 🌟 Embed full room_type object so frontend has all fields
                     // (max_guests, extra_bed_*, etc.)
-                    // 🌟 Refactor (22/07/26): rate ย้ายไป global_rates แล้ว — ดึงแยกผ่าน API /global-rates
+                    // 🌟 Add (24/07/26): daily_rate ดึงจาก global_rates มา embed ให้เลย
                     'room_type' => [
                         'id' => $type->id,
                         'name_en' => $type->name_en,
@@ -170,6 +174,7 @@ class RoomController extends Controller
                         'extra_bed_enabled' => $type->extra_bed_enabled,
                         'max_extra_beds' => $type->max_extra_beds,
                         'extra_bed_price' => $type->extra_bed_price,
+                        'daily_rate' => $type->daily_rate,
                     ],
                     'search_criteria' => [
                         'check_in' => $checkIn->toDateString(),
