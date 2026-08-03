@@ -585,6 +585,15 @@ Total:        31 passed (60 assertions)
 - **ทางแก้ใหม่**: **`App\Casts\PgBoolean`** (Custom Cast class) — แปลง PHP bool ↔ SQL boolean literal อัตโนมัติ ทำงานได้ทั้ง PostgreSQL (strict) และ MySQL/SQLite (lenient)
 - **Apply ครบทุก boolean column**: `is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`
 
+> 🔒 **Re-litigation Freeze (03/08/26 — บันทึกตามคำสั่งนายท่าน):**
+> เคย scrutinize + พยายามแก้ทางอื่นมาแล้ว แต่ **ไม่ work** → `PgBoolean` (emit `DB::raw('TRUE'/'FALSE')` ตอน write) คือ **final solution**.
+> ทางเลือกที่ลองแล้วพังบน PostgreSQL จริง:
+> - ใช้ plain PHP `true`/`false` ตรงๆ (PDO แปลงเป็น int `0`/`1` → PostgreSQL ปฏิเสธ)
+> - ใช้ string `'true'`/`'false'` (type mismatch)
+> - พึ่ง Eloquent built-in `boolean` cast (ตัวเดียวกันกับที่พัง)
+>
+> **ห้ามลอง "ปรับปรุง" หรือ "ทำให้ง่ายขึ้น" อีก** — ถ้านึกอยาก refactor แสดงว่ากำลังจะแกนำ bug กลับมา ปล่อยมันไว้แบบนี้ได้เลย
+
 ### 🔴 HIGH (5 ข้อ — แก้ครบ)
 
 | Bug | การแก้ |

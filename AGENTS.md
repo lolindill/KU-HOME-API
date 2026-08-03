@@ -28,6 +28,12 @@ Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_gui
 
 ## Architecture & Layer Rules
 
+- **🔒 GLOBAL MIDDLEWARE (เด็ดขาด / mandatory):** ทุก `/api/*` request ต้อง "ยอมรับ" JSON — บังคับด้วย `App\Http\Middleware\RequireJsonAccept` (ลงทะเบียนใน `bootstrap/app.php` ผ่าน `$middleware->api(prepend: [...])` ทำงานก่อน `throttle`/`auth:sanctum`).
+  - **ถ้าไม่ส่ง Accept** → middleware **ใส่ `application/json` ให้เป็น default** แล้วปล่อยผ่าน (สุภาพ).
+  - **ถ้าส่ง Accept มาแต่ไม่ยอมรับ JSON** (เช่น `text/html`, `application/xml`) → **reject ทันที** ด้วย HTTP `406 Not Acceptable` + body `{"status":"error","message":"Accept: application/json is required for all /api/* requests. 🥺"}`.
+  - ยอมรับ: `application/json`, `*/*`, `application/*`, `+json` suffix (เช่น `application/vnd.api+json`), และ multiple media types ที่มี JSON/wildcard รวมอยู่.
+  - **Why:** API-only project ไม่มี Blade ให้ fallback — ป้องกัน browser/crawler/spider, ป้องกัน unauthenticated scan, และ lock-in ให้ทุก response เป็น JSON สม่ำเสมอ.
+  - **Do NOT:** ห้ามตรวจแค่ `Content-Type` — ต้องตรวจ `Accept`. ห้ามทำเป็น per-route middleware (ต้องเป็น global-on-API-group). ห้าม bypass ด้วย allowlist โดยไม่ document ใน `cline.md` ก่อน.
 - **Controllers** all live in `app/Http/Controllers/Api/V1/`. REST routes prefixed `/api/v1/` (see `routes/api.php`).
 - **No API Resources / Transformers** — models are returned directly. No `data` wrapper.
 - **No Policy classes** — authorization is **`CheckRole` middleware only** (`app/Http/Middleware/CheckRole.php`), plus an in-controller `role` re-check (defense-in-depth) in sensitive methods.
@@ -38,7 +44,8 @@ Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_gui
 
 ## Critical Conventions (gotchas that bite)
 
-- **PostgreSQL strict boolean typing** — NEVER write raw PHP `true`/`false` to a boolean column or `DB::raw('TRUE')`. Always use the **`App\Casts\PgBoolean`** custom cast on the model (`is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`). PDO turns PHP bool into `0`/`1`, which PostgreSQL rejects. SQLite/MySQL are lenient so this only breaks in prod.
+- **PostgreSQL strict boolean typing** — PostgreSQL rejects integer `0`/`1` in a boolean column, but PDO turns a PHP bool into exactly that, so writing `true`/`false` to a boolean column throws "Datatype mismatch" (SQLite/MySQL are lenient — this only breaks in prod). The **`App\Casts\PgBoolean`** custom cast is the canonical fix: it emits `DB::raw('TRUE'/'FALSE')` on write. Always attach it to boolean columns (`is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`) and never write raw bools / raw `DB::raw('TRUE')` by hand.
+  - 🔒 **DO NOT try to "fix" or simplify `PgBoolean` (re-litigation freeze).** We already scrutinized this and attempted alternative fixes (plain PHP `true`/`false`, string `'true'`/`'false'`, relying on Eloquent's built-in `boolean` cast) — **none of them work on PostgreSQL**. The `DB::raw('TRUE'/'FALSE')` approach inside the cast is the **final, proven solution** — leave it as-is. If you're tempted to refactor it, you are almost certainly reintroducing the bug.
 - **Money is integer satang/cents** — `total_amount`, `amount` columns/casts/validation are all `integer`, never decimal.
 - **UUID PKs everywhere** — most models use `HasUuids`. When asserting UUID equality in tests, cast to `(string)` first.
 - **Draft/testing code** is marked with `🚧 DRAFT / TESTING` comment prefix — treat as non-production.

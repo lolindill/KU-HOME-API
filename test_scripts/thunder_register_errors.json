@@ -1,0 +1,256 @@
+{
+  "clientName": "Thunder Client",
+  "collectionName": "KU HOME — Register Error Cases",
+  "collectionId": "ku_home_register_errors",
+  "dateExported": "2026-08-03T00:00:00.000Z",
+  "version": "2.0",
+  "folders": [],
+  "requests": [
+    {
+      "_id": "req_valid_201",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "✅ Valid Register (expect 201)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 10000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Valid User{{$timestamp}}\",\n  \"email\": \"valid{{$timestamp}}@kuhome.test\",\n  \"password\": \"password123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "201"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "status",
+          "action": "equal",
+          "value": "success"
+        }
+      ]
+    },
+    {
+      "_id": "req_missing_fields_422",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "❌ Missing Required Fields (expect 422)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 20000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "422"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "errors.name",
+          "action": "contains",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "_id": "req_invalid_email_422",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "❌ Invalid Email Format (expect 422)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 30000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Bad Email\",\n  \"email\": \"not-an-email\",\n  \"password\": \"password123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "422"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "errors.email",
+          "action": "contains",
+          "value": "valid email"
+        }
+      ]
+    },
+    {
+      "_id": "req_short_password_422",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "❌ Password Too Short (expect 422)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 40000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Short Pass\",\n  \"email\": \"short{{$timestamp}}@kuhome.test\",\n  \"password\": \"123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "422"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "errors.password",
+          "action": "contains",
+          "value": "8 characters"
+        }
+      ]
+    },
+    {
+      "_id": "req_long_name_422",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "❌ Name Exceeds 255 (expect 422)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 50000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\n  \"email\": \"longname{{$timestamp}}@kuhome.test\",\n  \"password\": \"password123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "422"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "errors.name",
+          "action": "contains",
+          "value": "255"
+        }
+      ]
+    },
+    {
+      "_id": "req_duplicate_email",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "🔁 Duplicate Email (expect 422 from validation)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 60000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Dup User\",\n  \"email\": \"admin@kuhome.com\",\n  \"password\": \"password123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "422"
+        },
+        {
+          "type": "res-json-body",
+          "custom": "errors.email",
+          "action": "contains",
+          "value": "already been taken"
+        }
+      ]
+    },
+    {
+      "_id": "req_409_concurrent",
+      "colId": "ku_home_register_errors",
+      "containerId": "",
+      "name": "🔬 Duplicate → 409 (RUN AFTER #1, manually set same email)",
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/register",
+      "method": "post",
+      "sortNum": 70000,
+      "created": "2026-08-03T00:00:00.000Z",
+      "modified": "2026-08-03T00:00:00.000Z",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" },
+        { "name": "Accept", "value": "application/json" }
+      ],
+      "params": [],
+      "body": {
+        "type": "json",
+        "raw": "{\n  \"name\": \"Dup User\",\n  \"email\": \"PASTE-EMAIL-FROM-REQUEST-1-HERE\",\n  \"password\": \"password123\"\n}",
+        "form": []
+      },
+      "tests": [
+        {
+          "type": "res-status",
+          "custom": "",
+          "action": "equal",
+          "value": "409"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "auth": null,
+    "enableFrontmatter": false,
+    "env": {
+      "BASE_URL": "https://ku-home.ku.ac.th/backend/api/v1"
+    }
+  }
+}
