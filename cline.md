@@ -833,3 +833,59 @@ Tests ใหม่ครอบคลุม: state machine lifecycle + terminal l
   - แก้: Standardize ทุก amount field เป็น `integer` (satang/cents) — เปลี่ยน DB column `decimal→bigint`, model cast `decimal:2→integer`, validation `numeric→integer`
   - ไฟล์ที่แก้: `Payment.php`, `Receipt.php`, `StorePaymentRequest.php`, 2 migrations ใหม่
 
+---
+
+## ✅ Booking Confirmation Table + Payments/Receipts Freeze (2026-07-24)
+
+> **แยก payment info ออกจาก bookings container → table ใหม่ `booking_confirmations`** + ❄️ freeze `payments`/`receipts` เป็น read-only legacy
+>
+> **Decisions (นายท่านเลือก):** สร้าง table ใหม่ (ไม่ยัด column ใน bookings) · 1:N history (ไม่ unique) · 1 pending max guard · row ใหม่ทุกครั้ง · verify/reject by confirmation_id · freeze webhook + ลบ Receipt::create
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+| ส่วน | เดิม | ใหม่ |
+|---|---|---|
+| Payment flow | webhook (mock, no HMAC) draft→paid + Receipt::create | user `POST /bookings/{id}/confirm` ส่ง slip → admin verify/reject |
+| Storage | `payments` (1:N) + `receipts` (1:1) | `booking_confirmations` (1:N history) |
+| Receipt | auto-generate ตอน webhook/recordPayment | ❄️ deprecated — ไม่สร้าง row ใหม่ |
+| Webhook | draft→paid + receipt (mock) | ❄️ `410 GONE` |
+| recordPayment | Payment + Receipt | Payment only (walk-in/cash admin) |
+| Confirmation state | n/a | `pending → verified \| rejected` (terminal) |
+
+### 🔄 Flow
+
+```
+USER  POST /bookings/{id}/confirm (slip+method+time)
+   └─► สร้าง confirmation (pending) + booking draft→paid
+        └─ [1 pending max guard — กัน spam]
+
+ADMIN PUT /booking-confirmations/{id}/verify  → pending→verified + booking paid→confirmed
+ADMIN PUT /booking-confirmations/{id}/reject  → pending→rejected, booking ค้าง paid
+ADMIN GET  /booking-confirmations/pending     → dashboard list (FIFO)
+
+USER (re-submit หลัง reject) → สร้าง row ใหม่ pending (row rejected เก่ายังอยู่ใน history)
+```
+
+### 📁 Files Changed (6 new + 7 modified)
+
+| Category | Files |
+|---|---|
+| Migration | `2026_07_24_140000_create_booking_confirmations_table` |
+| Models | ✨ `BookingConfirmation.php` (state machine) · ✏️ `Booking.php` (+`confirmations()` HasMany) |
+| Requests | ✨ `ConfirmBookingRequest` (multipart slip validation) · ✨ `ReviewConfirmationRequest` |
+| Controller | ✨ `BookingConfirmationController` (confirm/verify/reject/pending) |
+| Routes | ✏️ `routes/api.php` (+4 routes: 1 user + 3 admin) |
+| Freeze | ✏️ `PaymentController` (webhook → 410) · ✏️ `FrontDeskController::recordPayment` (ลบ Receipt::create) |
+| Tests | ✨ `BookingConfirmationTest` (19 tests) · ✏️ `PaymentTest` (ลบ webhook tests) · ✏️ `FrontDeskTest` (assert no receipt) |
+| Docs | ✏️ `api_guide.md`, `database-er.md`, `cline.md` |
+
+### 🗄️ Migration Required
+
+⚠️ **ต้องรัน `php artisan migrate`** — migration จะสร้าง `booking_confirmations` table (ไม่ได้แตะ payments/receipts เดิม เพราะ freeze)
+
+### 🧪 Test Results (2026-07-24)
+```
+188 passed (343 assertions) — เพิ่มจาก 173 → +15 net (19 ใหม่ - 4 ลบ webhook)
+```
+Tests ใหม่ครอบคลุม: confirm happy path + ownership + state guards + deadline + 1-pending-max + slip validation + verify/reject + re-submit history + terminal lock + webhook 410
+
