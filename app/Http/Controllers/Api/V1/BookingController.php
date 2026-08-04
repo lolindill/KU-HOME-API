@@ -10,6 +10,7 @@ use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Models\StatusChangeLog;
 use App\Models\User;
 use App\Services\RoomAllocator\RoomAllocator;
 use Carbon\Carbon;
@@ -402,6 +403,53 @@ class BookingController extends Controller
                 'status' => 'error',
                 'message' => $e->getMessage(),
             ], $statusCode);
+        }
+    }
+
+    /**
+     * 📝 Audit log (04/08/26): ประวัติการเปลี่ยนสถานะของ booking
+     *
+     * ดึง log ของ booking container + ทุก booking_room ที่อยู่ใต้ booking นี้
+     * เรียงตามเวลา (เก่า → ใหม่) เพื่อให้เห็นลำดับเหตุการณ์เต็มๆ
+     *
+     * Route: GET /api/v1/bookings/{id}/status-logs (admin only)
+     */
+    public function statusLogs(string $id)
+    {
+        try {
+            // โหลด booking + booking_rooms (เพื่อเอา BR ids สำหรับ query log)
+            $booking = Booking::with('bookingRooms')->findOrFail($id);
+            $brIds = $booking->bookingRooms->pluck('id');
+
+            // เก็บ log ของ booking container + ทุก booking_room ที่อยู่ใต้ booking นี้
+            $logs = StatusChangeLog::where(function ($q) use ($id, $brIds) {
+                $q->where(function ($qq) use ($id) {
+                    $qq->where('entity_type', 'booking')
+                        ->where('entity_id', $id);
+                })->orWhere(function ($qq) use ($brIds) {
+                    $qq->where('entity_type', 'booking_room')
+                        ->whereIn('entity_id', $brIds);
+                });
+            })
+                ->orderBy('created_at', 'asc')
+                ->get([
+                    'id', 'entity_type', 'entity_id',
+                    'from_status', 'to_status', 'role', 'causer_id',
+                    'note', 'created_at',
+                ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Status change logs retrieved',
+                'booking_id' => $booking->id,
+                'logs' => $logs,
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูล Booking ที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
         }
     }
 

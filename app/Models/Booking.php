@@ -2,19 +2,17 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Database\QueryException;
+use App\Casts\PgBoolean;
 use Carbon\Carbon;
 use Exception;
-use App\Models\Payment;
-use App\Models\Receipt;
-use App\Models\BookingConfirmation;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class Booking extends Model
 {
@@ -42,7 +40,7 @@ class Booking extends Model
         'total_amount' => 'integer',
         // 🌟 Fix PostgreSQL strict boolean (03/07/26): ใช้ PgBoolean cast แทน 'boolean'
         // (PDO ส่ง PHP bool → integer 0/1 → PostgreSQL ปฏิเสธ)
-        'is_paid' => \App\Casts\PgBoolean::class,
+        'is_paid' => PgBoolean::class,
         'payment_deadline' => 'datetime',
     ];
 
@@ -117,31 +115,44 @@ class Booking extends Model
 
         $validTransitions = [
             'draft' => [
-                'paid'       => ['user', 'guest', 'admin', 'system'],
-                'confirmed'  => ['admin'], // walk-in by admin (skip paid)
+                'paid' => ['user', 'guest', 'admin', 'system'],
+                'confirmed' => ['admin'], // walk-in by admin (skip paid)
             ],
             'paid' => [
                 'confirmed' => ['admin'],
             ],
             'confirmed' => [
-                'complete'  => ['admin', 'system'], // auto เมื่อ BR ครบ
+                'complete' => ['admin', 'system'], // auto เมื่อ BR ครบ
             ],
         ];
 
         // เช็คว่า flow ถูกต้องไหม
-        if (!array_key_exists($currentStatus, $validTransitions) ||
-            !array_key_exists($newStatus, $validTransitions[$currentStatus])) {
+        if (! array_key_exists($currentStatus, $validTransitions) ||
+            ! array_key_exists($newStatus, $validTransitions[$currentStatus])) {
             throw new Exception("ไม่อนุญาตให้เปลี่ยนสถานะจาก '{$currentStatus}' ไปเป็น '{$newStatus}' ตาม Flow ระบบค่ะนายท่าน", 422);
         }
 
         // เช็ค Role
         $requiredRoles = $validTransitions[$currentStatus][$newStatus];
-        if (!in_array($userRole, $requiredRoles)) {
-            throw new Exception("ไม่มีสิทธิ์ดำเนินการค่ะ!", 403);
+        if (! in_array($userRole, $requiredRoles)) {
+            throw new Exception('ไม่มีสิทธิ์ดำเนินการค่ะ!', 403);
         }
 
         $this->status = $newStatus;
         $this->save();
+
+        // 📝 Audit log (04/08/26): เก็บประวัติการเปลี่ยนสถานะ (ใคร/role/from/to/เมื่อไหร่)
+        //    เขียนที่นี่เพราะเป็น chokepoint เดียว — อย่า bypass ด้วย ->status = ตรงๆ
+        //    causer_id ใช้ Auth::id() (nullable สำหรับ system/queue transition)
+        StatusChangeLog::create([
+            'entity_type' => 'booking',
+            'entity_id' => $this->id,
+            'from_status' => $currentStatus,
+            'to_status' => $newStatus,
+            'role' => $userRole,
+            'causer_id' => Auth::id(),
+            'note' => null,
+        ]);
     }
 
     /**
@@ -155,7 +166,9 @@ class Booking extends Model
     public function syncStatusFromRooms(): void
     {
         $rooms = $this->bookingRooms;
-        if ($rooms->isEmpty()) return;
+        if ($rooms->isEmpty()) {
+            return;
+        }
 
         $allFinished = $rooms->every(fn ($br) => in_array($br->status, ['checked_out', 'no_show']));
         if ($allFinished && $this->status !== 'complete') {
@@ -172,6 +185,7 @@ class Booking extends Model
      * Format: YYYYMM-XXXXX (เช่น 202606-00001)
      *
      * @return string Confirmation number ที่ unique การันตี
+     *
      * @throws Exception ถ้าสร้างไม่สำเร็จหลัง retry
      */
     public static function generateUniqueConfirmation(): string
@@ -201,11 +215,11 @@ class Booking extends Model
                         ]);
                     }
 
-                    return $key . '-' . str_pad($next, 5, '0', STR_PAD_LEFT);
+                    return $key.'-'.str_pad($next, 5, '0', STR_PAD_LEFT);
                 });
             } catch (QueryException $e) {
                 if ($i === $maxAttempts - 1) {
-                    throw new Exception('Unable to generate unique confirmation number after ' . $maxAttempts . ' attempts');
+                    throw new Exception('Unable to generate unique confirmation number after '.$maxAttempts.' attempts');
                 }
                 usleep(100000); // รอ 100ms แล้ว retry
             }

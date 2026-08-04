@@ -925,6 +925,63 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
 
 ---
 
+### GET `/bookings/{id}/status-logs` — Booking state-change audit log (Admin)
+
+🔒 **Admin only**
+
+Returns the audit trail of status transitions for a booking — both the **booking container** and every **booking_room** under it, ordered oldest → newest.
+
+Each log row captures **who** changed **what** **when**:
+| Field | Type | Description |
+|---|---|---|
+| `entity_type` | string | `booking` \| `booking_room` |
+| `entity_id` | uuid | the id of the booking or booking_room that changed |
+| `from_status` | string | previous status |
+| `to_status` | string | new status |
+| `role` | string | role that authorized the transition (`user`/`guest`/`admin`/`system`/...) |
+| `causer_id` | uuid\|null | `Auth::id()` of the user who triggered it — **null for system/queue transitions** (e.g. auto `confirmed → complete` via `syncStatusFromRooms`) |
+| `note` | string\|null | reserved for future context |
+| `created_at` | timestamp | when the transition occurred |
+
+> 📝 Logs are written inside `transitionStatus()` (the single chokepoint). A transition that fails validation (throws 422/403) writes **no** log. Log rows participate in the caller's DB transaction and roll back together on failure.
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Status change logs retrieved",
+  "booking_id": "booking-uuid",
+  "logs": [
+    {
+      "id": "log-uuid",
+      "entity_type": "booking",
+      "entity_id": "booking-uuid",
+      "from_status": "draft",
+      "to_status": "paid",
+      "role": "user",
+      "causer_id": "user-uuid",
+      "note": null,
+      "created_at": "2026-08-04T10:00:00.000000Z"
+    },
+    {
+      "id": "log-uuid-2",
+      "entity_type": "booking_room",
+      "entity_id": "br-uuid",
+      "from_status": "confirmed",
+      "to_status": "checked_in",
+      "role": "admin",
+      "causer_id": "admin-uuid",
+      "note": null,
+      "created_at": "2026-08-04T11:30:00.000000Z"
+    }
+  ]
+}
+```
+
+**Response `404`:** booking id not found.
+
+---
+
 ### POST `/bookings/validate-discount` — Validate discount code 🚧
 
 🔒 **Auth required**

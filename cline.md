@@ -898,3 +898,80 @@ USER (re-submit หลัง reject) → สร้าง row ใหม่ pendin
 ```
 Tests ใหม่ครอบคลุม: confirm happy path + ownership + state guards + deadline + 1-pending-max + slip validation + verify/reject + re-submit history + terminal lock + webhook 410
 
+---
+
+## ✅ Audit Log — Booking/BookingRoom State Changes (2026-08-04)
+
+> 📌 **เป้าหมาย:** เมื่อ status ของ Booking หรือ BookingRoom เปลี่ยน → บันทึก audit row (ใคร/role/from/to/เมื่อไหร่) + เปิด endpoint ให้ admin อ่าน
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+| ส่วน | รายละเอียด |
+|---|---|
+| Table ใหม่ | `status_change_logs` (polymorphic — `entity_type` + `entity_id`) |
+| Chokepoint | เขียน log **ใน** `transitionStatus()` ของ `Booking` + `BookingRoom` (ห้าม bypass) |
+| Endpoint | `GET /api/v1/bookings/{id}/status-logs` (admin) → log ของ booking + ทุก booking_room |
+| Model | `StatusChangeLog` (HasUuids, append-only) |
+
+### 🤔 Decision: polymorphic ตารางเดียว vs สองตารางแยก
+
+**เลือก polymorphic ตารางเดียว** (`status_change_logs`) เพราะ:
+1. ขยาย entity ใหม่ในอนาคตง่าย (Room/HousekeepingTask) — เพิ่ม `entity_type` ใหม่ได้เลย
+2. โครงสร้างเดียวกันทุก entity → query/UI/logic รวมศูนย์
+
+**Trade-off ที่ยอมรับ:**
+- ไม่ใส่ FK constraint บน `entity_id` (polymorphic → morph target หลายตาราง ใส่ FK ไม่ได้) → ความเสี่ยง orphan row
+- ลดความเสี่ยง: row ถูกสร้างเฉพาะตอนที่ entity มีอยู่จริง (ใน `transitionStatus()` ของ model ที่ load มาแล้ว) + booking delete จะไม่ cascade ไป log (ตั้งใจ — audit trail ต้องอยู่ต่อแม้ booking ถูกลบ)
+
+> 🔒 **ห้ามเปลี่ยนเป็นสองตาราง** (re-litigation freeze) — เลือกแล้ว ตามที่นายท่านตัดสินใจใน plan
+
+### 🤔 Decision: เขียน log ใน transitionStatus() ไม่ใช่ observer/event
+
+เหตุผล 3 ข้อ (ไม่ re-litigate):
+1. **Project ตั้งใจหลีกเลี่ยง events/listeners** (`cline.md:395` — "No events/listeners … state changes are synchronous")
+2. **Observer ไม่เห็น `$userRole`** — role guard อยู่ใน scope `transitionStatus()` เท่านั้น ถ้าใช้ `::updated` hook จะไม่รู้ role ที่ authorize transition
+3. **`transitionStatus()` เป็น chokepoint เดียว** — grep ยืนยันว่าไม่มี controller ไหน `->status =` ตรงๆ นอกเมธอดนี้เลย → เขียนที่เดียวครอบคลุมหมด
+
+### 🤔 Decision: ไม่แก้ signature `transitionStatus()`
+
+ถ้าเพิ่ม `causer_id` เข้า signature = breaking change กระทบ caller ~12 แห่ง → ใช้ `Auth::id()` resolve จาก request context ณ runtime แทน (non-breaking). `causer_id` เป็น nullable เพราะ system/queue transition (เช่น `syncStatusFromRooms`) ไม่มี user ล็อกอิน
+
+### 🔄 Transaction Safety
+
+log row ถูกเขียนหลัง `$this->save()` **ในไม่ใช่ try/catch ปกป้อง** เพราะ:
+- caller ส่วนใหญ่ (เช่น `FrontDeskController`) ห่อ `transitionStatus()` ใน `DB::transaction()` → log rollback ไปด้วยถ้า transition ที่ตามมา fail
+- test `test_audit_log_rolls_back_with_transition_on_failure` ยืนยันพฤติกรรมนี้
+
+### 📁 Files Changed (2 new + 4 modified + 1 test new)
+
+| ไฟล์ | การเปลี่ยน |
+|---|---|
+| ✨ `database/migrations/2026_08_04_100000_create_status_change_logs_table.php` | สร้างใหม่ |
+| ✨ `app/Models/StatusChangeLog.php` | สร้างใหม่ |
+| ✏️ `app/Models/Booking.php` | +`use Auth`, `use StatusChangeLog`; +8 บรรทัดใน `transitionStatus()` |
+| ✏️ `app/Models/BookingRoom.php` | +`use Auth`, `use StatusChangeLog`; +10 บรรทัดใน `transitionStatus()` |
+| ✏️ `app/Http/Controllers/Api/V1/BookingController.php` | +`use StatusChangeLog`; +method `statusLogs()` |
+| ✏️ `routes/api.php` | +1 route ใต้ `role:admin` |
+| ✨ `tests/Feature/StatusChangeLogTest.php` | สร้างใหม่ (10 tests) |
+| ✏️ `AGENTS.md`, `docs/api_guide.md`, `cline.md` | อัปเดต doc |
+
+### 🗄️ Migration Required
+
+⚠️ **ต้องรัน `php artisan migrate`** — migration จะสร้าง `status_change_logs` table (ไม่แตะ table เดิม)
+
+### 🧪 Test Results (2026-08-04)
+```
+198 passed (370 assertions) — เพิ่มจาก 188 → +10 net (10 audit log tests ใหม่)
+```
+Tests ใหม่ครอบคลุม: booking transition log + system null causer + invalid transition (no log) + BR transition + BR no_show + syncStatusFromRooms system log + admin endpoint 200 + non-admin 403 + 404 missing booking + transaction rollback safety
+
+### 🔮 Future Extension (ไม่ใช่ scope รอบนี้)
+
+Polymorphic table ออกแบบให้ขยายได้:
+- เพิ่ม `entity_type = 'room'` → ใช้ `Room::transitionStatusTo()` เขียน log
+- เพิ่ม `entity_type = 'housekeeping_task'` → ใช้ `HousekeepingTask::transitionStatus()` เขียน log
+- เพิ่ม `entity_type = 'booking_confirmation'` → ใช้ `BookingConfirmation` state machine
+
+เมื่อขยาย ให้เขียน log ใน `transitionStatus()` ของ model นั้น (chokepoint pattern เดียวกัน) และอัปเดต `StatusChangeLog` model docblock สำหรับ `entity_type` values ใหม่
+
+

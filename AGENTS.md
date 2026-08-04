@@ -51,6 +51,7 @@ Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_gui
 - **Draft/testing code** is marked with `🚧 DRAFT / TESTING` comment prefix — treat as non-production.
 - **API response shape:** success `{"status":"success","message":...}` · error `{"status":"error","message":...}`. Don't leak `$e->getMessage()` on 500s — return a generic message + `Log::error()`.
 - **Throttle:** `5,1` on login/booking/confirm; `10,1` on lookups.
+- **Audit log (state changes):** every `Booking::transitionStatus()` and `BookingRoom::transitionStatus()` writes a row to `status_change_logs` (polymorphic: `entity_type` = `booking`|`booking_room`, `entity_id`, `from_status`, `to_status`, `role`, `causer_id`, `created_at`). The log is written **inside** `transitionStatus()` — never bypass it with a direct `->status =` assignment, or the audit trail breaks. Read via `GET /api/v1/bookings/{id}/status-logs` (admin only). `causer_id` is `Auth::id()` and is **nullable** for system/queue transitions (e.g. `syncStatusFromRooms()`).
 
 ## State Machines (do not bypass)
 

@@ -102,6 +102,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
         Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
 
+        // 📝 Status change logs (audit) — ประวัติการเปลี่ยนสถานะของ booking + booking_rooms
+        Route::get('/bookings/{id}/status-logs', [BookingController::class, 'statusLogs'])
+            ->where('id', '[0-9a-f\-]{36}');
+
         // 🌟 Refactor (24/07/26): admin verify/reject booking confirmation (by confirmation_id)
         //    1:N — admin ระบุ row เฉพาะที่จะ review
         Route::get('/booking-confirmations/pending', [BookingConfirmationController::class, 'pending']);

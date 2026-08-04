@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\Auth;
 
 class BookingRoom extends Model
 {
@@ -87,6 +88,17 @@ class BookingRoom extends Model
 
         $this->status = $newStatus;
         $this->save();
+
+        // 📝 Audit log (04/08/26): เก็บประวัติการเปลี่ยนสถานะ BR (chokepoint เดียว)
+        StatusChangeLog::create([
+            'entity_type' => 'booking_room',
+            'entity_id' => $this->id,
+            'from_status' => $current,
+            'to_status' => $newStatus,
+            'role' => $userRole,
+            'causer_id' => Auth::id(),
+            'note' => null,
+        ]);
     }
 
     // =========================================================
