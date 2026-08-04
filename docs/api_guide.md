@@ -618,7 +618,9 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
           "guests": [
             { "title": "Mr.", "name": "Somchai", "nationality": "Thai", "is_ku_member": false }
           ],
-          "children": 0,
+          "has_children": false,
+          "billing_address": null,
+          "billing_comment": null,
           "room_type": { ...room type... },
           "room": null,
           "addon": { ...addon... }
@@ -662,7 +664,9 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
           "is_ku_member": false
         }
       ],
-      "children": 0,
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
       "addons": {
         "breakfast": 2,
         "early_checkin": false,
@@ -695,7 +699,9 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 | `booking_rooms.*.guests.*.name`             | nullable, string, max 255                     |
 | `booking_rooms.*.guests.*.nationality`      | nullable, string, max 100                     |
 | `booking_rooms.*.guests.*.is_ku_member`     | nullable, boolean                             |
-| `booking_rooms.*.children`                  | nullable, integer, min 0                      |
+| `booking_rooms.*.has_children`              | nullable, boolean                             |
+| `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
+| `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
 | `booking_rooms.*.addons.early_checkin`      | nullable, boolean                             |
 | `booking_rooms.*.addons.late_checkout`      | nullable, boolean                             |
@@ -834,7 +840,9 @@ curl -X POST /api/v1/bookings/{id}/confirm \
         "check_in": "2026-06-20",
         "check_out": "2026-06-22",
         "guests": [...],
-        "children": 0,
+        "has_children": false,
+        "billing_address": null,
+        "billing_comment": null,
         "addon": {...},
         "room_type": {...},
         "room": {...}
@@ -966,7 +974,9 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
       "is_ku_member": false
     }
   ],
-  "children": 0
+  "has_children": false,
+  "billing_address": null,
+  "billing_comment": null
 }
 ```
 
@@ -982,7 +992,9 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 | `guests.*.name`          | nullable, string, max 255           |
 | `guests.*.nationality`   | nullable, string, max 100           |
 | `guests.*.is_ku_member`  | nullable, boolean                   |
-| `children`               | nullable, integer, min 0            |
+| `has_children`           | nullable, boolean                   |
+| `billing_address`        | nullable, string, max 255           |
+| `billing_comment`        | nullable, string, max 255           |
 
 > Room must be in `available` or `prep_checkin` status.
 
@@ -1487,7 +1499,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `check_out`    | date      | 🌟 Per-room check-out date (Refactor 02/07/26)           |
 | `status`       | enum      | BR-level: `draft`, `confirmed`, `checked_in`, `checked_out`, `no_show` |
 | `guests`       | JSON      | Array of `{title, name, nationality, is_ku_member}`     |
-| `children`     | integer   | Number of children in this room                         |
+| `has_children` | boolean   | Whether children stay in this room (Refactor 04/08/26)  |
+| `billing_address` | string | Billing address (nullable)                          |
+| `billing_comment` | string | Billing note/comment (nullable)                     |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 
@@ -1875,7 +1889,9 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "check_out": "2026-07-03",
       "extra_beds": 0,
       "guests": [{"title":"Mr.","name":"Test","nationality":"Thai","is_ku_member":false}],
-      "children": 0,
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
       "addons": {"breakfast": 2, "early_checkin": false, "late_checkout": false}
     }]
   }'

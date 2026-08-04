@@ -105,6 +105,16 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - Currency in satang (integer); dates ISO format.
 - Migrations are numbered `YYYY_MM_DD_HHMMSS_*.php`; UUID PKs; atomic sequence tables (`booking_sequences`, `receipt_sequences`) for confirmation/receipt numbers.
 
+## Planned / Not-Yet-Implemented Features
+
+> 🚧 These are **roadmap items only** — not yet built. Treat as greenfield when implementing. Check `cline.md` for any in-progress notes before starting, and create a scrutinize-style plan first.
+
+- **Static dashboard** — overview/stats dashboard (occupancy, revenue, room status aggregates). The existing `DashboardController` is **housekeeping-task-only** (`/api/v1/dashboard/tasks*`) — do **not** confuse it with this. Likely a new controller + read-only aggregate queries (no new writes to existing state machines).
+- **Generate & print report templates** — formatted printable reports (e.g. booking/occupancy/receipt). No PDF library is installed yet — **no** `dompdf`/`tcpdf`/`snappy`/`mpdf` in `composer.json`. Picking a PDF lib + designing the template layer is part of the task. Keep templates server-side rendered (this is an API-only repo; the React frontend is separate).
+- **Digital signature on physical documents** — capture/apply a digital signature onto a generated template document (e.g. signed receipt/agreement). Consider where the signature image is stored (existing `Image` upload is draft/incomplete — see Frozen section) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
+
+When starting any of the above: document the design decision + lib choice in `cline.md` before coding, and add a new entry here moving it from "Planned" to a real section once landed.
+
 ## Migration gotchas
 
 Several refactors require **`php artisan migrate:fresh --seed`** (not just `migrate`) because seeders changed shape (e.g., 8 → 100 rooms). Always check `cline.md` "Migration Required" notes before pulling/running.

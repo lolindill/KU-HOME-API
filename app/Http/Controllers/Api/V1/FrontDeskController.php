@@ -35,7 +35,11 @@ class FrontDeskController extends Controller
             'guests.*.name' => 'nullable|string|max:255',
             'guests.*.nationality' => 'nullable|string|max:100',
             'guests.*.is_ku_member' => 'nullable|boolean',
-            'children' => 'nullable|integer|min:0',
+            // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
+            'has_children' => 'nullable|boolean',
+            // 🧾 Billing fields (04/08/26)
+            'billing_address' => 'nullable|string|max:255',
+            'billing_comment' => 'nullable|string|max:255',
         ]);
 
         try {
@@ -73,7 +77,11 @@ class FrontDeskController extends Controller
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
                 'guests' => $validated['guests'] ?? null,
-                'children' => $validated['children'] ?? 0,
+                // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
+                'has_children' => $validated['has_children'] ?? false,
+                // 🧾 Billing fields (04/08/26)
+                'billing_address' => $validated['billing_address'] ?? null,
+                'billing_comment' => $validated['billing_comment'] ?? null,
                 'status' => 'draft',
             ]);
 

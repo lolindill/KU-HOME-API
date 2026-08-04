@@ -71,7 +71,7 @@ final class RoomAllocatorIntegrationTest extends TestCase
                 'rate_type' => 'daily',
                 'room_type_id' => $this->typeIds[$key],
                 'code' => null,
-                'name_en' => $en . ' Daily',
+                'name_en' => $en.' Daily',
                 'default_price' => $rate,
                 'is_active' => true,
             ]);
@@ -134,7 +134,7 @@ final class RoomAllocatorIntegrationTest extends TestCase
             'check_in' => $checkIn,
             'check_out' => $checkOut,
             'guests' => [['title' => 'Mr', 'name' => 'Test']],
-            'children' => 0,
+            'has_children' => false,
             'status' => 'draft',
             'bed_preference' => $bedPref,
         ]);

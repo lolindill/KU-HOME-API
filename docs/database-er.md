@@ -95,7 +95,9 @@ erDiagram
         uuid room_type_id FK
         uuid room_id FK "nullable, assigned at check-in"
         json guests "nullable, array of {title,name,nationality,is_ku_member}"
-        integer children "default: 0"
+        boolean has_children "default: false (Refactor 04/08/26)"
+        string billing_address "nullable"
+        string billing_comment "nullable"
         integer rate_daily "nullable"
         integer nights "nullable"
         timestamp created_at

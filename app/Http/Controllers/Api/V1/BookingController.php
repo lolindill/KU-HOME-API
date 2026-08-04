@@ -239,7 +239,11 @@ class BookingController extends Controller
                     'status' => 'draft', // BR-level state
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
                     'guests' => $roomRequest['guests'] ?? null,
-                    'children' => $roomRequest['children'] ?? 0,
+                    // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
+                    'has_children' => $roomRequest['has_children'] ?? false,
+                    // 🧾 Billing fields (04/08/26)
+                    'billing_address' => $roomRequest['billing_address'] ?? null,
+                    'billing_comment' => $roomRequest['billing_comment'] ?? null,
                 ]);
 
                 // 🌟 บันทึก Addon โดยผูกกับ booking_room_id แทนค่ะ

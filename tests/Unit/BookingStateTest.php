@@ -2,13 +2,13 @@
 
 namespace Tests\Unit;
 
-use Tests\TestCase;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
-use App\Models\User;
 use App\Models\RoomType;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
 class BookingStateTest extends TestCase
 {
@@ -39,7 +39,7 @@ class BookingStateTest extends TestCase
         ]);
 
         $booking = Booking::create([
-            'confirmation' => 'TEST-' . uniqid(),
+            'confirmation' => 'TEST-'.uniqid(),
             'user_id' => $user->id,
             'source' => 'admin',
             'status' => $bookingStatus,
@@ -55,7 +55,7 @@ class BookingStateTest extends TestCase
             'check_out' => now()->addDays(3)->toDateString(),
             'status' => $brStatus,
             'guests' => [['title' => 'Mr', 'name' => 'Test Guest', 'nationality' => 'Thai']],
-            'children' => 0,
+            'has_children' => false,
         ]);
 
         return $booking->fresh(['bookingRooms']);

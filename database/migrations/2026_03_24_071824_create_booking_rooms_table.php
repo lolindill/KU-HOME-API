@@ -25,7 +25,14 @@ return new class extends Migration
             // 🧍‍♂️ ข้อมูลผู้เข้าพัก (รองรับหลายคนใน 1 ห้อง)
             // JSON: [{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai", "is_ku_member": false }, ...]
             $table->json('guests')->nullable()->after('room_id');
-            $table->integer('children')->default(0)->after('guests');
+
+            // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
+            //    (ไม่นับจำนวนเด็กแล้ว เก็บแค่ "มีเด็กเข้าพักไหม")
+            $table->boolean('has_children')->default(false)->after('guests');
+
+            // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษี
+            $table->string('billing_address')->nullable()->after('has_children');
+            $table->string('billing_comment')->nullable()->after('billing_address');
 
             // 🚦 State Machine: draft → confirmed → {checked_in → checked_out | no_show}
             $table->string('status')->default('draft');

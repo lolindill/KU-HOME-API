@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
 use Exception;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,17 +26,22 @@ class BookingRoom extends Model
         'check_in',    // ย้ายมาจาก bookings (แต่ละห้องมีวันที่ต่างกันได้)
         'check_out',
         'guests',      // JSON: [{ title, name, nationality, is_ku_member }, ...]
-        'children',    // int: จำนวนเด็กที่เข้าพักในห้องนี้
+        // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
+        'has_children', // bool: มีเด็กเข้าพักในห้องนี้ไหม
         'status',      // draft | confirmed | checked_in | checked_out | no_show
         // 🏨 Phase 1: bed_preference สำหรับ Room Allocation Algorithm (twin | null=any)
         'bed_preference',
+        // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษีระดับห้อง
+        'billing_address',
+        'billing_comment',
     ];
 
     protected $casts = [
         'check_in' => 'date',
         'check_out' => 'date',
         'guests' => 'array',
-        'children' => 'integer',
+        // 🌟 Fix PostgreSQL strict boolean (04/08/26): PgBoolean cast
+        'has_children' => PgBoolean::class,
     ];
 
     // =========================================================
@@ -104,7 +110,9 @@ class BookingRoom extends Model
 
     public function getTotalGuestsAttribute(): int
     {
-        return (is_array($this->guests) ? count($this->guests) : 0) + ($this->children ?? 0);
+        // 🧒 Refactor (04/08/26): เดิมนับ children (int) รวมด้วย
+        //    ตอนนี้ has_children เป็น boolean flag ไม่ใช่ count แล้ว จึงนับเฉพาะ adults ใน guests[]
+        return is_array($this->guests) ? count($this->guests) : 0;
     }
 
     // =========================================================

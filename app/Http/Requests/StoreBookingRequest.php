@@ -14,32 +14,36 @@ class StoreBookingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'source'             => 'required|string|in:online,admin,line',
+            'source' => 'required|string|in:online,admin,line',
 
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไปอยู่ใน booking_rooms (รองรับหลายคน/ห้อง)
             // bookings ไม่รับ guest fields แล้ว
 
             // 🌟 Refactor (25/06/26): 1 array entry = 1 ห้อง (ไม่มี quantity multiplier แล้ว)
             // 🌟 Refactor (02/07/26): check_in/check_out ย้ายไป BR-level (แต่ละห้องต่างวันได้)
-            'booking_rooms'                  => 'required|array',
-            'booking_rooms.*.room_type_id'   => 'required|uuid|exists:room_types,id',
-            'booking_rooms.*.check_in'       => 'required|date|after_or_equal:today',
-            'booking_rooms.*.check_out'      => 'required|date|after:booking_rooms.*.check_in',
-            'booking_rooms.*.extra_beds'     => 'nullable|integer|min:0',
+            'booking_rooms' => 'required|array',
+            'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
+            'booking_rooms.*.check_in' => 'required|date|after_or_equal:today',
+            'booking_rooms.*.check_out' => 'required|date|after:booking_rooms.*.check_in',
+            'booking_rooms.*.extra_beds' => 'nullable|integer|min:0',
 
             // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง (array ของ guests)
             // รองรับหลายคนต่อห้อง; ถ้าไม่ส่งมา ระบบจะใช้ชื่อผู้จอง (user) เป็น default
-            'booking_rooms.*.guests'                 => 'nullable|array',
-            'booking_rooms.*.guests.*.title'         => 'nullable|string|max:50',
-            'booking_rooms.*.guests.*.name'          => 'nullable|string|max:255',
-            'booking_rooms.*.guests.*.nationality'   => 'nullable|string|max:100',
-            'booking_rooms.*.guests.*.is_ku_member'  => 'nullable|boolean',
-            'booking_rooms.*.children'               => 'nullable|integer|min:0',
+            'booking_rooms.*.guests' => 'nullable|array',
+            'booking_rooms.*.guests.*.title' => 'nullable|string|max:50',
+            'booking_rooms.*.guests.*.name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
+            'booking_rooms.*.guests.*.is_ku_member' => 'nullable|boolean',
+            'booking_rooms.*.has_children' => 'nullable|boolean',
 
-            'booking_rooms.*.addons'                    => 'nullable|array',
-            'booking_rooms.*.addons.breakfast'           => 'nullable|integer|min:0',
-            'booking_rooms.*.addons.early_checkin'       => 'nullable|boolean',
-            'booking_rooms.*.addons.late_checkout'       => 'nullable|boolean',
+            // 🧾 Billing fields (04/08/26)
+            'booking_rooms.*.billing_address' => 'nullable|string|max:255',
+            'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
+
+            'booking_rooms.*.addons' => 'nullable|array',
+            'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.early_checkin' => 'nullable|boolean',
+            'booking_rooms.*.addons.late_checkout' => 'nullable|boolean',
         ];
     }
 
@@ -49,16 +53,16 @@ class StoreBookingRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'source.required'                => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
-            'source.in'                      => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
-            'booking_rooms.required'         => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
-            'booking_rooms.array'            => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
+            'source.required' => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
+            'source.in' => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
+            'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
+            'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
             'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',
-            'booking_rooms.*.room_type_id.exists'   => 'ไม่พบประเภทห้องที่ระบุ',
-            'booking_rooms.*.check_in.required'         => 'กรุณาระบุวันที่เช็คอินของแต่ละห้อง',
-            'booking_rooms.*.check_in.after_or_equal'   => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
-            'booking_rooms.*.check_out.required'        => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
-            'booking_rooms.*.check_out.after'           => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
+            'booking_rooms.*.room_type_id.exists' => 'ไม่พบประเภทห้องที่ระบุ',
+            'booking_rooms.*.check_in.required' => 'กรุณาระบุวันที่เช็คอินของแต่ละห้อง',
+            'booking_rooms.*.check_in.after_or_equal' => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
+            'booking_rooms.*.check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
+            'booking_rooms.*.check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
         ];
     }
 }

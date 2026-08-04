@@ -2,15 +2,16 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\Booking;
+use App\Models\BookingRoom;
 use App\Models\GlobalRate;
+use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomType;
-use App\Models\BookingRoom;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class FrontDeskTest extends TestCase
 {
@@ -34,6 +35,7 @@ class FrontDeskTest extends TestCase
             'default_price' => 1500,
             'is_active' => true,
         ]);
+
         return $rt;
     }
 
@@ -42,7 +44,7 @@ class FrontDeskTest extends TestCase
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.rand(1, 99),
             'status' => $status,
         ]);
     }
@@ -78,7 +80,7 @@ class FrontDeskTest extends TestCase
             'check_in' => now()->toDateString(),
             'check_out' => now()->addDays(2)->toDateString(),
             'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'children' => 0,
+            'has_children' => false,
             'status' => $brStatus,
         ]);
     }
@@ -94,7 +96,7 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType);
 
-        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[] + children, ไม่มี guest_name/email/phone แล้ว
+        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[] + has_children, ไม่มี guest_name/email/phone แล้ว
         $response = $this->postJson('/api/v1/front-desk/walk-in', [
             'verified_by' => $admin->id,
             'room_id' => $room->id,
@@ -102,7 +104,7 @@ class FrontDeskTest extends TestCase
             'guests' => [
                 ['title' => 'mr', 'name' => 'Walk In Guest', 'nationality' => 'TH'],
             ],
-            'children' => 0,
+            'has_children' => false,
         ]);
 
         $response->assertStatus(201);
@@ -116,7 +118,7 @@ class FrontDeskTest extends TestCase
         $this->assertDatabaseHas('booking_rooms', [
             'room_id' => $room->id,
             'status' => 'checked_in',
-            'children' => 0,
+            'has_children' => false,
         ]);
     }
 
@@ -206,7 +208,7 @@ class FrontDeskTest extends TestCase
         $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
 
         // Need a completed payment for check-out to succeed
-        \App\Models\Payment::create([
+        Payment::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'amount' => 3000,
@@ -402,7 +404,7 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $this->createBookingRoom($booking, $roomType, null, 'confirmed');
 
-        $admin = \App\Models\User::factory(['role' => 'admin'])->create();
+        $admin = User::factory(['role' => 'admin'])->create();
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
             'verified_by' => $admin->id,

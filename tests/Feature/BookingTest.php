@@ -2,14 +2,16 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\Booking;
+use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class BookingTest extends TestCase
 {
@@ -33,6 +35,7 @@ class BookingTest extends TestCase
             'default_price' => 1500,
             'is_active' => true,
         ]);
+
         return $rt;
     }
 
@@ -41,7 +44,7 @@ class BookingTest extends TestCase
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.rand(1, 99),
             'status' => $status,
         ]);
     }
@@ -49,7 +52,7 @@ class BookingTest extends TestCase
     /**
      * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
      * ตอนนี้ Booking มีแค่ข้อมูลการจอง + user_id (คนจอง)
-     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON) + booking_rooms.children
+     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON) + booking_rooms.has_children
      */
     private function createBooking(array $overrides = []): Booking
     {
@@ -81,7 +84,7 @@ class BookingTest extends TestCase
             'is_active' => true,
         ]);
 
-        \App\Models\BookingRoom::create([
+        BookingRoom::create([
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
             'check_in' => now()->addDay()->toDateString(),
@@ -89,7 +92,7 @@ class BookingTest extends TestCase
             'guests' => [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
-            'children' => 0,
+            'has_children' => false,
             'rate_daily' => 1500,
             'nights' => 2,
         ]);
@@ -116,7 +119,7 @@ class BookingTest extends TestCase
                     'guests' => [
                         ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
                     ],
-                    'children' => 0,
+                    'has_children' => false,
                 ],
             ],
         ]);
@@ -142,7 +145,7 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
+                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -167,10 +170,10 @@ class BookingTest extends TestCase
         $this->assertDatabaseHas('booking_rooms', [
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
-            'children' => 0,
+            'has_children' => false,
         ]);
 
-        $bookingRoom = \App\Models\BookingRoom::where('booking_id', $booking->id)->first();
+        $bookingRoom = BookingRoom::where('booking_id', $booking->id)->first();
         $guests = is_string($bookingRoom->guests) ? json_decode($bookingRoom->guests, true) : $bookingRoom->guests;
         $this->assertEquals($user->name, $guests[0]['name'] ?? null,
             'Guest name must be stored in booking_rooms.guests JSON, not in bookings table');
@@ -276,7 +279,7 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Test', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
+                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -312,7 +315,7 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
+                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -346,7 +349,7 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
+                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -378,7 +381,7 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
+                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -392,7 +395,7 @@ class BookingTest extends TestCase
 
     public function test_create_booking_route_has_rate_limiting(): void
     {
-        $route = \Illuminate\Support\Facades\Route::getRoutes()->getByAction(
+        $route = Route::getRoutes()->getByAction(
             'App\Http\Controllers\Api\V1\BookingController@createBooking'
         );
 

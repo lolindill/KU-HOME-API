@@ -1,19 +1,20 @@
 <?php
+
 /**
  * 🔗 KU HOME API — Chained Integration Test
- * 
+ *
  * สคริปต์ทดสอบ API แบบ Chain Flow
  * ดึง ID จาก response แล้วส่งต่อไป request ถัดไปอัตโนมัติ
- * 
+ *
  * วิธีใช้: php test_scripts/api_test_chain.php
  */
 
-require __DIR__ . '/../vendor/autoload.php';
-$app = require __DIR__ . '/../bootstrap/app.php';
+require __DIR__.'/../vendor/autoload.php';
+$app = require __DIR__.'/../bootstrap/app.php';
 $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
-use App\Models\RoomType;
 use App\Models\Room;
+use App\Models\RoomType;
 
 // ============================================
 // ⚙️ Configuration
@@ -26,20 +27,36 @@ $TEST_PASSWORD = 'password123';
 // ============================================
 // 🎨 Color Helpers
 // ============================================
-function green($t) { return "\033[32m{$t}\033[0m"; }
-function red($t)   { return "\033[31m{$t}\033[0m"; }
-function yellow($t){ return "\033[33m{$t}\033[0m"; }
-function cyan($t)  { return "\033[36m{$t}\033[0m"; }
-function bold($t)  { return "\033[1m{$t}\033[0m"; }
+function green($t)
+{
+    return "\033[32m{$t}\033[0m";
+}
+function red($t)
+{
+    return "\033[31m{$t}\033[0m";
+}
+function yellow($t)
+{
+    return "\033[33m{$t}\033[0m";
+}
+function cyan($t)
+{
+    return "\033[36m{$t}\033[0m";
+}
+function bold($t)
+{
+    return "\033[1m{$t}\033[0m";
+}
 
 // ============================================
 // 🔧 HTTP Helpers
 // ============================================
 $stats = ['pass' => 0, 'fail' => 0, 'skip' => 0];
 
-function apiCall($method, $url, $data = null, $token = null, $headers = []) {
+function apiCall($method, $url, $data = null, $token = null, $headers = [])
+{
     $ch = curl_init();
-    
+
     $curlHeaders = ['Content-Type: application/json', 'Accept: application/json'];
     if ($token) {
         $curlHeaders[] = "Authorization: Bearer {$token}";
@@ -49,11 +66,11 @@ function apiCall($method, $url, $data = null, $token = null, $headers = []) {
     }
 
     curl_setopt_array($ch, [
-        CURLOPT_URL            => $url,
+        CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CUSTOMREQUEST  => $method,
-        CURLOPT_HTTPHEADER     => $curlHeaders,
-        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_CUSTOMREQUEST => $method,
+        CURLOPT_HTTPHEADER => $curlHeaders,
+        CURLOPT_TIMEOUT => 10,
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
 
@@ -72,35 +89,37 @@ function apiCall($method, $url, $data = null, $token = null, $headers = []) {
 
     return [
         'http_code' => $httpCode,
-        'body'      => json_decode($response, true),
-        'error'     => null,
+        'body' => json_decode($response, true),
+        'error' => null,
     ];
 }
 
-function test($label, $method, $url, $data = null, $token = null, $expectedCode = null) {
+function test($label, $method, $url, $data = null, $token = null, $expectedCode = null)
+{
     global $BASE_URL, $stats;
-    
-    $fullUrl = strpos($url, 'http') === 0 ? $url : $BASE_URL . $url;
+
+    $fullUrl = strpos($url, 'http') === 0 ? $url : $BASE_URL.$url;
     $methodDisplay = strtoupper($method);
-    
-    echo cyan("  → {$methodDisplay} {$url}") . "\n";
-    
+
+    echo cyan("  → {$methodDisplay} {$url}")."\n";
+
     $result = apiCall($method, $fullUrl, $data, $token);
-    
+
     if ($result['error']) {
         $stats['fail']++;
-        echo red("    ❌ FAIL: cURL error — {$result['error']}") . "\n\n";
+        echo red("    ❌ FAIL: cURL error — {$result['error']}")."\n\n";
+
         return $result;
     }
-    
+
     $code = $result['http_code'];
     $body = $result['body'];
-    
+
     $passed = true;
     if ($expectedCode !== null && $code !== $expectedCode) {
         $passed = false;
     }
-    
+
     if ($passed) {
         $stats['pass']++;
         echo green("    ✅ PASS → {$code}");
@@ -108,7 +127,7 @@ function test($label, $method, $url, $data = null, $token = null, $expectedCode 
         $stats['fail']++;
         echo red("    ❌ FAIL → {$code} (expected {$expectedCode})");
     }
-    
+
     // Show brief response info
     if ($body) {
         $status = $body['status'] ?? '???';
@@ -119,39 +138,40 @@ function test($label, $method, $url, $data = null, $token = null, $expectedCode 
         }
     }
     echo "\n";
-    
+
     return $result;
 }
 
-function showVar($name, $value) {
+function showVar($name, $value)
+{
     if ($value !== null) {
-        echo yellow("    💾 Saved: {$name} = {$value}") . "\n";
+        echo yellow("    💾 Saved: {$name} = {$value}")."\n";
     }
 }
 
 // ============================================
 // 🚀 Start Testing
 // ============================================
-echo bold("\n" . str_repeat('=', 60)) . "\n";
-echo bold("🏨 KU HOME API — Chained Integration Test") . "\n";
-echo bold(str_repeat('=', 60)) . "\n";
+echo bold("\n".str_repeat('=', 60))."\n";
+echo bold('🏨 KU HOME API — Chained Integration Test')."\n";
+echo bold(str_repeat('=', 60))."\n";
 echo "Base URL: {$BASE_URL}\n";
-echo "Time: " . date('Y-m-d H:i:s') . "\n\n";
+echo 'Time: '.date('Y-m-d H:i:s')."\n\n";
 
 // ============================================
 // Phase 1: Seed Data — Get IDs from DB
 // ============================================
-echo bold("━━━ Phase 1: 📋 Get Seed Data (from DB) ━━━") . "\n";
+echo bold('━━━ Phase 1: 📋 Get Seed Data (from DB) ━━━')."\n";
 
 $roomType = RoomType::first();
 $ROOM_TYPE_ID = $roomType?->id;
 
 if ($ROOM_TYPE_ID) {
     $stats['pass']++;
-    echo green("  ✅ PASS: Found RoomType — ID = {$ROOM_TYPE_ID} ({$roomType->name_en})") . "\n";
+    echo green("  ✅ PASS: Found RoomType — ID = {$ROOM_TYPE_ID} ({$roomType->name_en})")."\n";
 } else {
     $stats['fail']++;
-    echo red("  ❌ FAIL: No RoomTypes in DB! Cannot continue booking tests.") . "\n";
+    echo red('  ❌ FAIL: No RoomTypes in DB! Cannot continue booking tests.')."\n";
 }
 
 $room = Room::where('status', 'available')->first();
@@ -159,10 +179,10 @@ $ROOM_ID = $room?->id;
 
 if ($ROOM_ID) {
     $stats['pass']++;
-    echo green("  ✅ PASS: Found available Room — ID = {$ROOM_ID} (#{$room->room_number})") . "\n";
+    echo green("  ✅ PASS: Found available Room — ID = {$ROOM_ID} (#{$room->room_number})")."\n";
 } else {
     $stats['fail']++;
-    echo red("  ❌ FAIL: No available Rooms in DB!") . "\n";
+    echo red('  ❌ FAIL: No available Rooms in DB!')."\n";
 }
 
 echo "\n";
@@ -170,7 +190,7 @@ echo "\n";
 // ============================================
 // Phase 2: Public GET Endpoints
 // ============================================
-echo bold("━━━ Phase 2: 🌐 Public GET Endpoints ━━━") . "\n";
+echo bold('━━━ Phase 2: 🌐 Public GET Endpoints ━━━')."\n";
 
 $r = test('All Rooms', 'GET', '/rooms', null, null, 200);
 $roomCount = $r['body']['total_rooms'] ?? 0;
@@ -199,24 +219,24 @@ echo "\n";
 // ============================================
 // Phase 3: Auth Chain
 // ============================================
-echo bold("━━━ Phase 3: 🔑 Auth Chain ━━━") . "\n";
+echo bold('━━━ Phase 3: 🔑 Auth Chain ━━━')."\n";
 
 // Register
 $r = test('Register', 'POST', '/register', [
-    'name'     => "Test User {$TIMESTAMP}",
-    'email'    => $TEST_EMAIL,
+    'name' => "Test User {$TIMESTAMP}",
+    'email' => $TEST_EMAIL,
     'password' => $TEST_PASSWORD,
 ], null, 201);
 
 $TOKEN = $r['body']['access_token'] ?? null;
-showVar('TOKEN', $TOKEN ? 'received (' . strlen($TOKEN) . ' chars)' : null);
+showVar('TOKEN', $TOKEN ? 'received ('.strlen($TOKEN).' chars)' : null);
 
-if (!$TOKEN) {
-    echo red("  ⛔ No token received! Cannot continue authenticated tests.") . "\n";
+if (! $TOKEN) {
+    echo red('  ⛔ No token received! Cannot continue authenticated tests.')."\n";
     // Try login with existing user fallback
-    echo yellow("  ⚠️ Attempting login fallback...") . "\n";
+    echo yellow('  ⚠️ Attempting login fallback...')."\n";
     $r = test('Login Fallback', 'POST', '/login', [
-        'email'    => $TEST_EMAIL,
+        'email' => $TEST_EMAIL,
         'password' => $TEST_PASSWORD,
     ], null, 200);
     $TOKEN = $r['body']['access_token'] ?? null;
@@ -225,7 +245,7 @@ if (!$TOKEN) {
 
 // Login (verify login works)
 $r = test('Login', 'POST', '/login', [
-    'email'    => $TEST_EMAIL,
+    'email' => $TEST_EMAIL,
     'password' => $TEST_PASSWORD,
 ], null, 200);
 
@@ -234,7 +254,7 @@ echo "\n";
 // ============================================
 // Phase 4: Authenticated Endpoints
 // ============================================
-echo bold("━━━ Phase 4: 🔒 Authenticated Endpoints ━━━") . "\n";
+echo bold('━━━ Phase 4: 🔒 Authenticated Endpoints ━━━')."\n";
 
 if ($TOKEN) {
     $r = test('Get Profile (/me)', 'GET', '/me', null, $TOKEN, 200);
@@ -244,13 +264,13 @@ if ($TOKEN) {
     $r = test('Get Bookings', 'GET', '/bookings', null, $TOKEN, 200);
 
     $r = test('Validate Discount', 'POST', '/bookings/validate-discount', [
-        'code'    => 'WELCOME10',
+        'code' => 'WELCOME10',
         'subtotal' => 1000,
     ], $TOKEN, 200);
 
 } else {
     $stats['skip'] += 3;
-    echo yellow("  ⏭️ SKIPPED: /me, /bookings, /validate-discount (no token)") . "\n";
+    echo yellow('  ⏭️ SKIPPED: /me, /bookings, /validate-discount (no token)')."\n";
 }
 
 echo "\n";
@@ -258,7 +278,7 @@ echo "\n";
 // ============================================
 // Phase 5: Booking Creation Chain
 // ============================================
-echo bold("━━━ Phase 5: 📅 Booking Creation Chain ━━━") . "\n";
+echo bold('━━━ Phase 5: 📅 Booking Creation Chain ━━━')."\n";
 
 $BOOKING_ID = null;
 
@@ -267,23 +287,23 @@ if ($TOKEN && $ROOM_TYPE_ID) {
     $dayAfter = date('Y-m-d', strtotime('+3 days'));
 
     $bookingData = [
-        'source'            => 'online',
-        'check_in'          => $tomorrow,
-        'check_out'         => $dayAfter,
-        'guest_title'       => 'Mr.',
-        'guest_name'        => "Test Guest {$TIMESTAMP}",
-        'guest_email'       => $TEST_EMAIL,
-        'guest_phone'       => '081-234-5678',
+        'source' => 'online',
+        'check_in' => $tomorrow,
+        'check_out' => $dayAfter,
+        'guest_title' => 'Mr.',
+        'guest_name' => "Test Guest {$TIMESTAMP}",
+        'guest_email' => $TEST_EMAIL,
+        'guest_phone' => '081-234-5678',
         'guest_nationality' => 'Thai',
-        'children'          => 0,
-        'booking_rooms'     => [
+        'has_children' => false,
+        'booking_rooms' => [
             [
                 'room_type_id' => $ROOM_TYPE_ID,
-                'quantity'     => 1,
-                'extra_beds'   => 0,
-                'addons'       => [
-                    'breakfast'           => 1,
-                    'breakfast_price'     => 200,
+                'quantity' => 1,
+                'extra_beds' => 0,
+                'addons' => [
+                    'breakfast' => 1,
+                    'breakfast_price' => 200,
                     'early_checkIn_price' => 0,
                     'late_checkOut_price' => 0,
                 ],
@@ -304,8 +324,8 @@ if ($TOKEN && $ROOM_TYPE_ID) {
 
 } else {
     $stats['skip'] += 2;
-    $skipReason = !$TOKEN ? 'no token' : 'no room_type_id';
-    echo yellow("  ⏭️ SKIPPED: Create Booking & Get Booking ({$skipReason})") . "\n";
+    $skipReason = ! $TOKEN ? 'no token' : 'no room_type_id';
+    echo yellow("  ⏭️ SKIPPED: Create Booking & Get Booking ({$skipReason})")."\n";
 }
 
 echo "\n";
@@ -313,15 +333,15 @@ echo "\n";
 // ============================================
 // Phase 6: Payment Chain
 // ============================================
-echo bold("━━━ Phase 6: 💳 Payment Chain ━━━") . "\n";
+echo bold('━━━ Phase 6: 💳 Payment Chain ━━━')."\n";
 
 $PAYMENT_ID = null;
 
 if ($TOKEN && $BOOKING_ID) {
     // Request Payment
     $r = test('Request Payment', 'POST', '/payments', [
-        'booking_id'     => $BOOKING_ID,
-        'amount'         => $TOTAL_AMOUNT ?? 1000,
+        'booking_id' => $BOOKING_ID,
+        'amount' => $TOTAL_AMOUNT ?? 1000,
         'payment_method' => 'credit_card',
     ], $TOKEN, 200);
 
@@ -331,9 +351,9 @@ if ($TOKEN && $BOOKING_ID) {
     // Simulate Webhook (payment success → draft → paid)
     if ($PAYMENT_ID) {
         $r = test('Webhook (Payment Success)', 'POST', '/payment/webhook', [
-            'payment_id'       => $PAYMENT_ID,
-            'status'           => 'success',
-            'reference_number' => 'REF-' . $TIMESTAMP,
+            'payment_id' => $PAYMENT_ID,
+            'status' => 'success',
+            'reference_number' => 'REF-'.$TIMESTAMP,
         ], null, 200);
 
         // Verify booking is now paid
@@ -344,8 +364,8 @@ if ($TOKEN && $BOOKING_ID) {
 
 } else {
     $stats['skip'] += 2;
-    $skipReason = !$TOKEN ? 'no token' : 'no booking_id';
-    echo yellow("  ⏭️ SKIPPED: Payment chain ({$skipReason})") . "\n";
+    $skipReason = ! $TOKEN ? 'no token' : 'no booking_id';
+    echo yellow("  ⏭️ SKIPPED: Payment chain ({$skipReason})")."\n";
 }
 
 echo "\n";
@@ -353,7 +373,7 @@ echo "\n";
 // ============================================
 // Phase 7: Booking Status Transition Chain
 // ============================================
-echo bold("━━━ Phase 7: 🔄 Booking Status Transition Chain ━━━") . "\n";
+echo bold('━━━ Phase 7: 🔄 Booking Status Transition Chain ━━━')."\n";
 
 if ($TOKEN && $BOOKING_ID) {
     // paid → confirmed
@@ -370,16 +390,16 @@ if ($TOKEN && $BOOKING_ID) {
 
     $checkedInCode = $r['http_code'];
     if ($checkedInCode === 200) {
-        echo green("    ✅ Status transitioned to checked_in") . "\n";
+        echo green('    ✅ Status transitioned to checked_in')."\n";
     } else {
-        echo yellow("    ⚠️ Got {$checkedInCode} (expected — user role may not be admin)") . "\n";
+        echo yellow("    ⚠️ Got {$checkedInCode} (expected — user role may not be admin)")."\n";
         $stats['fail']--; // Adjust since this is expected
         $stats['pass']++;
     }
 
 } else {
     $stats['skip'] += 2;
-    echo yellow("  ⏭️ SKIPPED: Status transitions (no booking)") . "\n";
+    echo yellow('  ⏭️ SKIPPED: Status transitions (no booking)')."\n";
 }
 
 echo "\n";
@@ -387,20 +407,20 @@ echo "\n";
 // ============================================
 // Phase 8: Room Assignment Chain
 // ============================================
-echo bold("━━━ Phase 8: 🛏️ Room Assignment Chain ━━━") . "\n";
+echo bold('━━━ Phase 8: 🛏️ Room Assignment Chain ━━━')."\n";
 
 if ($TOKEN && $BOOKING_ID) {
     // Need booking in paid/confirmed state for assignment
     // Reset to paid first if needed
     $r = test('Assign Rooms', 'PUT', "/bookings/{$BOOKING_ID}/assign-rooms", null, $TOKEN);
-    
+
     $assignCode = $r['http_code'];
     if ($assignCode === 200) {
-        echo green("    ✅ Rooms assigned successfully") . "\n";
+        echo green('    ✅ Rooms assigned successfully')."\n";
     } elseif ($assignCode === 422) {
         // Expected if booking status doesn't allow assignment
         $msg = $r['body']['message'] ?? '';
-        echo yellow("    ⚠️ 422: {$msg}") . "\n";
+        echo yellow("    ⚠️ 422: {$msg}")."\n";
         $stats['fail']--;
         $stats['pass']++;
     } else {
@@ -409,7 +429,7 @@ if ($TOKEN && $BOOKING_ID) {
 
 } else {
     $stats['skip']++;
-    echo yellow("  ⏭️ SKIPPED: Room assignment (no booking)") . "\n";
+    echo yellow('  ⏭️ SKIPPED: Room assignment (no booking)')."\n";
 }
 
 echo "\n";
@@ -417,7 +437,7 @@ echo "\n";
 // ============================================
 // Phase 9: Room Status Chain
 // ============================================
-echo bold("━━━ Phase 9: 🧹 Room Status Update Chain ━━━") . "\n";
+echo bold('━━━ Phase 9: 🧹 Room Status Update Chain ━━━')."\n";
 
 if ($TOKEN && $ROOM_ID) {
     $r = test('Update Room Status: → dirty', 'PUT', "/rooms/{$ROOM_ID}/status", [
@@ -441,7 +461,7 @@ if ($TOKEN && $ROOM_ID) {
 
 } else {
     $stats['skip']++;
-    echo yellow("  ⏭️ SKIPPED: Room status (no room)") . "\n";
+    echo yellow('  ⏭️ SKIPPED: Room status (no room)')."\n";
 }
 
 echo "\n";
@@ -449,13 +469,13 @@ echo "\n";
 // ============================================
 // Phase 10: Logout
 // ============================================
-echo bold("━━━ Phase 10: 🚪 Logout ━━━") . "\n";
+echo bold('━━━ Phase 10: 🚪 Logout ━━━')."\n";
 
 if ($TOKEN) {
     $r = test('Logout', 'POST', '/logout', null, $TOKEN, 200);
 } else {
     $stats['skip']++;
-    echo yellow("  ⏭️ SKIPPED: Logout (no token)") . "\n";
+    echo yellow('  ⏭️ SKIPPED: Logout (no token)')."\n";
 }
 
 echo "\n";
@@ -465,12 +485,12 @@ echo "\n";
 // ============================================
 $total = $stats['pass'] + $stats['fail'] + $stats['skip'];
 
-echo bold(str_repeat('═', 60)) . "\n";
-echo bold("📊 TEST SUMMARY") . "\n";
-echo bold(str_repeat('═', 60)) . "\n";
-echo green("  ✅ Passed:  {$stats['pass']}") . "\n";
-echo red("    ❌ Failed:  {$stats['fail']}") . "\n";
-echo yellow("  ⏭️ Skipped:  {$stats['skip']}") . "\n";
+echo bold(str_repeat('═', 60))."\n";
+echo bold('📊 TEST SUMMARY')."\n";
+echo bold(str_repeat('═', 60))."\n";
+echo green("  ✅ Passed:  {$stats['pass']}")."\n";
+echo red("    ❌ Failed:  {$stats['fail']}")."\n";
+echo yellow("  ⏭️ Skipped:  {$stats['skip']}")."\n";
 echo "  📋 Total:   {$total}\n";
 
 if ($stats['fail'] === 0) {
@@ -479,4 +499,4 @@ if ($stats['fail'] === 0) {
     echo yellow("\n⚠️ มีบางเทสตกอยู่นะคะ ตรวจสอบด่วนเลย! 💅\n");
 }
 
-echo bold(str_repeat('═', 60)) . "\n";
+echo bold(str_repeat('═', 60))."\n";
