@@ -8,7 +8,7 @@
 **KU HOME API** — hotel management REST API for Kasetsart University. Handles room bookings, payments (slip-based), front-desk (check-in/out), housekeeping tasks, and room allocation (cluster algorithm). Consumed by a separate React frontend (`ku-home`).
 
 - **Runtime:** PHP 8.3+ · **Framework:** Laravel 13 · **Auth:** Sanctum 4 (bearer token)
-- **DB:** PostgreSQL (Supabase) — will migrate to org server. **Tests:** SQLite in-memory.
+- **DB (current `.env`):** **SQLite** is active locally — `DB_CONNECTION=sqlite`, `DB_DATABASE=database/database.sqlite`. PostgreSQL configs (Supabase `aws-1-ap-northeast-2.pooler.supabase.com`, and the org server `dbc.ku.ac.th`) are **commented out** in `.env`. PostgreSQL is still the **prod target** — never write code that relies on SQLite-only quirks. **Tests:** SQLite in-memory.
 - **API-only** — no Blade views. Vite is minimal (frontend is a separate repo).
 
 ## Commands
@@ -25,6 +25,30 @@ vendor/bin/pint --dirty                        # lint changed files (Laravel Pin
 ```
 
 Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_guide.php` (full lifecycle, recommended).
+
+### Inspecting data / listing users (server)
+
+`.env` ปัจจุบันใช้ **SQLite** (`database/database.sqlite`). วิธีดู users บน server:
+
+```bash
+# 🌟 แนะนำ — ผ่าน Tinker (Eloquent, cross-DB; รันจาก repo root ที่มี .env)
+php artisan tinker --execute "foreach (App\Models\User::all() as \$u) { echo \$u->email . ' | ' . \$u->role . PHP_EOL; }"
+
+# กรองเฉพาะ role
+php artisan tinker --execute "echo App\Models\User::where('role','admin')->pluck('email')->implode(PHP_EOL);"
+
+# 🔧 ตรงผ่าน sqlite3 CLI (ถ้าลง sqlite3 ไว้บน server; ไม่ต้อง boot Laravel)
+sqlite3 database/database.sqlite "SELECT email, role FROM users;"
+sqlite3 database/database.sqlite "SELECT email, role, created_at FROM users ORDER BY created_at DESC LIMIT 10;"
+
+# 🌐 ผ่าน API (ต้องล็อกอินด้วย admin token ก่อน; route อยู่ใต้ role:admin)
+curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" http://localhost:8000/api/v1/users
+```
+
+**หมายเหตุสำคัญ:**
+- **Default seed users** (ดู `database/seeders/UserSeeder.php`): `{user,guest,kumember,staff,admin,housekeeping,system}@kuhome.com` · password **ทุกคนคือ `password123`** (dev/testing เท่านั้น).
+- ตอนนี้ DB มี user แค่ 2 คน (`admin@kuhome.com`, `maid@kuhome.com` housekeeping) → ถ้าอยากได้ default accounts ครบ ต้อง `php artisan migrate:fresh --seed` (ดู "Migration gotchas" ด้านล่าง — เปลี่ยนแปลงข้อมูล).
+- **DB schema เป็นเดียวกัน** ต่อ connection (`pgsql` vs `sqlite`) — แค่เปลี่ยนคำสั่งในระดับ driver. บน prod ที่เป็น PostgreSQL ให้ใช้ `php artisan tinker --execute "..."` (วิธีเดียวกัน) หรือ `psql` แทน `sqlite3`.
 
 ## Architecture & Layer Rules
 
@@ -52,6 +76,25 @@ Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_gui
 - **API response shape:** success `{"status":"success","message":...}` · error `{"status":"error","message":...}`. Don't leak `$e->getMessage()` on 500s — return a generic message + `Log::error()`.
 - **Throttle:** `5,1` on login/booking/confirm; `10,1` on lookups.
 - **Audit log (state changes):** every `Booking::transitionStatus()` and `BookingRoom::transitionStatus()` writes a row to `status_change_logs` (polymorphic: `entity_type` = `booking`|`booking_room`, `entity_id`, `from_status`, `to_status`, `role`, `causer_id`, `created_at`). The log is written **inside** `transitionStatus()` — never bypass it with a direct `->status =` assignment, or the audit trail breaks. Read via `GET /api/v1/bookings/{id}/status-logs` (admin only). `causer_id` is `Auth::id()` and is **nullable** for system/queue transitions (e.g. `syncStatusFromRooms()`).
+
+## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
+
+> API นี้ออกแบบเป็น **stateless token-based** รองรับหลาย client/device ต่อผู้ใช้หนึ่งคนโดยกำเนิด ด้านล่างคือสัญญา (contract) ที่ future agents ต้องรู้ก่อนแตะส่วนที่เกี่ยวกับ auth/booking พร้อมกัน
+
+- **Auth model = stateless Bearer tokens (Sanctum token mode)** — ไม่ใช่ SPA cookie/stateful mode.
+  - `config/cors.php`: `allowed_origins => ['*']`, `supports_credentials => false`, paths `['api/*', 'sanctum/csrf-cookie']`. ห้ามเปลี่ยนเป็น cookie mode โดยไม่รื้อทั้ง CORS + Sanctum stateful domains ก่อน
+  - `config/sanctum.php`: `'expiration' => null` → **token ไม่หมดอายุเอง** ทั้ง life
+  - Default guard คือ `web` (session) แต่ทุก protected route ใช้ `auth:sanctum` ตรงๆ ใน `routes/api.php` → ใช้ token route จริง
+- **Token per client/device:** ทุกครั้งที่ `login`/`register` เรียก `createToken('ku_home_auth_token')` → **สร้าง token ใหม่เสมอ ไม่ revoke ของเดิม** → ผู้ใช้คนเดียวสามารถมี token หลายตัวใช้งานพร้อมกันได้ (multi-device/multi-tab/multi-client).
+  - `logout` ลบเฉพาะ `currentAccessToken()` เท่านั้น → token อื่นยังใช้ได้ (logout-on-one-device semantics). ห้ามเปลี่ยนเป็น `tokens()->delete()` โดยไม่ตั้งใจ ไม่งั้นถือว่า kick ออกจากทุก device
+  - ยังไม่มี "revoke all other tokens" / "single active session" policy — ถ้าจะเพิ่ม ให้เอา `DB::table('personal_access_tokens')->where(...)->delete()` หรือ `$user->tokens()->where('id','!=',$current)->delete()` ใน `AuthController::login`
+- **Throttle คือกำแพงแรกต้าน concurrency abuse:** `throttle:5,1` บน login/booking/confirm · `throttle:10,1` บน lookups (ลงทะเบียนใน `routes/api.php`). อย่าลบ throttle ออกเพื่อ "แก้ปัญหาช้า" — มันคือ rate-limit layer ไม่ใช่ perf bottleneck
+- **Concurrency / locking (สำคัญมาก):**
+  - **Atomic sequences:** `Booking::generateUniqueConfirmation()` ใช้ `booking_sequences` table + `SELECT ... FOR UPDATE` (`lockForUpdate()`) → collision-proof ต่อหลาย concurrent request. **อย่าใช้** `max()+1` หรือ `Str::random()` สุ่มทำเลข confirmation/receipt
+  - **`RoomAllocator::allocate()`** เรียก `lockForUpdate()` บน room pool (skip ใน SQLite test env เพราะ SQLite ไม่ support row lock) → กัน double-assign ห้องเดียวให้ 2 booking พร้อมกัน
+  - **`createBooking()` availability check ทำภายใน `DB::beginTransaction()`** แต่ **availability count ยังไม่มี `lockForUpdate`** บน room/BR pool มี TOCTOU window เล็กน้อยระหว่าง count กับ insert (race ที่ 2 request พร้อมกันผ่าน check ทั้งคู่แต่จริงๆ ห้องไม่พอ). ถ้าเจอ overbooking ใน prod ให้พิจารณา `Room::where('room_type_id',$rtId)->lockForUpdate()->count()` ก่อน count overlap — และ document ใน `cline.md`
+  - **never** write `->status = ...` ตรงๆ บน `Booking`/`BookingRoom` (audit trail พัง) และ never assign `room_id` โดยไม่ผ่าน `RoomAllocator` (double-book risk)
+- **Queue driver = `database`** → jobs ทำงาน sequential ใน worker เดียวถ้าไม่ scale worker. ถ้าจะ scale worker หลายตัว ต้องแน่ใจว่าทุก state change ผ่าน `transitionStatus()` + atomic sequence เท่านั้น
 
 ## State Machines (do not bypass)
 
