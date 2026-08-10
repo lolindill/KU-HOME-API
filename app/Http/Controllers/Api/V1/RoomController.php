@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Http\Requests\UpdateRoomRequest;
+use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\Log;
 
 class RoomController extends Controller
@@ -188,6 +190,86 @@ class RoomController extends Controller
             'status' => 'success',
             'message' => 'Room availability fetched successfully',
             'room_types' => $availableRoomTypes
+        ]);
+    }
+
+    // 📅 ตรวจห้องว่างรายวัน (per-day calendar) — คืนทุก room type × ทุกคืนในช่วง
+    public function availabilityPerDay(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date|after_or_equal:today',
+            'end_date'   => 'required|date|after_or_equal:start_date',
+        ]);
+
+        $start = Carbon::parse($validated['start_date'])->startOfDay();
+        $end   = Carbon::parse($validated['end_date'])->startOfDay();
+
+        // 🌟 DoS guard (public route): cap ที่ 366 คืน
+        if ($start->diffInDays($end) > 365) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Date range cannot exceed 366 days',
+            ], 422);
+        }
+
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // (status NOT IN maintenance, reserved_closed) → ตรงกับ createBooking
+        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
+                $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+            }])
+            ->get();
+
+        // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
+        // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availability/createBooking)
+        $endExclusive = $end->copy()->addDay();
+        $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
+            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where('check_in', '<', $endExclusive)
+            ->where('check_out', '>', $start)
+            ->get();
+
+        // 🌟 Build occupied matrix [room_type_id => [date => count]]
+        $occupied = [];
+        foreach ($overlaps as $br) {
+            $brCheckIn  = Carbon::parse($br->check_in)->startOfDay();
+            $brCheckOut = Carbon::parse($br->check_out)->startOfDay();
+
+            // วันที่ BR ครอบความค้างคืน ที่อยู่ภายใน [start, end] (half-open: check_in <= D < check_out)
+            $from = $brCheckIn < $start ? $start : $brCheckIn;
+            $to   = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
+
+            for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+                $dateKey = $d->toDateString();
+                $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
+            }
+        }
+
+        // 🌟 Build per-day availability per room type
+        $period = CarbonPeriod::create($start, $end);
+        $dateKeys = [];
+        foreach ($period as $date) {
+            $dateKeys[] = $date->toDateString();
+        }
+
+        $result = $roomTypes->map(function ($type) use ($occupied, $dateKeys) {
+            $row = [
+                'room_type_id' => $type->id,
+                'name_en'      => $type->name_en,
+                'name_th'      => $type->name_th,
+            ];
+            foreach ($dateKeys as $dateKey) {
+                $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
+                $row[$dateKey] = max(0, $type->total_rooms_count - $occupiedCount);
+            }
+            return $row;
+        });
+
+        return response()->json([
+            'status'     => 'success',
+            'message'    => 'Per-day availability fetched successfully',
+            'start_date' => $start->toDateString(),
+            'end_date'   => $end->toDateString(),
+            'room_types' => $result,
         ]);
     }
 

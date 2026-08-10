@@ -206,7 +206,7 @@ These routes exist but are **not for production use**:
 - `AuthController` — login, register, logout
 - `UserController` — user CRUD, profile, verification (Eloquent-based)
 - `BookingController` — booking CRUD, status transitions, room assignment
-- `RoomController` — rooms & room types listing, availability, status updates
+- `RoomController` — rooms & room types listing, availability, per-day availability calendar, status updates
 - `PaymentController` — ❄️ webhook frozen (410), requestPayment (admin walk-in)
 - `FrontDeskController` — walk-in bookings, check-in, check-out, record payments
 - `ImageController` — 🚧 DRAFT image upload
@@ -973,5 +973,54 @@ Polymorphic table ออกแบบให้ขยายได้:
 - เพิ่ม `entity_type = 'booking_confirmation'` → ใช้ `BookingConfirmation` state machine
 
 เมื่อขยาย ให้เขียน log ใน `transitionStatus()` ของ model นั้น (chokepoint pattern เดียวกัน) และอัปเดต `StatusChangeLog` model docblock สำหรับ `entity_type` values ใหม่
+
+
+---
+
+## ✅ Availability Per-Day Calendar Endpoint (2026-08-10)
+
+> เพิ่ม endpoint `GET /api/v1/availability-per-day` — คืนจำนวนห้องว่างรายวัน × ราย room type สำหรับทำ calendar view ที่ frontend (ทำงานคู่กับ `/availability` เดิมที่คืนเลขเดียวต่อ range)
+
+### 🎯 การเปลี่ยนแปลงหลัก
+- **Route:** `GET /v1/availability-per-day?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` (public, ไม่ auth) — เพิ่มใน `routes/api.php` sibling ของ `/availability`
+- **Method:** `RoomController::availabilityPerDay()` — คืน **ทุก room type** (ไม่ filter) × ทุกคืนในช่วง
+- **Output shape:** minimal ตามที่นายท่านขอ + `room_type_id`/`name_en`/`name_th`:
+  ```json
+  {
+    "status": "success", "message": "...",
+    "start_date": "2026-08-10", "end_date": "2026-08-12",
+    "room_types": [
+      { "room_type_id": "uuid", "name_en": "...", "name_th": "...",
+        "2026-08-10": 8, "2026-08-11": 7, "2026-08-12": 9 }
+    ]
+  }
+  ```
+
+### 🤔 Decision: Semantics ของ "ห้องว่างคืนนั้น"
+- **Total rooms (ตัวตั้ง)** = ห้องที่ `status NOT IN (maintenance, reserved_closed)` → **ตรงกับ `BookingController::createBooking` และ `BookingRoom::assignAvailableRoom`** (ไม่ใช่ `status='available'` เหมือน `/availability` เดิมที่ under-count)
+- **Occupied** = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap คืนนั้น — half-open `check_in <= D < check_out` (checkout day free) → ตรงกับ `/availability` + `createBooking` 100%
+- **ข้อจำกัดตามธรรมชาติ (ล็อกไว้):** total = snapshot ณ today ของ sellable rooms ไม่ใช่ future-aware maintenance schedule (ถ้าวันนี้ maintenance แต่อนาคตซ่อมเสร็จ calendar ก็ยังตัดออก) → **consistent กับ booking-time check เป็นหลัก** ป้องกัน over-promise
+
+### 🤔 Decision: Matrix one-query approach (ไม่ใช่ N×M ในลูป)
+แทนที่จะวน query ทีละวัน × room type ใช้ "load once, fill matrix":
+1. query room_types ทั้งหมดพร้อม `withCount rooms whereNotIn(status, [maintenance, reserved_closed])` (1 query)
+2. query booking_rooms ที่ overlap `[start, end+1]` **ครั้งเดียว** (1 query)
+3. PHP วนแต่ละ BR fill occupied count ลง matrix `[room_type_id][date]` เฉพาะคืนใน [start, end]
+4. compute `available = max(0, total − occupied)` แต่ละ cell
+
+→ **3 queries ตลอด ไม่ว่าจะกี่วัน** (vs. `days × room_types` queries แบบ naive). สำคัญมากเพราะ route public + ไม่ auth.
+
+### 🛡️ DoS Guard
+Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกินปฏิเสธด้วย 422 `{"status":"error","message":"Date range cannot exceed 366 days"}` กัน JSON bomb และ memory spike (เช่น 100 ปี × ทุก room type)
+
+### 📁 Files Changed (1 controller edit + 1 route + doc)
+- `app/Http/Controllers/Api/V1/RoomController.php` — เพิ่ม `use App\Models\BookingRoom` + `use Carbon\CarbonPeriod` + method `availabilityPerDay()`
+- `routes/api.php` — เพิ่ม `Route::get('/availability-per-day', [RoomController::class, 'availabilityPerDay'])`
+- `cline.md` — section นี้ + อัปเดต controller description (บรรทัด 209)
+
+### 🔮 Future Extension (ไม่ใช่ scope รอบนี้)
+- ถ้า calendar ต้องการ future-aware maintenance schedule → ต้องการ `room_maintenance_schedule` table (วันที่เริ่ม/จบ maintenance) แล้ว query เข้า matrix เพิ่ม
+- ถ้า frontend ต้องการ rate ด้วย → embed `daily_rate` เหมือน `/availability` (ตอนนี้ minimal ตามคำขอ)
+- ถ้าโดน abuse หนัก → เพิ่ม `throttle:10,1` เฉพาะ route หรือ cache ผลลัพธ์ short-TTL
 
 

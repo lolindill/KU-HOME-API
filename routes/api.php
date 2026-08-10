@@ -42,6 +42,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/room-types', [RoomController::class, 'allRoomTypes']);
     Route::get('/room-types/{id}', [RoomController::class, 'getRoomTypeById']);
     Route::get('/availability', [RoomController::class, 'availability']);
+    Route::get('/availability-per-day', [RoomController::class, 'availabilityPerDay']);
 
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);

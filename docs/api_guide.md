@@ -564,6 +564,77 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 
 ---
 
+### GET `/availability-per-day` — Per-day availability calendar
+
+🔒 **Public**
+
+คืนจำนวนห้องว่างรายวัน × ทุก room type สำหรับทำ calendar view (แต่ละค่า = จำนวนห้องที่ขายได้ "คืนนั้น"). ทำงานคู่กับ `/availability` ที่คืนเลขเดียวต่อ range.
+
+**Query Params:**
+- `start_date` (required, date, ≥ today)
+- `end_date` (required, date, ≥ start_date)
+- 🛡️ Cap: `(end_date − start_date) ≤ 365 คืน` (สูงสุด 366 วัน) — เกินปฏิเสธด้วย `422`
+
+**Semantics:**
+- แต่ละค่า = `max(0, total_rooms − occupied)` ของคืนนั้น
+- `total_rooms` = ห้องที่ `status NOT IN (maintenance, reserved_closed)` (ตรงกับ `/bookings` createBooking)
+- `occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap คืนนั้น — half-open `check_in ≤ D < check_out` (วัน check-out ว่างเสมอ)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Per-day availability fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-12",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "2026-08-10": 39,
+      "2026-08-11": 39,
+      "2026-08-12": 40
+    },
+    {
+      "room_type_id": "uuid",
+      "name_en": "Deluxe",
+      "name_th": "ห้องดีลักซ์",
+      "2026-08-10": 50,
+      "2026-08-11": 50,
+      "2026-08-12": 50
+    }
+  ]
+}
+```
+> 💡 Key รายวัน (`YYYY-MM-DD`) เป็น dynamic ตามช่วงที่ส่งมา
+
+**Response `422`:**
+```json
+// ขาด required param, หรือ start_date ก่อนวันนี้
+{
+  "status": "error",
+  "message": "The start date field is required.",
+  "errors": { "start_date": ["The start date field is required."] }
+}
+
+// ช่วงเกิน 365 คืน
+{
+  "status": "error",
+  "message": "Date range cannot exceed 366 days"
+}
+```
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/availability-per-day?start_date=2026-08-10&end_date=2026-08-12"
+```
+
+> ⚠️ **ข้อจำกัด (consistent กับ booking-time):** `total_rooms` คือ snapshot ณ วันนี้ของห้องที่ขายได้ (ไม่ใช่ future-aware maintenance schedule). ถ้าวันนี้ห้อง status=`maintenance` แต่อนาคตซ่อมเสร็อ calendar ก็ยังตัดห้องนั้นออก → ตรงกับการกดจองจริง ป้องกัน over-promise.
+
+---
+
 ## Bookings (Core)
 
 ### GET `/bookings` — List bookings
