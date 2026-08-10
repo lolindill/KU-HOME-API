@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Http\Requests\UpdateRoomRequest;
 use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class RoomController extends Controller
@@ -35,7 +36,7 @@ class RoomController extends Controller
             'status' => 'success',
             'message' => 'All rooms fetched successfully',
             'total_rooms' => $rooms->count(),
-            'rooms' => $rooms
+            'rooms' => $rooms,
         ]);
     }
 
@@ -44,10 +45,10 @@ class RoomController extends Controller
     {
         $room = Room::with('roomType:id,name_en')->find($id);
 
-        if (!$room) {
+        if (! $room) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Room not found'
+                'message' => 'Room not found',
             ], 404);
         }
 
@@ -61,7 +62,7 @@ class RoomController extends Controller
                 'room_type_name' => $room->roomType->name_en ?? 'Unknown',
                 'status' => $room->status,
                 'status_updated_at' => $room->status_updated_at,
-            ]
+            ],
         ]);
     }
 
@@ -73,7 +74,7 @@ class RoomController extends Controller
         $rooms = Room::with('roomType')
             ->when($statusFilter, function ($query, $statusFilter) {
                 return $query->where('status', strtolower($statusFilter));
-            })  
+            })
             ->orderBy('room_number')
             ->get()
             ->map(function ($room) {
@@ -81,15 +82,15 @@ class RoomController extends Controller
                     'room_number' => $room->room_number,
                     'room_type' => $room->roomType->name_en ?? 'Unknown',
                     'status' => $room->status,
-                    'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-'
+                    'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-',
                 ];
             });
-     
+
         return response()->json([
             'status' => 'success',
             'message' => 'Room status list fetched successfully',
             'total_rooms' => $rooms->count(),
-            'rooms' => $rooms
+            'rooms' => $rooms,
         ]);
     }
 
@@ -103,7 +104,7 @@ class RoomController extends Controller
             'status' => 'success',
             'message' => 'All room types fetched successfully',
             'total_types' => $roomTypes->count(),
-            'room_types' => $roomTypes
+            'room_types' => $roomTypes,
         ]);
     }
 
@@ -113,17 +114,17 @@ class RoomController extends Controller
         // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1
         $roomType = RoomType::with('dailyRateRow')->find($id);
 
-        if (!$roomType) {
+        if (! $roomType) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Room type not found'
+                'message' => 'Room type not found',
             ], 404);
         }
 
         return response()->json([
             'status' => 'success',
             'message' => 'Room type fetched successfully',
-            'room_type' => $roomType
+            'room_type' => $roomType,
         ]);
     }
 
@@ -141,21 +142,21 @@ class RoomController extends Controller
         $maxGuests = $request->query('max_guests');
 
         $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
-                $query->where('status', 'available');
-            }])
+            $query->where('status', 'available');
+        }])
             ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
                 // 🌟 Refactor (29/06/26): filter ที่ BR-level ตรงๆ ตาม state machine
                 // BR states ที่นับลด availability: draft, confirmed, checked_in
                 // (cancelled/no_show/checked_out ไม่นับลด)
                 // ✅ Consistency: ตรงกับ createBooking() ที่กรองแบบเดียวกัน
                 $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
-                      ->where('check_in', '<', $checkOut)
-                      ->where('check_out', '>', $checkIn);
+                    ->where('check_in', '<', $checkOut)
+                    ->where('check_out', '>', $checkIn);
             }])
             // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1 (rate มาจาก global_rates)
             ->with('dailyRateRow')
             // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
-            ->when($maxGuests, fn($q) => $q->where('max_guests', '>=', $maxGuests))
+            ->when($maxGuests, fn ($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
             ->map(function ($type) use ($checkIn, $checkOut, $maxGuests) {
                 $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
@@ -182,14 +183,14 @@ class RoomController extends Controller
                         'check_in' => $checkIn->toDateString(),
                         'check_out' => $checkOut->toDateString(),
                         'max_guests' => $maxGuests ? (int) $maxGuests : null,
-                    ]
+                    ],
                 ];
             });
 
         return response()->json([
             'status' => 'success',
             'message' => 'Room availability fetched successfully',
-            'room_types' => $availableRoomTypes
+            'room_types' => $availableRoomTypes,
         ]);
     }
 
@@ -198,16 +199,16 @@ class RoomController extends Controller
     {
         $validated = $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
-            'end_date'   => 'required|date|after_or_equal:start_date',
+            'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
         $start = Carbon::parse($validated['start_date'])->startOfDay();
-        $end   = Carbon::parse($validated['end_date'])->startOfDay();
+        $end = Carbon::parse($validated['end_date'])->startOfDay();
 
         // 🌟 DoS guard (public route): cap ที่ 366 คืน
         if ($start->diffInDays($end) > 365) {
             return response()->json([
-                'status'  => 'error',
+                'status' => 'error',
                 'message' => 'Date range cannot exceed 366 days',
             ], 422);
         }
@@ -215,8 +216,8 @@ class RoomController extends Controller
         // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ createBooking
         $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
-                $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
-            }])
+            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+        }])
             ->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
@@ -231,12 +232,12 @@ class RoomController extends Controller
         // 🌟 Build occupied matrix [room_type_id => [date => count]]
         $occupied = [];
         foreach ($overlaps as $br) {
-            $brCheckIn  = Carbon::parse($br->check_in)->startOfDay();
+            $brCheckIn = Carbon::parse($br->check_in)->startOfDay();
             $brCheckOut = Carbon::parse($br->check_out)->startOfDay();
 
             // วันที่ BR ครอบความค้างคืน ที่อยู่ภายใน [start, end] (half-open: check_in <= D < check_out)
             $from = $brCheckIn < $start ? $start : $brCheckIn;
-            $to   = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
+            $to = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
 
             for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
                 $dateKey = $d->toDateString();
@@ -254,22 +255,215 @@ class RoomController extends Controller
         $result = $roomTypes->map(function ($type) use ($occupied, $dateKeys) {
             $row = [
                 'room_type_id' => $type->id,
-                'name_en'      => $type->name_en,
-                'name_th'      => $type->name_th,
+                'name_en' => $type->name_en,
+                'name_th' => $type->name_th,
             ];
             foreach ($dateKeys as $dateKey) {
                 $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
                 $row[$dateKey] = max(0, $type->total_rooms_count - $occupiedCount);
             }
+
             return $row;
         });
 
         return response()->json([
-            'status'     => 'success',
-            'message'    => 'Per-day availability fetched successfully',
+            'status' => 'success',
+            'message' => 'Per-day availability fetched successfully',
             'start_date' => $start->toDateString(),
-            'end_date'   => $end->toDateString(),
+            'end_date' => $end->toDateString(),
             'room_types' => $result,
+        ]);
+    }
+
+    // 📅 ตรวจห้องว่างเป็นช่วง (range) — คืน intervals ของวันที่ห้องเต็ม (available=0) ราย room_type
+    //    ต่างจาก availabilityPerDay ตรงที่ไม่คืนจำนวนห้องว่างรายวัน แต่กลุ่มวัน sold-out ที่ติดกันเป็น {start_date,end_date}
+    //    ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้ (โหลดน้อยกว่า per-day matrix)
+    public function availabilityRanges(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date|after_or_equal:today',
+            'end_date' => 'required|date|after_or_equal:start_date',
+        ]);
+
+        $start = Carbon::parse($validated['start_date'])->startOfDay();
+        $end = Carbon::parse($validated['end_date'])->startOfDay();
+
+        // 🌟 DoS guard (public route): cap ที่ 366 คืน
+        if ($start->diffInDays($end) > 365) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Date range cannot exceed 366 days',
+            ], 422);
+        }
+
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
+        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
+            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+        }])
+            ->get();
+
+        // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
+        // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
+        $endExclusive = $end->copy()->addDay();
+        $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
+            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where('check_in', '<', $endExclusive)
+            ->where('check_out', '>', $start)
+            ->get();
+
+        // 🌟 Build occupied matrix [room_type_id => [date => count]]
+        $occupied = [];
+        foreach ($overlaps as $br) {
+            $brCheckIn = Carbon::parse($br->check_in)->startOfDay();
+            $brCheckOut = Carbon::parse($br->check_out)->startOfDay();
+
+            // วันที่ BR ครอบความค้างคืน ที่อยู่ภายใน [start, end] (half-open: check_in <= D < check_out)
+            $from = $brCheckIn < $start ? $start : $brCheckIn;
+            $to = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
+
+            for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+                $dateKey = $d->toDateString();
+                $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
+            }
+        }
+
+        // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
+        $dateKeys = [];
+        foreach (CarbonPeriod::create($start, $end) as $date) {
+            $dateKeys[] = $date->toDateString();
+        }
+
+        // 🌟 กลุ่มวัน sold-out (available=0) ที่ติดกันเป็น interval ราย room_type
+        // sold-out = occupied >= total_rooms_count (total=0 → ไม่มีห้องขาย ไม่ถือว่า sold-out ที่นี่
+        //            เพราะ frontend มัก disable เฉพาะวันที่เคยมีห้องแต่หมดแล้ว)
+        $result = $roomTypes->map(function ($type) use ($occupied, $dateKeys) {
+            $intervals = [];
+
+            // run-length grouping: จับวัน sold-out ที่ติดกันเป็นช่วง [start_date, end_date]
+            foreach ($dateKeys as $dateKey) {
+                $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
+                $isSoldOut = $type->total_rooms_count > 0 && $occupiedCount >= $type->total_rooms_count;
+
+                if ($isSoldOut) {
+                    // ขยาย interval สุดท้าย (ถ้าติดกัน) หรือเปิด interval ใหม่
+                    $lastIdx = count($intervals) - 1;
+                    if ($lastIdx >= 0 && Carbon::parse($intervals[$lastIdx]['end_date'])->addDay()->toDateString() === $dateKey) {
+                        $intervals[$lastIdx]['end_date'] = $dateKey;
+                    } else {
+                        $intervals[] = ['start_date' => $dateKey, 'end_date' => $dateKey];
+                    }
+                }
+            }
+
+            return [
+                'room_type_id' => $type->id,
+                'name_en' => $type->name_en,
+                'name_th' => $type->name_th,
+                'intervals' => array_values($intervals),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Availability ranges fetched successfully',
+            'start_date' => $start->toDateString(),
+            'end_date' => $end->toDateString(),
+            'room_types' => $result,
+        ]);
+    }
+
+    // 📅 ดึงวันที่จองไม่ได้เลย (flat list) — คืนวันที่ผลรวมห้องว่างของทุก room type เป็น 0
+    //    ต่างจาก availabilityPerDay/Ranges ตรงที่ไม่แยกราย room type และไม่กลุ่มติดกัน
+    //    ใช้สำหรับ frontend disable วันในปฏิทินแบบรวม (วันที่ห้องทุกประเภทเต็ม = จองไม่ได้เลย)
+    public function unavailableDates(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date|after_or_equal:today',
+            'end_date' => 'required|date|after_or_equal:start_date',
+        ]);
+
+        $start = Carbon::parse($validated['start_date'])->startOfDay();
+        $end = Carbon::parse($validated['end_date'])->startOfDay();
+
+        // 🌟 DoS guard (public route): cap ที่ 366 คืน
+        if ($start->diffInDays($end) > 365) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Date range cannot exceed 366 days',
+            ], 422);
+        }
+
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
+        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
+            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+        }])
+            ->get();
+
+        // 🌟 Degenerate guard: ถ้าไม่มี room type เลย หรือทุก room type total=0
+        //    → ไม่มีห้องขายอยู่แล้ว → คืน [] ป้องกัน false-positive ว่าทุกวัน "เต็ม"
+        if ($roomTypes->isEmpty() || $roomTypes->sum('total_rooms_count') === 0) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Unavailable dates fetched successfully',
+                'start_date' => $start->toDateString(),
+                'end_date' => $end->toDateString(),
+                'unavailable_dates' => [],
+            ]);
+        }
+
+        // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
+        // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
+        $endExclusive = $end->copy()->addDay();
+        $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
+            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where('check_in', '<', $endExclusive)
+            ->where('check_out', '>', $start)
+            ->get();
+
+        // 🌟 Build occupied matrix [room_type_id => [date => count]]
+        $occupied = [];
+        foreach ($overlaps as $br) {
+            $brCheckIn = Carbon::parse($br->check_in)->startOfDay();
+            $brCheckOut = Carbon::parse($br->check_out)->startOfDay();
+
+            // วันที่ BR ครอบความค้างคืน ที่อยู่ภายใน [start, end] (half-open: check_in <= D < check_out)
+            $from = $brCheckIn < $start ? $start : $brCheckIn;
+            $to = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
+
+            for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+                $dateKey = $d->toDateString();
+                $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
+            }
+        }
+
+        // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
+        $dateKeys = [];
+        foreach (CarbonPeriod::create($start, $end) as $date) {
+            $dateKeys[] = $date->toDateString();
+        }
+
+        // 🌟 วัน "จองไม่ได้" = ผลรวมห้องว่างข้ามทุก room type เป็น 0
+        //    (วันที่ไม่ว่างสักประเภท = จองไม่ได้เลย)
+        $unavailableDates = [];
+        foreach ($dateKeys as $dateKey) {
+            $totalAvailable = 0;
+            foreach ($roomTypes as $type) {
+                $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
+                $totalAvailable += max(0, $type->total_rooms_count - $occupiedCount);
+            }
+            if ($totalAvailable === 0) {
+                $unavailableDates[] = $dateKey;
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Unavailable dates fetched successfully',
+            'start_date' => $start->toDateString(),
+            'end_date' => $end->toDateString(),
+            'unavailable_dates' => $unavailableDates,
         ]);
     }
 
@@ -287,11 +481,11 @@ class RoomController extends Controller
             // 🌟 ใช้ state machine
             $isUpdated = $room->transitionStatusTo($newStatus, $userId);
 
-            if (!$isUpdated) {
+            if (! $isUpdated) {
                 return response()->json([
                     'status' => 'success',
-                    'message' => 'Room status is already ' . $newStatus,
-                    'room' => $room
+                    'message' => 'Room status is already '.$newStatus,
+                    'room' => $room,
                 ]);
             }
 
@@ -303,21 +497,22 @@ class RoomController extends Controller
                 'old_status' => $currentStatus,
                 'new_status' => $room->status,
                 'status_updated_at' => $room->status_updated_at,
-                'status_updated_by' => $room->status_updated_by, 
+                'status_updated_by' => $room->status_updated_by,
             ]);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Room not found'
+                'message' => 'Room not found',
             ], 404);
 
         } catch (\Exception $e) {
             $statusCode = $e->getCode() ?: 500;
-            Log::error("Room status update failed: " . $e->getMessage());
+            Log::error('Room status update failed: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], $statusCode);
         }
     }

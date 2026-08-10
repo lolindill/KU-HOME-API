@@ -1024,3 +1024,96 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - ถ้าโดน abuse หนัก → เพิ่ม `throttle:10,1` เฉพาะ route หรือ cache ผลลัพธ์ short-TTL
 
 
+## ✅ Sold-out Intervals + Unavailable Dates Endpoints (2026-08-10)
+
+> เพิ่ม endpoint availability อีก 2 ตัว ทำงานคู่กับ `/availability-per-day` แต่ตอบ use-case อื่น:
+> - `GET /availability-ranges` — คืน **intervals** วัน sold-out **ราย room_type** (กลุ่มวันติดกันเป็น `{start_date,end_date}`) เบากว่า per-day matrix
+> - `GET /unavailable-dates` — คืน **flat list** วันที่จองไม่ได้เลย (**ทุก room type เต็ม**) สำหรับ disable วันในปฏิทินแบบรวม
+
+### 🎯 การเปลี่ยนแปลงหลัก
+- **Route:** `GET /v1/availability-ranges` + `GET /v1/unavailable-dates` (public, sibling ของ `/availability-per-day`)
+- **Methods:** `RoomController::availabilityRanges()` + `RoomController::unavailableDates()`
+- **Output shapes:**
+  ```json
+  // /availability-ranges — แยกราย room_type, intervals กลุ่มติดกัน
+  { "status":"success", "room_types": [
+    { "room_type_id":"uuid","name_en":"...","intervals":[ {"start_date":"2026-08-12","end_date":"2026-08-13"} ] }
+  ]}
+
+  // /unavailable-dates — flat list รวมทุก type
+  { "status":"success", "unavailable_dates": ["2026-08-12","2026-08-13"] }
+  ```
+
+### 🤔 Decision: Semantics ต่างกันยังไง
+| Endpoint | Granularity | Shape | "เต็ม" หมายถึง |
+|---|---|---|---|
+| `/availability-per-day` | ราย room_type × รายวัน | matrix (เลขห้องว่าง) | n/a (คืนจำนวน) |
+| `/availability-ranges` | ราย room_type | intervals กลุ่มติดกัน | type นั้น occupied >= total |
+| `/unavailable-dates` | รวมทุก type | flat list รายวัน | **sum across types = 0** |
+
+→ total/occupied semantics เหมือนกันทั้ง 3 ตัว (status NOT IN maintenance/reserved_closed, BR ∈ draft/confirmed/checked_in, half-open `check_in <= D < check_out`)
+
+### 🤔 Decision: Edge case `total_rooms = 0`
+- **`/availability-ranges`** — `total=0` ไม่ถือว่า sold-out (คืน `intervals: []`) เพราะ frontend มัก disable เฉพาะวันที่เคยมีห้องแต่หมดแล้ว
+- **`/unavailable-dates`** — **degenerate guard:** ถ้าไม่มี room type เลย หรือ `sum(total) === 0` → คืน `[]` เลย ป้องกัน false-positive ว่าทุกวัน "เต็ม" ทั้งที่จริงคือไม่มีห้องขายอยู่แล้ว (สำคัญใน dev/test DB ที่ยังไม่มีข้อมูล)
+
+### 🛡️ DoS Guard / Performance
+- Public routes → cap `(end − start) ≤ 365` คืน เหมือน `/availability-per-day`
+- Reuse matrix one-query approach (3 queries ตลอด ไม่ว่าจะกี่วัน)
+
+### 📁 Files Changed
+- `app/Http/Controllers/Api/V1/RoomController.php` — เพิ่ม `availabilityRanges()` + `unavailableDates()`
+- `routes/api.php` — เพิ่ม 2 routes ใน public block
+- `tests/Feature/RoomTest.php` — เพิ่ม 3 tests สำหรับ availability-ranges + 3 tests สำหรับ unavailable-dates
+- `docs/api_guide.md` — เพิ่ม 2 sections ตาม pattern เดียวกับ `/availability-per-day`
+
+
+## ✅ Add Rooms to Draft Booking Endpoint (2026-08-10)
+
+> เพิ่ม endpoint `POST /api/v1/bookings/{bookingId}/rooms` — เพิ่มห้องเข้า booking ที่สร้างไปแล้ว **เฉพาะเมื่อ booking อยู่ในสถานะ `draft`** ทำให้ user/admin ปรับแต่ง cart ก่อน confirm ได้
+
+### 🎯 การเปลี่ยนแปลงหลัก
+- **Route:** `POST /v1/bookings/{bookingId}/rooms` (auth:sanctum + throttle:5,1) — วางใน protected group sibling ของ `createBooking`
+- **Method:** `BookingController::addRooms(AddBookingRoomsRequest, $bookingId)` — reuse logic จาก `createBooking` (availability check + pricing + create BR + Addon) แต่ไม่สร้าง Booking ใหม่
+- **Request shape:** array `booking_rooms.*` เหมือน `StoreBookingRequest` (ไม่มี `source` เพราะ booking สร้างไปแล้ว)
+- **Output:** `{"status":"success","booking_id","added_amount","total_amount","payment_deadline"}` (HTTP 200)
+
+### 🔒 Constraints (state machine)
+- **Draft guard:** `if ($booking->status !== 'draft')` → **422** "ไม่สามารถเพิ่มห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ" — **core constraint ของ feature**
+- **Authorization:** เจ้าของ booking (`user_id === Auth::id()`) **หรือ** admin → ใช้ได้; คนอื่น → **403** (pattern เดียวกับ `showById`)
+- **Availability check** เหมือน `createBooking` เป๊ะ — นับ `['draft','confirmed','checked_in']` BRs ที่ overlap + batch overlaps ภายใน request; reject ถ้าเกิน `Room::where('room_type_id',$rtId)->count()`
+- **Pricing** อ่านจาก `GlobalRate` server-side เท่านั้น (ป้องกัน price manipulation #20) เหมือน `createBooking`
+
+### 🤔 Decision: ไม่เรียก RoomAllocator / transitionStatus
+- **ไม่เรียก RoomAllocator** — draft booking ยังไม่จ่ายห้องจริง (room allocation เกิดตอน `paid`/`confirmed` ผ่าน `autoAssignRooms`) → สร้าง BR ด้วย `room_id = null`
+- **ไม่เรียก `transitionStatus()`** — ห้องใหม่ถูกสร้างด้วย `status='draft'` ตรงๆ (initial state ไม่ใช่ transition target) เหมือน `createBooking` บรรทัด 233
+- **ไม่เขียน status_change_logs เอง** — ไม่มี transition เกิดขึ้นใน endpoint นี้ → audit log ยังสอดคล้องกับ state machine
+
+### 🤔 Decision: สร้าง AddBookingRoomsRequest ใหม่ (ไม่ใช้ StoreBookingRoomRequest)
+- `StoreBookingRoomRequest` + `UpdateBookingRoomRequest` ที่มีอยู่เป็น **flat (single room) + unused scaffold** (grep: zero usages) และไม่มี `addons` rules
+- สร้าง `AddBookingRoomsRequest` ใหม่เป็น nested array shape (`booking_rooms.*`) ตรงกับ `createBooking` → reuse validation + Thai messages pattern เดิม ไม่ทำซ้ำ semantics
+
+### 🤔 Decision: existing count รวมห้องใน booking นี้เอง
+- availability query ไม่ `where('booking_id', '!=', $booking->id)` exclude — เพราะห้องที่อยู่ใน booking นี้มี `status='draft'` และ overlap อยู่แล้ว นับเข้าไปด้วยถูกต้อง (มันจองไปแล้วจริงๆ)
+- ถ้า exclude ออกจะทำให้ over-count available → risk overbooking ข้าม booking
+
+### 📁 Files Changed (1 new + 2 modified + 1 doc)
+- `app/Http/Requests/AddBookingRoomsRequest.php` — **(new)** form request nested array + Thai messages
+- `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม import + method `addRooms()` วางก่อน `createBooking()`
+- `routes/api.php` — เพิ่ม `POST /v1/bookings/{bookingId}/rooms`
+- `cline.md` — section นี้
+
+### 🗄️ Migration Required
+**ไม่ต้อง** — ไม่มี schema change; ใช้ตารางที่มีอยู่ (`bookings`, `booking_rooms`, `addons`, `global_rates`)
+
+### 🧪 Test Results (2026-08-10)
+- **198 passed (370 assertions)** — existing suite ไม่พัง (ไม่มี test ใหม่สำหรับ endpoint นี้ใน scope รอบนี้ — ถ้าจะเพิ่ม unit/feature test ให้ตรงกับ `BookingTest` pattern: create draft → add rooms → assert total_amount; add rooms ให้ `paid` booking → assert 422)
+- `vendor/bin/pint --dirty` — ผ่าน (3 files)
+- `php artisan route:list` — route ลงทะเบียน: `POST api/v1/bookings/{bookingId}/rooms → BookingController@addRooms`
+
+### 🔮 Future Extension (ไม่ใช่ scope รอบนี้)
+- **Remove rooms** (delete BR จาก draft booking + recompute total) — endpoint คู่ของ feature นี้
+- **Update individual room** (เปลี่ยน room_type/date/addons ของ BR ใน draft) — repurpose `UpdateBookingRoomRequest` ที่มีอยู่ (ตอนนี้ unused)
+- **Feature test** สำหรับ addRooms (draft/paid/owner/admin/availability-exhausted cases)
+
+

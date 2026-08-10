@@ -1,0 +1,65 @@
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+
+/**
+ * 🌟 Request สำหรับเพิ่มห้องเข้าไปใน booking ที่สร้างไว้แล้ว (เฉพาะ draft state)
+ *
+ * โครงสร้างเหมือน StoreBookingRequest แต่ไม่มี `source`
+ * (booking ถูกสร้างไปแล้ว — แค่เพิ่ม booking_rooms เข้าไป)
+ */
+class AddBookingRoomsRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        return [
+            // 🌟 1 array entry = 1 ห้อง (เหมือน StoreBookingRequest)
+            'booking_rooms' => 'required|array',
+            'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
+            'booking_rooms.*.check_in' => 'required|date|after_or_equal:today',
+            'booking_rooms.*.check_out' => 'required|date|after:booking_rooms.*.check_in',
+            'booking_rooms.*.extra_beds' => 'nullable|integer|min:0',
+
+            // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง
+            'booking_rooms.*.guests' => 'nullable|array',
+            'booking_rooms.*.guests.*.title' => 'nullable|string|max:50',
+            'booking_rooms.*.guests.*.name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
+            'booking_rooms.*.guests.*.is_ku_member' => 'nullable|boolean',
+            'booking_rooms.*.has_children' => 'nullable|boolean',
+
+            // 🧾 Billing fields (04/08/26)
+            'booking_rooms.*.billing_address' => 'nullable|string|max:255',
+            'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
+
+            'booking_rooms.*.addons' => 'nullable|array',
+            'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.early_checkin' => 'nullable|boolean',
+            'booking_rooms.*.addons.late_checkout' => 'nullable|boolean',
+        ];
+    }
+
+    /**
+     * 🌟 ข้อความแจ้งเตือนภาษาไทย
+     */
+    public function messages(): array
+    {
+        return [
+            'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการเพิ่มอย่างน้อย 1 ห้อง',
+            'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จะเพิ่มไม่ถูกต้อง',
+            'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',
+            'booking_rooms.*.room_type_id.exists' => 'ไม่พบประเภทห้องที่ระบุ',
+            'booking_rooms.*.check_in.required' => 'กรุณาระบุวันที่เช็คอินของแต่ละห้อง',
+            'booking_rooms.*.check_in.after_or_equal' => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
+            'booking_rooms.*.check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
+            'booking_rooms.*.check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
+        ];
+    }
+}

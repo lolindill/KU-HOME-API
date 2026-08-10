@@ -2,15 +2,15 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
-use App\Models\Room;
-use App\Models\RoomType;
-use App\Models\GlobalRate;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
+use App\Models\Room;
+use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class RoomTest extends TestCase
 {
@@ -34,16 +34,18 @@ class RoomTest extends TestCase
             'default_price' => 1500,
             'is_active' => true,
         ]);
+
         return $rt;
     }
 
     private function createRoom(string $status = 'available'): Room
     {
         $roomType = $this->createRoomType();
+
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.rand(1, 99),
             'status' => $status,
         ]);
     }
@@ -88,7 +90,7 @@ class RoomTest extends TestCase
             'status' => 'available',
         ]);
 
-        $response = $this->getJson('/api/v1/availability?' . http_build_query([
+        $response = $this->getJson('/api/v1/availability?'.http_build_query([
             'check_in' => now()->addDay()->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
         ]));
@@ -173,7 +175,7 @@ class RoomTest extends TestCase
         $user = User::factory()->create();
         $booking = Booking::create([
             'user_id' => $user->id,
-            'confirmation' => 'TEST-' . Str::uuid(),
+            'confirmation' => 'TEST-'.Str::uuid(),
             'source' => 'admin',
             'status' => 'confirmed',
             'total_amount' => 3000,
@@ -188,7 +190,7 @@ class RoomTest extends TestCase
             'status' => 'cancelled', // BR-level cancelled — ไม่นับลด availability
         ]);
 
-        $response = $this->getJson('/api/v1/availability?' . http_build_query([
+        $response = $this->getJson('/api/v1/availability?'.http_build_query([
             'check_in' => now()->addDays(1)->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
         ]));
@@ -215,7 +217,7 @@ class RoomTest extends TestCase
         $user = User::factory()->create();
         $booking = Booking::create([
             'user_id' => $user->id,
-            'confirmation' => 'TEST-' . Str::uuid(),
+            'confirmation' => 'TEST-'.Str::uuid(),
             'source' => 'admin',
             'status' => 'confirmed',
             'total_amount' => 3000,
@@ -230,7 +232,7 @@ class RoomTest extends TestCase
             'status' => 'confirmed',
         ]);
 
-        $response = $this->getJson('/api/v1/availability?' . http_build_query([
+        $response = $this->getJson('/api/v1/availability?'.http_build_query([
             'check_in' => now()->addDays(1)->toDateString(),
             'check_out' => now()->addDays(3)->toDateString(),
         ]));
@@ -241,5 +243,175 @@ class RoomTest extends TestCase
 
         // confirmed booking should reduce available rooms to 0
         $this->assertEquals(0, $found['available_rooms']);
+    }
+
+    // ============================================
+    // 📅 availability-ranges (intervals of sold-out days)
+    // ============================================
+
+    public function test_availability_ranges_groups_consecutive_sold_out_days(): void
+    {
+        // room_type ที่มีห้องเดียว → ทุก BR overlap = sold-out วันนั้น
+        $roomType = $this->createRoomType();
+        Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '101',
+            'status' => 'available',
+        ]);
+
+        $user = User::factory()->create();
+        $booking = Booking::create([
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-'.Str::uuid(),
+            'source' => 'admin',
+            'status' => 'confirmed',
+            'total_amount' => 3000,
+        ]);
+
+        // BR แรก: today+1 .. today+3 (sold-out 2 คืนติด)
+        // BR สอง: today+6 .. today+7 (sold-out 1 คืน — แยก interval จากอันแรก)
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(1)->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(6)->toDateString(),
+            'check_out' => now()->addDays(7)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+
+        $response = $this->getJson('/api/v1/availability-ranges?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(10)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $found = collect($response->json('room_types'))->firstWhere('room_type_id', $roomType->id);
+        $intervals = $found['intervals'];
+
+        // 🌟 expect 2 intervals: [today+1 .. today+2] และ [today+6 .. today+6]
+        //    (end_date = วันสุดท้ายที่ sold-out, คืน check_out ไม่นับเพราะ check-out วันนั้นว่างแล้ว)
+        $this->assertCount(2, $intervals);
+        $this->assertEquals(now()->addDays(1)->toDateString(), $intervals[0]['start_date']);
+        $this->assertEquals(now()->addDays(2)->toDateString(), $intervals[0]['end_date']);
+        $this->assertEquals(now()->addDays(6)->toDateString(), $intervals[1]['start_date']);
+        $this->assertEquals(now()->addDays(6)->toDateString(), $intervals[1]['end_date']);
+    }
+
+    public function test_availability_ranges_empty_when_never_sold_out(): void
+    {
+        $roomType = $this->createRoomType();
+        // 2 ห้อง แต่ไม่มี booking → ไม่มีวัน sold-out
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '102', 'status' => 'available']);
+
+        $response = $this->getJson('/api/v1/availability-ranges?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(5)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $found = collect($response->json('room_types'))->firstWhere('room_type_id', $roomType->id);
+        $this->assertSame([], $found['intervals']);
+    }
+
+    public function test_availability_ranges_validates_required_dates(): void
+    {
+        $response = $this->getJson('/api/v1/availability-ranges');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['start_date', 'end_date']);
+    }
+
+    // ============================================
+    // 📅 unavailable-dates (flat list วันที่จองไม่ได้เลย — ทุก room type เต็ม)
+    // ============================================
+
+    public function test_unavailable_dates_lists_days_where_all_room_types_sold_out(): void
+    {
+        // 2 room types, แต่ละ type มี 1 ห้อง → sold-out เมื่อมี BR overlap
+        $roomTypeA = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomTypeA->id, 'room_number' => '101', 'status' => 'available']);
+        $roomTypeB = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomTypeB->id, 'room_number' => '201', 'status' => 'available']);
+
+        $user = User::factory()->create();
+        $booking = Booking::create([
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-'.Str::uuid(),
+            'source' => 'admin',
+            'status' => 'confirmed',
+            'total_amount' => 3000,
+        ]);
+
+        // 🌟 วัน today+2: จองทั้งสอง type → จองไม่ได้เลย (อยู่ใน list)
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomTypeA->id,
+            'check_in' => now()->addDays(2)->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomTypeB->id,
+            'check_in' => now()->addDays(2)->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+
+        // 🌟 วัน today+4: จองแค่ type A → type B ยังว่าง → ยังจองได้ (ไม่อยู่ใน list)
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomTypeA->id,
+            'check_in' => now()->addDays(4)->toDateString(),
+            'check_out' => now()->addDays(5)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+
+        $response = $this->getJson('/api/v1/unavailable-dates?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(10)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $dates = $response->json('unavailable_dates');
+
+        // 🌟 expect เฉพาะ today+2 (ทั้งสอง type เต็ม). today+4 มี type B ว่าง → ไม่อยู่ใน list
+        $this->assertContains(now()->addDays(2)->toDateString(), $dates);
+        $this->assertNotContains(now()->addDays(4)->toDateString(), $dates);
+    }
+
+    public function test_unavailable_dates_empty_when_never_full(): void
+    {
+        // มีห้องว่างเยอะกว่า booking → ไม่มีวันไหนเต็มทุก type
+        $roomType = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '102', 'status' => 'available']);
+
+        $response = $this->getJson('/api/v1/unavailable-dates?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(5)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $this->assertSame([], $response->json('unavailable_dates'));
+    }
+
+    public function test_unavailable_dates_validates_required_dates(): void
+    {
+        $response = $this->getJson('/api/v1/unavailable-dates');
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['start_date', 'end_date']);
     }
 }

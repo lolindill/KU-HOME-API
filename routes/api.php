@@ -43,6 +43,8 @@ Route::prefix('v1')->group(function () {
     Route::get('/room-types/{id}', [RoomController::class, 'getRoomTypeById']);
     Route::get('/availability', [RoomController::class, 'availability']);
     Route::get('/availability-per-day', [RoomController::class, 'availabilityPerDay']);
+    Route::get('/availability-ranges', [RoomController::class, 'availabilityRanges']);
+    Route::get('/unavailable-dates', [RoomController::class, 'unavailableDates']);
 
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
@@ -77,6 +79,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // 🌟 Refactor (18/06/26): createBooking ย้ายมานี่ — ต้อง login (auth:sanctum) ทุกกรณี
     Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
+
+    // 🌟 (10/08/26): เพิ่มห้องเข้า booking ที่สร้างไปแล้ว (เฉพาะ draft state)
+    //    เจ้าของ booking หรือ admin ใช้ได้ (ownership check ใน controller)
+    Route::post('/bookings/{bookingId}/rooms', [BookingController::class, 'addRooms'])
+        ->where('bookingId', '[0-9a-f\-]{36}')
+        ->middleware('throttle:5,1');
 
     // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
     Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])

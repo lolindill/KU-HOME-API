@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AddBookingRoomsRequest;
 use App\Http\Requests\StoreBookingRequest;
 use App\Models\Addon;
 use App\Models\Booking;
@@ -112,6 +113,190 @@ class BookingController extends Controller
             'discount_applied' => $discountAmount,
             'net_total' => $request->subtotal - $discountAmount,
         ]);
+    }
+
+    /**
+     * 🌟 เพิ่มห้องเข้าไปใน booking ที่สร้างไว้แล้ว (เฉพาะ draft state เท่านั้น)
+     *
+     * Logic reuse จาก createBooking (availability check + pricing + create BR + Addon)
+     * แต่ไม่สร้าง Booking ใหม่ — เพิ่ม booking_rooms เข้าไปใน container เดิม
+     *
+     * Constraints:
+     * - booking.status ต้องเป็น 'draft' เท่านั้น (🔒 core guard)
+     * - เจ้าของ booking หรือ admin เท่านั้นที่เพิ่มได้
+     * - ไม่เรียก RoomAllocator (draft ยังไม่จ่ายห้อง — เหมือน createBooking)
+     * - ไม่เรียก transitionStatus (ห้องใหม่สร้างด้วย status='draft' ตรงๆ = initial state)
+     */
+    public function addRooms(AddBookingRoomsRequest $request, $bookingId)
+    {
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนเพิ่มห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — เพิ่มห้องได้เฉพาะ draft state เท่านั้น
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถเพิ่มห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะนายท่าน', 422);
+            }
+
+            DB::beginTransaction();
+
+            // 🌟 Availability check (reuse pattern จาก createBooking)
+            // group by room_type_id + ตรวจ overlap ของแต่ละช่วงวัน
+            // 🌟 สำคัญ: existing count รวมห้องที่อยู่ใน booking นี้แล้วด้วย (มี status='draft' overlap)
+            $requestedByType = [];
+
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                $rtId = $roomRequest['room_type_id'];
+                $requestedByType[$rtId][] = [
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                ];
+            }
+
+            foreach ($requestedByType as $rtId => $requests) {
+                $totalRooms = Room::where('room_type_id', $rtId)->count();
+
+                // ตรวจทีละช่วงวันของห้องที่ขอเพิ่ม — นับ existing bookings + batch overlaps
+                foreach ($requests as $checkReq) {
+                    $checkIn = Carbon::parse($checkReq['check_in']);
+                    $checkOut = Carbon::parse($checkReq['check_out']);
+
+                    // 🌟 availability นับที่ BR-level (block ห้องตั้งแต่ draft ขึ้นไป)
+                    $existingBooked = BookingRoom::where('room_type_id', $rtId)
+                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->count();
+
+                    // นับห้องใน batch นี้ที่ overlap กับช่วงวันของห้องปัจจุบัน
+                    $batchOverlapping = 0;
+                    foreach ($requests as $otherReq) {
+                        $otherIn = Carbon::parse($otherReq['check_in']);
+                        $otherOut = Carbon::parse($otherReq['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+            }
+
+            // 🌟 ดึง rate จาก global_rates (server-side) — เหมือน createBooking
+            $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+
+            $addedAmount = 0;
+
+            // 🌟 สร้าง BookingRoom + Addon ทีละห้อง (clone pattern จาก createBooking)
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
+
+                // คำนวณ nights รายห้อง
+                $roomCheckIn = Carbon::parse($roomRequest['check_in']);
+                $roomCheckOut = Carbon::parse($roomRequest['check_out']);
+                $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
+
+                // 🌟 room rate จาก global_rates (rate_type='daily')
+                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
+                $extraBedQty = $roomRequest['extra_beds'] ?? 0;
+                $extraBedUnit = $rates['extra_bed'] ?? 0;
+                $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
+
+                // คำนวณราคา Addon ของห้องนี้ (rate จาก server เท่านั้น)
+                $addons = $roomRequest['addons'] ?? [];
+                $breakfastQty = $addons['breakfast'] ?? 0;
+                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
+                $earlyCheckInPrice = ! empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
+                $lateCheckOutPrice = ! empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
+
+                // รวมยอดของห้องใหม่นี้
+                $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
+                $addedAmount += $subtotal;
+
+                $bookingRoom = BookingRoom::create([
+                    'booking_id' => $booking->id,
+                    'room_type_id' => $roomType->id,
+                    'room_id' => null, // รอจ่ายห้องตอน Check-in
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                    'status' => 'draft', // BR-level state (initial, ไม่ใช่ transition)
+                    'guests' => $roomRequest['guests'] ?? null,
+                    'has_children' => $roomRequest['has_children'] ?? false,
+                    'billing_address' => $roomRequest['billing_address'] ?? null,
+                    'billing_comment' => $roomRequest['billing_comment'] ?? null,
+                ]);
+
+                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id
+                Addon::create([
+                    'booking_room_id' => $bookingRoom->id,
+                    'extra_bed' => $extraBedQty,
+                    'extra_bed_price' => $extraBedTotal,
+                    'breakfast' => $breakfastQty,
+                    'breakfast_price' => $breakfastPrice,
+                    'early_checkIn_price' => $earlyCheckInPrice,
+                    'late_checkOut_price' => $lateCheckOutPrice,
+                ]);
+            }
+
+            // 🌟 อัปเดต total_amount (accumulate เข้ายอดเดิม)
+            $newTotal = $booking->total_amount + $addedAmount;
+            $booking->update(['total_amount' => $newTotal]);
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'added_amount' => $addedAmount,
+                'total_amount' => $booking->fresh()->total_amount,
+                'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
+            ], 200);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            // 🛡️ #40 pattern: Business logic errors (422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            // ModelNotFoundException → 404 (booking ไม่พบ)
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to add rooms to booking: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการเพิ่มห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
     }
 
     public function createBooking(StoreBookingRequest $request)

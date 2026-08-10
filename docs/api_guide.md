@@ -541,6 +541,13 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 **Query Params:**
 - `check_in` (optional, date, ≥ today) — default: today
 - `check_out` (optional, date, > check_in) — default: tomorrow
+- `max_guests` (optional, integer, ≥ 1) — กรองเอาเฉพาะ room type ที่รองรับจำนวนแขก >= ค่าที่ส่ง (เทียบกับคอลัมน์ `max_guests` ของ room type)
+
+**Semantics:**
+- `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
+  - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
+  - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
+- `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `daily_rate`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก
 
 **Response `200`:**
 ```json
@@ -553,14 +560,27 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "name_en": "Standard",
       "name_th": "ห้องมาตรฐาน",
       "available_rooms": 8,
+      "room_type": {
+        "id": "uuid",
+        "name_en": "Standard",
+        "name_th": "ห้องมาตรฐาน",
+        "max_guests": 2,
+        "extra_bed_enabled": true,
+        "max_extra_beds": 1,
+        "extra_bed_price": 50000,
+        "daily_rate": 150000
+      },
       "search_criteria": {
         "check_in": "2026-06-19",
-        "check_out": "2026-06-20"
+        "check_out": "2026-06-20",
+        "max_guests": 2
       }
     }
   ]
 }
 ```
+> 💡 `max_guests` ใน `search_criteria` เป็น `null` ถ้าไม่ได้ส่งมา
+> ⚠️ `rooms_count` ใช้ `status='available'` (ต่างจาก `/availability-per-day` ที่ใช้ `status NOT IN (maintenance, reserved_closed)` — inconsistency ที่รู้กันอยู่)
 
 ---
 
@@ -632,6 +652,71 @@ curl -s -H "Accept: application/json" \
 ```
 
 > ⚠️ **ข้อจำกัด (consistent กับ booking-time):** `total_rooms` คือ snapshot ณ วันนี้ของห้องที่ขายได้ (ไม่ใช่ future-aware maintenance schedule). ถ้าวันนี้ห้อง status=`maintenance` แต่อนาคตซ่อมเสร็อ calendar ก็ยังตัดห้องนั้นออก → ตรงกับการกดจองจริง ป้องกัน over-promise.
+
+---
+
+### GET `/availability-ranges` — Sold-out intervals per room type
+
+🔒 **Public**
+
+คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start_date, end_date}`. เบากว่า `/availability-per-day` เพราะไม่คืนจำนวนห้องว่างรายวัน — ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
+
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` required, cap 365 คืน)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Availability ranges fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-20",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Standard",
+      "name_th": "ห้องมาตรฐาน",
+      "intervals": [
+        { "start_date": "2026-08-12", "end_date": "2026-08-13" }
+      ]
+    }
+  ]
+}
+```
+> 💡 `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out ที่นี่ → คืน `intervals: []` (frontend มัก disable เฉพาะวันที่เคยมีห้องแต่หมดแล้ว)
+
+---
+
+### GET `/unavailable-dates` — Flat list วันที่จองไม่ได้เลย
+
+🔒 **Public**
+
+คืน flat list วันที่ **จองไม่ได้เลย** (ผลรวมห้องว่างของทุก room type เป็น 0 ในวันนั้น). ต่างจาก `/availability-ranges` ตรงที่ (1) รวมทุกประเภทเป็น list เดียว, (2) เป็นวันราบไม่กลุ่มติดกันเป็น interval. ใช้สำหรับปฏิทิน frontend disable วันที่ห้องทุกประเภทเต็ม = กดจองเลยไม่ได้.
+
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` required, cap 365 คืน)
+
+**Semantics:**
+- วัน "จองไม่ได้" = `sum over room_types of max(0, total_rooms − occupied) == 0`
+- `total_rooms` / `occupied` semantics เหมือน `/availability-per-day` ทุกอย่าง
+- **Edge case:** ถ้าไม่มี room type เลย หรือทุก room type `total=0` → คืน `[]` (degenerate guard — ป้องกัน false-positive ว่าทุกวัน "เต็ม" ทั้งที่จริงคือไม่มีห้องขายอยู่แล้ว)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Unavailable dates fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-20",
+  "unavailable_dates": ["2026-08-12", "2026-08-13"]
+}
+```
+
+**Response `422`:** validation errors — เหมือน `/availability-per-day`
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/unavailable-dates?start_date=2026-08-10&end_date=2026-08-20"
+```
 
 ---
 
