@@ -45,6 +45,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/availability-per-day', [RoomController::class, 'availabilityPerDay']);
     Route::get('/availability-ranges', [RoomController::class, 'availabilityRanges']);
     Route::get('/unavailable-dates', [RoomController::class, 'unavailableDates']);
+    Route::get('/unavailable-ranges', [RoomController::class, 'unavailableRanges']);
 
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);

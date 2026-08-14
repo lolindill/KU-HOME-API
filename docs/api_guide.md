@@ -720,6 +720,68 @@ curl -s -H "Accept: application/json" \
 
 ---
 
+### GET `/unavailable-ranges` — Sold-out intervals ราย room type (auto window)
+
+🔒 **Public**
+
+คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start, end}` — เหมือน `/availability-ranges` แต่ **ไม่รับ query param**: endpoint คำนวณช่วงสแกนเอง ใช้สำหรับ frontend โหลด "วันที่จองไม่ได้" ทั้งระบบโดยไม่ต้องรู้ช่วงล่วงหน้า.
+
+**Query Params:** ❌ ไม่รับ — ช่วงสแกนคำนวณอัตโนมัติ
+- `start` = `today + 3 วัน`
+- `end` = `max(check_out)` จาก `booking_rooms` ที่ `status IN (draft, confirmed, checked_in)` (booking ที่ยัง active — ชุดเดียวกับที่นับลด availability)
+- **DoS guard:** ถ้า `end` ไกลเกินไป จะถูก clamp ที่ `start + 365 วัน` (กัน booking ปีหน้าทำให้ลูปสแกนยาว)
+
+**Semantics:**
+- ต่างจาก `/availability-ranges` ตรงที่ (1) ไม่รับ input, (2) key ของ interval เป็น **`{start, end}`** (ไม่ใช่ `{start_date, end_date}`)
+- sold-out logic เหมือน `/availability-ranges` เป๊ะ: `total_rooms > 0 && occupied >= total_rooms`
+- `total_rooms` / `occupied` semantics เหมือน `/availability-per-day` ทุกอย่าง
+- **Edge case — ไม่มี booking เลย:** ไม่สามารถ lock `end` ของ window ได้ → คืน `start: null`, `end: null`, และ `intervals: []` ทุก room type
+- **Edge case — ทุก booking checkout ก่อน today+3:** window กลายเป็น `end < start` → `CarbonPeriod` ว่าง → `intervals: []` โดยธรรมชาติ (คืน `start`/`end` ตามจริง)
+
+**Response `200` (มี booking):**
+```json
+{
+  "status": "success",
+  "message": "Unavailable ranges fetched successfully",
+  "start": "2026-08-17",
+  "end": "2026-09-05",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Standard",
+      "name_th": "ห้องมาตรฐาน",
+      "intervals": [
+        { "start": "2026-08-20", "end": "2026-08-22" },
+        { "start": "2026-08-25", "end": "2026-08-27" }
+      ]
+    }
+  ]
+}
+```
+
+**Response `200` (ไม่มี booking เลย):**
+```json
+{
+  "status": "success",
+  "message": "Unavailable ranges fetched successfully",
+  "start": null,
+  "end": null,
+  "room_types": [
+    { "room_type_id": "uuid", "name_en": "Standard", "name_th": "ห้องมาตรฐาน", "intervals": [] }
+  ]
+}
+```
+> 💡 `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out → คืน `intervals: []` เสมอ (เหมือน `/availability-ranges`)
+> ⚠️ ไม่มี response `422` เพราะไม่มี input ให้ validate
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/unavailable-ranges"
+```
+
+---
+
 ## Bookings (Core)
 
 ### GET `/bookings` — List bookings

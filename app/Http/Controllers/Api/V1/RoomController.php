@@ -467,6 +467,120 @@ class RoomController extends Controller
         ]);
     }
 
+    // 📅 ดึงช่วงวันที่จองไม่ได้ราย room type (sold-out intervals) — คลอนจาก availabilityRanges
+    //    ต่างจาก availabilityRanges ตรงที่ "ไม่รับ input" และช่วงสแกนคำนวณอัตโนมัติ:
+    //      start = today+3, end = max(check_out) ของ booking_rooms ที่ยัง active
+    //    key ของ interval เป็น {start, end} ตามที่ frontend ขอ
+    //    ใช้สำหรับ frontend แสดงวันที่จองไม่ได้เลยโดยไม่ต้องส่งช่วงวันมาเอง
+    public function unavailableRanges(Request $request)
+    {
+        // 🌟 ไม่รับ input — ช่วงสแกนคำนวณอัตโนมัติ: [today+3, max checkout ของ booking ที่ยัง active]
+        $start = Carbon::today()->addDays(3)->startOfDay();
+
+        // 🌟 max checkout จาก BR ที่ status นับลด availability (ชุดเดียวกับ availabilityRanges/createBooking)
+        $maxCheckout = BookingRoom::select('check_out')
+            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->max('check_out');
+
+        // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" ล่วงหน้า (ใช้ทั้งกรณีมี/ไม่มี booking)
+        // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityRanges/createBooking
+        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
+            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+        }])
+            ->get();
+
+        // 🌟 กรณีไม่มี booking เลย → ไม่สามารถ lock end ของช่วงได้ → คืน list ว่าง
+        if ($maxCheckout === null) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Unavailable ranges fetched successfully',
+                'start' => null,
+                'end' => null,
+                'room_types' => $roomTypes->map(fn ($t) => [
+                    'room_type_id' => $t->id,
+                    'name_en' => $t->name_en,
+                    'name_th' => $t->name_th,
+                    'intervals' => [],
+                ])->values(),
+            ]);
+        }
+
+        $end = Carbon::parse($maxCheckout)->startOfDay();
+
+        // 🌟 DoS guard (public route): ป้องกัน booking ไกลๆ ทำให้ลูปสแกนยาวเกินไป (cap 365 คืน เทียบเท่า sibling)
+        if ($end->gt($start->copy()->addDays(365))) {
+            $end = $start->copy()->addDays(365);
+        }
+
+        // 🌟 โหลด booking_rooms overlap [start, end+1] ครั้งเดียว (matrix approach)
+        // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityRanges/createBooking)
+        $endExclusive = $end->copy()->addDay();
+        $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
+            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where('check_in', '<', $endExclusive)
+            ->where('check_out', '>', $start)
+            ->get();
+
+        // 🌟 Build occupied matrix [room_type_id => [date => count]]
+        $occupied = [];
+        foreach ($overlaps as $br) {
+            $brCheckIn = Carbon::parse($br->check_in)->startOfDay();
+            $brCheckOut = Carbon::parse($br->check_out)->startOfDay();
+
+            // วันที่ BR ครอบความค้างคืน ที่อยู่ภายใน [start, end] (half-open: check_in <= D < check_out)
+            $from = $brCheckIn < $start ? $start : $brCheckIn;
+            $to = $brCheckOut > $endExclusive ? $endExclusive : $brCheckOut;
+
+            for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+                $dateKey = $d->toDateString();
+                $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
+            }
+        }
+
+        // 🌟 list ของทุกคืนในช่วง [start, end] (ว่างอัตโนมัติถ้า end < start — ทุก booking checkout ก่อน today+3)
+        $dateKeys = [];
+        foreach (CarbonPeriod::create($start, $end) as $date) {
+            $dateKeys[] = $date->toDateString();
+        }
+
+        // 🌟 กลุ่มวัน sold-out (available=0) ที่ติดกันเป็น interval ราย room_type → {start, end}
+        // sold-out = occupied >= total_rooms_count (total=0 → ไม่ถือว่า sold-out เพราะไม่มีห้องขายอยู่แล้ว)
+        $result = $roomTypes->map(function ($type) use ($occupied, $dateKeys) {
+            $intervals = [];
+
+            // run-length grouping: จับวัน sold-out ที่ติดกันเป็นช่วง [start, end]
+            foreach ($dateKeys as $dateKey) {
+                $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
+                $isSoldOut = $type->total_rooms_count > 0 && $occupiedCount >= $type->total_rooms_count;
+
+                if ($isSoldOut) {
+                    // ขยาย interval สุดท้าย (ถ้าติดกัน) หรือเปิด interval ใหม่
+                    $lastIdx = count($intervals) - 1;
+                    if ($lastIdx >= 0 && Carbon::parse($intervals[$lastIdx]['end'])->addDay()->toDateString() === $dateKey) {
+                        $intervals[$lastIdx]['end'] = $dateKey;
+                    } else {
+                        $intervals[] = ['start' => $dateKey, 'end' => $dateKey];
+                    }
+                }
+            }
+
+            return [
+                'room_type_id' => $type->id,
+                'name_en' => $type->name_en,
+                'name_th' => $type->name_th,
+                'intervals' => array_values($intervals),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Unavailable ranges fetched successfully',
+            'start' => $start->toDateString(),
+            'end' => $end->toDateString(),
+            'room_types' => $result,
+        ]);
+    }
+
     // 🧹 เปลี่ยนสถานะห้องพัก (ใช้ state machine)
     public function updateRoomStatus(UpdateRoomRequest $request, $id)
     {

@@ -414,4 +414,121 @@ class RoomTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['start_date', 'end_date']);
     }
+
+    // ============================================
+    // 📅 unavailable-ranges (auto-window: today+3 → max checkout, intervals {start,end})
+    // ============================================
+
+    public function test_unavailable_ranges_groups_consecutive_sold_out_days(): void
+    {
+        // room_type ที่มีห้องเดียว → ทุก BR overlap = sold-out วันนั้น
+        $roomType = $this->createRoomType();
+        Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '101',
+            'status' => 'available',
+        ]);
+
+        $user = User::factory()->create();
+        $booking = Booking::create([
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-'.Str::uuid(),
+            'source' => 'admin',
+            'status' => 'confirmed',
+            'total_amount' => 3000,
+        ]);
+
+        // BR แรก: today+4 .. today+6 (sold-out today+4, today+5 — 2 คืนติดกัน)
+        // BR สอง: today+9 .. today+10 (sold-out today+9 — แยก interval จากอันแรก)
+        // 🌟 window อัตโนมัติ = [today+3, max checkout=today+10]
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(4)->toDateString(),
+            'check_out' => now()->addDays(6)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(9)->toDateString(),
+            'check_out' => now()->addDays(10)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+
+        // 🌟 ไม่มี query string — endpoint คำนวณ window เอง
+        $response = $this->getJson('/api/v1/unavailable-ranges');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('start', now()->addDays(3)->toDateString());
+        $response->assertJsonPath('end', now()->addDays(10)->toDateString());
+
+        $found = collect($response->json('room_types'))->firstWhere('room_type_id', $roomType->id);
+        $intervals = $found['intervals'];
+
+        // 🌟 expect 2 intervals: [today+4 .. today+5] และ [today+9 .. today+9]
+        //    key เป็น {start, end} (ตาม spec — ต่างจาก availability-ranges ที่ใช้ start_date/end_date)
+        $this->assertCount(2, $intervals);
+        $this->assertEquals(now()->addDays(4)->toDateString(), $intervals[0]['start']);
+        $this->assertEquals(now()->addDays(5)->toDateString(), $intervals[0]['end']);
+        $this->assertEquals(now()->addDays(9)->toDateString(), $intervals[1]['start']);
+        $this->assertEquals(now()->addDays(9)->toDateString(), $intervals[1]['end']);
+    }
+
+    public function test_unavailable_ranges_empty_when_no_bookings(): void
+    {
+        // มี room type แต่ไม่มี booking เลย → ไม่สามารถ lock end ของ window ได้
+        $roomType = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '102', 'status' => 'available']);
+
+        $response = $this->getJson('/api/v1/unavailable-ranges');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('start', null);
+        $response->assertJsonPath('end', null);
+        $found = collect($response->json('room_types'))->firstWhere('room_type_id', $roomType->id);
+        $this->assertSame([], $found['intervals']);
+    }
+
+    public function test_unavailable_ranges_ignores_days_before_today_plus_3(): void
+    {
+        // BR ครอบตั้งแต่ today .. today+5 แต่ window เริ่มที่ today+3
+        // → วัน today, today+1, today+2 ต้องถูกตัดออก (ไม่อยู่ใน interval)
+        $roomType = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
+
+        $user = User::factory()->create();
+        $booking = Booking::create([
+            'user_id' => $user->id,
+            'confirmation' => 'TEST-'.Str::uuid(),
+            'source' => 'admin',
+            'status' => 'confirmed',
+            'total_amount' => 3000,
+        ]);
+        BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(5)->toDateString(),
+            'status' => 'confirmed',
+        ]);
+
+        $response = $this->getJson('/api/v1/unavailable-ranges');
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('start', now()->addDays(3)->toDateString());
+
+        $found = collect($response->json('room_types'))->firstWhere('room_type_id', $roomType->id);
+        $intervals = $found['intervals'];
+
+        // 🌟 expect 1 interval เริ่มที่ today+3 (auto-start ตัดวันก่อนหน้าออก): [today+3 .. today+4]
+        $this->assertCount(1, $intervals);
+        $this->assertEquals(now()->addDays(3)->toDateString(), $intervals[0]['start']);
+        $this->assertEquals(now()->addDays(4)->toDateString(), $intervals[0]['end']);
+    }
 }
