@@ -98,8 +98,8 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 
 ## State Machines (do not bypass)
 
-- **Booking (container):** `draft → paid → confirmed → complete` (no `cancelled`; expired drafts are hard-deleted by `CleanupExpiredDrafts` at 02:00). Transitions via `Booking::transitionStatus()`.
-- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking.
+- **Booking (container):** `draft → paid → confirmed → complete` (no `cancelled`; expired drafts are hard-deleted by `CleanupExpiredDrafts` at 02:00). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`.
+- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing) or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
 - **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
 - **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
 

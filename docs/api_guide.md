@@ -1025,6 +1025,142 @@ curl -s -H "Accept: application/json" \
 
 ---
 
+### PUT `/bookings/{bookingId}/rooms/{bookingRoomId}` — Update a booking room
+
+🌟 **(17/08/26)**: แก้ไข booking room **รายห้อง** — ใช้ได้เฉพาะเมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` เท่านั้น
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
+- ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422`
+- **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
+- `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
+- BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
+
+**Request Body** (flat — แก้ทีละห้อง, ส่งเฉพาะ field ที่จะแก้):
+```json
+{
+  "check_in": "2026-08-22",
+  "check_out": "2026-08-25",
+  "extra_beds": 1,
+  "guests": [
+    { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai", "is_ku_member": false }
+  ],
+  "has_children": false,
+  "bed_preference": "twin",
+  "billing_address": null,
+  "billing_comment": null,
+  "addons": { "breakfast": 2, "early_checkin": false, "late_checkout": false }
+}
+```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `room_type_id` | `sometimes` uuid exists:room_types,id |
+| `check_in` | `sometimes` date `after_or_equal:today` |
+| `check_out` | `sometimes` date `after:check_in` |
+| `extra_beds` | nullable integer ≥ 0 |
+| `guests.*` | เหมือน `POST /bookings` |
+| `has_children` | nullable boolean |
+| `bed_preference` | nullable `in:twin` |
+| `billing_address` / `billing_comment` | nullable string ≤ 255 |
+| `addons.breakfast` | nullable integer ≥ 0 |
+| `addons.early_checkin` / `addons.late_checkout` | nullable boolean |
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "booking_room": { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room" },
+  "total_amount": 4900
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR ไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ / validation |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### DELETE `/bookings/{bookingId}/rooms/{bookingRoomId}` — Remove a booking room
+
+🌟 **(17/08/26)**: ลบห้องออกจาก draft booking — hard delete BR + Addon แล้วคำนวณ `total_amount` ใหม่
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- **ห้องสุดท้ายของ booking ลบไม่ได้** → `422` (ให้ใช้ `DELETE /bookings/{bookingId}` ลบทั้ง booking แทน — กันเกิด draft เปล่าที่ไปล็อกโควตา "มี draft ค้าง" ของผู้ใช้)
+- เขียน audit log `booking_room: draft → deleted` ใน `status_change_logs` ก่อนลบ
+- BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบห้องออกจากการจองเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "remaining_rooms": 1,
+  "total_amount": 3000
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR ไม่ใช่ draft / เป็นห้องสุดท้ายของ booking |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### DELETE `/bookings/{bookingId}` — Delete a draft booking
+
+🌟 **(17/08/26)**: เจ้าของ (หรือ admin) ลบ draft booking ของตัวเองได้ — hard delete cascade แบบเดียวกับ `CleanupExpiredDrafts` (Addon ทุกห้อง → BookingRoom ทุกห้อง → payments → confirmations → Booking)
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status = 'draft'` เท่านั้น (จ่ายเงิน/ยืนยันแล้วลบไม่ได้) → `422`
+- เป็น **hard delete** ไม่ใช่ transition ใหม่ใน state machine (ไม่มี `cancelled` เหมือนเดิม) — แต่เขียน audit log `booking: draft → deleted` เก็บไว้ใน `status_change_logs` ก่อนลบ
+- ทำใน `DB::transaction` + `lockForUpdate` + re-check status — กัน race กับ confirm/verify ที่กำลังเปลี่ยน status พร้อมกัน
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบรายการจองเรียบร้อยแล้วค่ะนายท่าน 🗑️",
+  "booking_id": "booking-uuid"
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking ที่ระบุ |
+| 422  | Booking ไม่ได้อยู่ในสถานะ draft |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
 ### POST `/bookings/{id}/confirm` — Submit payment confirmation
 
 🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + method + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
@@ -2069,6 +2205,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `confirmed`   | `complete`    | admin, system (auto-sync)  |
 
 > ❌ **ไม่มี `cancelled`** — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+> 🗑️ **(17/08/26)** เจ้าของ/admin ลบ draft เองได้ผ่าน `DELETE /bookings/{bookingId}` (hard delete cascade + audit log `draft → deleted` ใน status_change_logs)
 > ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
 
 ---
@@ -2125,6 +2262,10 @@ Returns tasks with status `pending` or `in_progress`.
 | `checked_in`  | `checked_out` | admin         |
 
 > **Container auto-sync:** เมื่อ BR ทุกห้องเป็น `checked_out`/`no_show` → booking container → `complete`
+>
+> 🌟 **(17/08/26) Draft-editable window:** ถ้า parent booking เป็น `draft` และ BR เป็น `draft` —
+> แก้ไขห้องได้ทุก field ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` (เช็ค availability + คิดราคาใหม่ที่ server)
+> และลบห้องออกได้ผ่าน `DELETE /bookings/{bookingId}/rooms/{bookingRoomId}` (ห้องสุดท้ายลบไม่ได้ — ให้ลบทั้ง booking)
 
 ---
 

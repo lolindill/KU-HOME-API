@@ -87,6 +87,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         ->where('bookingId', '[0-9a-f\-]{36}')
         ->middleware('throttle:5,1');
 
+    // 🌟 (17/08/26): ลบ draft booking (เจ้าของหรือ admin) — hard delete cascade แบบเดียวกับ CleanupExpiredDrafts
+    Route::delete('/bookings/{bookingId}', [BookingController::class, 'destroyBooking'])
+        ->where('bookingId', '[0-9a-f\-]{36}')
+        ->middleware('throttle:5,1');
+
+    // 🌟 (17/08/26): แก้ไข / ลบ booking room รายห้อง (เฉพาะ BR=draft และ parent booking=draft)
+    //    เจ้าของ booking หรือ admin ใช้ได้ (ownership check ใน controller)
+    Route::put('/bookings/{bookingId}/rooms/{bookingRoomId}', [BookingController::class, 'updateRoom'])
+        ->where(['bookingId' => '[0-9a-f\-]{36}', 'bookingRoomId' => '[0-9a-f\-]{36}'])
+        ->middleware('throttle:5,1');
+
+    Route::delete('/bookings/{bookingId}/rooms/{bookingRoomId}', [BookingController::class, 'destroyRoom'])
+        ->where(['bookingId' => '[0-9a-f\-]{36}', 'bookingRoomId' => '[0-9a-f\-]{36}'])
+        ->middleware('throttle:5,1');
+
     // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
     Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])
         ->where('bookingId', '[0-9a-f\-]{36}')

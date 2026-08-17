@@ -1112,8 +1112,46 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - `php artisan route:list` — route ลงทะเบียน: `POST api/v1/bookings/{bookingId}/rooms → BookingController@addRooms`
 
 ### 🔮 Future Extension (ไม่ใช่ scope รอบนี้)
-- **Remove rooms** (delete BR จาก draft booking + recompute total) — endpoint คู่ของ feature นี้
-- **Update individual room** (เปลี่ยน room_type/date/addons ของ BR ใน draft) — repurpose `UpdateBookingRoomRequest` ที่มีอยู่ (ตอนนี้ unused)
+- ~~**Remove rooms** (delete BR จาก draft booking + recompute total)~~ — ✅ **ทำแล้ว (17/08/26)** ดู section "Draft Deletion + Draft BR Update/Delete" ด้านล่าง
+- ~~**Update individual room** (เปลี่ยน room_type/date/addons ของ BR ใน draft) — repurpose `UpdateBookingRoomRequest`~~ — ✅ **ทำแล้ว (17/08/26)** (rewrite เป็น flat `sometimes` rules)
 - **Feature test** สำหรับ addRooms (draft/paid/owner/admin/availability-exhausted cases)
+
+
+## ✅ Draft Booking Deletion + Draft BookingRoom Update/Delete (2026-08-17)
+
+> เพิ่ม 3 endpoints ให้ผู้ใช้จัดการ cart ตอน draft ได้ครบวงจร: ลบ draft booking ทั้งใบ / แก้ไขห้องรายห้อง / ลบห้องออกจาก booking — ปิด gap ที่เคยมีแค่ `addRooms` (เพิ่มได้อย่างเดียว)
+
+### 🎯 Endpoints ใหม่ (ทั้งหมด auth:sanctum + throttle:5,1 + ownership: เจ้าของหรือ admin)
+- `DELETE /v1/bookings/{bookingId}` → `BookingController@destroyBooking` — booking ต้องเป็น `draft`
+- `PUT /v1/bookings/{bookingId}/rooms/{bookingRoomId}` → `updateRoom` — **BR=draft และ booking=draft**
+- `DELETE /v1/bookings/{bookingId}/rooms/{bookingRoomId}` → `destroyRoom` — **BR=draft และ booking=draft**, ห้องสุดท้าย 422
+
+### 🔒 Constraints (state machine)
+- **ไม่เพิ่ม state ใหม่** — การลบคือ hard delete ไม่ใช่ transition (ไม่มี `cancelled`/`deleted` state เหมือนเดิม) แต่**เขียน audit log** `draft → deleted` (entity_type `booking`/`booking_room`) ใน `status_change_logs` ก่อนลบ — เก็บ trail แบบ append-only ไว้แม้ row หาย
+- **destroyBooking cascade** เหมือน `CleanupExpiredDrafts`: addon ทุกห้อง → BR → payments (frozen) → confirmations (defense-in-depth) → booking — ทำใน `DB::transaction` + `lockForUpdate` booking row + re-check draft (กัน race กับ confirm/verify ที่กำลัง draft→paid)
+- **updateRoom**: แก้ได้ทุก field **ยกเว้น** `room_id` (กฎ RoomAllocator) / `status` (กฎ transitionStatus) / `booking_id` — ถ้าแก้ room_type_id/check_in/check_out จะ availability re-check โดย `where('id','!=',$br->id)` **ตัดตัวเองออกจาก count** (ต่างจาก addRooms ที่นับรวม — เพราะที่นี่แก้ห้องเดิม ไม่ใช่เพิ่มใหม่)
+- **Repricing ทั้ง server-side**: คิดราคาห้องใหม่จาก `global_rates` (room rate × nights + extra_bed × rate × nights + breakfast + early/late) → update กลับ `addons` row → คำนวณ `total_amount` ของ booking ใหม่ทั้งใบผ่าน helper `recalculateBookingTotal()` (draft อายุ ≤24 ชม. — rate drift ไม่มีนัยสำคัญ)
+- **`payment_deadline` คงเดิม** เหมือน addRooms
+- **ห้องสุดท้ายลบไม่ได้ (422)** — decision กับนายท่าน: กันเกิด draft เปล่าที่ไปล็อกโควตา "มี draft ค้าง" ของผู้ใช้ (สร้าง booking ใหม่ไม่ได้) — ให้ใช้ `DELETE /bookings/{id}` แทน
+- BR ต้องอยู่ใต้ booking ที่ระบุ (`$booking->bookingRooms()->where('id',...)`) — ใส่ BR id ของ booking อื่น = **404** ไม่ใช่ 403 (ไม่ leak การมีอยู่ของ BR)
+
+### 🐛 Bug ที่เจอระหว่างทำ
+- **`status_change_logs.role` NOT NULL ชนกับ `$user->role` เป็น null** — `users.role` มี DB default `'user'` แต่ model ที่สร้างผ่าน factory ใน tests ไม่ back-fill default (attribute เป็น null ใน memory) → insert log พัง 500. Fix: `$user->role ?? 'user'` ตอนเขียน log (production ทุก user มี role จริงเสมอ — แค่กันขอบ)
+
+### 📁 Files Changed
+- `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม `destroyBooking()`, `updateRoom()`, `destroyRoom()` + private `recalculateBookingTotal()`
+- `app/Http/Requests/UpdateBookingRoomRequest.php` — **rewrite** จาก unused scaffold เดิม (มี booking_id/room_id) เป็น flat `sometimes` rules + Thai messages
+- `routes/api.php` — 3 routes ใหม่ใน protected group
+- `tests/Feature/BookingTest.php` — เพิ่ม 17 tests + helper `createDraftBooking()`
+- `docs/api_guide.md` — 3 endpoint sections ใหม่ + state machine notes
+- `AGENTS.md` — State Machines section อัปเดต
+
+### 🗄️ Migration Required
+**ไม่ต้อง** — ไม่มี schema change
+
+### 🧪 Test Results (2026-08-17)
+- `php artisan test` — **225 passed (458 assertions)** (BookingTest 30 tests: 17 ใหม่ + 13 เดิม)
+- `vendor/bin/pint --dirty` — ผ่าน (4 files, fixed unused import 1 จุด)
+
 
 

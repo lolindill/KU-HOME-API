@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AddBookingRoomsRequest;
 use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\UpdateBookingRoomRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
@@ -297,6 +298,417 @@ class BookingController extends Controller
                 'message' => 'เกิดข้อผิดพลาดในการเพิ่มห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
+    }
+
+    /**
+     * 🌟 (17/08/26): ลบ draft booking (เจ้าของหรือ admin)
+     *
+     * Hard delete cascade แบบเดียวกับ CleanupExpiredDrafts:
+     * addon ของทุก BR → BR → payments (frozen) → confirmations → booking
+     *
+     * Constraints:
+     * - booking.status ต้องเป็น 'draft' เท่านั้น (จ่ายเงิน/ยืนยันแล้วลบไม่ได้)
+     * - เป็นการ hard delete ไม่ใช่ transition ใหม่ใน state machine
+     *   แต่ยังเขียน StatusChangeLog (draft → deleted) เก็บ audit trail ไว้ค่ะ
+     */
+    public function destroyBooking(Request $request, $bookingId)
+    {
+        try {
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนลบรายการจองค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์ลบการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — ลบได้เฉพาะ draft เท่านั้น
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ที่กำลัง draft→paid พร้อมกัน
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+                }
+
+                foreach ($locked->bookingRooms as $br) {
+                    $br->addon()?->delete();
+                    $br->delete();
+                }
+                // frozen legacy table — ลบทิ้งเหมือน CleanupExpiredDrafts
+                $locked->payments()->delete();
+                // defense-in-depth: draft ไม่ควรมี confirmation (confirm จะ transition เป็น paid ทันที) แต่ลบกันเหนียว
+                $locked->confirmations()->delete();
+
+                // 📝 Audit log — เก็บไว้แม้ booking row จะหายไปแล้ว (append-only)
+                //    role ใช้ ?? 'user' กันกรณี DB default ยังไม่ถูกอ่านกลับมาใน model instance
+                StatusChangeLog::create([
+                    'entity_type' => 'booking',
+                    'entity_id' => $locked->id,
+                    'from_status' => 'draft',
+                    'to_status' => 'deleted',
+                    'role' => $user->role ?? 'user',
+                    'causer_id' => $user->id,
+                    'note' => 'ผู้ใช้ลบ draft booking เอง (hard delete)',
+                ]);
+
+                $locked->delete();
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบรายการจองเรียบร้อยแล้วค่ะนายท่าน 🗑️',
+                'booking_id' => $bookingId,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to delete draft booking: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบรายการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): แก้ไข booking room รายห้อง (เจ้าของหรือ admin)
+     *
+     * Constraints:
+     * - booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * - แก้ room_type_id/check_in/check_out ได้ โดยเช็ค availability ใหม่ (ตัดตัวเองออกจาก count)
+     * - ราคาคิดใหม่ทั้งหมดที่ server (global_rates) — ไม่รับ price จาก client เด็ดขาด
+     * - ห้ามแก้ room_id (ต้องผ่าน RoomAllocator) / status (ต้องผ่าน transitionStatus)
+     * - payment_deadline คงเดิม (เหมือน addRooms)
+     */
+    public function updateRoom(UpdateBookingRoomRequest $request, $bookingId, $bookingRoomId)
+    {
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนแก้ไขห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — booking ต้องเป็น draft
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+            if ($bookingRoom->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 🎯 Merge ฟิลด์ที่ส่งมาลง BR (ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว)
+                $brFields = [];
+                foreach (['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'] as $field) {
+                    if (array_key_exists($field, $validated)) {
+                        $brFields[$field] = $validated[$field];
+                    }
+                }
+
+                // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
+                $effectiveTypeId = $brFields['room_type_id'] ?? $bookingRoom->room_type_id;
+                $effectiveCheckIn = $brFields['check_in'] ?? $bookingRoom->check_in->toDateString();
+                $effectiveCheckOut = $brFields['check_out'] ?? $bookingRoom->check_out->toDateString();
+
+                // 🌟 Availability re-check — เฉพาะเมื่อแก้ประเภทห้องหรือวันที่
+                //    (นับ existing แบบตัดตัวเองออก — ไม่งั้นเปลี่ยนวันที่แล้วนับซ้ำตัวเอง)
+                $shapeChanged = array_key_exists('room_type_id', $validated)
+                    || array_key_exists('check_in', $validated)
+                    || array_key_exists('check_out', $validated);
+
+                if ($shapeChanged) {
+                    $checkIn = Carbon::parse($effectiveCheckIn);
+                    $checkOut = Carbon::parse($effectiveCheckOut);
+                    $totalRooms = Room::where('room_type_id', $effectiveTypeId)->count();
+
+                    $existingBooked = BookingRoom::where('room_type_id', $effectiveTypeId)
+                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->where('id', '!=', $bookingRoom->id)
+                        ->count();
+
+                    // +1 = ห้องที่กำลังแก้ไขตัวเอง
+                    if (($existingBooked + 1) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+
+                $bookingRoom->update($brFields);
+
+                // 🌟 Reprice server-side — extra_beds/addons: ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row
+                $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+                $existingAddon = $bookingRoom->addon;
+                $addonInput = $validated['addons'] ?? null;
+
+                $extraBedQty = array_key_exists('extra_beds', $validated)
+                    ? ($validated['extra_beds'] ?? 0)
+                    : ($existingAddon?->extra_bed ?? 0);
+                $breakfastQty = is_array($addonInput)
+                    ? ($addonInput['breakfast'] ?? 0)
+                    : ($existingAddon?->breakfast ?? 0);
+                $earlyCheckInEnabled = is_array($addonInput)
+                    ? ! empty($addonInput['early_checkin'])
+                    : ! empty($existingAddon?->early_checkIn_price);
+                $lateCheckOutEnabled = is_array($addonInput)
+                    ? ! empty($addonInput['late_checkout'])
+                    : ! empty($existingAddon?->lateCheckOut_price);
+
+                $roomType = RoomType::findOrFail($effectiveTypeId);
+                $nights = Carbon::parse($effectiveCheckIn)->diffInDays(Carbon::parse($effectiveCheckOut)) ?: 1;
+
+                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
+                $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
+                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
+                $earlyCheckInPrice = $earlyCheckInEnabled ? ($rates['early_checkin'] ?? 0) : 0;
+                $lateCheckOutPrice = $lateCheckOutEnabled ? ($rates['late_checkout'] ?? 0) : 0;
+
+                $addonData = [
+                    'extra_bed' => $extraBedQty,
+                    'extra_bed_price' => $extraBedTotal,
+                    'breakfast' => $breakfastQty,
+                    'breakfast_price' => $breakfastPrice,
+                    'early_checkIn_price' => $earlyCheckInPrice,
+                    'lateCheckOut_price' => $lateCheckOutPrice,
+                ];
+                if ($existingAddon) {
+                    $existingAddon->update($addonData);
+                } else {
+                    Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                }
+
+                // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (idempotent)
+                $newTotal = $this->recalculateBookingTotal($locked);
+                $locked->update(['total_amount' => $newTotal]);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'booking_room' => $bookingRoom->fresh(['addon', 'roomType', 'room']),
+                'total_amount' => $locked->fresh()->total_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to update booking room: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): ลบ booking room รายห้องออกจาก draft booking (เจ้าของหรือ admin)
+     *
+     * Constraints:
+     * - booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * - ห้องสุดท้ายของ booking ลบไม่ได้ (422) — ให้ลบทั้ง booking ด้วย DELETE /bookings/{id} แทน
+     *   (กันเกิด draft เปล่าที่ไปล็อกโควตา "มี draft ค้าง" ของผู้ใช้)
+     * - BR draft ยังไม่มี room_id (จ่ายห้องตอน paid/confirmed) — ไม่มี room ต้อง release
+     */
+    public function destroyRoom(Request $request, $bookingId, $bookingRoomId)
+    {
+        try {
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนลบห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — booking ต้องเป็น draft
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+            if ($bookingRoom->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างลบ
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 🔒 ห้องสุดท้าย → ห้ามลบ ให้ลบทั้ง booking แทน
+                if ($locked->bookingRooms()->count() <= 1) {
+                    throw new \Exception('ไม่สามารถลบห้องสุดท้ายของการจองได้ค่ะ — ให้ลบทั้งรายการจอง (DELETE /bookings/{bookingId}) แทนนะคะ', 422);
+                }
+
+                $bookingRoom->addon()?->delete();
+                $bookingRoom->delete();
+
+                // 📝 Audit log — เก็บไว้แม้ BR row จะหายไปแล้ว (append-only)
+                StatusChangeLog::create([
+                    'entity_type' => 'booking_room',
+                    'entity_id' => $bookingRoom->id,
+                    'from_status' => 'draft',
+                    'to_status' => 'deleted',
+                    'role' => $user->role ?? 'user',
+                    'causer_id' => $user->id,
+                    'note' => 'ผู้ใช้ลบห้องออกจาก draft booking (hard delete)',
+                ]);
+
+                $locked->update(['total_amount' => $this->recalculateBookingTotal($locked)]);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบห้องออกจากการจองเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'remaining_rooms' => $locked->bookingRooms()->count(),
+                'total_amount' => $locked->fresh()->total_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to delete booking room: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): คำนวณ total_amount ของ booking ใหม่ทั้งใบจาก server rates ปัจจุบัน
+     *
+     * - room rate × nights คิดใหม่จาก global_rates (rate_type='daily')
+     * - ราคา addon ใช้จาก Addon row ที่เก็บไว้ (ตอน update ห้องเราเพิ่งคิดใหม่แล้ว)
+     * - draft อายุ ≤ 24 ชม. — rate drift ระหว่างสร้างกับแก้ไขไม่มีนัยสำคัญ
+     */
+    private function recalculateBookingTotal(Booking $booking): int
+    {
+        $total = 0;
+
+        foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
+            $nights = $br->check_in->diffInDays($br->check_out) ?: 1;
+            $roomPriceTotal = GlobalRate::getRoomRate($br->roomType, 'daily') * $nights;
+
+            $total += $roomPriceTotal
+                + ($br->addon?->extra_bed_price ?? 0)
+                + ($br->addon?->breakfast_price ?? 0)
+                + ($br->addon?->early_checkIn_price ?? 0)
+                + ($br->addon?->lateCheckOut_price ?? 0);
+        }
+
+        return $total;
     }
 
     public function createBooking(StoreBookingRequest $request)
