@@ -955,6 +955,76 @@ curl -s -H "Accept: application/json" \
 
 ---
 
+### POST `/bookings/{bookingId}/rooms` — Add rooms to an existing booking
+
+🌟 **(10/08/26)**: เพิ่มห้องเข้า booking ที่สร้างไว้แล้ว (**เฉพาะ `draft` state**) — reuse logic จาก `POST /bookings` (availability check + pricing + create BookingRoom/Addons) แต่ไม่สร้าง Booking ใหม่
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status` ต้องเป็น `draft` เท่านั้น (จ่ายเงิน/confirm ไปแล้วเพิ่มไม่ได้) → `422`
+- Availability check นับที่ BR-level (`draft`/`confirmed`/`checked_in` ที่ overlap) — **รวมห้องที่อยู่ใน booking นี้แล้วด้วย** กันจองเกิน capacity ตอนเพิ่มซ้ำ
+- ไม่เรียก `RoomAllocator` — ห้องใหม่ถูกสร้างด้วย `room_id = null`, `status = 'draft'` (initial state รอจ่ายห้องตอน assign/check-in)
+- `payment_deadline` **ไม่เปลี่ยน** (คง deadline เดิมของ booking) · `total_amount` **accumulate** (ยอดเดิม + ราคาห้องใหม่)
+
+**Request Body** — โครงสร้างเหมือน `POST /bookings` เป๊ะ ยกเว้น**ไม่มี field `source`** (booking สร้างไปแล้ว):
+```json
+{
+  "booking_rooms": [
+    {
+      "room_type_id": "rt-uuid",
+      "check_in": "2026-08-20",
+      "check_out": "2026-08-22",
+      "extra_beds": 0,
+      "guests": [
+        {
+          "title": "Mr.",
+          "name": "Somchai Jaidee",
+          "nationality": "Thai",
+          "is_ku_member": false
+        }
+      ],
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
+      "addons": {
+        "breakfast": 2,
+        "early_checkin": false,
+        "late_checkout": false
+      }
+    }
+  ]
+}
+```
+
+**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in ≥ today` · `check_out > check_in` (รายห้อง)
+
+> 💡 **Pricing**: Server คำนวณราคาจาก `global_rates` ทั้งหมด — client ส่งราคาเองไม่ได้ (เหมือน createBooking)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "added_amount": 2400,
+  "total_amount": 4800,
+  "payment_deadline": "2026-08-17 18:00:00"
+}
+```
+
+**Errors:**
+
+| Code | Cause                                              |
+|------|----------------------------------------------------|
+| 401  | ไม่ได้ล็อกอิน                                       |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin (`คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ`) |
+| 404  | ไม่พบ booking ที่ระบุ                                |
+| 422  | Booking ไม่ได้อยู่ในสถานะ draft / ห้องเต็มในช่วงวันนั้น   |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`)          |
+
+---
+
 ### POST `/bookings/{id}/confirm` — Submit payment confirmation
 
 🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + method + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
@@ -2092,6 +2162,7 @@ Returns tasks with status `pending` or `in_progress`.
 | User Management       | ❌     | ❌    | ✅    |
 | Booking Status Change | ❌     | ❌    | ✅    |
 | Assign Rooms          | ❌     | owner | ✅    |
+| Add Rooms to Booking  | ❌     | owner | ✅    |
 | Front Desk Ops        | ❌     | ❌    | ✅    |
 | Room Status Update    | ❌     | ❌    | ✅    |
 | Addon Rate Update     | ❌     | ❌    | ✅    |
