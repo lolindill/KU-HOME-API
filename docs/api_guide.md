@@ -1094,6 +1094,84 @@ curl -s -H "Accept: application/json" \
 
 ---
 
+### PUT `/bookings/{bookingId}/rooms` — Batch update booking rooms
+
+🌟 **(19/08/26)**: แก้ไข booking room **หลายห้องพร้อมกัน** — payload ต่างกันได้รายห้อง (1 array entry = การแก้ 1 ห้อง ระบุ `booking_room_id` ของตัวเอง) · **all-or-nothing**: ห้องใดห้องหนึ่ง fail = rollback ทั้งชุด
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+> 🌟 Route นี้ (path ลงท้าย `/rooms` ไม่มี id) อยู่คู่กับ `PUT .../rooms/{bookingRoomId}` แบบรายห้อง ซึ่งยังใช้งานเหมือนเดิม
+
+**Constraints:**
+- Booking `status = 'draft'` + **ทุก** BookingRoom ใน batch เป็น `draft` เท่านั้น → `422`
+- แก้ได้ทุก field เหมือนรายห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` / `status`
+- `booking_room_id` ซ้ำใน batch เดียวกันไม่ได้ (validation `distinct`) → `422`
+- ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด
+- วันที่ตรวจจาก **effective values** (ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม) — ส่งแต่ `check_in` ทับ `check_out` เดิม (หรือกลับกัน) ก็ถูกจับ → `422`
+- **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว)
+- `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
+- ทุก BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่นสักอันเดียว = `404` ทั้ง batch (ไม่มีอะไรถูกแก้)
+
+**Request Body** (ส่งเฉพาะ field ที่จะแก้รายห้อง):
+```json
+{
+  "rooms": [
+    {
+      "booking_room_id": "br-uuid-1",
+      "check_in": "2026-08-22",
+      "check_out": "2026-08-25"
+    },
+    {
+      "booking_room_id": "br-uuid-2",
+      "guests": [
+        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai", "is_ku_member": false }
+      ],
+      "addons": { "breakfast": 2 }
+    }
+  ]
+}
+```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `rooms` | required, array, ≥ 1 entry |
+| `rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
+| `rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
+| `rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
+| `rooms.*.check_out` | `sometimes` date `after:rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
+| `rooms.*.extra_beds` | nullable integer ≥ 0 |
+| `rooms.*.guests.*` | เหมือน `POST /bookings` |
+| `rooms.*.has_children` | nullable boolean |
+| `rooms.*.bed_preference` | nullable `in:twin` |
+| `rooms.*.billing_address` / `rooms.*.billing_comment` | nullable string ≤ 255 |
+| `rooms.*.addons.breakfast` | nullable integer ≥ 0 |
+| `rooms.*.addons.early_checkin` / `rooms.*.addons.late_checkout` | nullable boolean |
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "booking_rooms": [ { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room — เรียงตามลำดับ rooms ใน request" } ],
+  "total_amount": 7600
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking / มี BR อย่างน้อย 1 อันที่ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR บางห้องไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ (final state ทั้ง batch) / `booking_room_id` ซ้ำ / validation |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
 ### DELETE `/bookings/{bookingId}/rooms/{bookingRoomId}` — Remove a booking room
 
 🌟 **(17/08/26)**: ลบห้องออกจาก draft booking — hard delete BR + Addon แล้วคำนวณ `total_amount` ใหม่
@@ -1163,7 +1241,8 @@ curl -s -H "Accept: application/json" \
 
 ### POST `/bookings/{id}/confirm` — Submit payment confirmation
 
-🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + method + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
+🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
+🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 
 🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
 
@@ -1173,15 +1252,13 @@ curl -s -H "Accept: application/json" \
 
 | Field             | Type      | Required | Description                                   |
 |-------------------|-----------|----------|-----------------------------------------------|
-| `payment_method`  | string    | ✅       | `cash`, `credit_card`, `transfer`             |
-| `slip_image`      | file      | transfer | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — required_if transfer |
-| `transfer_time`   | datetime  | transfer | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
+| `slip_image`      | file      | ✅       | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — บังคับเสมอ |
+| `transfer_time`   | datetime  | ❌       | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
 
-**Example (transfer)**:
+**Example**:
 ```bash
 curl -X POST /api/v1/bookings/{id}/confirm \
   -H "Authorization: Bearer <token>" \
-  -F "payment_method=transfer" \
   -F "slip_image=@slip.jpg" \
   -F "transfer_time=2026-07-24T10:30:00Z"
 ```
@@ -1202,7 +1279,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 - ❌ Booking ไม่ใช่ `draft`/`paid` (paid = re-submit หลัง reject)
 - ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
-- ❌ `transfer` แต่ไม่ส่ง `slip_image`/`transfer_time`
+- ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
 
 ---
 
@@ -1642,7 +1719,6 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 ```json
 {
   "amount": 2400,
-  "payment_method": "cash",
   "reference_number": "CASH-2026-001",
   "received_by": "admin-uuid"
 }
@@ -1654,7 +1730,6 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 |--------------------|-----------------------------------------------------|
 | `booking_id`       | required, uuid, exists in bookings                  |
 | `amount`           | required, integer, min 0                            |
-| `payment_method`   | required, in: `cash`, `credit_card`, `transfer`     |
 | `reference_number` | nullable, string                                    |
 | `received_by`      | nullable, uuid, exists in users                     |
 
@@ -1667,7 +1742,6 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
     "id": "payment-uuid",
     "booking_id": "booking-uuid",
     "amount": 2400,
-    "payment_method": "cash",
     "status": "completed",
     "reference_number": "CASH-2026-001",
     "received_by": "admin-uuid"
@@ -1681,7 +1755,8 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 
 ## Payments & Webhooks
 
-> ⚠️ **DEMO / Not Production-Ready:** Payment & Webhook endpoints below are functional demos. Schema/enum values (`payment_method`, `status`) may change when the real payment gateway is integrated.
+> ⚠️ **DEMO / Not Production-Ready:** Payment & Webhook endpoints below are functional demos. Schema/enum values (`status`) may change when the real payment gateway is integrated.
+> 🌟 **Refactor (19/08/26)**: `payment_method` ถูกลบออกจากทุก flow แล้ว — การชำระเงินเหลือ "ส่งสลิป → รอแอดมินตรวจ" ผ่าน `POST /bookings/{id}/confirm`
 
 ### POST `/payments` — Request payment (Admin)
 
@@ -1692,8 +1767,7 @@ Creates a `pending` payment and returns a mock payment URL.
 **Request Body:**
 ```json
 {
-  "booking_id": "booking-uuid",
-  "payment_method": "credit_card"
+  "booking_id": "booking-uuid"
 }
 ```
 
@@ -2096,14 +2170,14 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Payment
 
-> ⚠️ **DEMO** — Payment schema/enum is provisional. `payment_method` may change from `cash / credit_card / transfer` when real gateway integration lands.
+> ⚠️ **DEMO** — Payment schema is provisional. Fields may change when real gateway integration lands.
+> 🌟 **(19/08/26)** — `payment_method` dropped: flow เหลือสลิปอย่างเดียว
 
 | Field              | Type      | Description                                              |
 |--------------------|-----------|---------------------------------------------------------|
 | `id`               | UUID      | Primary key                                             |
 | `booking_id`       | UUID      | FK → bookings                                           |
 | `amount`           | integer   | In baht (integer since 2026-06-05)                      |
-| `payment_method`   | enum      | `cash` / `credit_card` / `transfer` (DEMO — may change) |
 | `status`           | enum      | `pending` / `completed` / `failed`                      |
 | `reference_number` | string    | Bank/gateway reference (nullable)                       |
 | `received_by`      | UUID      | FK → users (admin who received cash, nullable)          |
@@ -2140,12 +2214,12 @@ Returns tasks with status `pending` or `in_progress`.
 ### BookingConfirmation
 
 🌟 **(24/07/26)** — Replaces payments/receipts. 1:N with bookings (history of every payment proof submitted, even rejected ones).
+🌟 **(19/08/26)** — `payment_method` dropped: flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" (`slip_image` บังคับ, `transfer_time` optional)
 
 | Field              | Type      | Description                                              |
 |--------------------|-----------|---------------------------------------------------------|
 | `id`               | UUID      | Primary key                                              |
 | `booking_id`       | UUID      | FK → bookings (1:N, not unique)                          |
-| `payment_method`   | string    | `cash`, `credit_card`, `transfer` (nullable)             |
 | `slip_image`       | string    | Path of slip file in `storage/app/public/slips/...`      |
 | `transfer_time`    | timestamp | Time customer reported transfer (from slip)              |
 | `status`           | string    | `pending`, `verified`, `rejected` (default: pending)     |

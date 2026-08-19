@@ -99,7 +99,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 ## State Machines (do not bypass)
 
 - **Booking (container):** `draft → paid → confirmed → complete` (no `cancelled`; expired drafts are hard-deleted by `CleanupExpiredDrafts` at 02:00). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`.
-- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing) or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
+- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
 - **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
 - **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
 
@@ -139,7 +139,8 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 
 ## Frozen / Deprecated (do not extend)
 
-- **`payments` + `receipts` tables are FROZEN (2026-07-24)** as read-only legacy. New payment flow uses `booking_confirmations` (slip → admin verify/reject). `PaymentController::webhook` returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
+- **`receipts` table is FROZEN (2026-07-24)** as read-only legacy — no new receipt rows, ever. New payment flow uses `booking_confirmations` (slip → admin verify/reject).
+- **`payments` table was UNFROZEN (2026-08-19)** to drop `payment_method` — the payment flow is now slip-image-only (no cash/credit_card/transfer distinction anywhere). `PaymentController::webhook` still returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
 - **Webhook has NO HMAC signature verification** (blocker #4) — waiting on payment gateway decision. Do not assume it's secure.
 - `Image` upload and `Discount` (`validate-discount`, only `WELCOME10`) are draft/incomplete.
 

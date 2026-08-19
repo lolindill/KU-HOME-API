@@ -56,7 +56,7 @@ hotel/
 │   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
 │   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
 │   │   ├── RoomType.php               # PgBoolean extra_bed_enabled
-│   │   ├── Payment.php                # ❄️ legacy (frozen 24/07/26) — integer amount (satang)
+│   │   ├── Payment.php                # 🔓 unfrozen (19/08/26 ลบ payment_method) — integer amount (satang)
 │   │   ├── Receipt.php                # ❄️ legacy (frozen 24/07/26) — integer amount, atomic receipt_no
 │   │   ├── BookingConfirmation.php    # 🌟 NEW (24/07/26): payment proof table, state machine pending→verified|rejected
 │   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
@@ -293,7 +293,7 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### Payment (`app/Models/Payment.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: booking_id, amount, payment_method, status, reference_number, received_by
+- **Fillable**: booking_id, amount, status, reference_number, received_by (🌟 19/08/26: ลบ payment_method)
 - **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
 - **Relationships**: booking (BelongsTo), receiver (BelongsTo User via received_by), receipts (HasMany)
 
@@ -864,7 +864,7 @@ Tests ใหม่ครอบคลุม: state machine lifecycle + terminal l
 ### 🔄 Flow
 
 ```
-USER  POST /bookings/{id}/confirm (slip+method+time)
+USER  POST /bookings/{id}/confirm (slip+time)
    └─► สร้าง confirmation (pending) + booking draft→paid
         └─ [1 pending max guard — กัน spam]
 
@@ -1152,6 +1152,78 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 ### 🧪 Test Results (2026-08-17)
 - `php artisan test` — **225 passed (458 assertions)** (BookingTest 30 tests: 17 ใหม่ + 13 เดิม)
 - `vendor/bin/pint --dirty` — ผ่าน (4 files, fixed unused import 1 จุด)
+
+
+## ✅ Batch Update Booking Rooms (2026-08-19)
+
+> `PUT /v1/bookings/{bookingId}/rooms` — แก้ไข booking room **หลายห้องพร้อมกัน** (payload ต่างกันได้รายห้อง, all-or-nothing) — นายท่านเลือก design ทาง B (per-room payload) จาก 2 ทางที่เสนอ (A = payload เดียว apply ทุกห้อง / B = array `rooms[]` ระบุ `booking_room_id` รายแถว)
+
+### 🎯 Endpoint ใหม่ (auth:sanctum + throttle:5,1 + ownership: เจ้าของหรือ admin)
+- `PUT /v1/bookings/{bookingId}/rooms` → `BookingController@updateRooms` — **BR ทุกห้องใน batch=draft และ booking=draft**
+- Route รายห้องเดิม `PUT .../rooms/{bookingRoomId}` **ยังอยู่ครบถ้วน** (backward compat — ไม่แตะ)
+
+### 🔒 Constraints / การตัดสินใจสำคัญ
+- **All-or-nothing** — pre-flight ทุกห้อง (ต้องเป็นของ booking นี้ + draft) ก่อนเขียนอะไร; ห้องใด fail ระหว่าง transaction = rollback ทั้งชุด (422) ; มี BR id ของ booking อื่นสักอัน = 404 ทั้ง batch
+- **`booking_room_id` ซ้ำใน batch ไม่ได้** — validation `distinct` (422)
+- **Availability check จาก final state ของทั้ง batch** (จุดที่ delicate ที่สุด):
+  - existing count ใช้ `whereNotIn('id', $batchIds)` — ตัด **ทุกห้องใน batch** ออก (ต่างจาก updateRoom ที่ตัดตัวเดียว) เพราะห้องเหล่านี้มีอยู่แล้วเป็น draft rows
+  - batch overlap นับจากค่า final ของ **ทุกห้องใน batch รวมห้องที่ไม่ได้เปลี่ยน shape** (guests-only) — ถ้านับเฉพาะ shape-changed ห้อง unchanged ที่ยังยึดพื้นที่อยู่จะหายไปจากการนับ → overbook (มี test กันไว้: `test_batch_update_rejects_when_batch_overbooks_type`)
+  - ตรวจเฉพาะห้อง shape-changed (ส่ง room_type_id/check_in/check_out) — ห้อง unchanged ผ่านมาแล้วโดย invariant (occupancy ของมันไม่เพิ่ม)
+- **🐛 Gap ที่เจอ: validation `after:rooms.*.check_in` ผ่านเงียบๆ เมื่อไม่ส่ง check_in มาด้วย** (verify ด้วย tinker — เช่นส่งแต่ check_out ย้อนหลัง หรือส่งแต่ check_in ทับ check_out เดิม) → เพิ่ม **effective-dates guard ใน controller**: `check_out ≤ check_in` จากค่า final (ใหม่ถ้าส่ง ไม่งั้นเดิม) = 422 (มี test กันไว้) — หมายเหตุ: updateRoom รายห้องเดิมมี gap เดียวกันนี้กับ `after:check_in` แต่ไม่ได้แตะใน session นี้
+- Repricing server-side รายห้อง (เหมือน updateRoom) + `recalculateBookingTotal()` **ครั้งเดียว**ท้าย transaction · `payment_deadline` คงเดิม · ไม่มี state transition ใหม่ / ไม่แตะ audit trail
+- Response: `booking_rooms` array เรียงตามลำดับ `rooms` ใน request + `total_amount`
+
+### 📁 Files Changed
+- `app/Http/Requests/UpdateBookingRoomsRequest.php` — **สร้างใหม่** (array `rooms[]` + `booking_room_id` required/uuid/distinct + flat rules เหมือน UpdateBookingRoomRequest ทุก field)
+- `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม `updateRooms()` (ไม่แตะ `updateRoom()` เดิม)
+- `routes/api.php` — route ใหม่ใต้ throttle:5,1 (ไม่ชน route รายห้องเพราะไม่มี segment ที่สาม)
+- `tests/Feature/BookingTest.php` — เพิ่ม 7 tests (happy path 2 ห้องต่าง field กัน / id ซ้ำ 422 / id ต่าง booking 404 atomic / ห้องไม่ draft 422 atomic / overbook final-state / วันที่กลับข้าง 422 / ส่งเดี่ยว check_out ก่อน check_in เดิม 422)
+- `test_scripts/test_draft_ops_remote.php` — เพิ่ม section 3.5 (batch 200 + total, id ซ้ำ 422, id แปลกปลอม 404, ไม่มี token 401, restore สถานะเดิมให้ section 4 ทำงานเหมือนเดิม)
+- `docs/api_guide.md` — section ใหม่ระหว่าง PUT รายห้องกับ DELETE
+
+### 🗄️ Migration Required
+**ไม่ต้อง** — ไม่มี schema change
+
+### 🧪 Test Results (2026-08-19)
+- `php artisan test` — **232 passed (480 assertions)** (BookingTest 37 tests: 7 ใหม่ + 30 เดิม)
+- `vendor/bin/pint --dirty` — ผ่าน (fixed style 1 จุดใน test script)
+
+
+## ✅ ลบ payment_method ทุก flow + ปลด freeze payments (2026-08-19)
+
+> **Flow การชำระเงินเหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว** — นายท่านสั่งลบ `payment_method` ออกจากทั้ง flow ใหม่ (`booking_confirmations`) และ legacy (`payments`) พร้อมปลด freeze ตาราง payments
+>
+> **Decisions (นายท่านเลือก):** ลบทั้งสองฝั่ง + unfreeze payments · `transfer_time` เป็น **optional** (`nullable|date|before_or_equal:now`) · `slip_image` บังคับเสมอ · `receipts` ยัง frozen · webhook ยัง 410
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+| ส่วน | เดิม | ใหม่ |
+|---|---|---|
+| `POST /bookings/{id}/confirm` | `payment_method` required (cash/credit_card/transfer) + slip/time เฉพาะ transfer | ลบ method · `slip_image` required เสมอ · `transfer_time` optional |
+| `booking_confirmations` table | มี `payment_method` nullable | **drop column** |
+| `payments` table (🔓 unfrozen) | มี `payment_method` NOT NULL | **drop column** |
+| `POST /payments` + `POST /front-desk/{id}/payment` | ต้องส่ง `payment_method` | ไม่รับ/ไม่เก็บแล้ว (ส่งมาก็ถูก ignore) |
+| Response ที่ serialize model | มี `payment_method` | หายไป (breaking — frontend `ku-home` ต้องเลิกอ่าน field นี้) |
+
+### 📁 Files Changed
+- Migration: ✨ `2026_08_19_100000_drop_payment_method_columns` (drop ทั้งสองตาราง, down() คืนเป็น nullable)
+- Requests: ✏️ `ConfirmBookingRequest` (ลบ required_if ทั้งหมด) · `StorePaymentRequest` · `UpdatePaymentRequest`
+- Controllers: ✏️ `BookingConfirmationController::confirm` (store slip ตรงๆ ไม่ต้อง hasFile guard) · `PaymentController::requestPayment` · `FrontDeskController::recordPayment`
+- Models: ✏️ `BookingConfirmation` · `Payment` (ลบจาก fillable)
+- Tests: ✏️ `BookingConfirmationTest` (rename `test_owner_can_submit_confirmation_with_slip` · `test_cash_payment_does_not_require_slip` → `test_transfer_time_is_optional` · `test_transfer_requires_slip_image` → `test_confirm_requires_slip_image`) · `PaymentTest` · `FrontDeskTest`
+- Scripts: ✏️ `test_scripts/api_test_chain.php`, `api_test_remote.php`, `api_guide.php`
+- Docs: ✏️ `api_guide.md` · `booking-verify-flow.md` · `database-er.md` · `AGENTS.md` (Frozen section)
+
+### 🗄️ Migration Required
+⚠️ **ต้องรัน `php artisan migrate`** — drop column `payment_method` จาก `booking_confirmations` + `payments` (ข้อมูลใน column นี้หายถาวร — ตั้งใจ)
+
+### 🧪 Test Results (2026-08-19)
+- `php artisan migrate` — ผ่าน (drop column ทั้งสองตาราง)
+- `php artisan test` — **232 passed (481 assertions)** (BookingConfirmationTest 19 · PaymentTest 3 · FrontDeskTest 14 ผ่านครบ)
+- `vendor/bin/pint --dirty` — ผ่าน (fixed 9 style issues รวม pre-existing ในไฟล์ที่แตะ)
+
+
+
 
 
 
