@@ -381,7 +381,6 @@ $USER_ID = chainGet('USER_ID');
 $r = step(5, 'บันทึกการชำระเงิน (completed → auto draft→paid)', 'POST', "/front-desk/{$BOOKING_ID}/payment", [
     'booking_id' => $BOOKING_ID,
     'amount' => $TOTAL_AMOUNT ?? 1000,
-    'payment_method' => 'cash',
     'reference_number' => 'CASH-GUIDE-'.$TIMESTAMP,
     'received_by' => $USER_ID,
 ], $TOKEN, 201);

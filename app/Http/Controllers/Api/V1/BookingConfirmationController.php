@@ -7,12 +7,12 @@ use App\Http\Requests\ConfirmBookingRequest;
 use App\Http\Requests\ReviewConfirmationRequest;
 use App\Models\Booking;
 use App\Models\BookingConfirmation;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * 🌟 Refactor (24/07/26): Booking Confirmation Controller
@@ -28,7 +28,7 @@ use Exception;
 class BookingConfirmationController extends Controller
 {
     // ============================================================
-    // 💳 confirm — user ส่งหลักฐานการชำระ (slip + method + time)
+    // 💳 confirm — user ส่งหลักฐานการชำระ (slip + time)
     // ============================================================
     public function confirm(ConfirmBookingRequest $request, string $bookingId)
     {
@@ -73,19 +73,15 @@ class BookingConfirmationController extends Controller
         try {
             DB::beginTransaction();
 
-            // เก็บไฟล์ slip (ถ้ามี — cash/credit_card ไม่ต้องส่ง)
-            $slipPath = null;
-            if ($request->hasFile('slip_image')) {
-                $slipPath = $request->file('slip_image')->store('slips', 'public');
-            }
+            // เก็บไฟล์ slip (บังคับเสมอ — validation required แล้ว)
+            $slipPath = $request->file('slip_image')->store('slips', 'public');
 
             // สร้าง row ใหม่เสมอ (1:N history — ไม่ upsert)
             $confirmation = BookingConfirmation::create([
-                'booking_id'     => $booking->id,
-                'payment_method' => $validated['payment_method'],
-                'slip_image'     => $slipPath,
-                'transfer_time'  => $validated['transfer_time'] ?? null,
-                'status'         => 'pending',
+                'booking_id' => $booking->id,
+                'slip_image' => $slipPath,
+                'transfer_time' => $validated['transfer_time'] ?? null,
+                'status' => 'pending',
             ]);
 
             // booking transition draft → paid (เฉพาะ draft; paid แล้วจะไม่ transition ซ้ำ)
@@ -98,17 +94,18 @@ class BookingConfirmationController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'              => 'success',
-                'message'             => 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
-                'confirmation_id'     => $confirmation->id,
+                'status' => 'success',
+                'message' => 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
+                'confirmation_id' => $confirmation->id,
                 'confirmation_status' => $confirmation->status,
-                'booking_status'      => $booking->fresh()->status,
-                'slip_image_url'      => $slipPath ? Storage::url($slipPath) : null,
+                'booking_status' => $booking->fresh()->status,
+                'slip_image_url' => Storage::url($slipPath),
             ], 201);
 
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Booking confirm failed: ' . $e->getMessage());
+            Log::error('Booking confirm failed: '.$e->getMessage());
+
             return $this->error('เกิดข้อผิดพลาดในการส่งหลักฐานการชำระ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭', 500);
         }
     }
@@ -143,14 +140,15 @@ class BookingConfirmationController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'         => 'success',
-                'message'        => 'ยืนยันการชำระเงินเรียบร้อย — booking confirmed',
-                'confirmation'   => $confirmation->fresh(),
+                'status' => 'success',
+                'message' => 'ยืนยันการชำระเงินเรียบร้อย — booking confirmed',
+                'confirmation' => $confirmation->fresh(),
                 'booking_status' => $confirmation->booking->fresh()->status,
             ], 200);
 
         } catch (Exception $e) {
             DB::rollBack();
+
             return $this->handleBusinessError($e);
         }
     }
@@ -181,14 +179,15 @@ class BookingConfirmationController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'         => 'success',
-                'message'        => 'ปฏิเสธสลิป — booking ยังคง paid รอผู้จองแจ้งใหม่',
-                'confirmation'   => $confirmation->fresh(),
+                'status' => 'success',
+                'message' => 'ปฏิเสธสลิป — booking ยังคง paid รอผู้จองแจ้งใหม่',
+                'confirmation' => $confirmation->fresh(),
                 'booking_status' => $confirmation->booking->fresh()->status,
             ], 200);
 
         } catch (Exception $e) {
             DB::rollBack();
+
             return $this->handleBusinessError($e);
         }
     }
@@ -209,8 +208,8 @@ class BookingConfirmationController extends Controller
             ->paginate(15);
 
         return response()->json([
-            'status'         => 'success',
-            'confirmations'  => $confirmations,
+            'status' => 'success',
+            'confirmations' => $confirmations,
         ], 200);
     }
 
@@ -220,7 +219,7 @@ class BookingConfirmationController extends Controller
     private function error(string $message, int $code)
     {
         return response()->json([
-            'status'  => 'error',
+            'status' => 'error',
             'message' => $message,
         ], $code);
     }
@@ -238,7 +237,8 @@ class BookingConfirmationController extends Controller
             return $this->error($e->getMessage(), $code);
         }
 
-        Log::error('Booking confirmation review failed: ' . $e->getMessage());
+        Log::error('Booking confirmation review failed: '.$e->getMessage());
+
         return $this->error('เกิดข้อผิดพลาดบางอย่าง กรุณาลองใหม่ค่ะนายท่าน 😭', 500);
     }
 }

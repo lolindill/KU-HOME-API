@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
+use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Exception;
 
 class BookingConfirmation extends Model
 {
@@ -21,7 +21,6 @@ class BookingConfirmation extends Model
      */
     protected $fillable = [
         'booking_id',
-        'payment_method',
         'slip_image',
         'transfer_time',
         'status',
@@ -32,7 +31,7 @@ class BookingConfirmation extends Model
 
     protected $casts = [
         'transfer_time' => 'datetime',
-        'reviewed_at'   => 'datetime',
+        'reviewed_at' => 'datetime',
     ];
 
     public function booking(): BelongsTo
@@ -70,7 +69,7 @@ class BookingConfirmation extends Model
 
         $requiredRoles = $validTransitions[$this->status][$newStatus];
         if (! in_array($userRole, $requiredRoles)) {
-            throw new Exception("ไม่มีสิทธิ์ดำเนินการค่ะ!", 403);
+            throw new Exception('ไม่มีสิทธิ์ดำเนินการค่ะ!', 403);
         }
 
         $this->status = $newStatus;

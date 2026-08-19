@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\Booking;
 use App\Models\BookingConfirmation;
 use App\Models\GlobalRate;
@@ -12,6 +11,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 /**
  * 🌟 Refactor (24/07/26): Booking Confirmation tests
@@ -73,7 +73,6 @@ class BookingConfirmationTest extends TestCase
     private function confirmPayload(array $overrides = []): array
     {
         return array_merge([
-            'payment_method' => 'transfer',
             'slip_image' => $this->slipFile(),
             'transfer_time' => now()->subHour()->toDateTimeString(),
         ], $overrides);
@@ -83,7 +82,7 @@ class BookingConfirmationTest extends TestCase
     // 💳 confirm endpoint (user)
     // ============================================
 
-    public function test_owner_can_submit_confirmation_with_transfer_slip(): void
+    public function test_owner_can_submit_confirmation_with_slip(): void
     {
         $user = User::factory()->create(['role' => 'user']);
         $booking = $this->createDraftBooking($user->id);
@@ -99,7 +98,6 @@ class BookingConfirmationTest extends TestCase
         // ✅ DB assertions: confirmation created + slip stored + booking paid
         $this->assertDatabaseHas('booking_confirmations', [
             'booking_id' => $booking->id,
-            'payment_method' => 'transfer',
             'status' => 'pending',
         ]);
         $this->assertNotNull(BookingConfirmation::first()->slip_image);
@@ -169,36 +167,36 @@ class BookingConfirmationTest extends TestCase
             ->assertJsonPath('status', 'error');
     }
 
-    public function test_transfer_requires_slip_image(): void
+    public function test_confirm_requires_slip_image(): void
     {
         $user = User::factory()->create(['role' => 'user']);
         $booking = $this->createDraftBooking($user->id);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
-                'payment_method' => 'transfer',
                 'transfer_time' => now()->subHour()->toDateTimeString(),
-                // ❌ ไม่ส่ง slip_image
+                // ❌ ไม่ส่ง slip_image (บังคับเสมอแล้ว)
             ]);
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['slip_image']);
     }
 
-    public function test_cash_payment_does_not_require_slip(): void
+    public function test_transfer_time_is_optional(): void
     {
         $user = User::factory()->create(['role' => 'user']);
         $booking = $this->createDraftBooking($user->id);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
-                'payment_method' => 'cash',
-                // ❌ ไม่ส่ง slip_image + transfer_time
+                'slip_image' => $this->slipFile(),
+                // ❌ ไม่ส่ง transfer_time (optional)
             ]);
 
         $response->assertStatus(201)
             ->assertJsonPath('confirmation_status', 'pending');
-        $this->assertNull(BookingConfirmation::first()->slip_image);
+        $this->assertNotNull(BookingConfirmation::first()->slip_image);
+        $this->assertNull(BookingConfirmation::first()->transfer_time);
     }
 
     public function test_cannot_submit_when_pending_exists(): void
@@ -231,7 +229,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'transfer',
             'slip_image' => 'slips/test.jpg',
             'status' => 'pending',
         ]);
@@ -259,7 +256,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'transfer',
             'slip_image' => 'slips/test.jpg',
             'status' => 'pending',
         ]);
@@ -286,7 +282,6 @@ class BookingConfirmationTest extends TestCase
         // 📜 row #1 — rejected (history)
         BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'transfer',
             'slip_image' => 'slips/old.jpg',
             'status' => 'rejected',
         ]);
@@ -310,7 +305,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'transfer',
             'status' => 'rejected',
         ]);
 
@@ -324,7 +318,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'cash',
             'status' => 'pending',
         ]);
 
@@ -339,7 +332,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'cash',
             'status' => 'verified', // terminal
         ]);
 
@@ -354,7 +346,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'cash',
             'status' => 'rejected', // terminal
         ]);
 
@@ -373,12 +364,10 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'cash',
             'status' => 'pending',
         ]);
         BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'payment_method' => 'cash',
             'status' => 'verified', // ไม่ควรขึ้น list
         ]);
 

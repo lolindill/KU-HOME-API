@@ -16,12 +16,12 @@ class StorePaymentRequest extends FormRequest
         return [
             // 🌟 Fix H4 (03/07/26): sometimes เพราะ front-desk payment รับ booking_id จาก URL param
             // (PaymentController::requestPayment ยังต้องการใน body — สองกรณีใช้ rule นี้ร่วมกันได้)
-            'booking_id'        => 'sometimes|uuid|exists:bookings,id',
-            'amount'            => 'required|integer|min:0',
-            'payment_method'    => 'required|string|in:cash,credit_card,transfer',
+            'booking_id' => 'sometimes|uuid|exists:bookings,id',
+            'amount' => 'required|integer|min:0',
+            // 🌟 Refactor (19/08/26): ลบ payment_method — flow เหลือสลิปอย่างเดียว
             // 🌟 Fix M4 (03/07/26): ลบ dead validation — status ถูก hardcode ใน controller ทั้งคู่ (pending/completed)
-            'reference_number'  => 'nullable|string|max:255',
-            'received_by'       => 'nullable|uuid|exists:users,id',
+            'reference_number' => 'nullable|string|max:255',
+            'received_by' => 'nullable|uuid|exists:users,id',
         ];
     }
 }

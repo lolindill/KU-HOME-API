@@ -2,12 +2,12 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\Booking;
 use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class PaymentTest extends TestCase
 {
@@ -40,7 +40,6 @@ class PaymentTest extends TestCase
         $response = $this->postJson('/api/v1/payments', [
             'booking_id' => $booking->id,
             'amount' => 4500,
-            'payment_method' => 'transfer',
         ]);
         $response->assertStatus(200);
         $this->assertDatabaseHas('payments', [
@@ -57,7 +56,6 @@ class PaymentTest extends TestCase
         $response = $this->postJson('/api/v1/payments', [
             'booking_id' => $booking->id,
             'amount' => 4500,
-            'payment_method' => 'transfer',
         ]);
         $response->assertStatus(403);
     }
@@ -85,7 +83,6 @@ class PaymentTest extends TestCase
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'amount' => 4500,
-            'payment_method' => 'transfer',
             'status' => 'pending',
         ]);
 
@@ -93,7 +90,6 @@ class PaymentTest extends TestCase
         $response = $this->postJson('/api/v1/payments', [
             'booking_id' => $booking->id,
             'amount' => 4500,
-            'payment_method' => 'transfer',
         ]);
 
         $response->assertStatus(422);

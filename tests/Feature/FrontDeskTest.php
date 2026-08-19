@@ -212,7 +212,6 @@ class FrontDeskTest extends TestCase
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'amount' => 3000,
-            'payment_method' => 'cash',
             'status' => 'completed',
         ]);
 
@@ -248,7 +247,6 @@ class FrontDeskTest extends TestCase
         $payResponse = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
             'booking_id' => $booking->id,
             'amount' => 3000,
-            'payment_method' => 'cash',
         ]);
         $payResponse->assertStatus(201);
         $this->assertTrue($booking->fresh()->is_paid);
@@ -288,7 +286,6 @@ class FrontDeskTest extends TestCase
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
             'booking_id' => $booking->id,
             'amount' => 3000,
-            'payment_method' => 'cash',
         ]);
 
         $response->assertStatus(201);
@@ -314,10 +311,9 @@ class FrontDeskTest extends TestCase
         $this->actingAsAdmin();
         $booking = $this->createBooking(['status' => 'draft', 'total_amount' => 3000]);
 
-        // ส่งแค่ amount + payment_method (ไม่ส่ง booking_id ใน body)
+        // ส่งแค่ amount (ไม่ส่ง booking_id ใน body)
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
             'amount' => 3000,
-            'payment_method' => 'cash',
         ]);
 
         $response->assertStatus(201);

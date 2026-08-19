@@ -465,7 +465,6 @@ class FrontDeskController extends Controller
                 'id' => Str::uuid(),
                 'booking_id' => $booking->id,
                 'amount' => $validated['amount'],
-                'payment_method' => $validated['payment_method'],
                 'status' => 'completed',
                 'reference_number' => $validated['reference_number'] ?? null,
                 'received_by' => $validated['received_by'] ?? null,

@@ -179,15 +179,15 @@ Accept: application/json
 
 | Field             | Type      | Required When          | Description                                  |
 |-------------------|-----------|------------------------|----------------------------------------------|
-| `payment_method`  | string    | เสมอ                  | `cash` · `credit_card` · `transfer`         |
-| `slip_image`      | file      | `transfer`             | jpeg/png/jpg, max 4MB                        |
-| `transfer_time`   | datetime  | `transfer`             | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
+| `slip_image`      | file      | เสมอ                   | jpeg/png/jpg, max 4MB (บังคับเสมอ)          |
+| `transfer_time`   | datetime  | optional               | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
 
-**Example (transfer):**
+> 🌟 Refactor (19/08/26): ลบ `payment_method` ออกแล้ว — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว
+
+**Example:**
 ```bash
 curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
   -H "Authorization: Bearer <token>" \
-  -F "payment_method=transfer" \
   -F "slip_image=@slip.jpg" \
   -F "transfer_time=2026-08-06T10:30:00Z"
 ```
@@ -210,7 +210,7 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 - ❌ Booking ไม่ใช่ `draft`/`paid` (`paid` = re-submit หลัง reject)
 - ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
-- ❌ `transfer` แต่ไม่ส่ง `slip_image`/`transfer_time`
+- ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
 
 ---
 
@@ -231,7 +231,6 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
       {
         "id": "confirmation-uuid",
         "booking_id": "booking-uuid",
-        "payment_method": "transfer",
         "slip_image": "slips/abc123.jpg",
         "transfer_time": "2026-08-06T10:30:00.000000Z",
         "status": "pending",

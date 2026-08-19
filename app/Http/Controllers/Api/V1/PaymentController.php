@@ -3,12 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\Payment;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
@@ -23,7 +22,7 @@ class PaymentController extends Controller
         if ($booking->is_paid) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'This booking is already paid.'
+                'message' => 'This booking is already paid.',
             ], 400);
         }
 
@@ -35,7 +34,7 @@ class PaymentController extends Controller
         if ($existingPending) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'มีรายการชำระเงินที่รอดำเนินการอยู่แล้วค่ะนายท่าน กรุณารอให้รายการเดิมเสร็จสิ้นก่อนนะคะ'
+                'message' => 'มีรายการชำระเงินที่รอดำเนินการอยู่แล้วค่ะนายท่าน กรุณารอให้รายการเดิมเสร็จสิ้นก่อนนะคะ',
             ], 422);
         }
 
@@ -45,28 +44,28 @@ class PaymentController extends Controller
             $payment = Payment::create([
                 'booking_id' => $booking->id,
                 'amount' => $booking->total_amount,
-                'payment_method' => $validated['payment_method'],
-                'status' => 'pending' 
+                'status' => 'pending',
             ]);
 
             DB::commit();
 
-            $paymentUrl = "https://gateway.mockbank.com/pay/" . $payment->id;
+            $paymentUrl = 'https://gateway.mockbank.com/pay/'.$payment->id;
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Payment request created',
                 'payment_id' => $payment->id,
                 'amount' => $payment->amount,
-                'payment_url' => $paymentUrl
+                'payment_url' => $paymentUrl,
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Payment request failed: " . $e->getMessage());
+            Log::error('Payment request failed: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในการสร้างรายการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+                'message' => 'เกิดข้อผิดพลาดในการสร้างรายการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
@@ -79,7 +78,7 @@ class PaymentController extends Controller
     public function webhook(Request $request)
     {
         return response()->json([
-            'status'  => 'error',
+            'status' => 'error',
             'message' => 'Webhook deprecated — ใช้ POST /api/v1/bookings/{id}/confirm แทนค่ะนายท่าน (รองรับ admin verify ผ่าน booking_confirmations table)',
         ], 410);
     }

@@ -132,14 +132,13 @@ erDiagram
         uuid id PK
         uuid booking_id FK
         integer amount "satang/cents (was decimal, changed 2026-06-05)"
-        string payment_method "cash, credit_card, transfer"
         string status "default: completed"
         string reference_number "nullable"
         uuid received_by FK "nullable, staff who received"
         timestamp created_at
         timestamp updated_at
     }
-    ❄️ FROZEN (24/07/26): legacy table — read-only. ใช้ booking_confirmations แทน
+    🔓 UNFROZEN (19/08/26): ลบ payment_method แล้ว (flow เหลือสลิปอย่างเดียว) — receipts ยัง frozen
 
     RECEIPTS {
         uuid id PK
@@ -158,7 +157,6 @@ erDiagram
     BOOKING_CONFIRMATIONS {
         uuid id PK
         uuid booking_id FK "1:N with bookings (history)"
-        string payment_method "nullable, cash|credit_card|transfer"
         string slip_image "nullable, path ของไฟล์สลิป"
         timestamp transfer_time "nullable, เวลาที่ลูกค้าแจ้งโอน"
         string status "default: pending (pending|verified|rejected)"

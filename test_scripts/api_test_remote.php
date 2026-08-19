@@ -421,7 +421,6 @@ if ($USE_ADMIN && $TOKEN) {
         $r = test('Request Payment', 'POST', '/payments', [
             'booking_id' => $BOOKING_ID,
             'amount' => $TOTAL_AMOUNT ?? 1000,
-            'payment_method' => 'credit_card',
         ], $TOKEN, 200);
         $PAYMENT_ID = $r['body']['payment_id'] ?? ($r['body']['data']['payment_id'] ?? null);
         saveId('PAYMENT_ID', $PAYMENT_ID);
