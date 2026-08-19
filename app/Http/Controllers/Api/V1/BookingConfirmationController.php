@@ -70,18 +70,31 @@ class BookingConfirmationController extends Controller
 
         $validated = $request->validated();
 
+        $slipPath = null;
+
         try {
             DB::beginTransaction();
 
-            // เก็บไฟล์ slip (บังคับเสมอ — validation required แล้ว)
-            $slipPath = $request->file('slip_image')->store('slips', 'public');
+            // 🖼️ (19/08/26): เก็บไฟล์ slip บน private disk (storage/app/private/slips — เว็บเปิดตรงๆ ไม่ได้)
+            //    ดูรูปได้ผ่าน signed URL อายุ 15 นาทีเท่านั้น (เจ้าของ booking / admin)
+            $slipFile = $request->file('slip_image');
+            $slipPath = $slipFile->store('slips', 'local');
 
             // สร้าง row ใหม่เสมอ (1:N history — ไม่ upsert)
             $confirmation = BookingConfirmation::create([
                 'booking_id' => $booking->id,
-                'slip_image' => $slipPath,
                 'transfer_time' => $validated['transfer_time'] ?? null,
                 'status' => 'pending',
+            ]);
+
+            // 🖼️ metadata รูปลง images table — morph ผูกกับ confirmation นี้
+            $image = $confirmation->slipImage()->create([
+                'path' => $slipPath,
+                'disk' => 'local',
+                'mime_type' => $slipFile->getMimeType(),
+                'size' => $slipFile->getSize(),
+                'original_name' => $slipFile->getClientOriginalName(),
+                'uploaded_by' => $user->id,
             ]);
 
             // booking transition draft → paid (เฉพาะ draft; paid แล้วจะไม่ transition ซ้ำ)
@@ -99,11 +112,18 @@ class BookingConfirmationController extends Controller
                 'confirmation_id' => $confirmation->id,
                 'confirmation_status' => $confirmation->status,
                 'booking_status' => $booking->fresh()->status,
-                'slip_image_url' => Storage::url($slipPath),
+                'slip_image_url' => $image->url,
             ], 201);
 
         } catch (Exception $e) {
             DB::rollBack();
+
+            // 🧹 best-effort: ไฟล์ไม่ถูกคุมด้วย DB transaction — เก็บกำพร้าที่เขียนไปก่อน rollback ทันที
+            //    (ส่วนที่หลุดไปจริงๆ มี app:cleanup-images เก็บรอบ 02:30 อีกชั้น)
+            if ($slipPath !== null) {
+                Storage::disk('local')->delete($slipPath);
+            }
+
             Log::error('Booking confirm failed: '.$e->getMessage());
 
             return $this->error('เกิดข้อผิดพลาดในการส่งหลักฐานการชำระ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭', 500);
@@ -142,7 +162,7 @@ class BookingConfirmationController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ยืนยันการชำระเงินเรียบร้อย — booking confirmed',
-                'confirmation' => $confirmation->fresh(),
+                'confirmation' => $confirmation->fresh(['slipImage']),
                 'booking_status' => $confirmation->booking->fresh()->status,
             ], 200);
 
@@ -181,7 +201,7 @@ class BookingConfirmationController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ปฏิเสธสลิป — booking ยังคง paid รอผู้จองแจ้งใหม่',
-                'confirmation' => $confirmation->fresh(),
+                'confirmation' => $confirmation->fresh(['slipImage']),
                 'booking_status' => $confirmation->booking->fresh()->status,
             ], 200);
 
@@ -202,7 +222,7 @@ class BookingConfirmationController extends Controller
             return $this->error('ต้องเป็นแอดมินเท่านั้นค่ะนายท่าน', 403);
         }
 
-        $confirmations = BookingConfirmation::with(['booking.user', 'reviewer'])
+        $confirmations = BookingConfirmation::with(['booking.user', 'reviewer', 'slipImage'])
             ->where('status', 'pending')
             ->orderBy('created_at', 'asc') // เก่าก่อน (FIFO)
             ->paginate(15);

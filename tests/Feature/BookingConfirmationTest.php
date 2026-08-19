@@ -27,8 +27,8 @@ class BookingConfirmationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        // 🚀 ป้องกันไฟล์จริงเขียนลง disk ตอน test
-        Storage::fake('public');
+        // 🚀 ป้องกันไฟล์จริงเขียนลง disk ตอน test (19/08/26: สลิปย้ายมาอยู่บน local/private disk แล้ว)
+        Storage::fake('local');
     }
 
     /**
@@ -95,16 +95,25 @@ class BookingConfirmationTest extends TestCase
             ->assertJsonPath('confirmation_status', 'pending')
             ->assertJsonPath('booking_status', 'paid');
 
-        // ✅ DB assertions: confirmation created + slip stored + booking paid
+        // ✅ response ต้องคืน signed URL (มี signature + อายุ 15 นาที) ไม่ใช่ path เปล่าๆ
+        $slipUrl = $response->json('slip_image_url');
+        $this->assertStringContainsString('/api/v1/images/', $slipUrl);
+        $this->assertStringContainsString('signature=', $slipUrl);
+
+        // ✅ DB assertions: confirmation created + booking paid
         $this->assertDatabaseHas('booking_confirmations', [
             'booking_id' => $booking->id,
             'status' => 'pending',
         ]);
-        $this->assertNotNull(BookingConfirmation::first()->slip_image);
         $this->assertTrue($booking->fresh()->is_paid);
 
-        // ✅ slip file actually written to fake disk
-        Storage::disk('public')->assertExists(BookingConfirmation::first()->slip_image);
+        // ✅ 🖼️ (19/08/26) สลิปอยู่ใน images table ผ่าน morph + ไฟล์เขียนลง private (local) disk
+        $confirmation = BookingConfirmation::first();
+        $this->assertNotNull($confirmation->slipImage, 'confirmation ต้องมี slip Image row');
+        $this->assertSame('local', $confirmation->slipImage->disk);
+        $this->assertSame($user->id, $confirmation->slipImage->uploaded_by);
+        $this->assertSame('image/jpeg', $confirmation->slipImage->mime_type);
+        Storage::disk('local')->assertExists($confirmation->slipImage->path);
     }
 
     public function test_admin_can_submit_confirmation_for_any_booking(): void
@@ -195,7 +204,7 @@ class BookingConfirmationTest extends TestCase
 
         $response->assertStatus(201)
             ->assertJsonPath('confirmation_status', 'pending');
-        $this->assertNotNull(BookingConfirmation::first()->slip_image);
+        $this->assertNotNull(BookingConfirmation::first()->slipImage);
         $this->assertNull(BookingConfirmation::first()->transfer_time);
     }
 
@@ -229,7 +238,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'slip_image' => 'slips/test.jpg',
             'status' => 'pending',
         ]);
         $booking->update(['status' => 'paid', 'is_paid' => true]);
@@ -256,7 +264,6 @@ class BookingConfirmationTest extends TestCase
         $booking = $this->createDraftBooking();
         $confirmation = BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'slip_image' => 'slips/test.jpg',
             'status' => 'pending',
         ]);
         $booking->update(['status' => 'paid', 'is_paid' => true]);
@@ -282,7 +289,6 @@ class BookingConfirmationTest extends TestCase
         // 📜 row #1 — rejected (history)
         BookingConfirmation::create([
             'booking_id' => $booking->id,
-            'slip_image' => 'slips/old.jpg',
             'status' => 'rejected',
         ]);
 

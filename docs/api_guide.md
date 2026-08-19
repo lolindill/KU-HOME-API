@@ -1115,7 +1115,7 @@ curl -s -H "Accept: application/json" \
 **Request Body** (ส่งเฉพาะ field ที่จะแก้รายห้อง):
 ```json
 {
-  "rooms": [
+  "booking_rooms": [
     {
       "booking_room_id": "br-uuid-1",
       "check_in": "2026-08-22",
@@ -1136,18 +1136,18 @@ curl -s -H "Accept: application/json" \
 
 | Field | Rule |
 |-------|------|
-| `rooms` | required, array, ≥ 1 entry |
-| `rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
-| `rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
-| `rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
-| `rooms.*.check_out` | `sometimes` date `after:rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
-| `rooms.*.extra_beds` | nullable integer ≥ 0 |
-| `rooms.*.guests.*` | เหมือน `POST /bookings` |
-| `rooms.*.has_children` | nullable boolean |
-| `rooms.*.bed_preference` | nullable `in:twin` |
-| `rooms.*.billing_address` / `rooms.*.billing_comment` | nullable string ≤ 255 |
-| `rooms.*.addons.breakfast` | nullable integer ≥ 0 |
-| `rooms.*.addons.early_checkin` / `rooms.*.addons.late_checkout` | nullable boolean |
+| `booking_rooms` | required, array, ≥ 1 entry |
+| `booking_rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
+| `booking_rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
+| `booking_rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
+| `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
+| `booking_rooms.*.extra_beds` | nullable integer ≥ 0 |
+| `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
+| `booking_rooms.*.has_children` | nullable boolean |
+| `booking_rooms.*.bed_preference` | nullable `in:twin` |
+| `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
+| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
+| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable boolean |
 
 **Response `200`:**
 ```json
@@ -1155,7 +1155,7 @@ curl -s -H "Accept: application/json" \
   "status": "success",
   "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
-  "booking_rooms": [ { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room — เรียงตามลำดับ rooms ใน request" } ],
+  "booking_rooms": [ { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room — เรียงตามลำดับ booking_rooms ใน request" } ],
   "total_amount": 7600
 }
 ```
@@ -1243,6 +1243,7 @@ curl -s -H "Accept: application/json" \
 
 🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
+🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
 
 🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
 
@@ -1271,9 +1272,11 @@ curl -X POST /api/v1/bookings/{id}/confirm \
   "confirmation_id": "confirmation-uuid",
   "confirmation_status": "pending",
   "booking_status": "paid",
-  "slip_image_url": "/storage/slips/abc123.jpg"
+  "slip_image_url": "http://localhost/api/v1/images/<image-uuid>/file?expires=...&signature=..."
 }
 ```
+
+> 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — frontend ใช้ `<img src>` ตรงๆ ได้ทันที หมดอายุต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
 
 **Guards** (422 on failure):
 - ❌ Booking ไม่ใช่ `draft`/`paid` (paid = re-submit หลัง reject)
@@ -1289,7 +1292,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
-**Response 200**: `{ "status": "success", "confirmation": {...}, "booking_status": "confirmed" }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "path": "slips/...", "url": "<signed URL 15 นาที>", ... } }, "booking_status": "confirmed" }`
 
 ---
 
@@ -1299,15 +1302,43 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "slip ไม่ชัด" }`
 
-**Response 200**: `{ "status": "success", "confirmation": {...}, "booking_status": "paid" }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "paid" }`
 
 ---
 
 ### GET `/booking-confirmations/pending` — Admin dashboard list
 
-🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`
+🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`, `slipImage`
 
 **Response 200**: `{ "status": "success", "confirmations": { paginated data } }`
+
+---
+
+### GET `/images/{id}/file` — Serve image via signed URL
+
+🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
+
+🔓 **ไม่มี auth:sanctum โดยตั้งใจ** — `signature` ใน query string เป็นตัวยืนยันแทน · **Throttle**: `10,1`
+
+- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ (เจ้าของ booking / admin) เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending
+- ⚠️ Route นี้ **exempt `RequireJsonAccept`** เฉพาะจุดเดียวในระบบ — เพื่อให้ `<img Accept: image/*>` ของ browser โหลดได้ (มิฉะนั้นโดน 406) — เหตุผลถูกบันทึกใน `cline.md`
+- ไฟล์จริงอยู่ที่ `storage/app/private/slips/...` — ไม่มี symlink สาธารณะ
+
+**Example**:
+```bash
+curl "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signature=abc123..."
+```
+
+**Response 200**: ไฟล์ภาพ stream inline (`Content-Type: image/jpeg` ฯลฯ)
+
+**Errors**:
+- `403` — ลายเซ็นไม่ถูกต้อง / ถูกแกะ / หมดอายุ (เกิน 15 นาที)
+- `404` — Image row มีแต่ไฟล์ถูกลบไปแล้ว (เช่น ผ่านรอบ cleanup)
+
+**Retention (cleanup รอบ 02:30 ทุกวัน — `app:cleanup-images`)**:
+- สลิปของ confirmation `rejected` เก่ากว่า `SLIP_RETENTION_DAYS` (default 30) วัน → ลบรูป (คง confirmation row ตาม audit trail)
+- สลิป `verified` เก็บไว้ทั้งหมด (หลักฐานการเงิน — ห้ามลบอัตโนมัติ)
+- ไฟล์/row กำพร้า (ไม่มี row คุม / confirmation หายไปแล้ว) → เก็บกวาดทิ้ง
 
 ---
 
@@ -2215,12 +2246,12 @@ Returns tasks with status `pending` or `in_progress`.
 
 🌟 **(24/07/26)** — Replaces payments/receipts. 1:N with bookings (history of every payment proof submitted, even rejected ones).
 🌟 **(19/08/26)** — `payment_method` dropped: flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" (`slip_image` บังคับ, `transfer_time` optional)
+🌟 **(19/08/26 #2)** — `slip_image` column **ถูกลบแล้ว** — รูปสลิปอยู่ใน `images` table ผ่าน morph (`slipImage()`)
 
 | Field              | Type      | Description                                              |
 |--------------------|-----------|---------------------------------------------------------|
 | `id`               | UUID      | Primary key                                              |
 | `booking_id`       | UUID      | FK → bookings (1:N, not unique)                          |
-| `slip_image`       | string    | Path of slip file in `storage/app/public/slips/...`      |
 | `transfer_time`    | timestamp | Time customer reported transfer (from slip)              |
 | `status`           | string    | `pending`, `verified`, `rejected` (default: pending)     |
 | `reviewed_by`      | UUID      | FK → users (admin who reviewed)                          |
@@ -2232,6 +2263,29 @@ Returns tasks with status `pending` or `in_progress`.
 **Relationships:**
 - `belongsTo Booking`
 - `belongsTo User` (reviewer)
+- `morphOne Image` (`slipImage`) — รูปสลิปบน private disk + signed URL (ดู `images` table ด้านล่าง)
+
+---
+
+### Image
+
+🖼️ **(19/08/26)** — ระบบรูปจริงจัง (แทน draft เดิม) · polymorphic: ใช้กับสลิปวันนี้, housekeeping ฯลฯ ต่อได้
+
+| Field           | Type      | Description                                            |
+|-----------------|-----------|--------------------------------------------------------|
+| `id`            | UUID      | Primary key                                            |
+| `path`          | string    | ตำแหน่งไฟล์บน disk เช่น `slips/abc123.jpg`             |
+| `disk`          | string    | filesystem disk (default `local` = `storage/app/private`) |
+| `mime_type`     | string    | เช่น `image/jpeg` (nullable)                           |
+| `size`          | bigint    | ขนาดไฟล์ bytes (nullable)                              |
+| `original_name` | string    | ชื่อไฟล์ที่ผู้ใช้อัปโหลด (nullable)                    |
+| `uploaded_by`   | UUID      | FK → users (nullOnDelete)                              |
+| `imageable_id`  | UUID      | morph target id (เช่น booking_confirmation id)         |
+| `imageable_type`| string    | morph target class (เช่น `App\Models\BookingConfirmation`) |
+
+**Relationships:** `morphTo imageable` · `belongsTo User` (uploader)
+
+**พฤติกรรมพิเศษ:** serialize แล้วมี appended `url` (signed URL อายุ 15 นาที) · ลบ row = ลบไฟล์บน disk อัตโนมัติ (hook `deleting`)
 
 ---
 
@@ -2397,7 +2451,8 @@ These endpoints exist but are **not production-ready**:
 | `POST /front-desk/{id}/payment`     | ⚠️ Demo record-payment (admin)  |
 | Receipt model / auto-generation     | ⚠️ Demo (tied to payment flow)  |
 | `POST /bookings/validate-discount`  | 🚧 Testing only                 |
-| `POST /upload-image`                | 🚧 Testing only                 |
+
+> 🖼️ **(19/08/26)** — `POST /upload-image` (draft, unauthenticated) ถูก**ถอดออกแล้ว** — ระบบรูปใช้งานจริงผ่าน flow ของเจ้าของ (เช่น `POST /bookings/{id}/confirm`) + ดูผ่าน `GET /images/{id}/file` (signed URL)
 
 ---
 

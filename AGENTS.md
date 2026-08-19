@@ -58,6 +58,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - ยอมรับ: `application/json`, `*/*`, `application/*`, `+json` suffix (เช่น `application/vnd.api+json`), และ multiple media types ที่มี JSON/wildcard รวมอยู่.
   - **Why:** API-only project ไม่มี Blade ให้ fallback — ป้องกัน browser/crawler/spider, ป้องกัน unauthenticated scan, และ lock-in ให้ทุก response เป็น JSON สม่ำเสมอ.
   - **Do NOT:** ห้ามตรวจแค่ `Content-Type` — ต้องตรวจ `Accept`. ห้ามทำเป็น per-route middleware (ต้องเป็น global-on-API-group). ห้าม bypass ด้วย allowlist โดยไม่ document ใน `cline.md` ก่อน.
+  - **ข้อยกเว้นเดียว (2026-08-19, documented ใน `cline.md`):** route `GET /api/v1/images/{id}/file` ถูก exempt จาก `RequireJsonAccept` ผ่าน `->withoutMiddleware(...)` — เพราะ browser `<img>` ส่ง `Accept: image/*` (ไม่มี JSON/wildcard) และ route นี้ต้อง serve ไฟล์ภาพผ่าน signed URL ได้. อย่าเพิ่ม exemption ที่อื่นโดยไม่มีเหตุผล+ไม่จดใน `cline.md`.
 - **Controllers** all live in `app/Http/Controllers/Api/V1/`. REST routes prefixed `/api/v1/` (see `routes/api.php`).
 - **No API Resources / Transformers** — models are returned directly. No `data` wrapper.
 - **No Policy classes** — authorization is **`CheckRole` middleware only** (`app/Http/Middleware/CheckRole.php`), plus an in-controller `role` re-check (defense-in-depth) in sensitive methods.
@@ -76,6 +77,11 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 - **API response shape:** success `{"status":"success","message":...}` · error `{"status":"error","message":...}`. Don't leak `$e->getMessage()` on 500s — return a generic message + `Log::error()`.
 - **Throttle:** `5,1` on login/booking/confirm; `10,1` on lookups.
 - **Audit log (state changes):** every `Booking::transitionStatus()` and `BookingRoom::transitionStatus()` writes a row to `status_change_logs` (polymorphic: `entity_type` = `booking`|`booking_room`, `entity_id`, `from_status`, `to_status`, `role`, `causer_id`, `created_at`). The log is written **inside** `transitionStatus()` — never bypass it with a direct `->status =` assignment, or the audit trail breaks. Read via `GET /api/v1/bookings/{id}/status-logs` (admin only). `causer_id` is `Auth::id()` and is **nullable** for system/queue transitions (e.g. `syncStatusFromRooms()`).
+- **🖼️ Image system (2026-08-19):** ไฟล์อยู่บน **private disk** (`storage/app/private/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ใน **`images` table** (polymorphic `imageable_*`). ดูรูปผ่าน route `images.file` = **signed URL อายุ 15 นาที** เท่านั้น (URL ออกให้เฉพาะใน response ของผู้มีสิทธิ์ — ไม่มี URL ถาวร). สลิปผูกกับ `BookingConfirmation` ผ่าน `slipImage()` morph (column `slip_image` เดิมถูก drop แล้ว).
+  - **ลบ `Image` row = ไฟล์ถูกลบอัตโนมัติ** (model hook `deleting`) — อย่าลบไฟล์มือเองที่ call site (จะซ้ำซ้อน/fragile)
+  - ไม่มี generic upload endpoint โดยตั้งใจ — รูปเกิดจาก flow ของเจ้าของเสมอ (draft `POST /upload-image` ถูกถอดแล้ว)
+  - `app:cleanup-images` (02:30): sweep ไฟล์/row กำพร้า + ลบสลิป `rejected` เกิน `SLIP_RETENTION_DAYS` (default 30) — **สลิป `verified` ห้ามลบอัตโนมัติ** (หลักฐานการเงิน)
+  - อนาคตถ้า housekeeping อยากมีรูปก่อน/หลังเก็บห้อง → ใช้ `images` table นี้ (morph `HousekeepingTask`) อย่าสร้างตารางรูปใหม่ (`HousekeepingPhoto` ตอนนี้เป็น draft ลอยไม่มี route)
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
 
@@ -99,7 +105,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 ## State Machines (do not bypass)
 
 - **Booking (container):** `draft → paid → confirmed → complete` (no `cancelled`; expired drafts are hard-deleted by `CleanupExpiredDrafts` at 02:00). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`.
-- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
+- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `booking_rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
 - **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
 - **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
 
@@ -142,7 +148,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - **`receipts` table is FROZEN (2026-07-24)** as read-only legacy — no new receipt rows, ever. New payment flow uses `booking_confirmations` (slip → admin verify/reject).
 - **`payments` table was UNFROZEN (2026-08-19)** to drop `payment_method` — the payment flow is now slip-image-only (no cash/credit_card/transfer distinction anywhere). `PaymentController::webhook` still returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
 - **Webhook has NO HMAC signature verification** (blocker #4) — waiting on payment gateway decision. Do not assume it's secure.
-- `Image` upload and `Discount` (`validate-discount`, only `WELCOME10`) are draft/incomplete.
+- `Discount` (`validate-discount`, only `WELCOME10`) is draft/incomplete. (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions)
 
 ## Conventions
 
@@ -150,13 +156,22 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - Currency in satang (integer); dates ISO format.
 - Migrations are numbered `YYYY_MM_DD_HHMMSS_*.php`; UUID PKs; atomic sequence tables (`booking_sequences`, `receipt_sequences`) for confirmation/receipt numbers.
 
+## Task Execution & Progress Reporting Protocol (Sequential / Long Tasks)
+
+เมื่อทำงานที่มีหลายขั้นตอน (Sequential Tasks) หรืองานที่ใช้เวลานาน (Long-running Tasks / Multi-step Refactors / Command Executions):
+- **รายงานความคืบหน้าให้ผู้ใช้ทราบเป็นระยะ (Periodic Updates):**
+  1. 🔍 **What Discovered:** สิ่งที่ตรวจสอบพบหรือค้นพบจากการสำรวจโค้ด/ข้อมูล
+  2. 📋 **What Planned & What Will Do:** แผนงานที่จะทำต่อไปในแต่ละขั้นตอน
+  3. ✅ **What Succeeded:** สิ่งที่ทำเสร็จสมบูรณ์แล้วในแต่ละสเต็ป
+  4. ❌ **When Facing Failures / Errors:** เมื่อพบ error หรือคำสั่งล้มเหลว ให้อธิบายสิ่งที่พบเกี่ยวกับ error นั้น (Root Cause, บริบทข้อผิดพลาด, และแนวทางที่จะแก้) ให้ชัดเจนก่อนดำเนินการต่อ
+
 ## Planned / Not-Yet-Implemented Features
 
 > 🚧 These are **roadmap items only** — not yet built. Treat as greenfield when implementing. Check `cline.md` for any in-progress notes before starting, and create a scrutinize-style plan first.
 
 - **Static dashboard** — overview/stats dashboard (occupancy, revenue, room status aggregates). The existing `DashboardController` is **housekeeping-task-only** (`/api/v1/dashboard/tasks*`) — do **not** confuse it with this. Likely a new controller + read-only aggregate queries (no new writes to existing state machines).
 - **Generate & print report templates** — formatted printable reports (e.g. booking/occupancy/receipt). No PDF library is installed yet — **no** `dompdf`/`tcpdf`/`snappy`/`mpdf` in `composer.json`. Picking a PDF lib + designing the template layer is part of the task. Keep templates server-side rendered (this is an API-only repo; the React frontend is separate).
-- **Digital signature on physical documents** — capture/apply a digital signature onto a generated template document (e.g. signed receipt/agreement). Consider where the signature image is stored (existing `Image` upload is draft/incomplete — see Frozen section) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
+- **Digital signature on physical documents** — capture/apply a digital signature onto a generated template document (e.g. signed receipt/agreement). Consider where the signature image is stored (the `images` table is now production-ready — polymorphic, private disk, signed URLs; see "Image system" in Critical Conventions) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
 
 When starting any of the above: document the design decision + lib choice in `cline.md` before coding, and add a new entry here moving it from "Planned" to a real section once landed.
 

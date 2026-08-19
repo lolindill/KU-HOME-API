@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\UserController;
+use App\Http\Middleware\RequireJsonAccept;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -57,8 +58,14 @@ Route::prefix('v1')->group(function () {
     // 🌟 Refactor (18/06/26): ลบ public booking/lookup/request-payment — non-member ใช้งานไม่ได้แล้ว ทุกคนต้อง login
     //    createBooking ย้ายไป protected routes ด้านล่าง
 
-    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง
-    Route::post('/upload-image', [ImageController::class, 'upload']);
+    // 🖼️ (19/08/26): ให้บริการไฟล์รูปผ่าน signed URL อายุ 15 นาที
+    //    ⚠️ ไม่มี auth:sanctum — signature เป็นตัวยืนยันแทน + URL ออกให้เฉพาะผู้มีสิทธิ์
+    //    ⚠️ exempt RequireJsonAccept เฉพาะ route นี้ เพื่อให้ <img Accept: image/*> โหลดได้ (document ใน cline.md)
+    Route::get('/images/{image}/file', [ImageController::class, 'show'])
+        ->where('image', '[0-9a-f\-]{36}')
+        ->name('images.file')
+        ->middleware(['signed', 'throttle:10,1'])
+        ->withoutMiddleware([RequireJsonAccept::class]);
 });
 
 // ============================================

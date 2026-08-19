@@ -35,6 +35,7 @@ hotel/
 │   │   └── PgBoolean.php              # 🌟 Custom cast: PHP bool ↔ PostgreSQL boolean (strict typing fix)
 │   ├── Console/Commands/
 │   │   ├── CleanupExpiredDrafts.php   # Scheduled 02:00 — hard-delete expired draft bookings
+│   │   ├── CleanupImages.php          # 🖼️ Scheduled 02:30 — sweep orphan slip files/rows + rejected retention
 │   │   └── DailyRoomMaintenance.php   # Scheduled daily — cluster auto-assign (RoomAllocator) + flag dirty
 │   ├── Http/
 │   │   ├── Controllers/Api/V1/        # All controllers (REST API, /api/v1/)
@@ -46,7 +47,7 @@ hotel/
 │   │   │   ├── FrontDeskController.php# walk-in bookings, check-in/out, record payments (🧹 checkout creates typed task)
 │   │   │   ├── DashboardController.php# 🧹 housekeeping dashboard (Phase A: listTasks/createTask/assignTask/acceptTask/updateStatus)
 │   │   │   ├── AddonRateController.php
-│   │   │   └── ImageController.php    # 🚧 DRAFT image upload
+│   │   │   └── ImageController.php    # 🖼️ serve image file ผ่าน signed URL (images.file)
 │   │   ├── Middleware/
 │   │   │   └── CheckRole.php          # role-based authorization (user.role vs allowed roles)
 │   │   └── Requests/                  # 24 Form Requests (Store*/Update* per model)
@@ -62,7 +63,7 @@ hotel/
 │   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
 │   │   ├── HousekeepingTask.php / HousekeepingPhoto.php # 🧹 Phase A: task state machine + types
 │   │   ├── StockInventory.php         # 🧹 Phase A: master stock (replaces HousekeepingInventory)
-│   │   └── Image.php                  # 🚧 DRAFT polymorphic
+│   │   └── Image.php                  # 🖼️ (19/08/26) ระบบรูปจริงจัง: morph + private disk + signed URL 15 นาที + auto-delete-file
 │   ├── Services/
 │   │   └── RoomAllocator/             # 🏨 Phase 4 (14/07/26): v3 Walking Distance cluster algorithm
 │   │       ├── RoomAllocator.php      # ⭐ Entry: allocate(Collection $brs) → AllocationResult
@@ -161,7 +162,7 @@ hotel/
 | 🧾 Receipt | **30%** (🔴 design ยังไม่ final) |
 | 🧹 Housekeeping | **90%** (✅ Phase A refactor done — Phase B WebSocket เหลือ) |
 | ➕ Addon & AddonRate | 95% |
-| 🖼️ Image Upload | 10% (🚧 draft) |
+| 🖼️ Image System | **90%** (✅ 19/08/26: private disk + `images` table + signed URL — ใช้กับสลิปแล้ว · เหลือ: ไม่มี generic upload endpoint โดยตั้งใจ) |
 | 🎟️ Discount | 20% (🚧 draft) |
 
 ---
@@ -197,8 +198,9 @@ No `data` wrapper — resources are returned directly at top level (e.g., `booki
 
 ### Draft / Testing Routes (🚧)
 These routes exist but are **not for production use**:
-- `POST /upload-image` — Image upload system incomplete
 - `POST /bookings/validate-discount` — Discount system incomplete (only `WELCOME10`)
+
+> 🖼️ **(19/08/26)**: `POST /upload-image` (draft, unauthenticated) ถูกถอดออก — แทนด้วยระบบรูปจริง (ไฟล์บน private disk + `images` table + `GET /images/{id}/file` signed URL)
 
 > 🌟 **Refactor (18/06/26)**: Removed `POST /bookings/lookup` and `POST /bookings/{id}/request-payment` — non-member/guest access disabled. All users must login.
 
@@ -209,7 +211,7 @@ These routes exist but are **not for production use**:
 - `RoomController` — rooms & room types listing, availability, per-day availability calendar, status updates
 - `PaymentController` — ❄️ webhook frozen (410), requestPayment (admin walk-in)
 - `FrontDeskController` — walk-in bookings, check-in, check-out, record payments
-- `ImageController` — 🚧 DRAFT image upload
+- `ImageController` — 🖼️ (19/08/26) serve image file ผ่าน signed URL — ไม่มี auth:sanctum (signature ยืนยันแทน) + exempt RequireJsonAccept
 - `DashboardController` — housekeeping dashboard (cleaning tasks, status updates)
 
 ### Request Validation
@@ -1221,6 +1223,66 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - `php artisan migrate` — ผ่าน (drop column ทั้งสองตาราง)
 - `php artisan test` — **232 passed (481 assertions)** (BookingConfirmationTest 19 · PaymentTest 3 · FrontDeskTest 14 ผ่านครบ)
 - `vendor/bin/pint --dirty` — ผ่าน (fixed 9 style issues รวม pre-existing ในไฟล์ที่แตะ)
+
+---
+
+## ✅ ระบบรูปจริงจัง: private disk + images table + signed URL (2026-08-19 #2)
+
+> **สลิปเลิกเก็บบน public disk + path column แล้ว** — ย้ายมาเป็นระบบรูปกลางที่ปลอดภัยและขยายได้
+>
+> **Decisions (นายท่านเลือก):** Disk + `images` table polymorphic (ไม่เอา BLOB ใน DB — เหตุผล: มือใหม่ฝั่ง server + deploy บน company server, DB ต้องเบา, ย้ายไป S3/Supabase ภายหลังได้โดยไม่แก้ schema) · สลิปเป็น **private + ดูผ่าน signed URL อายุ 15 นาที** (frontend `<img src>` ตรงๆ ได้) · ขอบเขตแบบเต็ม (ถอด draft `/upload-image`) · มี cleanup
+
+### 🎯 การเปลี่ยนแปลงหลัก
+
+| ส่วน | เดิม | ใหม่ |
+|---|---|---|
+| ที่เก็บไฟล์สลิป | `public` disk (`storage/app/public/slips/` — URL ถาวรใครมีลิงก์ก็เห็น) | **`local` private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) |
+| DB | path string ใน `booking_confirmations.slip_image` | **drop column** — สลิป 1 ใบ = 1 row ใน `images` (morph `slipImage()`) |
+| `images` table | 🚧 draft (`url` + morph หลวม, ไม่มี index) | ของจริง: `path`/`disk`/`mime_type`/`size`/`original_name`/`uploaded_by` + morph index |
+| ดูรูป | `Storage::url()` = URL ถาวร | **`GET /api/v1/images/{id}/file`** + signed URL อายุ 15 นาที (ออกให้เฉพาะ response ของเจ้าของ/admin) |
+| `POST /upload-image` | 🚧 draft **ไม่มี auth** ใครก็อัปได้ | **ถอดออก** (route + `upload()` + `StoreImageRequest`) |
+| ตอน booking ถูก hard-delete | ไฟล์สลิปตาย (path ค้างใน row ที่ cascade หาย) | `destroyBooking` + `CleanupExpiredDrafts` ลบ Image row ก่อน (hook ลบไฟล์ให้) |
+| Cleanup | ไม่มี (ไฟล์สะสม) | **`app:cleanup-images`** รอบ 02:30: ไฟล์กำพร้า → ลบ · row กำพร้า → ลบ · rejected เกิน `SLIP_RETENTION_DAYS` (default 30) → ลบรูปคง confirmation · **verified ห้ามลบ** (หลักฐานการเงิน) |
+
+### 🔐 RequireJsonAccept exemption (จุดเดียวในระบบ — บันทึกตามกติกา AGENTS.md)
+`GET /images/{id}/file` ใช้ `->withoutMiddleware([RequireJsonAccept::class])` เพราะ browser `<img>` ส่ง `Accept: image/avif,image/webp,...` (ไม่มี JSON/wildcard) — ไม่ exempt แล้วรูปทุกใบโดน 406 ตอน frontend ฝัง tag · route ยังมี `signed` + `throttle:10,1` คุมอยู่ · ผ่าน test `test_signed_url_accepts_image_accept_header` กัน regression
+
+### 🧠 พฤติกรรมสำคัญที่ต้องจำ
+- **`Image` model**: serialize แล้วมี appended `url` (signed URL สดทุกครั้ง) · **ลบ row = ลบไฟล์อัตโนมัติ** (hook `deleting`) — call site ไหนลบ Image ไม่ต้องลบไฟล์เอง
+- `confirm()` เก็บไฟล์ใน transaction แต่ไฟล์ไม่ transactional → catch มี best-effort delete + command 02:30 เก็บรอยสอดคล้องอีกชั้น
+- ไม่มี generic upload endpoint โดยตั้งใจ — รูปเกิดจาก flow ของเจ้าของเสมอ (วันนี้คือ confirm) เพื่อกันอัปโหลดอิสระแบบ draft เดิม
+- **ทางไปต่อ:** `HousekeepingPhoto` (draft ลอย — มี model/migration/requests แต่ไม่มี route) ควรย้ายมาใช้ `images` table (morph `HousekeepingTask`) แล้ว drop ตาราง `housekeeping_photos` — ยังไม่ทำในรอบนี้
+
+### 📁 Files Changed
+- Migrations: ✨ `2026_08_19_110000_reshape_images_table` (drop+recreate — ตารางเดิมเป็น draft ไม่มีข้อมูล production) · `2026_08_19_110100_drop_slip_image_from_booking_confirmations`
+- Models: ✏️ `Image` (เขียนใหม่หมด) · `BookingConfirmation` (ลบ fillable `slip_image` + เพิ่ม `slipImage()` morphOne)
+- Controllers: ✏️ `BookingConfirmationController` (store local + สร้าง Image + eager `slipImage` ใน verify/reject/pending) · `ImageController` (เขียนใหม่: `show()` stream ไฟล์) · `BookingController::destroyBooking` (ลบรูปก่อน cascade)
+- Routes: ✏️ `api.php` (ลบ `/upload-image` · เพิ่ม `images.file` signed) · `console.php` (schedule 02:30)
+- Commands: ✨ `CleanupImages` · ✏️ `CleanupExpiredDrafts` (ลบรูปก่อนลบ booking)
+- Requests: 🗑️ `StoreImageRequest`
+- Tests: ✏️ `BookingConfirmationTest` (fake `local` disk + อ้าง morph แทน column) · ✏️ `BookingTest` (แก้ flaky `rand()` room_number → counter) · ✨ `ImageTest` · ✨ `CleanupImagesTest`
+- Docs: ✏️ `api_guide.md` · `cline.md` (ไฟล์นี้) · `AGENTS.md`
+
+### 🗄️ Migration Required
+⚠️ **ต้องรัน `php artisan migrate`** (หรือ `migrate:fresh --seed` บน dev): ตาราง `images` ถูกสร้างใหม่ (ข้อมูล draft เดิมหาย — ตั้งใจ) + **drop column `booking_confirmations.slip_image`** (path เดิมอ่านไม่ได้อีก — dev-only) · สลิปเก่าใน `storage/app/public/slips/` ตัดทิ้งได้ด้วยมือ
+
+### 🧪 Test Results (2026-08-19)
+- `php artisan test` — **256 passed (553 assertions)** (BookingConfirmationTest 18 · ImageTest 7 · CleanupImagesTest 7 ผ่านครบ)
+- `vendor/bin/pint --dirty` — ผ่าน (fixed 5 style issues)
+- `php artisan migrate` (dev SQLite) — ผ่านทั้ง 2 migration
+
+
+## ✅ Standardize PUT /bookings/{bookingId}/rooms payload key to `booking_rooms` (2026-08-19)
+
+> **Standardize payload key** — เปลี่ยน head key ของ batch room update จาก `rooms` เป็น `booking_rooms` ให้สอดคล้องกับ `POST /bookings` และ `POST /bookings/{bookingId}/rooms`
+>
+> **Files Changed:**
+> - `app/Http/Requests/UpdateBookingRoomsRequest.php` (`rooms` → `booking_rooms`)
+> - `app/Http/Controllers/Api/V1/BookingController.php` (`$validated['rooms']` → `$validated['booking_rooms']`)
+> - `tests/Feature/BookingTest.php` (update batch tests)
+> - `test_scripts/test_draft_ops_remote.php` (section 3.5)
+> - `docs/api_guide.md` & `AGENTS.md`
+
 
 
 

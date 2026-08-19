@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 
 class BookingConfirmation extends Model
 {
@@ -18,10 +19,12 @@ class BookingConfirmation extends Model
      * 1:N with bookings — เก็บ history ทุกครั้งที่ user ส่งหลักฐานการชำระ (แม้ reject)
      * - state machine ของตัวเอง: pending → verified | rejected (ทั้งคู่ terminal)
      * - ถ้า reject → user สร้าง row ใหม่ (ไม่ก็อกกลับ) เพื่อรักษา audit trail
+     *
+     * 🖼️ Refactor (19/08/26): สลิปเก็บใน images table ผ่าน morph (slipImage)
+     * — เลิกเก็บ path string ใน column slip_image แล้ว
      */
     protected $fillable = [
         'booking_id',
-        'slip_image',
         'transfer_time',
         'status',
         'reviewed_by',
@@ -42,6 +45,14 @@ class BookingConfirmation extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    /**
+     * 🖼️ (19/08/26) รูปสลิป — morphOne ไป images table (ตัวเชื่อมเดียวหลังเลิก column slip_image)
+     */
+    public function slipImage(): MorphOne
+    {
+        return $this->morphOne(Image::class, 'imageable');
     }
 
     /**

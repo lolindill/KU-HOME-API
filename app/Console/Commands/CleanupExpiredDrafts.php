@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Booking;
+use Carbon\Carbon;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
-use App\Models\Booking;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -25,6 +25,7 @@ class CleanupExpiredDrafts extends Command
 
         if ($expiredDrafts->isEmpty()) {
             $this->info('  ✓ No expired draft bookings found. All clean!');
+
             return Command::SUCCESS;
         }
 
@@ -42,6 +43,9 @@ class CleanupExpiredDrafts extends Command
                     }
                     // ลบ Payment ที่ผูกกับ Booking นี้ (ถ้ามี)
                     $booking->payments()->delete();
+                    // 🖼️ (19/08/26) ลบรูปสลิปก่อน booking หายไป — morph ไม่ cascade เอง
+                    //    (defense-in-depth: draft แทบไม่มี confirmation แต่กันเหนียวเหมือน destroyBooking)
+                    $booking->confirmations->each(fn ($confirmation) => $confirmation->slipImage?->delete());
                     // ลบ Booking container เป็นอันดับสุดท้าย
                     $booking->delete();
                 });
@@ -50,7 +54,7 @@ class CleanupExpiredDrafts extends Command
                 $this->line("  ✓ Expired draft deleted: {$booking->confirmation} (deadline: {$booking->payment_deadline})");
             } catch (\Exception $e) {
                 $this->warn("  ✗ Failed to delete draft {$booking->confirmation}: {$e->getMessage()}");
-                Log::warning("Failed to cleanup expired draft booking", [
+                Log::warning('Failed to cleanup expired draft booking', [
                     'booking_id' => $booking->id,
                     'confirmation' => $booking->confirmation,
                     'error' => $e->getMessage(),

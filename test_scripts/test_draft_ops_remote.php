@@ -286,7 +286,7 @@ if ($brA && $brB) {
 
     // 3.5a) batch จริง: brA ยืด 3 คืน + extra_bed + breakfast · brB guests + breakfast
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
-        'rooms' => [
+        'booking_rooms' => [
             [
                 'booking_room_id' => $brA,
                 'check_in' => $D, 'check_out' => $D3,
@@ -310,7 +310,7 @@ if ($brA && $brB) {
 
     // 3.5b) id ซ้ำใน batch → 422
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
-        'rooms' => [
+        'booking_rooms' => [
             ['booking_room_id' => $brA, 'billing_comment' => 'A'],
             ['booking_room_id' => $brA, 'billing_comment' => 'A dup'],
         ],
@@ -319,7 +319,7 @@ if ($brA && $brB) {
 
     // 3.5c) มี id ที่ไม่ได้อยู่ใต้ booking นี้ → 404 ทั้ง batch
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
-        'rooms' => [
+        'booking_rooms' => [
             ['booking_room_id' => $brA, 'billing_comment' => 'Should not apply'],
             ['booking_room_id' => '00000000-0000-4000-8000-000000000000'],
         ],
@@ -328,13 +328,13 @@ if ($brA && $brB) {
 
     // 3.5d) ไม่มี token → 401
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
-        'rooms' => [['booking_room_id' => $brA]],
+        'booking_rooms' => [['booking_room_id' => $brA]],
     ], null);
     check('BATCH PUT ไม่มี token → 401', $r['http_code'] === 401, 'HTTP '.$r['http_code']);
 
     // 3.5e) restore ทั้งสองห้องเป็นสถานะเดิม (2 คืน ไม่มี addon) — ให้ section 4 ทำงานเหมือนเดิม
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
-        'rooms' => [
+        'booking_rooms' => [
             ['booking_room_id' => $brA, 'check_in' => $D, 'check_out' => $D2, 'extra_beds' => 0, 'addons' => ['breakfast' => 0]],
             ['booking_room_id' => $brB, 'addons' => ['breakfast' => 0]],
         ],

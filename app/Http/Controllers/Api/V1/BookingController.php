@@ -358,6 +358,8 @@ class BookingController extends Controller
                 // frozen legacy table — ลบทิ้งเหมือน CleanupExpiredDrafts
                 $locked->payments()->delete();
                 // defense-in-depth: draft ไม่ควรมี confirmation (confirm จะ transition เป็น paid ทันที) แต่ลบกันเหนียว
+                // 🖼️ ลบรูปสลิปก่อนลบ confirmation — morph ไม่ cascade เอง (hook deleting ลบไฟล์บน disk ให้)
+                $locked->confirmations->each(fn ($confirmation) => $confirmation->slipImage?->delete());
                 $locked->confirmations()->delete();
 
                 // 📝 Audit log — เก็บไว้แม้ booking row จะหายไปแล้ว (append-only)
@@ -628,7 +630,7 @@ class BookingController extends Controller
 
             // 🔒 ทุก BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404) — ดึงครั้งเดียว
             //    (distinct rule รับประกันไม่มี id ซ้ำใน batch)
-            $ids = array_column($validated['rooms'], 'booking_room_id');
+            $ids = array_column($validated['booking_rooms'], 'booking_room_id');
             $rooms = $booking->bookingRooms()->whereIn('id', $ids)->get()->keyBy('id');
             if ($rooms->count() !== count($ids)) {
                 throw new ModelNotFoundException;
@@ -654,7 +656,7 @@ class BookingController extends Controller
                 $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'];
                 $updates = []; // booking_room_id => ['model', 'request', 'fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
 
-                foreach ($validated['rooms'] as $roomRequest) {
+                foreach ($validated['booking_rooms'] as $roomRequest) {
                     $brId = $roomRequest['booking_room_id'];
                     $bookingRoom = $rooms[$brId];
 
@@ -789,7 +791,7 @@ class BookingController extends Controller
 
             // 🌟 Response — เรียงตามลำดับ rooms ใน request
             $updatedRooms = [];
-            foreach ($validated['rooms'] as $roomRequest) {
+            foreach ($validated['booking_rooms'] as $roomRequest) {
                 $updatedRooms[] = $rooms[$roomRequest['booking_room_id']]->fresh(['addon', 'roomType', 'room']);
             }
 

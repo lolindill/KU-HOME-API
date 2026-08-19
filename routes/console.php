@@ -12,3 +12,4 @@ Artisan::command('inspire', function () {
 // เรียกใช้ Schedule ผ่าน Facade ให้ถูกต้อง
 Schedule::command('app:daily-room-maintenance')->daily();
 Schedule::command('app:cleanup-expired-drafts')->dailyAt('02:00');
+Schedule::command('app:cleanup-images')->dailyAt('02:30');

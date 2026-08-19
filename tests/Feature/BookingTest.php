@@ -40,12 +40,15 @@ class BookingTest extends TestCase
         return $rt;
     }
 
+    // counter แทน rand() — เลขห้องสุ่มชนกันเองใน test เดียวกันแล้วทำ suite พังแบบสุ่ม (flaky)
+    private static int $roomSeq = 0;
+
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
     {
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10'.rand(1, 99),
+            'room_number' => '10'.(++self::$roomSeq),
             'status' => $status,
         ]);
     }
@@ -926,7 +929,7 @@ class BookingTest extends TestCase
         // → total = 7600
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     [
                         'booking_room_id' => $br1->id,
                         'check_in' => now()->addDays(5)->toDateString(),
@@ -973,7 +976,7 @@ class BookingTest extends TestCase
         $intruder = User::factory()->create(); // role 'user' เหมือนเจ้าของ
         $response = $this->actingAs($intruder, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     ['booking_room_id' => $br1->id, 'billing_comment' => 'Hijack'],
                     ['booking_room_id' => $br2->id, 'billing_comment' => 'Hijack'],
                 ],
@@ -996,7 +999,7 @@ class BookingTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     ['booking_room_id' => $br->id, 'billing_comment' => 'A'],
                     ['booking_room_id' => $br->id, 'billing_comment' => 'B'],
                 ],
@@ -1020,7 +1023,7 @@ class BookingTest extends TestCase
         // BR ของ booking B แอบอ้างผ่าน booking A → 404 ทั้ง batch และห้องของ A ต้องไม่ถูกแตะ
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$bookingA->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     ['booking_room_id' => $brA->id, 'billing_comment' => 'Should not apply'],
                     ['booking_room_id' => $brB->id, 'billing_comment' => 'Hijack'],
                 ],
@@ -1044,7 +1047,7 @@ class BookingTest extends TestCase
         // br1 draft ปกติ แต่ br2 confirmed → batch ต้อง fail ทั้งชุด โดย br1 ไม่ถูกแตะ
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     ['booking_room_id' => $br1->id, 'billing_comment' => 'New comment'],
                     ['booking_room_id' => $br2->id, 'billing_comment' => 'Should fail'],
                 ],
@@ -1095,7 +1098,7 @@ class BookingTest extends TestCase
         // final state: X (T, +1..+3) + Y (T, +1..+3) = 2 ห้อง แต่ type T มีจริงแค่ 1 → 422
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     ['booking_room_id' => $roomX->id, 'guests' => [['title' => 'mr', 'name' => 'X', 'nationality' => 'TH']]],
                     ['booking_room_id' => $roomY->id, 'room_type_id' => $typeT->id],
                 ],
@@ -1120,7 +1123,7 @@ class BookingTest extends TestCase
         // ส่งครบทั้งคู่ แต่ check_out ก่อน check_in → validation จับได้ (422)
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     [
                         'booking_room_id' => $br->id,
                         'check_in' => now()->addDays(5)->toDateString(),
@@ -1144,7 +1147,7 @@ class BookingTest extends TestCase
         //    (ฟิลด์ check_in ไม่ได้ส่งมา) → controller effective-dates guard ต้องจับ (422)
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-                'rooms' => [
+                'booking_rooms' => [
                     [
                         'booking_room_id' => $br->id,
                         'check_out' => now()->toDateString(),
@@ -1168,7 +1171,7 @@ class BookingTest extends TestCase
         $br = $booking->bookingRooms->first();
 
         $response = $this->putJson("/api/v1/bookings/{$booking->id}/rooms", [
-            'rooms' => [
+            'booking_rooms' => [
                 ['booking_room_id' => $br->id, 'billing_comment' => 'Ghost Batch'],
             ],
         ]);
