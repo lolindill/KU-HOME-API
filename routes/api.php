@@ -102,6 +102,13 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         ->where(['bookingId' => '[0-9a-f\-]{36}', 'bookingRoomId' => '[0-9a-f\-]{36}'])
         ->middleware('throttle:5,1');
 
+    // 🌟 (19/08/26): แก้ไข booking room หลายห้องพร้อมกัน (batch update, all-or-nothing)
+    //    payload ต่างกันได้รายห้อง — แต่ละ entry ระบุ booking_room_id ของตัวเอง
+    //    เจ้าของ booking หรือ admin ใช้ได้ (ownership check ใน controller)
+    Route::put('/bookings/{bookingId}/rooms', [BookingController::class, 'updateRooms'])
+        ->where('bookingId', '[0-9a-f\-]{36}')
+        ->middleware('throttle:5,1');
+
     // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
     Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])
         ->where('bookingId', '[0-9a-f\-]{36}')

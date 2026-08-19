@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\AddBookingRoomsRequest;
 use App\Http\Requests\StoreBookingRequest;
 use App\Http\Requests\UpdateBookingRoomRequest;
+use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
@@ -570,6 +571,247 @@ class BookingController extends Controller
             }
 
             Log::error('Failed to update booking room: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (19/08/26): แก้ไข booking room หลายห้องพร้อมกัน — batch update (เจ้าของหรือ admin)
+     *
+     * 1 array entry = การแก้ 1 ห้อง (payload ต่างกันได้รายห้อง) — ต่างจาก updateRoom
+     * ที่ระบุ bookingRoomId ใน path ตัวเดียว ตรงนี้ระบุ booking_room_id รายแถวใน body
+     *
+     * Constraints (all-or-nothing — ห้องใดห้องหนึ่ง fail = rollback ทั้งชุด):
+     * - booking.status = 'draft' และ booking_room.status = 'draft' ทุกห้องเท่านั้น
+     * - แก้ room_type_id/check_in/check_out ได้ โดยเช็ค availability ใหม่จาก final state ของทั้ง batch
+     *   (existing count ตัดทุกห้องใน batch ออก แล้วนับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape)
+     * - ราคาคิดใหม่ทั้งหมดที่ server (global_rates) — ไม่รับ price จาก client เด็ดขาด
+     * - ห้ามแก้ room_id (ต้องผ่าน RoomAllocator) / status (ต้องผ่าน transitionStatus)
+     * - payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
+     */
+    public function updateRooms(UpdateBookingRoomsRequest $request, $bookingId)
+    {
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนแก้ไขห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — booking ต้องเป็น draft
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 ทุก BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404) — ดึงครั้งเดียว
+            //    (distinct rule รับประกันไม่มี id ซ้ำใน batch)
+            $ids = array_column($validated['rooms'], 'booking_room_id');
+            $rooms = $booking->bookingRooms()->whereIn('id', $ids)->get()->keyBy('id');
+            if ($rooms->count() !== count($ids)) {
+                throw new ModelNotFoundException;
+            }
+
+            // 🔒 Pre-flight: ทุกห้องต้องเป็น draft ก่อนแตะอะไร (all-or-nothing)
+            foreach ($rooms as $room) {
+                if ($room->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 🎯 เตรียมข้อมูลรายห้อง: fields ที่จะ merge + effective (final) values
+                //    ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว
+                $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'];
+                $updates = []; // booking_room_id => ['model', 'request', 'fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
+
+                foreach ($validated['rooms'] as $roomRequest) {
+                    $brId = $roomRequest['booking_room_id'];
+                    $bookingRoom = $rooms[$brId];
+
+                    $brFields = [];
+                    foreach ($fields as $field) {
+                        if (array_key_exists($field, $roomRequest)) {
+                            $brFields[$field] = $roomRequest[$field];
+                        }
+                    }
+
+                    $updates[$brId] = [
+                        'model' => $bookingRoom,
+                        'request' => $roomRequest,
+                        'fields' => $brFields,
+                        // ค่า final = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
+                        'type_id' => $brFields['room_type_id'] ?? $bookingRoom->room_type_id,
+                        'check_in' => $brFields['check_in'] ?? $bookingRoom->check_in->toDateString(),
+                        'check_out' => $brFields['check_out'] ?? $bookingRoom->check_out->toDateString(),
+                        'shape_changed' => array_key_exists('room_type_id', $roomRequest)
+                            || array_key_exists('check_in', $roomRequest)
+                            || array_key_exists('check_out', $roomRequest),
+                    ];
+
+                    // 🛡️ Guard effective dates จากค่า final — ครอบเคส partial update
+                    //    (validation after:* เทียบฟิลด์ที่ไม่ได้ส่งมาไม่ได้ เช่น ส่งแต่ check_in
+                    //     ทับ check_out เดิม หรือส่งแต่ check_out ก่อน check_in เดิม)
+                    if (Carbon::parse($updates[$brId]['check_out'])->lte(Carbon::parse($updates[$brId]['check_in']))) {
+                        throw new \Exception('วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้นค่ะ', 422);
+                    }
+                }
+
+                // 🌟 Availability re-check จาก final state ของทั้ง batch
+                //    - ตรวจเฉพาะห้องที่ shape เปลี่ยน (ห้อง unchanged ผ่านมาแล้วโดย invariant)
+                //    - existing count ตัด "ทุกห้องใน batch" ออก (มีอยู่แล้วเป็น draft rows)
+                //    - batch overlap นับจากค่า final ของทุกห้องใน batch รวมห้องที่ไม่ได้เปลี่ยน shape
+                //      (ไม่งั้นห้อง unchanged ที่ยังยึดพื้นที่อยู่จะหายไปจากการนับ → overbook)
+                $batchIds = array_keys($updates);
+                $totalByType = [];
+
+                foreach ($updates as $u) {
+                    if (! $u['shape_changed']) {
+                        continue;
+                    }
+
+                    if (! isset($totalByType[$u['type_id']])) {
+                        $totalByType[$u['type_id']] = Room::where('room_type_id', $u['type_id'])->count();
+                    }
+
+                    $checkIn = Carbon::parse($u['check_in']);
+                    $checkOut = Carbon::parse($u['check_out']);
+
+                    $existingBooked = BookingRoom::where('room_type_id', $u['type_id'])
+                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->whereNotIn('id', $batchIds)
+                        ->count();
+
+                    $batchOverlapping = 0;
+                    foreach ($updates as $other) {
+                        if ($other['type_id'] !== $u['type_id']) {
+                            continue;
+                        }
+                        $otherIn = Carbon::parse($other['check_in']);
+                        $otherOut = Carbon::parse($other['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalByType[$u['type_id']]) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+
+                // 🌟 Apply + reprice รายห้อง — extra_beds/addons: ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row
+                $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+
+                foreach ($updates as $u) {
+                    $bookingRoom = $u['model'];
+                    $roomRequest = $u['request'];
+
+                    $bookingRoom->update($u['fields']);
+
+                    $existingAddon = $bookingRoom->addon;
+                    $addonInput = $roomRequest['addons'] ?? null;
+
+                    $extraBedQty = array_key_exists('extra_beds', $roomRequest)
+                        ? ($roomRequest['extra_beds'] ?? 0)
+                        : ($existingAddon?->extra_bed ?? 0);
+                    $breakfastQty = is_array($addonInput)
+                        ? ($addonInput['breakfast'] ?? 0)
+                        : ($existingAddon?->breakfast ?? 0);
+                    $earlyCheckInEnabled = is_array($addonInput)
+                        ? ! empty($addonInput['early_checkin'])
+                        : ! empty($existingAddon?->early_checkIn_price);
+                    $lateCheckOutEnabled = is_array($addonInput)
+                        ? ! empty($addonInput['late_checkout'])
+                        : ! empty($existingAddon?->lateCheckOut_price);
+
+                    $roomType = RoomType::findOrFail($u['type_id']);
+                    $nights = Carbon::parse($u['check_in'])->diffInDays(Carbon::parse($u['check_out'])) ?: 1;
+
+                    $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
+                    $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
+                    $earlyCheckInPrice = $earlyCheckInEnabled ? ($rates['early_checkin'] ?? 0) : 0;
+                    $lateCheckOutPrice = $lateCheckOutEnabled ? ($rates['late_checkout'] ?? 0) : 0;
+
+                    $addonData = [
+                        'extra_bed' => $extraBedQty,
+                        'extra_bed_price' => $extraBedTotal,
+                        'breakfast' => $breakfastQty,
+                        'breakfast_price' => $breakfastPrice,
+                        'early_checkIn_price' => $earlyCheckInPrice,
+                        'lateCheckOut_price' => $lateCheckOutPrice,
+                    ];
+                    if ($existingAddon) {
+                        $existingAddon->update($addonData);
+                    } else {
+                        Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                    }
+                }
+
+                // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (ครั้งเดียว — idempotent)
+                $locked->update(['total_amount' => $this->recalculateBookingTotal($locked)]);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            // 🌟 Response — เรียงตามลำดับ rooms ใน request
+            $updatedRooms = [];
+            foreach ($validated['rooms'] as $roomRequest) {
+                $updatedRooms[] = $rooms[$roomRequest['booking_room_id']]->fresh(['addon', 'roomType', 'room']);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'booking_rooms' => $updatedRooms,
+                'total_amount' => $locked->fresh()->total_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to batch update booking rooms: '.$e->getMessage());
 
             return response()->json([
                 'status' => 'error',

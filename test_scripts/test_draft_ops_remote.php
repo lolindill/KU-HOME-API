@@ -7,6 +7,7 @@
  *   1. PUT    /bookings/{bookingId}/rooms/{bookingRoomId}  — แก้ไข BR draft (reprice + availability re-check)
  *   2. DELETE /bookings/{bookingId}/rooms/{bookingRoomId}  — ลบ BR draft (ห้องสุดท้ายห้ามลบ)
  *   3. DELETE /bookings/{bookingId}                       — ลบ draft booking (hard delete cascade)
+ *   4. PUT    /bookings/{bookingId}/rooms                 — แก้ไข BR หลายห้องพร้อมกัน (batch, 19/08/26)
  *
  * รวม error paths: 401 / 403 / 404 (ไม่พบ + BR ข้าม booking) / 422 (validation + ห้องสุดท้าย)
  * + admin override (admin ลบของคนอื่นได้)
@@ -34,19 +35,43 @@ $TEST_PASSWORD = 'password123';
 // ============================================
 // 🎨 Helpers
 // ============================================
-function out($t) { echo $t."\n"; }
-function ok($t) { echo "\033[32m✅ {$t}\033[0m\n"; }
-function bad($t) { echo "\033[31m❌ {$t}\033[0m\n"; }
-function info($t) { echo "\033[36mℹ️  {$t}\033[0m\n"; }
-function warn($t) { echo "\033[33m⚠️  {$t}\033[0m\n"; }
-
-$PASS = 0; $FAIL = 0; $SKIP = 0;
-function check($label, $cond, $detail = '') {
-    global $PASS, $FAIL;
-    if ($cond) { $PASS++; ok("{$label}".($detail ? " — {$detail}" : '')); }
-    else { $FAIL++; bad("{$label}".($detail ? " — {$detail}" : '')); }
+function out($t)
+{
+    echo $t."\n";
 }
-function skipCheck($label, $reason) {
+function ok($t)
+{
+    echo "\033[32m✅ {$t}\033[0m\n";
+}
+function bad($t)
+{
+    echo "\033[31m❌ {$t}\033[0m\n";
+}
+function info($t)
+{
+    echo "\033[36mℹ️  {$t}\033[0m\n";
+}
+function warn($t)
+{
+    echo "\033[33m⚠️  {$t}\033[0m\n";
+}
+
+$PASS = 0;
+$FAIL = 0;
+$SKIP = 0;
+function check($label, $cond, $detail = '')
+{
+    global $PASS, $FAIL;
+    if ($cond) {
+        $PASS++;
+        ok("{$label}".($detail ? " — {$detail}" : ''));
+    } else {
+        $FAIL++;
+        bad("{$label}".($detail ? " — {$detail}" : ''));
+    }
+}
+function skipCheck($label, $reason)
+{
     global $SKIP;
     $SKIP++;
     warn("⏭️  {$label} — ข้าม: {$reason}");
@@ -54,7 +79,8 @@ function skipCheck($label, $reason) {
 
 // ⏳ rate-limit pacing: 13s ระหว่าง request ใน bucket เดียวกัน (user token / ip)
 $lastHit = [];
-function pace($bucket) {
+function pace($bucket)
+{
     global $lastHit;
     $now = microtime(true);
     if (isset($lastHit[$bucket]) && ($now - $lastHit[$bucket]) < 13) {
@@ -65,12 +91,15 @@ function pace($bucket) {
     $lastHit[$bucket] = microtime(true);
 }
 
-function apiCall($method, $url, $data = null, $token = null) {
+function apiCall($method, $url, $data = null, $token = null)
+{
     pace($token ?: 'ip'); // bucket = user token หรือ ip
 
     $ch = curl_init();
     $headers = ['Content-Type: application/json', 'Accept: application/json'];
-    if ($token) { $headers[] = "Authorization: Bearer {$token}"; }
+    if ($token) {
+        $headers[] = "Authorization: Bearer {$token}";
+    }
     curl_setopt_array($ch, [
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
@@ -79,21 +108,31 @@ function apiCall($method, $url, $data = null, $token = null) {
         CURLOPT_TIMEOUT => 15,
         CURLOPT_SSL_VERIFYPEER => false,
     ]);
-    if ($data !== null) { curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data)); }
+    if ($data !== null) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    }
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);
     curl_close($ch);
-    if ($error) { return ['http_code' => 0, 'body' => null, 'error' => $error]; }
+    if ($error) {
+        return ['http_code' => 0, 'body' => null, 'error' => $error];
+    }
 
     return ['http_code' => $httpCode, 'body' => json_decode($response, true), 'error' => null];
 }
 
 $createdBookings = []; // สำหรับ cleanup ท้ายสุด
-function trackBooking($id) { global $createdBookings; if ($id) { $createdBookings[] = $id; } }
+function trackBooking($id)
+{
+    global $createdBookings;
+    if ($id) {
+        $createdBookings[] = $id;
+    }
+}
 
-out("══════════════════════════════════════════════════════════");
-out("🌐 KU HOME API — Remote Test: Draft Booking Ops");
+out('══════════════════════════════════════════════════════════');
+out('🌐 KU HOME API — Remote Test: Draft Booking Ops');
 out("   Target: {$BASE_URL}");
 out("══════════════════════════════════════════════════════════\n");
 
@@ -114,7 +153,11 @@ check('Register user2 → token', $r['http_code'] === 201 && $TOKEN2 !== null, "
 
 $r = apiCall('POST', $BASE_URL.'/login', ['email' => $ADMIN_EMAIL, 'password' => $ADMIN_PASS]);
 $ADMIN_TOKEN = $r['body']['access_token'] ?? null;
-if ($ADMIN_TOKEN) { ok('Admin login'); } else { warn('Admin login ล้มเหลว (HTTP '.$r['http_code'].') — จะข้ามเทสต์ admin override'); }
+if ($ADMIN_TOKEN) {
+    ok('Admin login');
+} else {
+    warn('Admin login ล้มเหลว (HTTP '.$r['http_code'].') — จะข้ามเทสต์ admin override');
+}
 
 // ============================================
 // 1) Fixtures: room types (≥2 ห้อง) + rates
@@ -123,7 +166,12 @@ $r = apiCall('GET', $BASE_URL.'/room-types');
 $roomTypes = $r['body']['room_types'] ?? $r['body']['data'] ?? $r['body'];
 if (! is_array($roomTypes) || ! $roomTypes) {
     $roomTypes = [];
-    foreach (($r['body'] ?? []) as $k => $v) { if (is_array($v) && isset($v[0]['id'])) { $roomTypes = $v; break; } }
+    foreach (($r['body'] ?? []) as $k => $v) {
+        if (is_array($v) && isset($v[0]['id'])) {
+            $roomTypes = $v;
+            break;
+        }
+    }
 }
 check('GET /room-types', $r['http_code'] === 200 && count($roomTypes) > 0, 'HTTP '.$r['http_code'].', '.count($roomTypes).' types');
 
@@ -131,37 +179,57 @@ $r = apiCall('GET', $BASE_URL.'/rooms');
 $rooms = $r['body']['rooms'] ?? $r['body']['data'] ?? $r['body'];
 if (! is_array($rooms) || ! $rooms) {
     $rooms = [];
-    foreach (($r['body'] ?? []) as $k => $v) { if (is_array($v) && isset($v[0]['id'])) { $rooms = $v; break; } }
+    foreach (($r['body'] ?? []) as $k => $v) {
+        if (is_array($v) && isset($v[0]['id'])) {
+            $rooms = $v;
+            break;
+        }
+    }
 }
 check('GET /rooms', $r['http_code'] === 200 && count($rooms) > 0, 'HTTP '.$r['http_code'].', '.count($rooms).' rooms');
 
 $countByType = [];
 foreach ($rooms as $room) {
     $rt = $room['room_type_id'] ?? null;
-    if ($rt) { $countByType[$rt] = ($countByType[$rt] ?? 0) + 1; }
+    if ($rt) {
+        $countByType[$rt] = ($countByType[$rt] ?? 0) + 1;
+    }
 }
 $candidates = [];
 foreach ($roomTypes as $rt) {
     $id = $rt['id'] ?? null;
-    if ($id && ($countByType[$id] ?? 0) >= 2) { $candidates[$id] = $countByType[$id]; }
+    if ($id && ($countByType[$id] ?? 0) >= 2) {
+        $candidates[$id] = $countByType[$id];
+    }
 }
 arsort($candidates);
-if (! $candidates) { bad('ไม่พบ room type ที่มี ≥2 ห้อง — เทสต์ต่อไม่ได้'); exit(1); }
+if (! $candidates) {
+    bad('ไม่พบ room type ที่มี ≥2 ห้อง — เทสต์ต่อไม่ได้');
+    exit(1);
+}
 $ROOM_TYPE_ID = array_key_first($candidates);
 info('ใช้ room type: '.$ROOM_TYPE_ID.' ('.$candidates[$ROOM_TYPE_ID].' ห้อง)');
 
 // rates — call เดียว แล้ว filter ในฝั่ง client (ลดจำนวน request)
 $r = apiCall('GET', $BASE_URL.'/global-rates');
 $rates = $r['body']['rates'] ?? [];
-$roomRate = 0; $extraBedRate = 0; $breakfastRate = 0;
+$roomRate = 0;
+$extraBedRate = 0;
+$breakfastRate = 0;
 foreach ($rates as $g) {
     $rt = $g['room_type_id'] ?? null;
     $code = $g['code'] ?? '';
     $rateType = $g['rate_type'] ?? '';
     $price = (int) ($g['default_price'] ?? 0);
-    if ($rateType === 'daily' && $rt === $ROOM_TYPE_ID) { $roomRate = $price; }
-    if ($rateType === 'addon' && $code === 'extra_bed') { $extraBedRate = $price; }
-    if ($rateType === 'addon' && $code === 'breakfast') { $breakfastRate = $price; }
+    if ($rateType === 'daily' && $rt === $ROOM_TYPE_ID) {
+        $roomRate = $price;
+    }
+    if ($rateType === 'addon' && $code === 'extra_bed') {
+        $extraBedRate = $price;
+    }
+    if ($rateType === 'addon' && $code === 'breakfast') {
+        $breakfastRate = $price;
+    }
 }
 check('มี daily rate สำหรับ room type', $roomRate > 0, $roomRate.' satang/คืน');
 info("extra_bed={$extraBedRate}/คืน · breakfast={$breakfastRate}/ท่าน");
@@ -181,13 +249,19 @@ foreach (array_keys($candidates) as $tryType) {
             ['room_type_id' => $tryType, 'check_in' => $D, 'check_out' => $D2, 'extra_beds' => 0],
         ],
     ], $TOKEN1);
-    if ($r['http_code'] === 201) { $BOOKING_ID = $r['body']['booking_id'] ?? null; break; }
+    if ($r['http_code'] === 201) {
+        $BOOKING_ID = $r['body']['booking_id'] ?? null;
+        break;
+    }
     info("Type {$tryType} เต็ม (HTTP {$r['http_code']}) — ลอง type ถัดไป");
 }
 trackBooking($BOOKING_ID);
 $expectedTotal = 2 * $roomRate * 2; // 2 ห้อง × rate × 2 คืน
 check('POST /bookings (2 ห้อง draft) → 201', $r['http_code'] === 201 && $BOOKING_ID, 'HTTP '.$r['http_code']);
-if (! $BOOKING_ID) { bad('สร้าง booking ไม่ได้ — เทสต์ต่อไม่ได้'); exit(1); }
+if (! $BOOKING_ID) {
+    bad('สร้าง booking ไม่ได้ — เทสต์ต่อไม่ได้');
+    exit(1);
+}
 check('total_amount ตรงกับสูตร (2×rate×2)', ($r['body']['total_amount'] ?? null) === $expectedTotal,
     "ได้ {$r['body']['total_amount']} คาด {$expectedTotal}");
 
@@ -203,10 +277,80 @@ $brB = $brs[1]['id'] ?? null;
 info("brA={$brA} · brB={$brB}");
 
 // ============================================
+// 3.5) BATCH: PUT /bookings/{id}/rooms — แก้หลายห้องพร้อมกัน (19/08/26)
+//      จบ section นี้แล้ว restore ทั้งสองห้องเป็นสถานะเดิม (2 คืน ไม่มี addon)
+//      เพื่อให้ section 4 ข้างล่างคำนวณ expected เดิมได้
+// ============================================
+if ($brA && $brB) {
+    $D3 = date('Y-m-d', strtotime('+5 days'));
+
+    // 3.5a) batch จริง: brA ยืด 3 คืน + extra_bed + breakfast · brB guests + breakfast
+    $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
+        'rooms' => [
+            [
+                'booking_room_id' => $brA,
+                'check_in' => $D, 'check_out' => $D3,
+                'extra_beds' => 1,
+                'addons' => ['breakfast' => 1],
+            ],
+            [
+                'booking_room_id' => $brB,
+                'guests' => [['title' => 'Mr.', 'name' => 'Batch Guest', 'nationality' => 'Thai', 'is_ku_member' => false]],
+                'addons' => ['breakfast' => 1],
+            ],
+        ],
+    ], $TOKEN1);
+    $expBatchA = ($roomRate * 3) + ($extraBedRate * 1 * 3) + $breakfastRate;
+    $expBatchB = ($roomRate * 2) + $breakfastRate;
+    $expBatchTotal = $expBatchA + $expBatchB;
+    check('BATCH PUT (brA 3 คืน+bed, brB guests+breakfast) → 200', $r['http_code'] === 200, 'HTTP '.$r['http_code']);
+    check('BATCH total_amount ถูกต้อง', ($r['body']['total_amount'] ?? null) === $expBatchTotal,
+        'ได้ '.($r['body']['total_amount'] ?? '?')." คาด {$expBatchTotal} (A={$expBatchA} + B={$expBatchB})");
+    check('BATCH response มี booking_rooms 2 อัน', count($r['body']['booking_rooms'] ?? []) === 2);
+
+    // 3.5b) id ซ้ำใน batch → 422
+    $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
+        'rooms' => [
+            ['booking_room_id' => $brA, 'billing_comment' => 'A'],
+            ['booking_room_id' => $brA, 'billing_comment' => 'A dup'],
+        ],
+    ], $TOKEN1);
+    check('BATCH id ซ้ำใน batch → 422', $r['http_code'] === 422, 'HTTP '.$r['http_code']);
+
+    // 3.5c) มี id ที่ไม่ได้อยู่ใต้ booking นี้ → 404 ทั้ง batch
+    $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
+        'rooms' => [
+            ['booking_room_id' => $brA, 'billing_comment' => 'Should not apply'],
+            ['booking_room_id' => '00000000-0000-4000-8000-000000000000'],
+        ],
+    ], $TOKEN1);
+    check('BATCH มี id แปลกปลอม → 404', $r['http_code'] === 404, 'HTTP '.$r['http_code']);
+
+    // 3.5d) ไม่มี token → 401
+    $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
+        'rooms' => [['booking_room_id' => $brA]],
+    ], null);
+    check('BATCH PUT ไม่มี token → 401', $r['http_code'] === 401, 'HTTP '.$r['http_code']);
+
+    // 3.5e) restore ทั้งสองห้องเป็นสถานะเดิม (2 คืน ไม่มี addon) — ให้ section 4 ทำงานเหมือนเดิม
+    $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms", [
+        'rooms' => [
+            ['booking_room_id' => $brA, 'check_in' => $D, 'check_out' => $D2, 'extra_beds' => 0, 'addons' => ['breakfast' => 0]],
+            ['booking_room_id' => $brB, 'addons' => ['breakfast' => 0]],
+        ],
+    ], $TOKEN1);
+    $restoredTotal = 2 * $roomRate * 2;
+    check('BATCH restore สถานะเดิม → 200 + total = 2×rate×2', $r['http_code'] === 200 && ($r['body']['total_amount'] ?? null) === $restoredTotal,
+        'HTTP '.$r['http_code'].', total '.($r['body']['total_amount'] ?? '?'));
+}
+
+// ============================================
 // 4) PUT brA: ขยายเป็น 3 คืน + extra_bed 1 + breakfast 1 → reprice
 // ============================================
 $D3 = date('Y-m-d', strtotime('+5 days'));
-if (! $brA) { skipCheck('PUT brA (reprice)', 'brA null'); } else {
+if (! $brA) {
+    skipCheck('PUT brA (reprice)', 'brA null');
+} else {
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms/{$brA}", [
         'check_in' => $D, 'check_out' => $D3,
         'extra_beds' => 1,
@@ -237,7 +381,9 @@ if (! $brA) { skipCheck('PUT brA (reprice)', 'brA null'); } else {
 // ============================================
 // 7) DELETE brB (ไม่ใช่ห้องสุดท้าย) → เหลือ 1 ห้อง, total = ห้อง A
 // ============================================
-if (! $brB) { skipCheck('DELETE brB', 'brB null'); } else {
+if (! $brB) {
+    skipCheck('DELETE brB', 'brB null');
+} else {
     $r = apiCall('DELETE', $BASE_URL."/bookings/{$BOOKING_ID}/rooms/{$brB}", null, $TOKEN1);
     check('DELETE brB (ไม่ใช่ห้องสุดท้าย) → 200', $r['http_code'] === 200, 'HTTP '.$r['http_code']);
     check('remaining_rooms = 1', ($r['body']['remaining_rooms'] ?? null) === 1);
@@ -249,7 +395,9 @@ if (! $brB) { skipCheck('DELETE brB', 'brB null'); } else {
 // ============================================
 // 8) DELETE brA (ห้องสุดท้ายของ booking) → 422
 // ============================================
-if (! $brA) { skipCheck('DELETE ห้องสุดท้าย', 'brA null'); } else {
+if (! $brA) {
+    skipCheck('DELETE ห้องสุดท้าย', 'brA null');
+} else {
     $r = apiCall('DELETE', $BASE_URL."/bookings/{$BOOKING_ID}/rooms/{$brA}", null, $TOKEN1);
     check('DELETE ห้องสุดท้าย → 422', $r['http_code'] === 422, 'HTTP '.$r['http_code']);
 }
@@ -364,13 +512,15 @@ foreach (array_unique($createdBookings) as $bid) {
         warn("ลบ {$bid} ไม่สำเร็จ (HTTP {$r['http_code']}) — ต้องลบมือ");
     }
 }
-if (! $leftover) { ok('ไม่มี residue ค้างบน prod'); }
-out("");
+if (! $leftover) {
+    ok('ไม่มี residue ค้างบน prod');
+}
+out('');
 
 // ============================================
 // Summary
 // ============================================
-out("══════════════════════════════════════════════════════════");
+out('══════════════════════════════════════════════════════════');
 out("📊 ผลรวม: ✅ PASS {$PASS} · ❌ FAIL {$FAIL} · ⏭️  SKIP {$SKIP}");
-out("══════════════════════════════════════════════════════════");
+out('══════════════════════════════════════════════════════════');
 exit($FAIL > 0 ? 1 : 0);
