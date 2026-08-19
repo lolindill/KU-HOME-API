@@ -131,6 +131,8 @@ class BookingController extends Controller
      */
     public function addRooms(AddBookingRoomsRequest $request, $bookingId)
     {
+        $inTransaction = false;
+
         try {
             $validated = $request->validated();
 
@@ -156,6 +158,7 @@ class BookingController extends Controller
             }
 
             DB::beginTransaction();
+            $inTransaction = true;
 
             // 🌟 Availability check (reuse pattern จาก createBooking)
             // group by room_type_id + ตรวจ overlap ของแต่ละช่วงวัน
@@ -273,7 +276,11 @@ class BookingController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            DB::rollBack();
+            // 🛡️ rollBack เฉพาะเมื่อเรา beginTransaction เอง — early guards (401/403/404/422)
+            //    โยน/return ก่อน begin แล้ว rollBack เปล่าจะไปยกเลิก transaction ของผู้เรียก
+            if ($inTransaction) {
+                DB::rollBack();
+            }
 
             // 🛡️ #40 pattern: Business logic errors (422) ส่ง message ได้, unexpected ซ่อน
             $code = $e->getCode();
@@ -955,6 +962,8 @@ class BookingController extends Controller
 
     public function createBooking(StoreBookingRequest $request)
     {
+        $inTransaction = false;
+
         try {
             $validated = $request->validated();
 
@@ -971,10 +980,11 @@ class BookingController extends Controller
                 ->exists();
 
             if ($hasDraft) {
-                throw new \Exception('มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
+                throw new \Exception('มีรายการจองที่รอชำระเงินอยู่คะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
             }
 
             DB::beginTransaction();
+            $inTransaction = true;
 
             // 🌟 Refactor (02/07/26): ย้าย check_in/check_out ไป BR-level — แต่ละห้องมีวันที่ของตัวเอง
             // ต้องเช็ค availability แบบ per-room-request (group by room_type + ดู overlap ของแต่ละช่วงวัน)
@@ -1112,7 +1122,11 @@ class BookingController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
+            // 🛡️ rollBack เฉพาะเมื่อเรา beginTransaction เอง — early guards (401/draft-limit 422)
+            //    โยนก่อน begin แล้ว rollBack เปล่าจะไปยกเลิก transaction ของผู้เรียก
+            if ($inTransaction) {
+                DB::rollBack();
+            }
 
             // 🛡️ #40 Fixed: Business logic errors (422) ส่ง message ได้, unexpected errors ซ่อน
             $code = $e->getCode();
