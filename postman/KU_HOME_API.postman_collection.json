@@ -1248,11 +1248,14 @@
                   "pm.test(\"Status code is 201 Created\", function () {",
                   "    pm.response.to.have.status(201);",
                   "});",
-                  "pm.test(\"Booking created and booking_id captured\", function () {",
+                  "pm.test(\"Booking created and booking_id + booking_room_id captured\", function () {",
                   "    const jsonData = pm.response.json();",
                   "    pm.expect(jsonData.status).to.eql(\"success\");",
                   "    pm.expect(jsonData.booking_id).to.be.a(\"string\");",
                   "    pm.environment.set(\"booking_id\", jsonData.booking_id);",
+                  "    if (jsonData.booking_rooms && jsonData.booking_rooms.length > 0) {",
+                  "        pm.environment.set(\"booking_room_id\", jsonData.booking_rooms[0].id);",
+                  "    }",
                   "});"
                 ]
               }
@@ -1274,7 +1277,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"Somchai Jaidee\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"addons\": {\n                \"breakfast\": 2,\n                \"early_checkin\": false,\n                \"late_checkout\": false\n            }\n        }\n    ]\n}",
+              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"firstName\": \"Somchai\",\n                    \"lastName\": \"Jaidee\",\n                    \"email\": \"somchai.j@ku.th\",\n                    \"phone\": \"0812345678\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"billing_address\": \"50 Ngamwongwan Rd, Lat Yao, Chatuchak, Bangkok 10900\",\n            \"billing_comment\": \"Tax ID: 0105559999999\",\n            \"addons\": {\n                \"breakfast\": 2,\n                \"early_checkin\": false,\n                \"late_checkout\": false\n            }\n        }\n    ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1419,9 +1422,12 @@
                   "pm.test(\"Status code is 200 OK\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Room added to booking\", function () {",
+                  "pm.test(\"Room added to booking & booking_room_id_2 captured\", function () {",
                   "    const jsonData = pm.response.json();",
                   "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    if (jsonData.booking_rooms && jsonData.booking_rooms.length > 0) {",
+                  "        pm.environment.set(\"booking_room_id_2\", jsonData.booking_rooms[0].id);",
+                  "    }",
                   "});",
                   "pm.sendRequest({",
                   "    url: pm.environment.get(\"base_url\") + \"/bookings/\" + pm.environment.get(\"booking_id\"),",
@@ -1458,7 +1464,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Ms.\",\n                    \"name\": \"Suda Jaidee\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"addons\": {\n                \"breakfast\": 1\n            }\n        }\n    ]\n}",
+              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Ms.\",\n                    \"firstName\": \"Suda\",\n                    \"lastName\": \"Jaidee\",\n                    \"email\": \"suda.j@ku.th\",\n                    \"phone\": \"0898765432\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"addons\": {\n                \"breakfast\": 1,\n                \"early_checkin\": false,\n                \"late_checkout\": false\n            }\n        }\n    ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1513,7 +1519,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"extra_beds\": 1,\n    \"guests\": [\n        {\n            \"title\": \"Mr.\",\n            \"name\": \"Somchai Jaidee (Updated)\",\n            \"nationality\": \"Thai\",\n            \"is_ku_member\": false\n        }\n    ],\n    \"addons\": {\n        \"breakfast\": 3\n    }\n}",
+              "raw": "{\n    \"extra_beds\": 1,\n    \"bed_preference\": \"twin\",\n    \"guests\": [\n        {\n            \"title\": \"Mr.\",\n            \"firstName\": \"Somchai\",\n            \"lastName\": \"Jaidee (Updated)\",\n            \"email\": \"somchai.j@ku.th\",\n            \"phone\": \"0812345678\",\n            \"nationality\": \"Thai\",\n            \"is_ku_member\": false\n        }\n    ],\n    \"addons\": {\n        \"breakfast\": 3,\n        \"early_checkin\": false,\n        \"late_checkout\": false\n    }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1572,7 +1578,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"booking_room_id\": \"{{booking_room_id}}\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"Somchai Batch 1\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 2\n            }\n        }\n    ]\n}",
+              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"booking_room_id\": \"{{booking_room_id}}\",\n            \"bed_preference\": \"twin\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"firstName\": \"Somchai\",\n                    \"lastName\": \"Batch 1\",\n                    \"email\": \"somchai.b1@ku.th\",\n                    \"phone\": \"0812345678\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 2\n            }\n        }\n    ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3900,7 +3906,10 @@
                 "exec": [
                   "pm.test(\"Status code is 201 Created\", function () { pm.response.to.have.status(201); });",
                   "const jsonData = pm.response.json();",
-                  "pm.environment.set(\"booking_id\", jsonData.booking_id);"
+                  "pm.environment.set(\"booking_id\", jsonData.booking_id);",
+                  "if (jsonData.booking_rooms && jsonData.booking_rooms.length > 0) {",
+                  "    pm.environment.set(\"booking_room_id\", jsonData.booking_rooms[0].id);",
+                  "}"
                 ]
               }
             }
@@ -3921,7 +3930,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"E2E Test Guest\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 1\n            }\n        }\n    ]\n}",
+              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"firstName\": \"Somchai\",\n                    \"lastName\": \"E2E\",\n                    \"email\": \"somchai.e2e@ku.th\",\n                    \"phone\": \"0812345678\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 1\n            }\n        }\n    ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
