@@ -200,6 +200,31 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(201);
+        $response->assertJsonPath('status', 'success');
+        $response->assertJsonCount(1, 'booking_rooms');
+        $response->assertJsonStructure([
+            'status',
+            'message',
+            'booking_id',
+            'confirmation',
+            'total_amount',
+            'payment_deadline',
+            'user_id',
+            'booking_rooms' => [
+                [
+                    'id',
+                    'booking_id',
+                    'room_type_id',
+                    'check_in',
+                    'check_out',
+                    'status',
+                    'guests',
+                    'has_children',
+                    'addon',
+                    'room_type',
+                ],
+            ],
+        ]);
 
         // 🛡️ Scrutinize: Verify booking linkage + total_amount calculated server-side
         $this->assertDatabaseHas('bookings', [
@@ -226,6 +251,49 @@ class BookingTest extends TestCase
         $guests = is_string($bookingRoom->guests) ? json_decode($bookingRoom->guests, true) : $bookingRoom->guests;
         $this->assertEquals($user->name, $guests[0]['name'] ?? null,
             'Guest name must be stored in booking_rooms.guests JSON, not in bookings table');
+    }
+
+    public function test_authenticated_user_can_create_booking_with_first_and_last_name_and_contact_info(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
+                        'guests' => [
+                            [
+                                'title' => 'Mr.',
+                                'firstName' => 'Somchai',
+                                'lastName' => 'Prasert',
+                                'email' => 'somchai.p@ku.th',
+                                'phone' => '0812345678',
+                                'nationality' => 'TH',
+                                'is_ku_member' => true,
+                            ],
+                        ],
+                        'has_children' => false,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('status', 'success');
+        $response->assertJsonCount(1, 'booking_rooms');
+        $response->assertJsonPath('booking_rooms.0.guests.0.firstName', 'Somchai');
+        $response->assertJsonPath('booking_rooms.0.guests.0.lastName', 'Prasert');
+        $response->assertJsonPath('booking_rooms.0.guests.0.email', 'somchai.p@ku.th');
+        $response->assertJsonPath('booking_rooms.0.guests.0.phone', '0812345678');
+
+        $bookingRoom = BookingRoom::where('room_type_id', $roomType->id)->latest('created_at')->first();
+        $this->assertNotNull($bookingRoom);
+        $this->assertEquals('Mr. Somchai Prasert', $bookingRoom->primary_guest_name);
     }
 
     // ============================================

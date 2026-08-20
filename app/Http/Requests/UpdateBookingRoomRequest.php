@@ -34,7 +34,13 @@ class UpdateBookingRoomRequest extends FormRequest
             // 👥 ข้อมูลผู้เข้าพัก
             'guests' => 'nullable|array',
             'guests.*.title' => 'nullable|string|max:50',
+            'guests.*.firstName' => 'nullable|string|max:255',
+            'guests.*.lastName' => 'nullable|string|max:255',
+            'guests.*.first_name' => 'nullable|string|max:255',
+            'guests.*.last_name' => 'nullable|string|max:255',
             'guests.*.name' => 'nullable|string|max:255',
+            'guests.*.email' => 'nullable|string|email|max:255',
+            'guests.*.phone' => 'nullable|string|max:50',
             'guests.*.nationality' => 'nullable|string|max:100',
             'guests.*.is_ku_member' => 'nullable|boolean',
             'has_children' => 'nullable|boolean',

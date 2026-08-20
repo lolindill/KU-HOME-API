@@ -117,7 +117,19 @@ class BookingRoom extends Model
             return 'Customer';
         }
 
-        return trim(($primary['title'] ?? '').' '.($primary['name'] ?? ''));
+        $firstName = $primary['firstName'] ?? $primary['first_name'] ?? '';
+        $lastName = $primary['lastName'] ?? $primary['last_name'] ?? '';
+        $fullName = trim($firstName.' '.$lastName);
+
+        if (empty($fullName)) {
+            $fullName = $primary['name'] ?? '';
+        }
+
+        if (empty($fullName)) {
+            return 'Customer';
+        }
+
+        return trim(($primary['title'] ?? '').' '.$fullName);
     }
 
     public function getTotalGuestsAttribute(): int

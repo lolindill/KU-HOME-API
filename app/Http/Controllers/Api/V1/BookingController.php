@@ -208,6 +208,7 @@ class BookingController extends Controller
             $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
 
             $addedAmount = 0;
+            $addedRooms = [];
 
             // 🌟 สร้าง BookingRoom + Addon ทีละห้อง (clone pattern จาก createBooking)
             foreach ($validated['booking_rooms'] as $roomRequest) {
@@ -258,6 +259,8 @@ class BookingController extends Controller
                     'early_checkIn_price' => $earlyCheckInPrice,
                     'late_checkOut_price' => $lateCheckOutPrice,
                 ]);
+
+                $addedRooms[] = $bookingRoom;
             }
 
             // 🌟 อัปเดต total_amount (accumulate เข้ายอดเดิม)
@@ -266,10 +269,15 @@ class BookingController extends Controller
 
             DB::commit();
 
+            $bookingRoomsResponse = array_map(function ($br) {
+                return $br->fresh(['addon', 'roomType', 'room']);
+            }, $addedRooms);
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ',
                 'booking_id' => $booking->id,
+                'booking_rooms' => $bookingRoomsResponse,
                 'added_amount' => $addedAmount,
                 'total_amount' => $booking->fresh()->total_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
@@ -1118,6 +1126,8 @@ class BookingController extends Controller
             // 🌟 Refactor (22/07/26): ย้ายจาก addon_rates → global_rates (rate_type='addon')
             $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
 
+            $createdRooms = [];
+
             // 🌟 ปรับลูปให้สร้าง BookingRoom และ Addon ไปพร้อมๆ กันต่อห้องเลยค่ะ
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
@@ -1171,19 +1181,28 @@ class BookingController extends Controller
                     'early_checkIn_price' => $earlyCheckInPrice,
                     'late_checkOut_price' => $lateCheckOutPrice,
                 ]);
+
+                $createdRooms[] = $bookingRoom;
             }
 
             $booking->update(['total_amount' => $totalAmount]);
 
             DB::commit();
 
+            // 🌟 โหลด relations ของห้องที่สร้างขึ้นทั้งหมด เพื่อส่งกลับใน response
+            $bookingRoomsResponse = array_map(function ($br) {
+                return $br->fresh(['addon', 'roomType', 'room']);
+            }, $createdRooms);
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Booking and Add-ons created successfully',
                 'booking_id' => $booking->id,
+                'confirmation' => $booking->confirmation,
                 'total_amount' => $booking->total_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
                 'user_id' => $userId,
+                'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 
         } catch (\Exception $e) {
@@ -1226,10 +1245,25 @@ class BookingController extends Controller
         $guestNameFilter = function ($brQuery) use ($lowerEscaped) {
             $driver = DB::getDriverName();
             if (in_array($driver, ['mysql', 'sqlite'])) {
-                $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', [$lowerEscaped]);
+                $brQuery->where(function ($q) use ($lowerEscaped) {
+                    $q->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].firstName")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].lastName")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].first_name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].last_name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].email")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].phone")) LIKE ?', [$lowerEscaped]);
+                });
             } elseif ($driver === 'pgsql') {
-                // PostgreSQL: guests #>> '{0,name}' extracts first guest's name as text
-                $brQuery->whereRaw("LOWER(guests #>> '{0,name}') LIKE ?", [$lowerEscaped]);
+                $brQuery->where(function ($q) use ($lowerEscaped) {
+                    $q->whereRaw("LOWER(guests #>> '{0,name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,firstName}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,lastName}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,first_name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,last_name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,email}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,phone}') LIKE ?", [$lowerEscaped]);
+                });
             } else {
                 // Fallback: search across whole JSON blob (less precise but safe)
                 $brQuery->whereRaw('LOWER(CAST(guests AS TEXT)) LIKE ?', [$lowerEscaped]);

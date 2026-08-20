@@ -30,7 +30,13 @@ class AddBookingRoomsRequest extends FormRequest
             // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง
             'booking_rooms.*.guests' => 'nullable|array',
             'booking_rooms.*.guests.*.title' => 'nullable|string|max:50',
+            'booking_rooms.*.guests.*.firstName' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.lastName' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.first_name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.last_name' => 'nullable|string|max:255',
             'booking_rooms.*.guests.*.name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.email' => 'nullable|string|email|max:255',
+            'booking_rooms.*.guests.*.phone' => 'nullable|string|max:50',
             'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
             'booking_rooms.*.guests.*.is_ku_member' => 'nullable|boolean',
             'booking_rooms.*.has_children' => 'nullable|boolean',
