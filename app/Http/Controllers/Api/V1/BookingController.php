@@ -464,24 +464,40 @@ class BookingController extends Controller
                     throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
                 }
 
-                // 🎯 Merge ฟิลด์ที่ส่งมาลง BR (ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว)
-                $brFields = [];
+                // 🎯 Merge ฟิลด์ที่ส่งมาลง BR — เช็คค่าเดิมใน DB เพื่ออัปเดตเฉพาะฟิลด์ที่เปลี่ยนจริง
+                $dirtyFields = [];
                 foreach (['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'] as $field) {
                     if (array_key_exists($field, $validated)) {
-                        $brFields[$field] = $validated[$field];
+                        $isDirty = match ($field) {
+                            'room_type_id' => (string) $validated['room_type_id'] !== (string) $bookingRoom->room_type_id,
+                            'check_in' => Carbon::parse($validated['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
+                            'check_out' => Carbon::parse($validated['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
+                            'has_children' => (bool) $validated['has_children'] !== (bool) $bookingRoom->has_children,
+                            'guests' => json_encode($validated['guests'] ?? []) !== json_encode($bookingRoom->guests ?? []),
+                            'bed_preference', 'billing_address', 'billing_comment' => ($validated[$field] ?? null) !== ($bookingRoom->$field ?? null),
+                            default => true,
+                        };
+
+                        if ($isDirty) {
+                            $dirtyFields[$field] = $validated[$field];
+                        }
                     }
                 }
 
                 // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
-                $effectiveTypeId = $brFields['room_type_id'] ?? $bookingRoom->room_type_id;
-                $effectiveCheckIn = $brFields['check_in'] ?? $bookingRoom->check_in->toDateString();
-                $effectiveCheckOut = $brFields['check_out'] ?? $bookingRoom->check_out->toDateString();
+                $effectiveTypeId = $validated['room_type_id'] ?? $bookingRoom->room_type_id;
+                $effectiveCheckIn = isset($validated['check_in'])
+                    ? Carbon::parse($validated['check_in'])->toDateString()
+                    : $bookingRoom->check_in->toDateString();
+                $effectiveCheckOut = isset($validated['check_out'])
+                    ? Carbon::parse($validated['check_out'])->toDateString()
+                    : $bookingRoom->check_out->toDateString();
 
-                // 🌟 Availability re-check — เฉพาะเมื่อแก้ประเภทห้องหรือวันที่
+                // 🌟 Availability re-check — เฉพาะเมื่อแก้ประเภทห้องหรือวันที่จริงเท่านั้น
                 //    (นับ existing แบบตัดตัวเองออก — ไม่งั้นเปลี่ยนวันที่แล้วนับซ้ำตัวเอง)
-                $shapeChanged = array_key_exists('room_type_id', $validated)
-                    || array_key_exists('check_in', $validated)
-                    || array_key_exists('check_out', $validated);
+                $shapeChanged = isset($dirtyFields['room_type_id'])
+                    || isset($dirtyFields['check_in'])
+                    || isset($dirtyFields['check_out']);
 
                 if ($shapeChanged) {
                     $checkIn = Carbon::parse($effectiveCheckIn);
@@ -501,7 +517,9 @@ class BookingController extends Controller
                     }
                 }
 
-                $bookingRoom->update($brFields);
+                if (! empty($dirtyFields)) {
+                    $bookingRoom->update($dirtyFields);
+                }
 
                 // 🌟 Reprice server-side — extra_beds/addons: ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row
                 $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
@@ -539,14 +557,24 @@ class BookingController extends Controller
                     'lateCheckOut_price' => $lateCheckOutPrice,
                 ];
                 if ($existingAddon) {
-                    $existingAddon->update($addonData);
+                    $dirtyAddonFields = [];
+                    foreach ($addonData as $k => $v) {
+                        if ((int) $existingAddon->$k !== (int) $v) {
+                            $dirtyAddonFields[$k] = $v;
+                        }
+                    }
+                    if (! empty($dirtyAddonFields)) {
+                        $existingAddon->update($dirtyAddonFields);
+                    }
                 } else {
                     Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
                 }
 
                 // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (idempotent)
                 $newTotal = $this->recalculateBookingTotal($locked);
-                $locked->update(['total_amount' => $newTotal]);
+                if ($locked->total_amount !== $newTotal) {
+                    $locked->update(['total_amount' => $newTotal]);
+                }
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -654,30 +682,52 @@ class BookingController extends Controller
                 // 🎯 เตรียมข้อมูลรายห้อง: fields ที่จะ merge + effective (final) values
                 //    ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว
                 $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'];
-                $updates = []; // booking_room_id => ['model', 'request', 'fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
+                $updates = []; // booking_room_id => ['model', 'request', 'dirty_fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
 
                 foreach ($validated['booking_rooms'] as $roomRequest) {
                     $brId = $roomRequest['booking_room_id'];
                     $bookingRoom = $rooms[$brId];
 
-                    $brFields = [];
+                    $dirtyFields = [];
                     foreach ($fields as $field) {
                         if (array_key_exists($field, $roomRequest)) {
-                            $brFields[$field] = $roomRequest[$field];
+                            $isDirty = match ($field) {
+                                'room_type_id' => (string) $roomRequest['room_type_id'] !== (string) $bookingRoom->room_type_id,
+                                'check_in' => Carbon::parse($roomRequest['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
+                                'check_out' => Carbon::parse($roomRequest['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
+                                'has_children' => (bool) $roomRequest['has_children'] !== (bool) $bookingRoom->has_children,
+                                'guests' => json_encode($roomRequest['guests'] ?? []) !== json_encode($bookingRoom->guests ?? []),
+                                'bed_preference', 'billing_address', 'billing_comment' => ($roomRequest[$field] ?? null) !== ($bookingRoom->$field ?? null),
+                                default => true,
+                            };
+
+                            if ($isDirty) {
+                                $dirtyFields[$field] = $roomRequest[$field];
+                            }
                         }
                     }
+
+                    $typeId = $roomRequest['room_type_id'] ?? $bookingRoom->room_type_id;
+                    $checkInStr = isset($roomRequest['check_in'])
+                        ? Carbon::parse($roomRequest['check_in'])->toDateString()
+                        : $bookingRoom->check_in->toDateString();
+                    $checkOutStr = isset($roomRequest['check_out'])
+                        ? Carbon::parse($roomRequest['check_out'])->toDateString()
+                        : $bookingRoom->check_out->toDateString();
+
+                    $shapeChanged = isset($dirtyFields['room_type_id'])
+                        || isset($dirtyFields['check_in'])
+                        || isset($dirtyFields['check_out']);
 
                     $updates[$brId] = [
                         'model' => $bookingRoom,
                         'request' => $roomRequest,
-                        'fields' => $brFields,
+                        'dirty_fields' => $dirtyFields,
                         // ค่า final = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
-                        'type_id' => $brFields['room_type_id'] ?? $bookingRoom->room_type_id,
-                        'check_in' => $brFields['check_in'] ?? $bookingRoom->check_in->toDateString(),
-                        'check_out' => $brFields['check_out'] ?? $bookingRoom->check_out->toDateString(),
-                        'shape_changed' => array_key_exists('room_type_id', $roomRequest)
-                            || array_key_exists('check_in', $roomRequest)
-                            || array_key_exists('check_out', $roomRequest),
+                        'type_id' => $typeId,
+                        'check_in' => $checkInStr,
+                        'check_out' => $checkOutStr,
+                        'shape_changed' => $shapeChanged,
                     ];
 
                     // 🛡️ Guard effective dates จากค่า final — ครอบเคส partial update
@@ -689,7 +739,7 @@ class BookingController extends Controller
                 }
 
                 // 🌟 Availability re-check จาก final state ของทั้ง batch
-                //    - ตรวจเฉพาะห้องที่ shape เปลี่ยน (ห้อง unchanged ผ่านมาแล้วโดย invariant)
+                //    - ตรวจเฉพาะห้องที่ shape เปลี่ยนจริง (ห้อง unchanged ผ่านมาแล้วโดย invariant)
                 //    - existing count ตัด "ทุกห้องใน batch" ออก (มีอยู่แล้วเป็น draft rows)
                 //    - batch overlap นับจากค่า final ของทุกห้องใน batch รวมห้องที่ไม่ได้เปลี่ยน shape
                 //      (ไม่งั้นห้อง unchanged ที่ยังยึดพื้นที่อยู่จะหายไปจากการนับ → overbook)
@@ -739,7 +789,9 @@ class BookingController extends Controller
                     $bookingRoom = $u['model'];
                     $roomRequest = $u['request'];
 
-                    $bookingRoom->update($u['fields']);
+                    if (! empty($u['dirty_fields'])) {
+                        $bookingRoom->update($u['dirty_fields']);
+                    }
 
                     $existingAddon = $bookingRoom->addon;
                     $addonInput = $roomRequest['addons'] ?? null;
@@ -774,14 +826,25 @@ class BookingController extends Controller
                         'lateCheckOut_price' => $lateCheckOutPrice,
                     ];
                     if ($existingAddon) {
-                        $existingAddon->update($addonData);
+                        $dirtyAddonFields = [];
+                        foreach ($addonData as $k => $v) {
+                            if ((int) $existingAddon->$k !== (int) $v) {
+                                $dirtyAddonFields[$k] = $v;
+                            }
+                        }
+                        if (! empty($dirtyAddonFields)) {
+                            $existingAddon->update($dirtyAddonFields);
+                        }
                     } else {
                         Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
                     }
                 }
 
                 // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (ครั้งเดียว — idempotent)
-                $locked->update(['total_amount' => $this->recalculateBookingTotal($locked)]);
+                $newTotal = $this->recalculateBookingTotal($locked);
+                if ($locked->total_amount !== $newTotal) {
+                    $locked->update(['total_amount' => $newTotal]);
+                }
 
                 DB::commit();
             } catch (\Exception $e) {

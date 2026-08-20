@@ -1283,9 +1283,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > - `test_scripts/test_draft_ops_remote.php` (section 3.5)
 > - `docs/api_guide.md` & `AGENTS.md`
 
+## ✅ Smart DB Diffing & Shape Checking for Booking Room Updates (2026-08-20)
 
-
-
-
-
-
+> **Optimize room updates** — เพิ่ม logic "Smart DB Diffing" ในทั้ง `updateRoom` (single) และ `updateRooms` (batch) เพื่อป้องกันการเช็ค availability ที่หนักและป้องกันคำสั่ง SQL UPDATE ที่ซ้ำซ้อน
+> 
+> **ปัญหาเดิม:** การกดบันทึกโดยไม่เปลี่ยนข้อมูลอะไรเลย (เช่น กด save ห้องเดิม) ทำให้เกิด availability overlap check ที่ต้องดึงข้อมูลห้องเยอะมาก และ update timestamp ใน DB แม้ข้อมูลไม่เปลี่ยน
+> 
+> **สิ่งที่แก้ไข:**
+> - เทียบ `$request` กับ current DB state ของ BookingRoom และ Addon (มีการ cast date และ bool เพื่อเปรียบเทียบ type ให้ตรงกัน)
+> - **Shape change detection**: จะเช็ค availability/overlap ก็ต่อเมื่อมีการเปลี่ยน `room_type_id`, `check_in`, หรือ `check_out` จริงๆ
+> - **Update prevention**: จะส่ง array ให้ Eloquent `update()` ก็ต่อเมื่อข้อมูลต่างจาก DB 
+> - ปรับ payload `PUT /bookings/{bookingId}/rooms` (batch) ให้ return relation กลับมาครบ (`addon`, `roomType`, `room`) เหมือน endpoint เดี่ยว
+> 
+> **Files Changed:**
+> - `app/Http/Controllers/Api/V1/BookingController.php` (updateRoom, updateRooms)
+> - `tests/Feature/BookingTest.php` (เพิ่ม 2 tests สำหรับเช็ค smart diffing และ payload shape)
+> - `docs/api_guide.md` (เพิ่ม note ⚡ Smart Diffing)

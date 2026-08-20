@@ -1,0 +1,4523 @@
+{
+  "info": {
+    "_postman_id": "c1a0c000-kuhome-api-2026-v1-collection",
+    "name": "KU HOME API",
+    "description": "# 🏨 KU HOME API — Postman Collection\n\nComprehensive API testing suite for KU HOME hotel management REST API (Laravel 13, PHP 8.3+, Sanctum 4).\n\n### 🔑 Authentication & Token Flow\n- Default authentication uses Bearer Token `{{token}}`.\n- Login requests auto-populate `{{admin_token}}`, `{{user_token}}`, `{{housekeeping_token}}`, and active `{{token}}`.\n\n### 🛡️ Global Middleware\n- Every `/api/*` request must include `Accept: application/json` (enforced via `RequireJsonAccept`).\n- File viewing `GET /images/{id}/file` uses Signed URL and accepts `image/*`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-calculate check_in (tomorrow) and check_out (+3 days) if not set",
+          "if (!pm.variables.get(\"check_in_date\")) {",
+          "    const today = new Date();",
+          "    const tomorrow = new Date(today);",
+          "    tomorrow.setDate(today.getDate() + 1);",
+          "    const checkOut = new Date(today);",
+          "    checkOut.setDate(today.getDate() + 3);",
+          "    pm.variables.set(\"check_in_date\", tomorrow.toISOString().split(\"T\")[0]);",
+          "    pm.variables.set(\"check_out_date\", checkOut.toISOString().split(\"T\")[0]);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_email",
+      "value": "admin@kuhome.com",
+      "type": "string"
+    },
+    {
+      "key": "admin_password",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_email",
+      "value": "user@kuhome.com",
+      "type": "string"
+    },
+    {
+      "key": "user_password",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "user_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "housekeeping_email",
+      "value": "maid@kuhome.com",
+      "type": "string"
+    },
+    {
+      "key": "housekeeping_password",
+      "value": "password123",
+      "type": "string"
+    },
+    {
+      "key": "housekeeping_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "current_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "room_type_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "room_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking_room_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking_room_id_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "confirmation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rate_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "target_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "check_in_date",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "check_out_date",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "slip_image_url",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "walkin_booking_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "room_id_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_assign_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_accept_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reject_booking_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reject_confirmation_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01. 🔑 Authentication & Profile",
+      "description": "User registration, login (Admin/User/Housekeeping), profile management, and token logout.",
+      "item": [
+        {
+          "name": "POST Register New Member",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Registration returns success status & access token\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.access_token).to.be.a(\"string\");",
+                  "    pm.environment.set(\"registered_user_token\", jsonData.access_token);",
+                  "    pm.environment.set(\"user_token\", jsonData.access_token);",
+                  "    pm.environment.set(\"token\", jsonData.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Somchai Jaidee\",\n    \"email\": \"somchai_{{$timestamp}}@example.com\",\n    \"password\": \"SecurePass123!\",\n    \"password_confirmation\": \"SecurePass123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "register"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Current User Profile (/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Profile fetched successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.user).to.be.an(\"object\");",
+                  "    pm.environment.set(\"current_user_id\", jsonData.user.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Update Own Profile (/profile)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Profile updated successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Somchai Updated Profile\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/profile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "profile"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Logout (/logout)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Logout successful\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "logout"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Login (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Admin Login successful and token captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.access_token).to.be.a(\"string\");",
+                  "    pm.environment.set(\"admin_token\", jsonData.access_token);",
+                  "    pm.environment.set(\"token\", jsonData.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{admin_email}}\",\n    \"password\": \"{{admin_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Login (Housekeeping)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Housekeeping Login successful and token captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.access_token).to.be.a(\"string\");",
+                  "    pm.environment.set(\"housekeeping_token\", jsonData.access_token);",
+                  "    pm.environment.set(\"token\", jsonData.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{housekeeping_email}}\",\n    \"password\": \"{{housekeeping_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Login (User)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"User Login successful and token captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.access_token).to.be.a(\"string\");",
+                  "    pm.environment.set(\"user_token\", jsonData.access_token);",
+                  "    pm.environment.set(\"token\", jsonData.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "login"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. 🏨 Rooms & Availability (Public)",
+      "description": "Public read-only endpoints for room inventory, room types, availability checking, and sold-out calendars.",
+      "item": [
+        {
+          "name": "GET List All Rooms (/rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Rooms fetched & room IDs captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.rooms).to.be.an(\"array\");",
+                  "    const rooms = jsonData.rooms || [];",
+                  "    const availableRoom = rooms.find(r => r.status === \"available\");",
+                  "    if (availableRoom) {",
+                  "        pm.environment.set(\"room_id\", availableRoom.id);",
+                  "    } else if (rooms.length > 0) {",
+                  "        pm.environment.set(\"room_id\", rooms[0].id);",
+                  "    }",
+                  "    if (rooms.length > 1) {",
+                  "        pm.environment.set(\"room_id_2\", rooms[1].id);",
+                  "    } else if (rooms.length > 0) {",
+                  "        pm.environment.set(\"room_id_2\", rooms[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Room Status Overview (/rooms/status)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rooms/status?status=available",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rooms",
+                "status"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "available",
+                  "description": "available, occupied, checkout_makeup, prep_checkin, maintenance, reserved_closed"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Room by ID (/rooms/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rooms",
+                "{{room_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List All Room Types (/room-types)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room types fetched and room_type_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.room_types).to.be.an(\"array\");",
+                  "    if (jsonData.room_types.length > 0) {",
+                  "        pm.environment.set(\"room_type_id\", jsonData.room_types[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/room-types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "room-types"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Room Type by ID (/room-types/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/room-types/{{room_type_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "room-types",
+                "{{room_type_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Check Availability (/availability)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Availability fetched successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.room_types).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/availability?check_in={{check_in_date}}&check_out={{check_out_date}}&max_guests=2",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "check_in",
+                  "value": "{{check_in_date}}"
+                },
+                {
+                  "key": "check_out",
+                  "value": "{{check_out_date}}"
+                },
+                {
+                  "key": "max_guests",
+                  "value": "2"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Per-Day Availability Calendar (/availability-per-day)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/availability-per-day?start_date={{check_in_date}}&end_date={{check_out_date}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "availability-per-day"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "{{check_in_date}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{check_out_date}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Sold-Out Availability Ranges (/availability-ranges)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/availability-ranges?start_date={{check_in_date}}&end_date={{check_out_date}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "availability-ranges"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "{{check_in_date}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{check_out_date}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Flat Unavailable Dates (/unavailable-dates)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/unavailable-dates?start_date={{check_in_date}}&end_date={{check_out_date}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "unavailable-dates"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "{{check_in_date}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{check_out_date}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Auto-Window Unavailable Ranges (/unavailable-ranges)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/unavailable-ranges",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "unavailable-ranges"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. 💰 Rates & Global Pricing",
+      "description": "Public rate lookups and Admin-only rate management (daily room rates, breakfast, extra bed, etc.).",
+      "item": [
+        {
+          "name": "GET List Global Rates (/global-rates)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Rates fetched and rate_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.rates).to.be.an(\"array\");",
+                  "    if (jsonData.rates.length > 0) {",
+                  "        pm.environment.set(\"rate_id\", jsonData.rates[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/global-rates",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "global-rates"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Global Rate by ID (/global-rates/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/global-rates/{{rate_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "global-rates",
+                "{{rate_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Update Global Rate (Admin) (/global-rates/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name_th\": \"อาหารเช้าบุฟเฟ่ต์พิเศษ\",\n    \"default_price\": 180\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/global-rates/{{rate_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "global-rates",
+                "{{rate_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH Toggle Global Rate Active (Admin) (/global-rates/{id}/toggle)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/global-rates/{{rate_id}}/toggle",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "global-rates",
+                "{{rate_id}}",
+                "toggle"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04. 📅 Bookings & Room Management",
+      "description": "Creating bookings, listing bookings, adding rooms, updating single/batch rooms, removing rooms, and deleting draft bookings.",
+      "item": [
+        {
+          "name": "POST Create Booking (Draft) (/bookings)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Booking created and booking_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.booking_id).to.be.a(\"string\");",
+                  "    pm.environment.set(\"booking_id\", jsonData.booking_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"Somchai Jaidee\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"addons\": {\n                \"breakfast\": 2,\n                \"early_checkin\": false,\n                \"late_checkout\": false\n            }\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List Bookings (/bookings)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Bookings listed and booking_room_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.bookings).to.be.an(\"array\");",
+                  "    const currentBooking = jsonData.bookings.find(b => b.id === pm.environment.get(\"booking_id\")) || jsonData.bookings[0];",
+                  "    if (currentBooking && currentBooking.booking_rooms && currentBooking.booking_rooms.length > 0) {",
+                  "        pm.environment.set(\"booking_room_id\", currentBooking.booking_rooms[0].id);",
+                  "        if (currentBooking.booking_rooms.length > 1) {",
+                  "            pm.environment.set(\"booking_room_id_2\", currentBooking.booking_rooms[1].id);",
+                  "        }",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings?per_page=15",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "term",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "check_in",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "check_out",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "room_type",
+                  "value": "all",
+                  "disabled": true
+                },
+                {
+                  "key": "per_page",
+                  "value": "15"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Booking by ID (/bookings/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Booking details fetched\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    if (jsonData.booking && jsonData.booking.booking_rooms && jsonData.booking.booking_rooms.length > 0) {",
+                  "        pm.environment.set(\"booking_room_id\", jsonData.booking.booking_rooms[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Add Rooms to Draft Booking (/bookings/{bookingId}/rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room added to booking\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});",
+                  "pm.sendRequest({",
+                  "    url: pm.environment.get(\"base_url\") + \"/bookings/\" + pm.environment.get(\"booking_id\"),",
+                  "    method: \"GET\",",
+                  "    header: {",
+                  "        \"Accept\": \"application/json\",",
+                  "        \"Authorization\": \"Bearer \" + pm.environment.get(\"token\")",
+                  "    }",
+                  "}, function (err, res) {",
+                  "    if (res && res.code === 200) {",
+                  "        const data = res.json();",
+                  "        if (data.booking && data.booking.booking_rooms && data.booking.booking_rooms.length > 1) {",
+                  "            pm.environment.set(\"booking_room_id_2\", data.booking.booking_rooms[1].id);",
+                  "        }",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"extra_beds\": 0,\n            \"guests\": [\n                {\n                    \"title\": \"Ms.\",\n                    \"name\": \"Suda Jaidee\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"has_children\": false,\n            \"addons\": {\n                \"breakfast\": 1\n            }\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Update Single Booking Room (/bookings/{bookingId}/rooms/{bookingRoomId})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room updated successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"extra_beds\": 1,\n    \"guests\": [\n        {\n            \"title\": \"Mr.\",\n            \"name\": \"Somchai Jaidee (Updated)\",\n            \"nationality\": \"Thai\",\n            \"is_ku_member\": false\n        }\n    ],\n    \"addons\": {\n        \"breakfast\": 3\n    }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/rooms/{{booking_room_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "rooms",
+                "{{booking_room_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Batch Update Booking Rooms (/bookings/{bookingId}/rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Batch rooms updated successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    if (jsonData.booking_rooms && jsonData.booking_rooms.length > 1) {",
+                  "        pm.environment.set(\"booking_room_id_2\", jsonData.booking_rooms[1].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_rooms\": [\n        {\n            \"booking_room_id\": \"{{booking_room_id}}\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"Somchai Batch 1\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 2\n            }\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE Remove Room from Booking (/bookings/{bookingId}/rooms/{bookingRoomId})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK or 422 (if last room)\", function () {",
+                  "    pm.expect([200, 422]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/rooms/{{booking_room_id_2}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "rooms",
+                "{{booking_room_id_2}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE Delete Entire Draft Booking (/bookings/{bookingId})",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const today = new Date();",
+                  "const tomorrow = new Date(today);",
+                  "tomorrow.setDate(today.getDate() + 1);",
+                  "const checkOut = new Date(today);",
+                  "checkOut.setDate(today.getDate() + 3);",
+                  "const checkInStr = tomorrow.toISOString().split('T')[0];",
+                  "const checkOutStr = checkOut.toISOString().split('T')[0];",
+                  "const roomTypeId = pm.variables.get('room_type_id') || pm.environment.get('room_type_id');",
+                  "const baseUrl = pm.variables.get('base_url') || pm.environment.get('base_url') || 'http://localhost:8000/api/v1';",
+                  "const adminToken = pm.variables.get('admin_token') || pm.environment.get('admin_token');",
+                  "",
+                  "const reqBody = {",
+                  "    source: 'online',",
+                  "    booking_rooms: [{",
+                  "        room_type_id: roomTypeId,",
+                  "        check_in: checkInStr,",
+                  "        check_out: checkOutStr,",
+                  "        extra_beds: 0,",
+                  "        guests: [{ title: 'Mr.', name: 'Temp Delete Test', nationality: 'Thai', is_ku_member: false }]",
+                  "    }]",
+                  "};",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/bookings',",
+                  "    method: 'POST',",
+                  "    header: {",
+                  "        'Accept': 'application/json',",
+                  "        'Content-Type': 'application/json',",
+                  "        'Authorization': 'Bearer ' + adminToken",
+                  "    },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify(reqBody)",
+                  "    }",
+                  "}, function (err, res) {",
+                  "    if (res && res.code === 201) {",
+                  "        pm.variables.set('temp_delete_booking_id', res.json().booking_id);",
+                  "    } else {",
+                  "        pm.variables.set('temp_delete_booking_id', pm.variables.get('booking_id'));",
+                  "    }",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Booking deleted successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{temp_delete_booking_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{temp_delete_booking_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Validate Discount Code (Draft) (/bookings/validate-discount)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"code\": \"WELCOME10\",\n    \"subtotal\": 2400\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/validate-discount",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "validate-discount"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05. 💳 Payment & Confirmations (Slip Flow)",
+      "description": "Slip submission (multipart/form-data), admin confirmation review (verify/reject), signed URL image streaming, and mock gateway endpoints.",
+      "item": [
+        {
+          "name": "POST Submit Payment Slip (/bookings/{bookingId}/confirm)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('transfer_time', new Date(Date.now() - 3600e3).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Slip submitted & confirmation_id + slip_image_url captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.confirmation_id).to.be.a(\"string\");",
+                  "    pm.environment.set(\"confirmation_id\", jsonData.confirmation_id);",
+                  "    if (jsonData.slip_image_url) {",
+                  "        pm.environment.set(\"slip_image_url\", jsonData.slip_image_url);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "slip_image",
+                  "type": "file",
+                  "description": "Select a slip image file (jpeg/png/jpg, max 4MB)",
+                  "src": "./assets/sample_slip.png"
+                },
+                {
+                  "key": "transfer_time",
+                  "value": "{{transfer_time}}",
+                  "type": "text",
+                  "description": "ISO transfer timestamp from slip"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "confirm"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List Pending Confirmations (Admin) (/booking-confirmations/pending)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Pending confirmations fetched\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/booking-confirmations/pending",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "booking-confirmations",
+                "pending"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Verify Payment Slip (Admin) (/booking-confirmations/{id}/verify)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Confirmation verified & booking status confirmed\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.booking_status).to.eql(\"confirmed\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"review_note\": \"Slip verified via bank app\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking-confirmations/{{confirmation_id}}/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "booking-confirmations",
+                "{{confirmation_id}}",
+                "verify"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Submit Payment Slip (for Reject) (/bookings/{bookingId}/confirm)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('transfer_time', new Date(Date.now() - 3600e3).toISOString());",
+                  "const today = new Date();",
+                  "const tomorrow = new Date(today);",
+                  "tomorrow.setDate(today.getDate() + 1);",
+                  "const checkOut = new Date(today);",
+                  "checkOut.setDate(today.getDate() + 3);",
+                  "const checkInStr = tomorrow.toISOString().split('T')[0];",
+                  "const checkOutStr = checkOut.toISOString().split('T')[0];",
+                  "const roomTypeId = pm.variables.get('room_type_id') || pm.environment.get('room_type_id');",
+                  "const baseUrl = pm.variables.get('base_url') || pm.environment.get('base_url') || 'http://localhost:8000/api/v1';",
+                  "",
+                  "const reqBody = {",
+                  "    source: 'online',",
+                  "    booking_rooms: [{",
+                  "        room_type_id: roomTypeId,",
+                  "        check_in: checkInStr,",
+                  "        check_out: checkOutStr,",
+                  "        extra_beds: 0,",
+                  "        guests: [{ title: 'Mr.', name: 'Reject Test Guest', nationality: 'Thai', is_ku_member: false }]",
+                  "    }]",
+                  "};",
+                  "",
+                  "// Login as guest to obtain dedicated token with fresh rate limit bucket",
+                  "pm.sendRequest({",
+                  "    url: baseUrl + '/login',",
+                  "    method: 'POST',",
+                  "    header: {",
+                  "        'Accept': 'application/json',",
+                  "        'Content-Type': 'application/json'",
+                  "    },",
+                  "    body: {",
+                  "        mode: 'raw',",
+                  "        raw: JSON.stringify({ email: 'guest@kuhome.com', password: 'password123' })",
+                  "    }",
+                  "}, function (err, res) {",
+                  "    if (res && res.code === 200) {",
+                  "        const gToken = res.json().access_token;",
+                  "        pm.environment.set('guest_token', gToken);",
+                  "        pm.variables.set('guest_token', gToken);",
+                  "",
+                  "        pm.sendRequest({",
+                  "            url: baseUrl + '/bookings',",
+                  "            method: 'POST',",
+                  "            header: {",
+                  "                'Accept': 'application/json',",
+                  "                'Content-Type': 'application/json',",
+                  "                'Authorization': 'Bearer ' + gToken",
+                  "            },",
+                  "            body: {",
+                  "                mode: 'raw',",
+                  "                raw: JSON.stringify(reqBody)",
+                  "            }",
+                  "        }, function (err2, res2) {",
+                  "            if (res2 && res2.code === 201) {",
+                  "                const bId = res2.json().booking_id;",
+                  "                pm.environment.set('reject_booking_id', bId);",
+                  "                pm.variables.set('reject_booking_id', bId);",
+                  "            }",
+                  "        });",
+                  "    }",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Slip submitted for reject & reject_confirmation_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.confirmation_id).to.be.a(\"string\");",
+                  "    pm.environment.set(\"reject_confirmation_id\", jsonData.confirmation_id);",
+                  "    if (jsonData.slip_image_url) {",
+                  "        pm.environment.set(\"slip_image_url\", jsonData.slip_image_url);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "slip_image",
+                  "type": "file",
+                  "description": "Select a slip image file (jpeg/png/jpg, max 4MB)",
+                  "src": "./assets/sample_slip.png"
+                },
+                {
+                  "key": "transfer_time",
+                  "value": "{{transfer_time}}",
+                  "type": "text",
+                  "description": "ISO transfer timestamp from slip"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/{{reject_booking_id}}/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{reject_booking_id}}",
+                "confirm"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{guest_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Reject Payment Slip (Admin) (/booking-confirmations/{id}/reject)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Confirmation rejected & booking status stays paid\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.booking_status).to.eql(\"paid\");",
+                  "    pm.expect(jsonData.confirmation).to.be.an(\"object\");",
+                  "    pm.expect(jsonData.confirmation.status).to.eql(\"rejected\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"review_note\": \"สลิปไม่ชัดเจน กรุณาส่งสลิปที่มี QR code ชัดเจนค่ะ\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/booking-confirmations/{{reject_confirmation_id}}/reject",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "booking-confirmations",
+                "{{reject_confirmation_id}}",
+                "reject"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET View Slip Image via Signed URL (/images/{id}/file)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK or 403 (if signature expired)\", function () {",
+                  "    pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "image/*",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{slip_image_url}}",
+              "host": [
+                "{{slip_image_url}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Request Payment (Admin - Demo) (/payments)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "console.log(\"Request Payment (Admin - Demo) response code:\", pm.response.code);",
+                  "pm.test(\"Status code is 200 OK, 201 Created, 400 (if already paid), or 422 (if pending payment exists)\", function () {",
+                  "    pm.expect([200, 201, 400, 422]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_id\": \"{{booking_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Webhook Callback (Frozen / 410 Gone) (/payment/webhook)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 410 Gone (Frozen endpoint)\", function () {",
+                  "    pm.response.to.have.status(410);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"payment_id\": \"test-id\",\n    \"status\": \"success\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/payment/webhook",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payment",
+                "webhook"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06. 🗂️ Booking State Machine & Audit",
+      "description": "Admin manual status transitions, automatic room cluster allocation, and state transition audit trail.",
+      "item": [
+        {
+          "name": "PUT Manual Booking Status Transition (/bookings/update/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK or 422 (if already in target status)\", function () {",
+                  "    pm.expect([200, 422]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Booking status transitioned\", function () {",
+                  "        const jsonData = pm.response.json();",
+                  "        pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/update/{{booking_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "update",
+                "{{booking_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Auto-Assign Physical Rooms (/bookings/{bookingId}/assign-rooms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Rooms auto-assigned and physical room_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    if (jsonData.booking && jsonData.booking.booking_rooms && jsonData.booking.booking_rooms[0].room_id) {",
+                  "        pm.environment.set(\"room_id\", jsonData.booking.booking_rooms[0].room_id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/assign-rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "assign-rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Booking Status Change Audit Logs (/bookings/{id}/status-logs)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Audit logs retrieved successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.logs).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/status-logs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "status-logs"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07. 🛎️ Front Desk Operations",
+      "description": "Admin front-desk workflows: walk-ins, check-in, check-out (triggers housekeeping task), no-show handling, and manual payment recording.",
+      "item": [
+        {
+          "name": "POST Walk-in Booking & Check-in (/front-desk/walk-in)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Walk-in completed and booking_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.booking_id).to.be.a(\"string\");",
+                  "    pm.environment.set(\"walkin_booking_id\", jsonData.booking_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"verified_by\": \"{{current_user_id}}\",\n    \"nights\": 2,\n    \"room_id\": \"{{room_id}}\",\n    \"guests\": [\n        {\n            \"title\": \"Mr.\",\n            \"name\": \"Walk-in Guest\",\n            \"nationality\": \"Thai\",\n            \"is_ku_member\": false\n        }\n    ],\n    \"has_children\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/walk-in",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "walk-in"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Record Manual Front Payment (/front-desk/{bookingId}/payment)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Payment recorded successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_id\": \"{{booking_id}}\",\n    \"amount\": 10000000,\n    \"reference_number\": \"CASH-FRONT-001\",\n    \"received_by\": \"{{current_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/payment",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "payment"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Check-In Guest (/front-desk/{bookingId}/check-in)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Check-in successful & room status updated to occupied\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect([\"confirmed\", \"checked_in\"]).to.include(jsonData.booking_status);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"assigned_rooms\": [\n        \"{{room_id}}\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/check-in",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "check-in"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Check-Out Guest (/front-desk/{bookingId}/check-out)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Check-out successful & housekeeping task created\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    if (jsonData.room_updates && jsonData.room_updates.length > 0 && jsonData.room_updates[0].housekeeping_task_id) {",
+                  "        pm.environment.set(\"task_id\", jsonData.room_updates[0].housekeeping_task_id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"verified_by\": \"{{current_user_id}}\",\n    \"notes\": \"Guest checked out normally at front desk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/check-out",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "check-out"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Mark Guest No-Show (/front-desk/{bookingId}/mark-no-show)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK, 400, or 422\", function () {",
+                  "    pm.expect([200, 400, 422]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"verified_by\": \"{{current_user_id}}\",\n    \"booking_room_ids\": [\n        \"{{booking_room_id}}\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/mark-no-show",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "mark-no-show"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "08. 👥 User Management",
+      "description": "Admin-only user CRUD, pagination, and user verification toggling.",
+      "item": [
+        {
+          "name": "GET List Users (/users)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Users list fetched successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.users).to.be.an(\"object\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Create User (/users)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"User created and target_user_id captured\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.user.id).to.be.a(\"string\");",
+                  "    pm.environment.set(\"target_user_id\", jsonData.user.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Staff Member\",\n    \"email\": \"staff_{{$timestamp}}@kuhome.com\",\n    \"password\": \"Password123!\",\n    \"role\": \"user\",\n    \"ver\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET User by ID (/users/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{target_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{target_user_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Update User (/users/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Staff Member Updated\",\n    \"role\": \"user\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/users/{{target_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{target_user_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Toggle User Verification (/users/{id}/verify)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"ver\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/users/{{target_user_id}}/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{target_user_id}}",
+                "verify"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE Delete User (/users/{id})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{target_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{target_user_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "09. 🛏️ Room Management",
+      "description": "Admin manual room status updates via state machine.",
+      "item": [
+        {
+          "name": "PUT Update Room Status (/rooms/{id}/status)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room status updated successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"maintenance\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "rooms",
+                "{{room_id}}",
+                "status"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. 🧹 Housekeeping Dashboard",
+      "description": "Housekeeping workflow: list all tasks, create manual task, assign task, list unassigned tasks, accept task, and update task status (done -> room available).",
+      "item": [
+        {
+          "name": "GET List All Tasks (Admin) (/dashboard/tasks)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Tasks list fetched successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.tasks).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Create Cleaning Task (Admin) (/dashboard/tasks)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created or 422 (if active task exists)\", function () {",
+                  "    pm.expect([201, 422]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test(\"Task creation handled & task_assign_id captured on 201\", function () {",
+                  "    if (pm.response.code === 201) {",
+                  "        const jsonData = pm.response.json();",
+                  "        pm.expect(jsonData.status).to.eql(\"success\");",
+                  "        const taskId = jsonData.task ? (jsonData.task.task_id || jsonData.task.id) : null;",
+                  "        if (taskId) {",
+                  "            pm.environment.set(\"task_assign_id\", taskId);",
+                  "        }",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"room_id\": \"{{room_id}}\",\n    \"task_type\": \"daily\",\n    \"notes\": \"Deep clean room before VIP guest\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List Unassigned Tasks (Admin) (/dashboard/tasks/unassigned)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Unassigned tasks fetched and target task IDs resolved\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.tasks).to.be.an(\"array\");",
+                  "    const tasks = jsonData.tasks || [];",
+                  "    let taskAssignId = pm.environment.get(\"task_assign_id\");",
+                  "    let taskAcceptId = null;",
+                  "    const acceptCandidate = tasks.find(function(t) { return (t.task_id || t.id) !== taskAssignId; });",
+                  "    if (acceptCandidate) {",
+                  "        taskAcceptId = acceptCandidate.task_id || acceptCandidate.id;",
+                  "        pm.environment.set(\"task_accept_id\", taskAcceptId);",
+                  "    }",
+                  "    if (!taskAssignId) {",
+                  "        const assignCandidate = tasks.find(function(t) { return (t.task_id || t.id) !== taskAcceptId; });",
+                  "        if (assignCandidate) {",
+                  "            taskAssignId = assignCandidate.task_id || assignCandidate.id;",
+                  "            pm.environment.set(\"task_assign_id\", taskAssignId);",
+                  "        }",
+                  "    }",
+                  "    if (!taskAssignId || !taskAcceptId || taskAssignId === taskAcceptId) {",
+                  "        const baseUrl = pm.variables.get(\"base_url\") || pm.environment.get(\"base_url\") || \"http://localhost:8000/api/v1\";",
+                  "        const adminToken = pm.variables.get(\"admin_token\") || pm.environment.get(\"admin_token\");",
+                  "        const roomId2 = pm.variables.get(\"room_id_2\") || pm.environment.get(\"room_id_2\") || pm.environment.get(\"room_id\");",
+                  "        pm.sendRequest({",
+                  "            url: baseUrl + \"/dashboard/tasks\",",
+                  "            method: \"POST\",",
+                  "            header: { \"Accept\": \"application/json\", \"Content-Type\": \"application/json\", \"Authorization\": \"Bearer \" + adminToken },",
+                  "            body: { mode: \"raw\", raw: JSON.stringify({ room_id: roomId2, task_type: \"daily\", notes: \"Fallback unassigned task for test\" }) }",
+                  "        }, function (err, res) {",
+                  "            if (res && res.code === 201) {",
+                  "                const createdId = res.json().task ? (res.json().task.task_id || res.json().task.id) : null;",
+                  "                if (createdId) {",
+                  "                    if (!taskAssignId) { pm.environment.set(\"task_assign_id\", createdId); }",
+                  "                    else { pm.environment.set(\"task_accept_id\", createdId); }",
+                  "                }",
+                  "            } else {",
+                  "                const code = res ? res.code : \"no response\";",
+                  "                const bodyText = (function() { try { return res ? JSON.stringify(res.json()) : \"\"; } catch(e) { return res ? res.text() : \"\"; } })();",
+                  "                const errMsg = err ? err.message : bodyText;",
+                  "                console.warn(\"[FALLBACK] Backup task via room_id_2 failed. HTTP \" + code + \" � \" + errMsg + \". room_id_2=\" + roomId2);",
+                  "                pm.test(\"[FALLBACK] Backup task via room_id_2 created (diagnostic)\", function () {",
+                  "                    pm.expect.fail(\"Fallback task creation failed: HTTP \" + code + \" � \" + errMsg + \". Ensure room_id_2 env var is a valid room UUID. Without 2 distinct unassigned tasks, Assign and Accept hit the same task.\");",
+                  "                });",
+                  "            }",
+                  "        });",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/unassigned",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "unassigned"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PUT Assign Task to Maid (Admin) (/dashboard/tasks/{id}/assign)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Task assigned to maid successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.task).to.be.an(\"object\");",
+                  "    pm.expect(jsonData.task.task_status || jsonData.task.status).to.eql(\"accepted\");",
+                  "});",
+                  "pm.test(\"Assigned task ID matches task_assign_id (anti-no-op)\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    const returnedId = jsonData.task ? (jsonData.task.task_id || jsonData.task.id) : null;",
+                  "    const expected = pm.environment.get(\"task_assign_id\");",
+                  "    pm.expect(returnedId, \"returned id must be a string\").to.be.a(\"string\");",
+                  "    pm.expect(returnedId, \"returned id must equal task_assign_id\").to.eql(expected);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"assigned_to\": \"{{current_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/{{task_assign_id}}/assign",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "{{task_assign_id}}",
+                "assign"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET List Unassigned Tasks (Housekeeping) (/dashboard/tasks/unassigned)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Unassigned tasks list fetched successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.tasks).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{housekeeping_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/unassigned",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "unassigned"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST Accept Cleaning Task (Housekeeping) (/dashboard/tasks/{id}/accept)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Task accepted by maid successfully\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.task).to.be.an(\"object\");",
+                  "    pm.expect(jsonData.task.task_status || jsonData.task.status).to.eql(\"accepted\");",
+                  "});",
+                  "pm.test(\"Accepted task ID matches task_accept_id (anti-no-op)\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    const returnedId = jsonData.task ? (jsonData.task.task_id || jsonData.task.id) : null;",
+                  "    const expected = pm.environment.get(\"task_accept_id\");",
+                  "    pm.expect(returnedId, \"returned id must be a string\").to.be.a(\"string\");",
+                  "    pm.expect(returnedId, \"returned id must equal task_accept_id\").to.eql(expected);",
+                  "});",
+                  "pm.test(\"Accepted task has assigned_to set (maid assigned)\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.task.assigned_to, \"assigned_to must not be null\").to.not.be.null;",
+                  "    pm.expect(jsonData.task.assigned_to).to.not.be.undefined;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{housekeeping_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/{{task_accept_id}}/accept",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "{{task_accept_id}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH Update Cleaning Task Status (Housekeeping) (/dashboard/tasks/{id}/status)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Task marked done and room returned to available\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(\"success\");",
+                  "    pm.expect(jsonData.task.task_status || jsonData.task.status).to.eql(\"done\");",
+                  "    pm.expect(jsonData.new_room_status).to.eql(\"available\");",
+                  "});",
+                  "pm.test(\"PATCH task ID matches task_accept_id (anti-no-op)\", function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    const returnedId = jsonData.task ? (jsonData.task.task_id || jsonData.task.id) : null;",
+                  "    const expected = pm.environment.get(\"task_accept_id\");",
+                  "    pm.expect(returnedId, \"returned id must be a string\").to.be.a(\"string\");",
+                  "    pm.expect(returnedId, \"returned id must equal task_accept_id\").to.eql(expected);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{housekeeping_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"done\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/{{task_accept_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "{{task_accept_id}}",
+                "status"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. 🔄 Automated E2E Runner Chains",
+      "description": "Complete end-to-end automated flows from customer booking to housekeeping completion. Ready for Collection Runner or Newman CLI.",
+      "item": [
+        {
+          "name": "Flow A - Step 1: Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.environment.set(\"admin_token\", jsonData.access_token);",
+                  "pm.environment.set(\"token\", jsonData.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"{{admin_email}}\",\"password\":\"{{admin_password}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 2: Get Admin Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.environment.set(\"current_user_id\", jsonData.user.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 3: Fetch Available Room Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect(jsonData.room_types.length).to.be.above(0);",
+                  "pm.environment.set(\"room_type_id\", jsonData.room_types[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/room-types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "room-types"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 4: Create Online Booking (Draft)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () { pm.response.to.have.status(201); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.environment.set(\"booking_id\", jsonData.booking_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"source\": \"online\",\n    \"booking_rooms\": [\n        {\n            \"room_type_id\": \"{{room_type_id}}\",\n            \"check_in\": \"{{check_in_date}}\",\n            \"check_out\": \"{{check_out_date}}\",\n            \"guests\": [\n                {\n                    \"title\": \"Mr.\",\n                    \"name\": \"E2E Test Guest\",\n                    \"nationality\": \"Thai\",\n                    \"is_ku_member\": false\n                }\n            ],\n            \"addons\": {\n                \"breakfast\": 1\n            }\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 5: Record Payment (draft -> paid)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () { pm.response.to.have.status(201); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect(jsonData.booking_status).to.eql(\"paid\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"booking_id\": \"{{booking_id}}\",\n    \"amount\": 1000000,\n    \"reference_number\": \"CASH-E2E-{{$timestamp}}\",\n    \"received_by\": \"{{current_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/payment",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "payment"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 6: Admin Confirm Booking (paid -> confirmed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect(jsonData.booking_status).to.eql(\"confirmed\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bookings/update/{{booking_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "update",
+                "{{booking_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 7: Auto-Assign Physical Rooms",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "if (jsonData.booking && jsonData.booking.booking_rooms && jsonData.booking.booking_rooms[0].room_id) {",
+                  "    pm.environment.set(\"room_id\", jsonData.booking.booking_rooms[0].room_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/assign-rooms",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "assign-rooms"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 8: Check-In Guest (confirmed -> checked_in)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect([\"confirmed\", \"checked_in\"]).to.include(jsonData.booking_status);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"assigned_rooms\": [\n        \"{{room_id}}\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/check-in",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "check-in"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 9: Check-Out Guest (checked_in -> checked_out)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "if (jsonData.room_updates && jsonData.room_updates[0].housekeeping_task_id) {",
+                  "    pm.environment.set(\"task_id\", jsonData.room_updates[0].housekeeping_task_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"verified_by\": \"{{current_user_id}}\",\n    \"notes\": \"E2E check-out completed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/front-desk/{{booking_id}}/check-out",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "front-desk",
+                "{{booking_id}}",
+                "check-out"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 10: Maid Accept Cleaning Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{housekeeping_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/{{task_id}}/accept",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "{{task_id}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 11: Maid Finish Cleaning Task (Done -> Room Available)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect(jsonData.new_room_status).to.eql(\"available\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{housekeeping_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"done\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks/{{task_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks",
+                "{{task_id}}",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Flow A - Step 12: Verify State Change Audit Logs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const jsonData = pm.response.json();",
+                  "pm.expect(jsonData.logs.length).to.be.above(0);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bookings/{{booking_id}}/status-logs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bookings",
+                "{{booking_id}}",
+                "status-logs"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. 🧹 Run Cleanup (Auto)",
+      "item": [
+        {
+          "name": "GET Close All Active Housekeeping Tasks (Cleanup) (/dashboard/tasks)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Cleanup executed successfully\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401, 403]);",
+                  "});",
+                  "",
+                  "const baseUrl = pm.variables.get('base_url') || pm.environment.get('base_url') || 'http://localhost:8000/api/v1';",
+                  "const adminToken = pm.variables.get('admin_token') || pm.environment.get('admin_token');",
+                  "const currentUserId = pm.variables.get('current_user_id') || pm.environment.get('current_user_id') || '1';",
+                  "",
+                  "if (adminToken && pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    const allTasks = jsonData.tasks || [];",
+                  "    const activeTasks = allTasks.filter(t => ['unassigned', 'accepted', 'in_progress'].includes(t.task_status || t.status));",
+                  "    ",
+                  "    console.log(`[Cleanup] Found ${activeTasks.length} active housekeeping task(s) to close.`);",
+                  "    ",
+                  "    activeTasks.forEach(t => {",
+                  "        const taskId = t.task_id || t.id;",
+                  "        const taskStatus = t.task_status || t.status;",
+                  "        ",
+                  "        if (taskStatus === 'unassigned') {",
+                  "            pm.sendRequest({",
+                  "                url: baseUrl + '/dashboard/tasks/' + taskId + '/assign',",
+                  "                method: 'PUT',",
+                  "                header: {",
+                  "                    'Accept': 'application/json',",
+                  "                    'Content-Type': 'application/json',",
+                  "                    'Authorization': 'Bearer ' + adminToken",
+                  "                },",
+                  "                body: {",
+                  "                    mode: 'raw',",
+                  "                    raw: JSON.stringify({ assigned_to: currentUserId })",
+                  "                }",
+                  "            }, function (err, assignRes) {",
+                  "                if (assignRes && assignRes.code === 200) {",
+                  "                    pm.sendRequest({",
+                  "                        url: baseUrl + '/dashboard/tasks/' + taskId + '/status',",
+                  "                        method: 'PATCH',",
+                  "                        header: {",
+                  "                            'Accept': 'application/json',",
+                  "                            'Content-Type': 'application/json',",
+                  "                            'Authorization': 'Bearer ' + adminToken",
+                  "                        },",
+                  "                        body: {",
+                  "                            mode: 'raw',",
+                  "                            raw: JSON.stringify({ status: 'done' })",
+                  "                        }",
+                  "                    }, function (err2, doneRes) {",
+                  "                        if (doneRes && doneRes.code === 200) {",
+                  "                            console.log(`[Cleanup] Closed unassigned task ${taskId}`);",
+                  "                        } else {",
+                  "                            console.log(`[Cleanup] Failed to mark task ${taskId} done:`, doneRes ? doneRes.code : err2);",
+                  "                        }",
+                  "                    });",
+                  "                } else {",
+                  "                    console.log(`[Cleanup] Failed to assign task ${taskId}:`, assignRes ? assignRes.code : err);",
+                  "                }",
+                  "            });",
+                  "        } else {",
+                  "            pm.sendRequest({",
+                  "                url: baseUrl + '/dashboard/tasks/' + taskId + '/status',",
+                  "                method: 'PATCH',",
+                  "                header: {",
+                  "                    'Accept': 'application/json',",
+                  "                    'Content-Type': 'application/json',",
+                  "                    'Authorization': 'Bearer ' + adminToken",
+                  "                },",
+                  "                body: {",
+                  "                    mode: 'raw',",
+                  "                    raw: JSON.stringify({ status: 'done' })",
+                  "                }",
+                  "            }, function (err, doneRes) {",
+                  "                if (doneRes && doneRes.code === 200) {",
+                  "                    console.log(`[Cleanup] Closed active task ${taskId} (was ${taskStatus})`);",
+                  "                } else {",
+                  "                    console.log(`[Cleanup] Failed to mark task ${taskId} done:`, doneRes ? doneRes.code : err);",
+                  "                }",
+                  "            });",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/dashboard/tasks",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "tasks"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

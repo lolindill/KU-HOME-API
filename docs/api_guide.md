@@ -1036,6 +1036,7 @@ curl -s -H "Accept: application/json" \
 - แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422`
 - **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
+- ⚡ **Smart Diffing**: ตรวจสอบ field ที่เปลี่ยนจริง (รวมถึง date casts/boolean casts) — ถ้าวันที่และประเภทห้องเหมือนเดิมในฐานข้อมูล จะข้ามการเช็ค availability อันหนักหน่วง และจะสั่ง Execute SQL เฉพาะเมื่อมีข้อมูลเปลี่ยนแปลงจริง (ลดภาระ DB)
 - `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
 - BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
 
@@ -1077,7 +1078,55 @@ curl -s -H "Accept: application/json" \
   "status": "success",
   "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
-  "booking_room": { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room" },
+  "booking_room": {
+    "id": "br-uuid-1",
+    "booking_id": "booking-uuid",
+    "room_type_id": "rt-uuid-1",
+    "room_id": null,
+    "check_in": "2026-08-22T00:00:00.000000Z",
+    "check_out": "2026-08-25T00:00:00.000000Z",
+    "guests": [
+      {
+        "title": "Mr.",
+        "name": "Somchai Jaidee",
+        "nationality": "Thai",
+        "is_ku_member": false
+      }
+    ],
+    "has_children": false,
+    "billing_address": null,
+    "billing_comment": null,
+    "status": "draft",
+    "bed_preference": "twin",
+    "created_at": "2026-08-19T02:23:13.000000Z",
+    "updated_at": "2026-08-19T02:23:13.000000Z",
+    "addon": {
+      "id": "addon-uuid-1",
+      "booking_room_id": "br-uuid-1",
+      "extra_bed": 1,
+      "breakfast": 2,
+      "early_checkIn_price": 0,
+      "late_checkOut_price": 0,
+      "extra_bed_price": 300,
+      "breakfast_price": 300,
+      "created_at": "...",
+      "updated_at": "..."
+    },
+    "room_type": {
+      "id": "rt-uuid-1",
+      "name_en": "Standard",
+      "name_th": "ห้องมาตรฐาน",
+      "max_guests": 2,
+      "extra_bed_enabled": true,
+      "max_extra_beds": 1,
+      "extra_bed_price": 300,
+      "daily_rate": 1000,
+      "description": null,
+      "created_at": "...",
+      "updated_at": "..."
+    },
+    "room": null
+  },
   "total_amount": 4900
 }
 ```
@@ -1109,6 +1158,7 @@ curl -s -H "Accept: application/json" \
 - ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด
 - วันที่ตรวจจาก **effective values** (ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม) — ส่งแต่ `check_in` ทับ `check_out` เดิม (หรือกลับกัน) ก็ถูกจับ → `422`
 - **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว)
+- ⚡ **Smart Diffing**: เทียบข้อมูลใหม่กับ DB จริง (รวม cast วันที่/boolean) — ห้องที่ข้อมูลไม่ต่างจากเดิมจะไม่เรียก SQL Update เลย, และถ้าไม่มีการเปลี่ยน shape (วันที่/ห้อง) ในทั้งชุด ก็จะข้ามการเช็ค availability
 - `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
 - ทุก BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่นสักอันเดียว = `404` ทั้ง batch (ไม่มีอะไรถูกแก้)
 
@@ -1155,7 +1205,92 @@ curl -s -H "Accept: application/json" \
   "status": "success",
   "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
-  "booking_rooms": [ { "...": "BookingRoom ล่าสุดพร้อม addon/roomType/room — เรียงตามลำดับ booking_rooms ใน request" } ],
+  "booking_rooms": [
+    {
+      "id": "br-uuid-1",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid-1",
+      "room_id": null,
+      "check_in": "2026-08-22T00:00:00.000000Z",
+      "check_out": "2026-08-25T00:00:00.000000Z",
+      "guests": [ ... ],
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
+      "status": "draft",
+      "bed_preference": "twin",
+      "created_at": "...",
+      "updated_at": "...",
+      "addon": {
+        "id": "addon-uuid-1",
+        "booking_room_id": "br-uuid-1",
+        "extra_bed": 1,
+        "breakfast": 0,
+        "early_checkIn_price": 0,
+        "late_checkOut_price": 0,
+        "extra_bed_price": 300,
+        "breakfast_price": 0,
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      "room_type": {
+        "id": "rt-uuid-1",
+        "name_en": "Standard",
+        "name_th": "ห้องมาตรฐาน",
+        "max_guests": 2,
+        "extra_bed_enabled": true,
+        "max_extra_beds": 1,
+        "extra_bed_price": 300,
+        "daily_rate": 1000,
+        "description": null,
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      "room": null
+    },
+    {
+      "id": "br-uuid-2",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid-2",
+      "room_id": null,
+      "check_in": "2026-08-22T00:00:00.000000Z",
+      "check_out": "2026-08-23T00:00:00.000000Z",
+      "guests": [ ... ],
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
+      "status": "draft",
+      "bed_preference": null,
+      "created_at": "...",
+      "updated_at": "...",
+      "addon": {
+        "id": "addon-uuid-2",
+        "booking_room_id": "br-uuid-2",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkIn_price": 0,
+        "late_checkOut_price": 0,
+        "extra_bed_price": 0,
+        "breakfast_price": 300,
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      "room_type": {
+        "id": "rt-uuid-2",
+        "name_en": "Superior",
+        "name_th": "ห้องซูพีเรียร์",
+        "max_guests": 2,
+        "extra_bed_enabled": false,
+        "max_extra_beds": 0,
+        "extra_bed_price": 0,
+        "daily_rate": 1500,
+        "description": null,
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      "room": null
+    }
+  ],
   "total_amount": 7600
 }
 ```

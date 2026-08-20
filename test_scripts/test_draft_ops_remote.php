@@ -131,6 +131,15 @@ function trackBooking($id)
     }
 }
 
+$createdUsers = [];
+function trackUser($id)
+{
+    global $createdUsers;
+    if ($id) {
+        $createdUsers[] = $id;
+    }
+}
+
 out('══════════════════════════════════════════════════════════');
 out('🌐 KU HOME API — Remote Test: Draft Booking Ops');
 out("   Target: {$BASE_URL}");
@@ -143,12 +152,22 @@ $r = apiCall('POST', $BASE_URL.'/register', [
     'name' => "Draft Ops Test A {$TS}", 'email' => $TEST_EMAIL_1, 'password' => $TEST_PASSWORD,
 ]);
 $TOKEN1 = $r['body']['access_token'] ?? null;
+if ($TOKEN1) {
+    $rMe = apiCall('GET', $BASE_URL.'/me', null, $TOKEN1);
+    $USER1_ID = $rMe['body']['user']['id'] ?? ($rMe['body']['id'] ?? null);
+    trackUser($USER1_ID);
+}
 check('Register user1 → token', $r['http_code'] === 201 && $TOKEN1 !== null, "HTTP {$r['http_code']}");
 
 $r = apiCall('POST', $BASE_URL.'/register', [
     'name' => "Draft Ops Test B {$TS}", 'email' => $TEST_EMAIL_2, 'password' => $TEST_PASSWORD,
 ]);
 $TOKEN2 = $r['body']['access_token'] ?? null;
+if ($TOKEN2) {
+    $rMe = apiCall('GET', $BASE_URL.'/me', null, $TOKEN2);
+    $USER2_ID = $rMe['body']['user']['id'] ?? ($rMe['body']['id'] ?? null);
+    trackUser($USER2_ID);
+}
 check('Register user2 → token', $r['http_code'] === 201 && $TOKEN2 !== null, "HTTP {$r['http_code']}");
 
 $r = apiCall('POST', $BASE_URL.'/login', ['email' => $ADMIN_EMAIL, 'password' => $ADMIN_PASS]);
@@ -501,19 +520,30 @@ if ($booking4) {
 }
 
 // ============================================
-// Cleanup สุดท้าย — ลบทุก booking ที่ยังค้าง (กัน residue บน prod)
+// Cleanup สุดท้าย — ลบทุก booking และ user ที่ยังค้าง (กัน residue บน prod)
 // ============================================
 out("\n── 🧹 Cleanup ──────────────────────────────────────────");
 $leftover = [];
 foreach (array_unique($createdBookings) as $bid) {
-    $r = apiCall('DELETE', $BASE_URL.'/bookings/'.$bid, null, $TOKEN1);
+    $r = apiCall('DELETE', $BASE_URL.'/bookings/'.$bid, null, $ADMIN_TOKEN ?: $TOKEN1);
     if ($r['http_code'] !== 200 && $r['http_code'] !== 404) {
         $leftover[] = $bid;
         warn("ลบ {$bid} ไม่สำเร็จ (HTTP {$r['http_code']}) — ต้องลบมือ");
     }
 }
+
+if ($ADMIN_TOKEN) {
+    foreach (array_unique($createdUsers) as $uid) {
+        $r = apiCall('DELETE', $BASE_URL.'/users/'.$uid, null, $ADMIN_TOKEN);
+        if ($r['http_code'] !== 200 && $r['http_code'] !== 404) {
+            $leftover[] = $uid;
+            warn("ลบ user {$uid} ไม่สำเร็จ (HTTP {$r['http_code']}) — ต้องลบมือ");
+        }
+    }
+}
+
 if (! $leftover) {
-    ok('ไม่มี residue ค้างบน prod');
+    ok('ไม่มี residue ค้างบน prod (ลบทั้ง bookings และ test users ครบถ้วน)');
 }
 out('');
 

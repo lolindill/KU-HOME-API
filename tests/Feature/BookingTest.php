@@ -1180,6 +1180,84 @@ class BookingTest extends TestCase
         $this->assertNotEquals('Ghost Batch', $br->fresh()->billing_comment);
     }
 
+    public function test_batch_update_booking_rooms_returns_mutated_rooms_with_relations(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2);
+        [$br1, $br2] = $booking->bookingRooms->all();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br1->id,
+                        'check_in' => $br1->check_in->toDateString(), // identical
+                        'check_out' => $br1->check_out->toDateString(), // identical
+                        'billing_comment' => 'Updated Note 1',
+                    ],
+                    [
+                        'booking_room_id' => $br2->id,
+                        'bed_preference' => 'twin',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure([
+            'status',
+            'message',
+            'booking_id',
+            'booking_rooms' => [
+                '*' => [
+                    'id',
+                    'booking_id',
+                    'room_type_id',
+                    'check_in',
+                    'check_out',
+                    'status',
+                    'addon',
+                    'room_type',
+                ],
+            ],
+            'total_amount',
+        ]);
+
+        $this->assertEquals('Updated Note 1', $br1->fresh()->billing_comment);
+        $this->assertEquals('twin', $br2->fresh()->bed_preference);
+    }
+
+    public function test_batch_update_with_identical_dates_skips_availability_recheck(): void
+    {
+        // Only 1 room available of this type
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType, 1);
+        $br = $booking->bookingRooms->first();
+
+        // Send identical dates and room_type_id, only updating billing_address
+        $response = $this->actingAs($owner, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'room_type_id' => $roomType->id,
+                        'check_in' => $br->check_in->toDateString(),
+                        'check_out' => $br->check_out->toDateString(),
+                        'billing_address' => '123 Test St',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('123 Test St', $br->fresh()->billing_address);
+    }
+
     // ============================================
     // ✅ Delete booking room (draft only) — DELETE /bookings/{bookingId}/rooms/{bookingRoomId}
     // ============================================
