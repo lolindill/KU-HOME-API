@@ -1299,3 +1299,14 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > - `app/Http/Controllers/Api/V1/BookingController.php` (updateRoom, updateRooms)
 > - `tests/Feature/BookingTest.php` (เพิ่ม 2 tests สำหรับเช็ค smart diffing และ payload shape)
 > - `docs/api_guide.md` (เพิ่ม note ⚡ Smart Diffing)
+
+## 🚧 Paused Rate Limiting (Throttle) on Booking Creation & Add Rooms Endpoints (2026-08-20)
+
+> **Pause throttle for development/testing** — ปลด middleware `throttle:5,1` ชั่วคราวออกจาก:
+> - `POST /api/v1/bookings`
+> - `POST /api/v1/bookings/{bookingId}/rooms`
+>
+> **Files Changed:**
+> - `routes/api.php` (remove `throttle:5,1` on both routes + comment marker)
+> - `tests/Feature/BookingTest.php` (update `test_create_booking_route_has_rate_limiting`)
+

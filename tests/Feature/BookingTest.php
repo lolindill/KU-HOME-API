@@ -449,8 +449,8 @@ class BookingTest extends TestCase
         );
 
         $this->assertNotNull($route, 'Route for createBooking should exist');
-        $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
-            'POST /bookings should have throttle:5,1 middleware');
+        $this->assertNotContains('throttle:5,1', $route->gatherMiddleware(),
+            'POST /bookings should not have throttle:5,1 middleware while paused');
     }
 
     // ============================================

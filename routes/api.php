@@ -86,13 +86,14 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/bookings/{id}', [BookingController::class, 'showById'])->where('id', '[0-9a-f\-]{36}');
 
     // 🌟 Refactor (18/06/26): createBooking ย้ายมานี่ — ต้อง login (auth:sanctum) ทุกกรณี
-    Route::post('/bookings', [BookingController::class, 'createBooking'])->middleware('throttle:5,1');
+    // 🚧 Throttle limit paused for testing/dev
+    Route::post('/bookings', [BookingController::class, 'createBooking']);
 
     // 🌟 (10/08/26): เพิ่มห้องเข้า booking ที่สร้างไปแล้ว (เฉพาะ draft state)
     //    เจ้าของ booking หรือ admin ใช้ได้ (ownership check ใน controller)
+    // 🚧 Throttle limit paused for testing/dev
     Route::post('/bookings/{bookingId}/rooms', [BookingController::class, 'addRooms'])
-        ->where('bookingId', '[0-9a-f\-]{36}')
-        ->middleware('throttle:5,1');
+        ->where('bookingId', '[0-9a-f\-]{36}');
 
     // 🌟 (17/08/26): ลบ draft booking (เจ้าของหรือ admin) — hard delete cascade แบบเดียวกับ CleanupExpiredDrafts
     Route::delete('/bookings/{bookingId}', [BookingController::class, 'destroyBooking'])
