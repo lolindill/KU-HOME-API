@@ -1310,3 +1310,23 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > - `routes/api.php` (remove `throttle:5,1` on both routes + comment marker)
 > - `tests/Feature/BookingTest.php` (update `test_create_booking_route_has_rate_limiting`)
 
+## ✅ Return `booking_rooms` in Create Booking Response & Support Guest `firstName`/`lastName`/`email`/`phone` (2026-08-20)
+
+> **Response & Schema Improvements** — ปรับปรุงการจองห้องพัก 2 ส่วนหลัก:
+> 1. `POST /api/v1/bookings` (และ `POST /api/v1/bookings/{id}/rooms`) ส่งคืน `booking_rooms` array พร้อม eager loaded relations (`addon`, `room_type`, `room`) และ `confirmation` ใน response ทันที (ไม่ต้องยิง `GET /bookings/{id}` ซ้ำ)
+> 2. แยกชื่อผู้เข้าพัก `guests.*` เป็น `firstName` และ `lastName` (รองรับทั้ง camelCase และ snake_case `first_name`/`last_name` พร้อม legacy `name` fallback) + เพิ่ม optional `email` และ `phone`
+>
+> **Files Changed:**
+> - `app/Http/Requests/StoreBookingRequest.php`, `AddBookingRoomsRequest.php`, `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php`, `StoreBookingRoomRequest.php`
+> - `app/Http/Controllers/Api/V1/BookingController.php` (`createBooking`, `addRooms`, `applyUserFilter`)
+> - `app/Http/Controllers/Api/V1/FrontDeskController.php` (walk-in guest validation)
+> - `app/Models/BookingRoom.php` (`getPrimaryGuestNameAttribute` accessors)
+> - `tests/Feature/BookingTest.php`
+> - `test_scripts/test_create_booking_remote.php` (remote live domain test script)
+> - `docs/api_guide.md` & `cline.md`
+>
+> **Testing:**
+> - PHPUnit: `259 passed (610 assertions)`
+> - Live Domain (`https://ku-home.ku.ac.th/backend/api/v1`): 18/18 checks passed.
+
+

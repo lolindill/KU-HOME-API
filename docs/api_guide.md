@@ -877,7 +877,10 @@ curl -s -H "Accept: application/json" \
       "guests": [
         {
           "title": "Mr.",
-          "name": "Somchai Jaidee",
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
           "nationality": "Thai",
           "is_ku_member": false
         }
@@ -900,7 +903,8 @@ curl -s -H "Accept: application/json" \
 }
 ```
 
-> 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.
+> 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.  
+> 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.
 
 **Validation Rules:**
 
@@ -914,7 +918,11 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.extra_beds`                | nullable, integer, min 0                      |
 | `booking_rooms.*.guests`                    | nullable, array                               |
 | `booking_rooms.*.guests.*.title`            | nullable, string, max 50                      |
-| `booking_rooms.*.guests.*.name`             | nullable, string, max 255                     |
+| `booking_rooms.*.guests.*.firstName`        | nullable, string, max 255 (or `first_name`)   |
+| `booking_rooms.*.guests.*.lastName`         | nullable, string, max 255 (or `last_name`)    |
+| `booking_rooms.*.guests.*.name`             | nullable, string, max 255 (legacy fallback)   |
+| `booking_rooms.*.guests.*.email`            | nullable, string, email, max 255              |
+| `booking_rooms.*.guests.*.phone`            | nullable, string, max 50                      |
 | `booking_rooms.*.guests.*.nationality`      | nullable, string, max 100                     |
 | `booking_rooms.*.guests.*.is_ku_member`     | nullable, boolean                             |
 | `booking_rooms.*.has_children`              | nullable, boolean                             |
@@ -932,9 +940,57 @@ curl -s -H "Accept: application/json" \
   "status": "success",
   "message": "Booking and Add-ons created successfully",
   "booking_id": "booking-uuid",
+  "confirmation": "202608-00001",
   "total_amount": 2400,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
-  "user_id": "user-uuid"
+  "user_id": "user-uuid",
+  "booking_rooms": [
+    {
+      "id": "br-uuid",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid",
+      "room_id": null,
+      "check_in": "2026-06-20",
+      "check_out": "2026-06-22",
+      "status": "draft",
+      "guests": [
+        {
+          "title": "Mr.",
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
+          "nationality": "Thai",
+          "is_ku_member": false
+        }
+      ],
+      "has_children": false,
+      "billing_address": null,
+      "billing_comment": null,
+      "created_at": "2026-06-19T11:00:00.000000Z",
+      "updated_at": "2026-06-19T11:00:00.000000Z",
+      "addon": {
+        "id": "addon-uuid",
+        "booking_room_id": "br-uuid",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkIn_price": 0,
+        "late_checkOut_price": 0,
+        "extra_bed_price": 0,
+        "breakfast_price": 400,
+        "created_at": "2026-06-19T11:00:00.000000Z",
+        "updated_at": "2026-06-19T11:00:00.000000Z"
+      },
+      "room_type": {
+        "id": "rt-uuid",
+        "name_en": "Standard Double",
+        "name_th": "สแตนดาร์ด ดับเบิล",
+        "max_guests": 2,
+        "extra_bed_enabled": false
+      },
+      "room": null
+    }
+  ]
 }
 ```
 
@@ -1007,6 +1063,41 @@ curl -s -H "Accept: application/json" \
   "status": "success",
   "message": "เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
+  "booking_rooms": [
+    {
+      "id": "new-br-uuid",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid",
+      "room_id": null,
+      "check_in": "2026-08-20",
+      "check_out": "2026-08-22",
+      "status": "draft",
+      "guests": [
+        {
+          "title": "Mr.",
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
+          "nationality": "Thai",
+          "is_ku_member": false
+        }
+      ],
+      "has_children": false,
+      "addon": {
+        "id": "addon-uuid",
+        "booking_room_id": "new-br-uuid",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "breakfast_price": 400
+      },
+      "room_type": {
+        "id": "rt-uuid",
+        "name_en": "Standard Double"
+      },
+      "room": null
+    }
+  ],
   "added_amount": 2400,
   "total_amount": 4800,
   "payment_deadline": "2026-08-17 18:00:00"
