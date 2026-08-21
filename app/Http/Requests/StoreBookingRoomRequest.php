@@ -33,8 +33,6 @@ class StoreBookingRoomRequest extends FormRequest
             'guests.*.email' => 'nullable|string|email|max:255',
             'guests.*.phone' => 'nullable|string|max:50',
             'guests.*.nationality' => 'nullable|string|max:100',
-            'guests.*.is_ku_member' => 'nullable|boolean',
-            'has_children' => 'nullable|boolean',
             // 🧾 Billing fields (04/08/26)
             'billing_address' => 'nullable|string|max:255',
             'billing_comment' => 'nullable|string|max:255',

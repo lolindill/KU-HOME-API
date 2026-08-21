@@ -55,7 +55,6 @@ class BookingStateTest extends TestCase
             'check_out' => now()->addDays(3)->toDateString(),
             'status' => $brStatus,
             'guests' => [['title' => 'Mr', 'name' => 'Test Guest', 'nationality' => 'Thai']],
-            'has_children' => false,
         ]);
 
         return $booking->fresh(['bookingRooms']);

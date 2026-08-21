@@ -834,9 +834,8 @@ curl -s -H "Accept: application/json" \
           "check_in": "2026-06-20",
           "check_out": "2026-06-22",
           "guests": [
-            { "title": "Mr.", "name": "Somchai", "nationality": "Thai", "is_ku_member": false }
+            { "title": "Mr.", "name": "Somchai", "nationality": "Thai" }
           ],
-          "has_children": false,
           "billing_address": null,
           "billing_comment": null,
           "room_type": { ...room type... },
@@ -881,11 +880,9 @@ curl -s -H "Accept: application/json" \
           "lastName": "Jaidee",
           "email": "somchai.j@ku.th",
           "phone": "0812345678",
-          "nationality": "Thai",
-          "is_ku_member": false
+          "nationality": "Thai"
         }
       ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "addons": {
@@ -924,8 +921,6 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.guests.*.email`            | nullable, string, email, max 255              |
 | `booking_rooms.*.guests.*.phone`            | nullable, string, max 50                      |
 | `booking_rooms.*.guests.*.nationality`      | nullable, string, max 100                     |
-| `booking_rooms.*.guests.*.is_ku_member`     | nullable, boolean                             |
-| `booking_rooms.*.has_children`              | nullable, boolean                             |
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
@@ -960,11 +955,9 @@ curl -s -H "Accept: application/json" \
           "lastName": "Jaidee",
           "email": "somchai.j@ku.th",
           "phone": "0812345678",
-          "nationality": "Thai",
-          "is_ku_member": false
+          "nationality": "Thai"
         }
       ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "created_at": "2026-06-19T11:00:00.000000Z",
@@ -1036,11 +1029,9 @@ curl -s -H "Accept: application/json" \
         {
           "title": "Mr.",
           "name": "Somchai Jaidee",
-          "nationality": "Thai",
-          "is_ku_member": false
+          "nationality": "Thai"
         }
       ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "addons": {
@@ -1079,11 +1070,9 @@ curl -s -H "Accept: application/json" \
           "lastName": "Jaidee",
           "email": "somchai.j@ku.th",
           "phone": "0812345678",
-          "nationality": "Thai",
-          "is_ku_member": false
+          "nationality": "Thai"
         }
       ],
-      "has_children": false,
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
@@ -1138,9 +1127,8 @@ curl -s -H "Accept: application/json" \
   "check_out": "2026-08-25",
   "extra_beds": 1,
   "guests": [
-    { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai", "is_ku_member": false }
+    { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
   ],
-  "has_children": false,
   "bed_preference": "twin",
   "billing_address": null,
   "billing_comment": null,
@@ -1157,7 +1145,6 @@ curl -s -H "Accept: application/json" \
 | `check_out` | `sometimes` date `after:check_in` |
 | `extra_beds` | nullable integer ≥ 0 |
 | `guests.*` | เหมือน `POST /bookings` |
-| `has_children` | nullable boolean |
 | `bed_preference` | nullable `in:twin` |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
 | `addons.breakfast` | nullable integer ≥ 0 |
@@ -1180,11 +1167,9 @@ curl -s -H "Accept: application/json" \
       {
         "title": "Mr.",
         "name": "Somchai Jaidee",
-        "nationality": "Thai",
-        "is_ku_member": false
+        "nationality": "Thai"
       }
     ],
-    "has_children": false,
     "billing_address": null,
     "billing_comment": null,
     "status": "draft",
@@ -1265,7 +1250,7 @@ curl -s -H "Accept: application/json" \
     {
       "booking_room_id": "br-uuid-2",
       "guests": [
-        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai", "is_ku_member": false }
+        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
       ],
       "addons": { "breakfast": 2 }
     }
@@ -1284,7 +1269,6 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
 | `booking_rooms.*.extra_beds` | nullable integer ≥ 0 |
 | `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
-| `booking_rooms.*.has_children` | nullable boolean |
 | `booking_rooms.*.bed_preference` | nullable `in:twin` |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
 | `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
@@ -1305,7 +1289,6 @@ curl -s -H "Accept: application/json" \
       "check_in": "2026-08-22T00:00:00.000000Z",
       "check_out": "2026-08-25T00:00:00.000000Z",
       "guests": [ ... ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "status": "draft",
@@ -1347,7 +1330,6 @@ curl -s -H "Accept: application/json" \
       "check_in": "2026-08-22T00:00:00.000000Z",
       "check_out": "2026-08-23T00:00:00.000000Z",
       "guests": [ ... ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "status": "draft",
@@ -1598,7 +1580,6 @@ curl "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signat
         "check_in": "2026-06-20",
         "check_out": "2026-06-22",
         "guests": [...],
-        "has_children": false,
         "billing_address": null,
         "billing_comment": null,
         "addon": {...},
@@ -1785,11 +1766,9 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
     {
       "title": "Mr.",
       "name": "Walk-in Guest",
-      "nationality": "Thai",
-      "is_ku_member": false
+      "nationality": "Thai"
     }
   ],
-  "has_children": false,
   "billing_address": null,
   "billing_comment": null
 }
@@ -1806,8 +1785,6 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 | `guests.*.title`         | nullable, string, max 50            |
 | `guests.*.name`          | nullable, string, max 255           |
 | `guests.*.nationality`   | nullable, string, max 100           |
-| `guests.*.is_ku_member`  | nullable, boolean                   |
-| `has_children`           | nullable, boolean                   |
 | `billing_address`        | nullable, string, max 255           |
 | `billing_comment`        | nullable, string, max 255           |
 
@@ -2310,8 +2287,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `check_in`     | date      | 🌟 Per-room check-in date (Refactor 02/07/26)            |
 | `check_out`    | date      | 🌟 Per-room check-out date (Refactor 02/07/26)           |
 | `status`       | enum      | BR-level: `draft`, `confirmed`, `checked_in`, `checked_out`, `no_show` |
-| `guests`       | JSON      | Array of `{title, name, nationality, is_ku_member}`     |
-| `has_children` | boolean   | Whether children stay in this room (Refactor 04/08/26)  |
+| `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
 | `created_at`   | timestamp |                                                         |
@@ -2322,15 +2298,15 @@ Returns tasks with status `pending` or `in_progress`.
 [
   {
     "title": "Mr.",
-    "name": "Somchai Jaidee",
-    "nationality": "Thai",
-    "is_ku_member": false
+    "firstName": "Somchai",
+    "lastName": "Jaidee",
+    "nationality": "Thai"
   },
   {
     "title": "Ms.",
-    "name": "Suda Jaidee",
-    "nationality": "Thai",
-    "is_ku_member": true
+    "firstName": "Suda",
+    "lastName": "Jaidee",
+    "nationality": "Thai"
   }
 ]
 ```
@@ -2730,8 +2706,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "check_in": "2026-07-01",
       "check_out": "2026-07-03",
       "extra_beds": 0,
-      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai","is_ku_member":false}],
-      "has_children": false,
+      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
       "billing_address": null,
       "billing_comment": null,
       "addons": {"breakfast": 2, "early_checkin": false, "late_checkout": false}

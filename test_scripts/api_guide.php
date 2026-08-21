@@ -338,10 +338,8 @@ $bookingData = [
                     'title' => 'Mr.',
                     'name' => "Guide Test Guest {$TIMESTAMP}",
                     'nationality' => 'Thai',
-                    'is_ku_member' => false,
                 ],
             ],
-            'has_children' => false,
             'addons' => [
                 'breakfast' => 1,
                 'early_checkin' => false,

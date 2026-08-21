@@ -243,8 +243,7 @@ class BookingController extends Controller
                     'check_in' => $roomRequest['check_in'],
                     'check_out' => $roomRequest['check_out'],
                     'status' => 'draft', // BR-level state (initial, ไม่ใช่ transition)
-                    'guests' => $roomRequest['guests'] ?? null,
-                    'has_children' => $roomRequest['has_children'] ?? false,
+                    'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
                     'billing_address' => $roomRequest['billing_address'] ?? null,
                     'billing_comment' => $roomRequest['billing_comment'] ?? null,
                 ]);
@@ -474,20 +473,21 @@ class BookingController extends Controller
 
                 // 🎯 Merge ฟิลด์ที่ส่งมาลง BR — เช็คค่าเดิมใน DB เพื่ออัปเดตเฉพาะฟิลด์ที่เปลี่ยนจริง
                 $dirtyFields = [];
-                foreach (['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'] as $field) {
+                foreach (['room_type_id', 'check_in', 'check_out', 'guests', 'bed_preference', 'billing_address', 'billing_comment'] as $field) {
                     if (array_key_exists($field, $validated)) {
                         $isDirty = match ($field) {
                             'room_type_id' => (string) $validated['room_type_id'] !== (string) $bookingRoom->room_type_id,
                             'check_in' => Carbon::parse($validated['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
                             'check_out' => Carbon::parse($validated['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
-                            'has_children' => (bool) $validated['has_children'] !== (bool) $bookingRoom->has_children,
-                            'guests' => json_encode($validated['guests'] ?? []) !== json_encode($bookingRoom->guests ?? []),
+                            'guests' => json_encode($this->stripGuestFields($validated['guests'] ?? null) ?? []) !== json_encode($bookingRoom->guests ?? []),
                             'bed_preference', 'billing_address', 'billing_comment' => ($validated[$field] ?? null) !== ($bookingRoom->$field ?? null),
                             default => true,
                         };
 
                         if ($isDirty) {
-                            $dirtyFields[$field] = $validated[$field];
+                            $dirtyFields[$field] = $field === 'guests'
+                                ? $this->stripGuestFields($validated['guests'] ?? null)
+                                : $validated[$field];
                         }
                     }
                 }
@@ -689,7 +689,7 @@ class BookingController extends Controller
 
                 // 🎯 เตรียมข้อมูลรายห้อง: fields ที่จะ merge + effective (final) values
                 //    ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว
-                $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'has_children', 'bed_preference', 'billing_address', 'billing_comment'];
+                $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'bed_preference', 'billing_address', 'billing_comment'];
                 $updates = []; // booking_room_id => ['model', 'request', 'dirty_fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
 
                 foreach ($validated['booking_rooms'] as $roomRequest) {
@@ -703,14 +703,15 @@ class BookingController extends Controller
                                 'room_type_id' => (string) $roomRequest['room_type_id'] !== (string) $bookingRoom->room_type_id,
                                 'check_in' => Carbon::parse($roomRequest['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
                                 'check_out' => Carbon::parse($roomRequest['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
-                                'has_children' => (bool) $roomRequest['has_children'] !== (bool) $bookingRoom->has_children,
-                                'guests' => json_encode($roomRequest['guests'] ?? []) !== json_encode($bookingRoom->guests ?? []),
+                                'guests' => json_encode($this->stripGuestFields($roomRequest['guests'] ?? null) ?? []) !== json_encode($bookingRoom->guests ?? []),
                                 'bed_preference', 'billing_address', 'billing_comment' => ($roomRequest[$field] ?? null) !== ($bookingRoom->$field ?? null),
                                 default => true,
                             };
 
                             if ($isDirty) {
-                                $dirtyFields[$field] = $roomRequest[$field];
+                                $dirtyFields[$field] = $field === 'guests'
+                                    ? $this->stripGuestFields($roomRequest['guests'] ?? null)
+                                    : $roomRequest[$field];
                             }
                         }
                     }
@@ -1163,9 +1164,7 @@ class BookingController extends Controller
                     'check_out' => $roomRequest['check_out'],
                     'status' => 'draft', // BR-level state
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
-                    'guests' => $roomRequest['guests'] ?? null,
-                    // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
-                    'has_children' => $roomRequest['has_children'] ?? false,
+                    'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
                     // 🧾 Billing fields (04/08/26)
                     'billing_address' => $roomRequest['billing_address'] ?? null,
                     'billing_comment' => $roomRequest['billing_comment'] ?? null,
@@ -1559,5 +1558,23 @@ class BookingController extends Controller
                 'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: '.$e->getMessage(),
             ], 422);
         }
+    }
+
+    /**
+     * 👥 ตัดฟิลด์ที่ไม่จัดเก็บออกจาก guests array (เช่น is_ku_member)
+     */
+    private function stripGuestFields(?array $guests): ?array
+    {
+        if ($guests === null) {
+            return null;
+        }
+
+        return array_map(function ($guest) {
+            if (is_array($guest)) {
+                unset($guest['is_ku_member']);
+            }
+
+            return $guest;
+        }, $guests);
     }
 }

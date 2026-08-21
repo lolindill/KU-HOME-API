@@ -94,8 +94,7 @@ erDiagram
         uuid booking_id FK
         uuid room_type_id FK
         uuid room_id FK "nullable, assigned at check-in"
-        json guests "nullable, array of {title,name,nationality,is_ku_member}"
-        boolean has_children "default: false (Refactor 04/08/26)"
+        json guests "nullable, array of {title,name,firstName,lastName,nationality}"
         string billing_address "nullable"
         string billing_comment "nullable"
         integer rate_daily "nullable"
@@ -314,7 +313,7 @@ erDiagram
 
 1. **Guests as JSON** (`booking_rooms.guests`)
    - รองรับผู้เข้าพักหลายคนต่อห้อง
-   - Format: `[{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai", "is_ku_member": false }]`
+   - Format: `[{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai" }]`
    - Refactored: 2026-06-18 (ย้ายจาก `bookings` table)
 
 2. **Amount as Integer** (satang/cents)

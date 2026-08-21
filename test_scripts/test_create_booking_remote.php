@@ -5,7 +5,6 @@
  *
  * Test against live domain: https://ku-home.ku.ac.th/backend/api/v1
  */
-
 $BASE_URL = getenv('KUHOME_BASE_URL') ?: 'https://ku-home.ku.ac.th/backend/api/v1';
 $ADMIN_EMAIL = getenv('KUHOME_ADMIN_EMAIL') ?: 'admin@kuhome.com';
 $ADMIN_PASS = getenv('KUHOME_ADMIN_PASS') ?: 'password123';
@@ -15,29 +14,46 @@ $TEST_EMAIL = "test_create_{$TS}@kuhome.test";
 $TEST_PASSWORD = 'password123';
 $TEST_NAME = "Test User {$TS}";
 
-function out($t) { echo $t . "\n"; }
-function ok($t) { echo "\033[32m[PASS] {$t}\033[0m\n"; }
-function bad($t) { echo "\033[31m[FAIL] {$t}\033[0m\n"; }
-function info($t) { echo "\033[36m[INFO] {$t}\033[0m\n"; }
-function warn($t) { echo "\033[33m[WARN] {$t}\033[0m\n"; }
+function out($t)
+{
+    echo $t."\n";
+}
+function ok($t)
+{
+    echo "\033[32m[PASS] {$t}\033[0m\n";
+}
+function bad($t)
+{
+    echo "\033[31m[FAIL] {$t}\033[0m\n";
+}
+function info($t)
+{
+    echo "\033[36m[INFO] {$t}\033[0m\n";
+}
+function warn($t)
+{
+    echo "\033[33m[WARN] {$t}\033[0m\n";
+}
 
 $PASS = 0;
 $FAIL = 0;
 
-function check($label, $cond, $detail = '') {
+function check($label, $cond, $detail = '')
+{
     global $PASS, $FAIL;
     if ($cond) {
         $PASS++;
-        ok($label . ($detail ? " — {$detail}" : ''));
+        ok($label.($detail ? " — {$detail}" : ''));
     } else {
         $FAIL++;
-        bad($label . ($detail ? " — {$detail}" : ''));
+        bad($label.($detail ? " — {$detail}" : ''));
     }
 }
 
-function request($method, $path, $data = null, $token = null) {
+function request($method, $path, $data = null, $token = null)
+{
     global $BASE_URL;
-    $url = $BASE_URL . $path;
+    $url = $BASE_URL.$path;
     $ch = curl_init($url);
     $headers = [
         'Accept: application/json',
@@ -66,22 +82,23 @@ function request($method, $path, $data = null, $token = null) {
     curl_close($ch);
 
     $json = $raw ? json_decode($raw, true) : null;
+
     return ['status' => $status, 'json' => $json, 'raw' => $raw, 'error' => $err];
 }
 
 out("\n=======================================================");
-out("🌐 KU HOME API — Remote Domain Test");
+out('🌐 KU HOME API — Remote Domain Test');
 out("Target: {$BASE_URL}");
 out("=======================================================\n");
 
 // 1. Get Room Types
-info("Step 1: Fetching available room types...");
+info('Step 1: Fetching available room types...');
 $res = request('GET', '/room-types');
 check('GET /room-types returns 200', $res['status'] === 200);
 
 $roomTypes = $res['json']['room_types'] ?? $res['json']['data'] ?? $res['json'] ?? [];
-if (!is_array($roomTypes) || empty($roomTypes)) {
-    bad("No room types found. Raw response: " . $res['raw']);
+if (! is_array($roomTypes) || empty($roomTypes)) {
+    bad('No room types found. Raw response: '.$res['raw']);
     exit(1);
 }
 
@@ -101,7 +118,7 @@ $regRes = request('POST', '/register', [
 $token = null;
 if ($regRes['status'] === 201 || $regRes['status'] === 200) {
     $token = $regRes['json']['token'] ?? $regRes['json']['access_token'] ?? null;
-    ok("Registered successfully, got token");
+    ok('Registered successfully, got token');
 } else {
     warn("Register status {$regRes['status']}, attempting login as admin instead...");
     $loginRes = request('POST', '/login', [
@@ -112,13 +129,13 @@ if ($regRes['status'] === 201 || $regRes['status'] === 200) {
     $token = $loginRes['json']['token'] ?? $loginRes['json']['access_token'] ?? null;
 }
 
-if (!$token) {
-    bad("Failed to get auth token");
+if (! $token) {
+    bad('Failed to get auth token');
     exit(1);
 }
 
 // 3. Create Booking with firstName, lastName, email, phone
-info("Step 3: Creating booking with booking_rooms payload (firstName, lastName, email, phone)...");
+info('Step 3: Creating booking with booking_rooms payload (firstName, lastName, email, phone)...');
 $checkIn = date('Y-m-d', strtotime('+30 days'));
 $checkOut = date('Y-m-d', strtotime('+32 days'));
 
@@ -138,10 +155,8 @@ $bookingPayload = [
                     'email' => 'somchai.remote@ku.th',
                     'phone' => '0899998888',
                     'nationality' => 'TH',
-                    'is_ku_member' => true,
                 ],
             ],
-            'has_children' => false,
             'billing_address' => '50 Ngamwongwan Rd, Bangkok',
             'billing_comment' => 'Tax ID: 0105559999999',
             'addons' => [
@@ -155,26 +170,26 @@ $bookingPayload = [
 
 $createRes = request('POST', '/bookings', $bookingPayload, $token);
 info("Response status: {$createRes['status']}");
-info("Response body: " . json_encode($createRes['json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+info('Response body: '.json_encode($createRes['json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
 check('POST /bookings returns 201 Created', $createRes['status'] === 201);
-check('Response contains booking_id', !empty($createRes['json']['booking_id']));
-check('Response contains confirmation', !empty($createRes['json']['confirmation']));
+check('Response contains booking_id', ! empty($createRes['json']['booking_id']));
+check('Response contains confirmation', ! empty($createRes['json']['confirmation']));
 check('Response contains total_amount', isset($createRes['json']['total_amount']));
 check('Response contains booking_rooms array', is_array($createRes['json']['booking_rooms'] ?? null));
 
 $createdRooms = $createRes['json']['booking_rooms'] ?? [];
 check('booking_rooms count is 1', count($createdRooms) === 1);
 
-if (!empty($createdRooms)) {
+if (! empty($createdRooms)) {
     $br = $createdRooms[0];
-    check('booking_room has id', !empty($br['id']));
+    check('booking_room has id', ! empty($br['id']));
     check('booking_room has addon relation loaded', isset($br['addon']) && is_array($br['addon']));
     check('booking_room has room_type relation loaded', isset($br['room_type']) && is_array($br['room_type']));
-    
+
     $guests = $br['guests'] ?? [];
-    check('booking_room has guests array', is_array($guests) && !empty($guests));
-    if (!empty($guests)) {
+    check('booking_room has guests array', is_array($guests) && ! empty($guests));
+    if (! empty($guests)) {
         $firstGuest = $guests[0];
         check('Guest firstName is Somchai', ($firstGuest['firstName'] ?? '') === 'Somchai');
         check('Guest lastName is RemoteTest', ($firstGuest['lastName'] ?? '') === 'RemoteTest');

@@ -56,7 +56,7 @@ class BookingTest extends TestCase
     /**
      * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
      * ตอนนี้ Booking มีแค่ข้อมูลการจอง + user_id (คนจอง)
-     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON) + booking_rooms.has_children
+     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON)
      */
     private function createBooking(array $overrides = []): Booking
     {
@@ -96,7 +96,6 @@ class BookingTest extends TestCase
             'guests' => [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
-            'has_children' => false,
             'rate_daily' => 1500,
             'nights' => 2,
         ]);
@@ -129,7 +128,6 @@ class BookingTest extends TestCase
                 'guests' => [
                     ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
                 ],
-                'has_children' => false,
             ]);
 
             Addon::create([
@@ -168,7 +166,6 @@ class BookingTest extends TestCase
                     'guests' => [
                         ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
                     ],
-                    'has_children' => false,
                 ],
             ],
         ]);
@@ -194,7 +191,6 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -219,7 +215,6 @@ class BookingTest extends TestCase
                     'check_out',
                     'status',
                     'guests',
-                    'has_children',
                     'addon',
                     'room_type',
                 ],
@@ -244,7 +239,6 @@ class BookingTest extends TestCase
         $this->assertDatabaseHas('booking_rooms', [
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
-            'has_children' => false,
         ]);
 
         $bookingRoom = BookingRoom::where('booking_id', $booking->id)->first();
@@ -275,10 +269,8 @@ class BookingTest extends TestCase
                                 'email' => 'somchai.p@ku.th',
                                 'phone' => '0812345678',
                                 'nationality' => 'TH',
-                                'is_ku_member' => true,
                             ],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -396,7 +388,6 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Test', 'nationality' => 'TH'],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -432,7 +423,6 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -466,7 +456,6 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -498,7 +487,6 @@ class BookingTest extends TestCase
                         'guests' => [
                             ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
                         ],
-                        'has_children' => false,
                     ],
                 ],
             ]);
@@ -945,7 +933,7 @@ class BookingTest extends TestCase
                 'guests' => [
                     ['title' => 'mr', 'name' => 'Updated Guest', 'nationality' => 'US'],
                 ],
-                'has_children' => true,
+                'billing_comment' => 'Tax ID: 0105559999999',
             ]);
 
         $response->assertStatus(200);
@@ -953,7 +941,7 @@ class BookingTest extends TestCase
 
         $freshBr = $br->fresh();
         $this->assertEquals('Updated Guest', $freshBr->guests[0]['name']);
-        $this->assertTrue((bool) $freshBr->has_children);
+        $this->assertEquals('Tax ID: 0105559999999', $freshBr->billing_comment);
     }
 
     public function test_unauthenticated_user_cannot_update_booking_room(): void

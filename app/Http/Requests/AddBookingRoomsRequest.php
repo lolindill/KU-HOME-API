@@ -38,8 +38,6 @@ class AddBookingRoomsRequest extends FormRequest
             'booking_rooms.*.guests.*.email' => 'nullable|string|email|max:255',
             'booking_rooms.*.guests.*.phone' => 'nullable|string|max:50',
             'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
-            'booking_rooms.*.guests.*.is_ku_member' => 'nullable|boolean',
-            'booking_rooms.*.has_children' => 'nullable|boolean',
 
             // 🧾 Billing fields (04/08/26)
             'booking_rooms.*.billing_address' => 'nullable|string|max:255',

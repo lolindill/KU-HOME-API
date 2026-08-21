@@ -134,7 +134,6 @@ final class RoomAllocatorIntegrationTest extends TestCase
             'check_in' => $checkIn,
             'check_out' => $checkOut,
             'guests' => [['title' => 'Mr', 'name' => 'Test']],
-            'has_children' => false,
             'status' => 'draft',
             'bed_preference' => $bedPref,
         ]);

@@ -329,7 +329,6 @@ if ($TOKEN && $ROOM_TYPE_ID) {
                 'check_in' => $tomorrow,
                 'check_out' => $dayAfter,
                 'extra_beds' => 0,
-                'has_children' => false,
                 'guests' => [
                     [
                         'title' => 'Mr.',

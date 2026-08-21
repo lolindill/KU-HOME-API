@@ -295,8 +295,8 @@ $batchPayload = [
             // brB: data-only — guests + breakfast 2 (ไม่แตะวันที่/ประเภท)
             'booking_room_id' => $brB,
             'guests' => [
-                ['title' => 'Mr.', 'name' => 'Batch Three A', 'nationality' => 'Thai', 'is_ku_member' => false],
-                ['title' => 'Ms.', 'name' => 'Batch Three B', 'nationality' => 'Thai', 'is_ku_member' => false],
+                ['title' => 'Mr.', 'name' => 'Batch Three A', 'nationality' => 'Thai'],
+                ['title' => 'Ms.', 'name' => 'Batch Three B', 'nationality' => 'Thai'],
             ],
             'addons' => ['breakfast' => 2],
         ],

@@ -295,7 +295,6 @@ if ($TOKEN && $ROOM_TYPE_ID) {
         'guest_email' => $TEST_EMAIL,
         'guest_phone' => '081-234-5678',
         'guest_nationality' => 'Thai',
-        'has_children' => false,
         'booking_rooms' => [
             [
                 'room_type_id' => $ROOM_TYPE_ID,

@@ -80,7 +80,6 @@ class FrontDeskTest extends TestCase
             'check_in' => now()->toDateString(),
             'check_out' => now()->addDays(2)->toDateString(),
             'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'has_children' => false,
             'status' => $brStatus,
         ]);
     }
@@ -96,7 +95,7 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType);
 
-        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[] + has_children, ไม่มี guest_name/email/phone แล้ว
+        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[], ไม่มี guest_name/email/phone แล้ว
         $response = $this->postJson('/api/v1/front-desk/walk-in', [
             'verified_by' => $admin->id,
             'room_id' => $room->id,
@@ -104,7 +103,6 @@ class FrontDeskTest extends TestCase
             'guests' => [
                 ['title' => 'mr', 'name' => 'Walk In Guest', 'nationality' => 'TH'],
             ],
-            'has_children' => false,
         ]);
 
         $response->assertStatus(201);
@@ -118,7 +116,6 @@ class FrontDeskTest extends TestCase
         $this->assertDatabaseHas('booking_rooms', [
             'room_id' => $room->id,
             'status' => 'checked_in',
-            'has_children' => false,
         ]);
     }
 

@@ -1327,6 +1327,25 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 >
 > **Testing:**
 > - PHPUnit: `259 passed (610 assertions)`
-> - Live Domain (`https://ku-home.ku.ac.th/backend/api/v1`): 18/18 checks passed.
+## ✅ Remove `guests.*.is_ku_member` + Drop `booking_rooms.has_children` (2026-08-21)
+
+> **Schema Cleanup & Simplification** — ลบฟิลด์ที่ไม่จำเป็นออกจากการจองห้องพัก:
+> 1. **`guests.*.is_ku_member`**: ลบ validation rules ออกจากทุก FormRequest และ Controller พร้อมเพิ่ม `stripGuestFields()` เพื่อ strip `is_ku_member` ออกจาก guests JSON ก่อนบันทึกหรือทำ dirty diffing (หาก client เก่าส่งมาจะถูก ignore เงียบๆ) — **คง `users.is_ku_member` ระดับ User ไว้ตามเดิม**
+> 2. **`booking_rooms.has_children`**: ลบ validation rules, Model `$fillable` และ `$casts` (`PgBoolean`), และสร้าง migration drop column `has_children` ออกจากตาราง `booking_rooms`
+> 3. **`addons.breakfast`**: คงไว้ทั้งหมด (nullable/optional) ตามเดิม
+>
+> **Files Changed:**
+> - `app/Http/Requests/StoreBookingRequest.php`, `AddBookingRoomsRequest.php`, `StoreBookingRoomRequest.php`, `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php`
+> - `app/Http/Controllers/Api/V1/BookingController.php`, `FrontDeskController.php`
+> - `app/Models/BookingRoom.php`
+> - `database/migrations/2026_08_21_100000_drop_has_children_from_booking_rooms_table.php` (New migration)
+> - `tests/Feature/BookingTest.php`, `FrontDeskTest.php`, `StatusChangeLogTest.php`, `tests/Unit/BookingStateTest.php`, `tests/Unit/RoomAllocator/RoomAllocatorIntegrationTest.php`
+> - `docs/api_guide.md`, `docs/booking-verify-flow.md`, `docs/database-er.md`
+> - `postman/KU_HOME_API.postman_collection.json`
+> - `test_scripts/api_guide.php`, `api_test_chain.php`, `api_test_remote.php`, `test_create_booking_remote.php`, `test_batch_rooms_multi_remote.php`, `test_draft_ops_remote.php`
+>
+> **Testing:**
+> - PHPUnit: Full suite `259 passed (609 assertions)`
+
 
 

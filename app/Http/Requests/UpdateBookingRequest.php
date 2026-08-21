@@ -17,7 +17,7 @@ class UpdateBookingRequest extends FormRequest
             'source' => 'sometimes|required|string|in:online,admin,line',
 
             // 🌟 Refactor (25/06/26): check_in/check_out ย้ายไป BR-level แล้ว — bookings เก็บแค่ container + payment info
-            // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว (guests JSON + has_children)
+            // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว (guests JSON)
             'total_amount' => 'nullable|integer|min:0',
             'is_paid' => 'nullable|boolean',
             'payment_deadline' => 'nullable|date',

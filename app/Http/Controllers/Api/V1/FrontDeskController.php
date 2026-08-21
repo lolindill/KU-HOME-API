@@ -40,9 +40,6 @@ class FrontDeskController extends Controller
             'guests.*.email' => 'nullable|string|email|max:255',
             'guests.*.phone' => 'nullable|string|max:50',
             'guests.*.nationality' => 'nullable|string|max:100',
-            'guests.*.is_ku_member' => 'nullable|boolean',
-            // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
-            'has_children' => 'nullable|boolean',
             // 🧾 Billing fields (04/08/26)
             'billing_address' => 'nullable|string|max:255',
             'billing_comment' => 'nullable|string|max:255',
@@ -82,9 +79,7 @@ class FrontDeskController extends Controller
                 'room_id' => $room->id,
                 'check_in' => $checkIn,
                 'check_out' => $checkOut,
-                'guests' => $validated['guests'] ?? null,
-                // 🧒 Refactor (04/08/26): เปลี่ยนจาก integer count → boolean flag
-                'has_children' => $validated['has_children'] ?? false,
+                'guests' => isset($validated['guests']) ? $this->stripGuestFields($validated['guests']) : null,
                 // 🧾 Billing fields (04/08/26)
                 'billing_address' => $validated['billing_address'] ?? null,
                 'billing_comment' => $validated['billing_comment'] ?? null,
@@ -514,5 +509,23 @@ class FrontDeskController extends Controller
                 'message' => $e->getMessage(),
             ], 400);
         }
+    }
+
+    /**
+     * 👥 ตัดฟิลด์ที่ไม่จัดเก็บออกจาก guests array (เช่น is_ku_member)
+     */
+    private function stripGuestFields(?array $guests): ?array
+    {
+        if ($guests === null) {
+            return null;
+        }
+
+        return array_map(function ($guest) {
+            if (is_array($guest)) {
+                unset($guest['is_ku_member']);
+            }
+
+            return $guest;
+        }, $guests);
     }
 }

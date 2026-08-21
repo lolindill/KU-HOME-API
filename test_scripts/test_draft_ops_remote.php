@@ -314,7 +314,7 @@ if ($brA && $brB) {
             ],
             [
                 'booking_room_id' => $brB,
-                'guests' => [['title' => 'Mr.', 'name' => 'Batch Guest', 'nationality' => 'Thai', 'is_ku_member' => false]],
+                'guests' => [['title' => 'Mr.', 'name' => 'Batch Guest', 'nationality' => 'Thai']],
                 'addons' => ['breakfast' => 1],
             ],
         ],
@@ -385,7 +385,7 @@ if (! $brA) {
 
     // 5) PUT brA: แก้เฉพาะ guests → total ไม่เปลี่ยน
     $r = apiCall('PUT', $BASE_URL."/bookings/{$BOOKING_ID}/rooms/{$brA}", [
-        'guests' => [['title' => 'Mr.', 'name' => 'Somchai Updated', 'nationality' => 'Thai', 'is_ku_member' => false]],
+        'guests' => [['title' => 'Mr.', 'name' => 'Somchai Updated', 'nationality' => 'Thai']],
     ], $TOKEN1);
     check('PUT brA (guests อย่างเดียว) → 200 + total คงเดิม', $r['http_code'] === 200 && ($r['body']['total_amount'] ?? null) === $expTotal,
         'HTTP '.$r['http_code'].', total '.($r['body']['total_amount'] ?? '?'));

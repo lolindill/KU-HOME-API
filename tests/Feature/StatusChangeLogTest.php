@@ -71,7 +71,6 @@ class StatusChangeLogTest extends TestCase
             'check_in' => now()->toDateString(),
             'check_out' => now()->addDays(2)->toDateString(),
             'guests' => [['title' => 'mr', 'name' => 'Guest', 'nationality' => 'TH']],
-            'has_children' => false,
             'status' => $brStatus,
         ]);
     }

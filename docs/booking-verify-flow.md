@@ -131,9 +131,8 @@ Accept: application/json
       "check_out": "2026-08-12",
       "extra_beds": 0,
       "guests": [
-        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai", "is_ku_member": false }
+        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
       ],
-      "has_children": false,
       "billing_address": null,
       "billing_comment": null,
       "addons": { "breakfast": 2, "early_checkin": false, "late_checkout": false }

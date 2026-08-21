@@ -44,8 +44,6 @@ class UpdateBookingRoomsRequest extends FormRequest
             'booking_rooms.*.guests.*.email' => 'nullable|string|email|max:255',
             'booking_rooms.*.guests.*.phone' => 'nullable|string|max:50',
             'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
-            'booking_rooms.*.guests.*.is_ku_member' => 'nullable|boolean',
-            'booking_rooms.*.has_children' => 'nullable|boolean',
 
             // 🏨 Phase 1: bed preference สำหรับ allocation algorithm (twin | null = any)
             'booking_rooms.*.bed_preference' => 'nullable|string|in:twin',
