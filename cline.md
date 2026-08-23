@@ -1348,4 +1348,29 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > - PHPUnit: Full suite `259 passed (609 assertions)`
 
 
+## ✅ Refactor `/unavailable-dates` เป็นราย room type (2026-08-23)
+
+> **Breaking Change (response shape)** — `GET /v1/unavailable-dates` เดิมคืน flat list `unavailable_dates` วันที่ **ทุก room type เต็มพร้อมกัน** (รวมทุกประเภทเป็น list เดียว) → ตอนนี้คืน **แยกราย room type** ผ่าน `room_types[]` เหมือน `/availability-per-day` และ `/availability-ranges`
+>
+> **Response ใหม่:**
+> ```
+> room_types: [
+>   { room_type_id, name_en, name_th, unavailable_dates: [Y-m-d, ...] }
+> ]
+> ```
+> - sold-out logic ต่อ type = `total_rooms > 0 && occupied >= total_rooms` — เหมือน `availabilityRanges` เป๊ะ (type ไม่มีห้องขาย `total=0` → `unavailable_dates: []` ไม่ถือว่า sold-out ทุกวัน)
+> - ลบ degenerate guard เดิม ("ไม่มี room type / sum(total)=0 → คืน `[]`") — per-type logic + เงื่อนไข `total > 0` จัดการกรณีนี้เองตามธรรมชาติ
+> - ถ้า frontend อยากได้พฤติกรรมเดิม (วันที่จองไม่ได้เลยทุกประเภท) → intersect `unavailable_dates` ของทุก type ฝั่ง client
+> - validation (`start_date`/`end_date` required) + DoS guard (cap 366 คืน) + occupied matrix approach คงเดิมทุกอย่าง
+>
+> **Files Changed:**
+> - `app/Http/Controllers/Api/V1/RoomController.php` — rewrite `unavailableDates()` (comment header อธิบาย diff กับ `availabilityRanges`)
+> - `tests/Feature/RoomTest.php` — rewrite 2 tests เดิมเป็น per-type + เพิ่ม `test_unavailable_dates_type_with_no_sellable_rooms_is_never_sold_out`
+> - `docs/api_guide.md` — อัปเดต section `/unavailable-dates` + ระบุ BREAKING
+> - `postman/KU_HOME_API.postman_collection.json` — rename entry "Flat" → "Per-Type"
+>
+> **Testing:**
+> - `php artisan test --filter=RoomTest` — `19 passed (60 assertions)` (รวม unavailable-dates 4 tests)
+
+
 

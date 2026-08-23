@@ -331,10 +331,10 @@ class RoomTest extends TestCase
     }
 
     // ============================================
-    // 📅 unavailable-dates (flat list วันที่จองไม่ได้เลย — ทุก room type เต็ม)
+    // 📅 unavailable-dates (flat list วันที่ sold-out — แยกราย room type)
     // ============================================
 
-    public function test_unavailable_dates_lists_days_where_all_room_types_sold_out(): void
+    public function test_unavailable_dates_lists_sold_out_days_per_room_type(): void
     {
         // 2 room types, แต่ละ type มี 1 ห้อง → sold-out เมื่อมี BR overlap
         $roomTypeA = $this->createRoomType();
@@ -351,7 +351,7 @@ class RoomTest extends TestCase
             'total_amount' => 3000,
         ]);
 
-        // 🌟 วัน today+2: จองทั้งสอง type → จองไม่ได้เลย (อยู่ใน list)
+        // 🌟 วัน today+2: จองทั้งสอง type → sold-out ทั้งคู่
         BookingRoom::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
@@ -369,7 +369,7 @@ class RoomTest extends TestCase
             'status' => 'confirmed',
         ]);
 
-        // 🌟 วัน today+4: จองแค่ type A → type B ยังว่าง → ยังจองได้ (ไม่อยู่ใน list)
+        // 🌟 วัน today+4: จองแค่ type A → sold-out เฉพาะ A, B ยังว่าง
         BookingRoom::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
@@ -385,16 +385,22 @@ class RoomTest extends TestCase
         ]));
 
         $response->assertStatus(200);
-        $dates = $response->json('unavailable_dates');
 
-        // 🌟 expect เฉพาะ today+2 (ทั้งสอง type เต็ม). today+4 มี type B ว่าง → ไม่อยู่ใน list
-        $this->assertContains(now()->addDays(2)->toDateString(), $dates);
-        $this->assertNotContains(now()->addDays(4)->toDateString(), $dates);
+        // 🌟 หาแถวของแต่ละ room type จาก room_types[] ใน response
+        $rowByType = collect($response->json('room_types'))->keyBy('room_type_id');
+        $datesA = $rowByType[(string) $roomTypeA->id]['unavailable_dates'];
+        $datesB = $rowByType[(string) $roomTypeB->id]['unavailable_dates'];
+
+        // type A: sold-out ทั้ง today+2 และ today+4 / type B: sold-out เฉพาะ today+2
+        $this->assertContains(now()->addDays(2)->toDateString(), $datesA);
+        $this->assertContains(now()->addDays(4)->toDateString(), $datesA);
+        $this->assertContains(now()->addDays(2)->toDateString(), $datesB);
+        $this->assertNotContains(now()->addDays(4)->toDateString(), $datesB);
     }
 
     public function test_unavailable_dates_empty_when_never_full(): void
     {
-        // มีห้องว่างเยอะกว่า booking → ไม่มีวันไหนเต็มทุก type
+        // มีห้องว่างเยอะกว่า booking → ไม่มีวันไหน sold-out
         $roomType = $this->createRoomType();
         Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
         Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '102', 'status' => 'available']);
@@ -405,7 +411,24 @@ class RoomTest extends TestCase
         ]));
 
         $response->assertStatus(200);
-        $this->assertSame([], $response->json('unavailable_dates'));
+        $rowByType = collect($response->json('room_types'))->keyBy('room_type_id');
+        $this->assertSame([], $rowByType[(string) $roomType->id]['unavailable_dates']);
+    }
+
+    public function test_unavailable_dates_type_with_no_sellable_rooms_is_never_sold_out(): void
+    {
+        // type ที่ห้อง maintenance ทั้งหมด (total=0) → ไม่ถือว่า sold-out ทุกวัน → คืน []
+        $roomType = $this->createRoomType();
+        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'maintenance']);
+
+        $response = $this->getJson('/api/v1/unavailable-dates?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(3)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $rowByType = collect($response->json('room_types'))->keyBy('room_type_id');
+        $this->assertSame([], $rowByType[(string) $roomType->id]['unavailable_dates']);
     }
 
     public function test_unavailable_dates_validates_required_dates(): void

@@ -948,7 +948,7 @@
           }
         },
         {
-          "name": "GET Flat Unavailable Dates (/unavailable-dates)",
+          "name": "GET Per-Type Unavailable Dates (/unavailable-dates)",
           "event": [
             {
               "listen": "test",

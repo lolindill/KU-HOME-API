@@ -373,9 +373,10 @@ class RoomController extends Controller
         ]);
     }
 
-    // 📅 ดึงวันที่จองไม่ได้เลย (flat list) — คืนวันที่ผลรวมห้องว่างของทุก room type เป็น 0
-    //    ต่างจาก availabilityPerDay/Ranges ตรงที่ไม่แยกราย room type และไม่กลุ่มติดกัน
-    //    ใช้สำหรับ frontend disable วันในปฏิทินแบบรวม (วันที่ห้องทุกประเภทเต็ม = จองไม่ได้เลย)
+    // 📅 ดึงวันที่จองไม่ได้ราย room type (flat list ต่อ type) — คลอนจาก availabilityRanges
+    //    🌟 Refactor (23/08/26): เดิมรวมทุก room type เป็น flat list เดียว (วันที่ทุก type เต็ม)
+    //    ตอนนี้แยกราย room type เหมือน availabilityPerDay/Ranges — frontend เลือกประเภทเองได้
+    //    ต่างจาก availabilityRanges ตรงที่คืนวันราบ ไม่กลุ่มติดกันเป็น interval
     public function unavailableDates(Request $request)
     {
         $validated = $request->validate([
@@ -400,18 +401,6 @@ class RoomController extends Controller
             $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
         }])
             ->get();
-
-        // 🌟 Degenerate guard: ถ้าไม่มี room type เลย หรือทุก room type total=0
-        //    → ไม่มีห้องขายอยู่แล้ว → คืน [] ป้องกัน false-positive ว่าทุกวัน "เต็ม"
-        if ($roomTypes->isEmpty() || $roomTypes->sum('total_rooms_count') === 0) {
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Unavailable dates fetched successfully',
-                'start_date' => $start->toDateString(),
-                'end_date' => $end->toDateString(),
-                'unavailable_dates' => [],
-            ]);
-        }
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
@@ -444,26 +433,31 @@ class RoomController extends Controller
             $dateKeys[] = $date->toDateString();
         }
 
-        // 🌟 วัน "จองไม่ได้" = ผลรวมห้องว่างข้ามทุก room type เป็น 0
-        //    (วันที่ไม่ว่างสักประเภท = จองไม่ได้เลย)
-        $unavailableDates = [];
-        foreach ($dateKeys as $dateKey) {
-            $totalAvailable = 0;
-            foreach ($roomTypes as $type) {
+        // 🌟 วัน "จองไม่ได้" ราย type = occupied >= total_rooms_count
+        //    (total=0 → ไม่ถือว่า sold-out เพราะไม่มีห้องขายอยู่แล้ว — เหมือน availabilityRanges)
+        $result = $roomTypes->map(function ($type) use ($occupied, $dateKeys) {
+            $unavailableDates = [];
+            foreach ($dateKeys as $dateKey) {
                 $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
-                $totalAvailable += max(0, $type->total_rooms_count - $occupiedCount);
+                if ($type->total_rooms_count > 0 && $occupiedCount >= $type->total_rooms_count) {
+                    $unavailableDates[] = $dateKey;
+                }
             }
-            if ($totalAvailable === 0) {
-                $unavailableDates[] = $dateKey;
-            }
-        }
+
+            return [
+                'room_type_id' => $type->id,
+                'name_en' => $type->name_en,
+                'name_th' => $type->name_th,
+                'unavailable_dates' => $unavailableDates,
+            ];
+        });
 
         return response()->json([
             'status' => 'success',
             'message' => 'Unavailable dates fetched successfully',
             'start_date' => $start->toDateString(),
             'end_date' => $end->toDateString(),
-            'unavailable_dates' => $unavailableDates,
+            'room_types' => $result,
         ]);
     }
 

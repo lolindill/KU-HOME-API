@@ -686,18 +686,20 @@ curl -s -H "Accept: application/json" \
 
 ---
 
-### GET `/unavailable-dates` — Flat list วันที่จองไม่ได้เลย
+### GET `/unavailable-dates` — Flat list วันที่ sold-out ราย room type
 
 🔒 **Public**
 
-คืน flat list วันที่ **จองไม่ได้เลย** (ผลรวมห้องว่างของทุก room type เป็น 0 ในวันนั้น). ต่างจาก `/availability-ranges` ตรงที่ (1) รวมทุกประเภทเป็น list เดียว, (2) เป็นวันราบไม่กลุ่มติดกันเป็น interval. ใช้สำหรับปฏิทิน frontend disable วันที่ห้องทุกประเภทเต็ม = กดจองเลยไม่ได้.
+คืน flat list วันที่ **sold-out** **แยกราย room_type**. เหมือน `/availability-ranges` ทุกอย่าง ยกเว้น (1) คืนวันราบไม่กลุ่มติดกันเป็น interval. ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
+
+> ⚠️ **BREAKING (2026-08-23):** เดิมคืน flat list `unavailable_dates` วันที่ **ทุก room type เต็มพร้อมกัน** (รวมทุกประเภทเป็น list เดียว) — ตอนนี้แยกราย room type ผ่าน `room_types[]` แทน ถ้า frontend อยากได้พฤติกรรมเดิม (วันที่จองไม่ได้เลย) ให้ intersect `unavailable_dates` ของทุก type ที่มีห้องขายฝั่ง client เอง
 
 **Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` required, cap 365 คืน)
 
 **Semantics:**
-- วัน "จองไม่ได้" = `sum over room_types of max(0, total_rooms − occupied) == 0`
+- วัน "จองไม่ได้" ของ type = `total_rooms > 0 && occupied >= total_rooms` (sold-out logic เหมือน `/availability-ranges` เป๊ะ)
 - `total_rooms` / `occupied` semantics เหมือน `/availability-per-day` ทุกอย่าง
-- **Edge case:** ถ้าไม่มี room type เลย หรือทุก room type `total=0` → คืน `[]` (degenerate guard — ป้องกัน false-positive ว่าทุกวัน "เต็ม" ทั้งที่จริงคือไม่มีห้องขายอยู่แล้ว)
+- `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out → คืน `unavailable_dates: []` (เหมือน `intervals: []` ของ `/availability-ranges`)
 
 **Response `200`:**
 ```json
@@ -706,7 +708,14 @@ curl -s -H "Accept: application/json" \
   "message": "Unavailable dates fetched successfully",
   "start_date": "2026-08-10",
   "end_date": "2026-08-20",
-  "unavailable_dates": ["2026-08-12", "2026-08-13"]
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Standard",
+      "name_th": "ห้องมาตรฐาน",
+      "unavailable_dates": ["2026-08-12", "2026-08-13"]
+    }
+  ]
 }
 ```
 
