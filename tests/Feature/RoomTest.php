@@ -323,11 +323,16 @@ class RoomTest extends TestCase
         $this->assertSame([], $found['intervals']);
     }
 
-    public function test_availability_ranges_validates_required_dates(): void
+    public function test_availability_ranges_defaults_to_today_plus_six_months_when_no_dates_provided(): void
     {
+        $this->createRoom();
         $response = $this->getJson('/api/v1/availability-ranges');
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['start_date', 'end_date']);
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addMonths(6)->toDateString(),
+        ]);
     }
 
     // ============================================
@@ -431,11 +436,16 @@ class RoomTest extends TestCase
         $this->assertSame([], $rowByType[(string) $roomType->id]['unavailable_dates']);
     }
 
-    public function test_unavailable_dates_validates_required_dates(): void
+    public function test_unavailable_dates_defaults_to_today_plus_six_months_when_no_dates_provided(): void
     {
+        $this->createRoom();
         $response = $this->getJson('/api/v1/unavailable-dates');
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['start_date', 'end_date']);
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addMonths(6)->toDateString(),
+        ]);
     }
 
     // ============================================
@@ -553,5 +563,77 @@ class RoomTest extends TestCase
         $this->assertCount(1, $intervals);
         $this->assertEquals(now()->addDays(3)->toDateString(), $intervals[0]['start']);
         $this->assertEquals(now()->addDays(4)->toDateString(), $intervals[0]['end']);
+    }
+
+    // ============================================
+    // 📅 availability-per-day (default window)
+    // ============================================
+
+    public function test_availability_per_day_defaults_to_today_plus_six_months_when_no_dates_provided(): void
+    {
+        $this->createRoom();
+        $response = $this->getJson('/api/v1/availability-per-day');
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addMonths(6)->toDateString(),
+        ]);
+    }
+
+    public function test_availability_per_day_defaults_end_date_when_only_start_date_provided(): void
+    {
+        $this->createRoom();
+        $startDate = now()->addDays(5)->toDateString();
+        $response = $this->getJson('/api/v1/availability-per-day?start_date='.$startDate);
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'start_date' => $startDate,
+            'end_date' => now()->addDays(5)->addMonths(6)->toDateString(),
+        ]);
+    }
+
+    // ============================================
+    // 🚧 mock/availability-ranges (mock data for frontend test)
+    // ============================================
+
+    public function test_mock_availability_ranges_returns_static_relative_data(): void
+    {
+        $response = $this->getJson('/api/v1/mock/availability-ranges');
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'message' => 'Availability ranges fetched successfully',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(30)->toDateString(),
+        ]);
+
+        $roomTypes = $response->json('room_types');
+        $this->assertCount(3, $roomTypes);
+
+        $superior = collect($roomTypes)->firstWhere('name_en', 'Superior');
+        $this->assertNotNull($superior);
+        $this->assertEquals('00000000-0000-4000-8000-000000000001', $superior['room_type_id']);
+        $this->assertEquals('ห้องซูพีเรียร์', $superior['name_th']);
+        $this->assertCount(2, $superior['intervals']);
+        $this->assertEquals(now()->addDays(5)->toDateString(), $superior['intervals'][0]['start_date']);
+        $this->assertEquals(now()->addDays(8)->toDateString(), $superior['intervals'][0]['end_date']);
+        $this->assertEquals(now()->addDays(15)->toDateString(), $superior['intervals'][1]['start_date']);
+        $this->assertEquals(now()->addDays(18)->toDateString(), $superior['intervals'][1]['end_date']);
+
+        $deluxe = collect($roomTypes)->firstWhere('name_en', 'Deluxe');
+        $this->assertNotNull($deluxe);
+        $this->assertEquals('00000000-0000-4000-8000-000000000002', $deluxe['room_type_id']);
+        $this->assertEquals('ห้องดีลักซ์', $deluxe['name_th']);
+        $this->assertCount(1, $deluxe['intervals']);
+        $this->assertEquals(now()->addDays(10)->toDateString(), $deluxe['intervals'][0]['start_date']);
+        $this->assertEquals(now()->addDays(12)->toDateString(), $deluxe['intervals'][0]['end_date']);
+
+        $suite = collect($roomTypes)->firstWhere('name_en', 'Suite');
+        $this->assertNotNull($suite);
+        $this->assertEquals('00000000-0000-4000-8000-000000000003', $suite['room_type_id']);
+        $this->assertEquals('ห้องสวีท', $suite['name_th']);
+        $this->assertSame([], $suite['intervals']);
     }
 }

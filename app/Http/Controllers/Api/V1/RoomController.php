@@ -197,6 +197,16 @@ class RoomController extends Controller
     // 📅 ตรวจห้องว่างรายวัน (per-day calendar) — คืนทุก room type × ทุกคืนในช่วง
     public function availabilityPerDay(Request $request)
     {
+        // 🌟 (24/08/26) default window เมื่อไม่ส่ง params: start = today, end = start + 6 เดือน
+        //    (merge ก่อน validate → rules/422 shape เดิมทั้งหมด — เทคนิคเดียวกันทั้ง 3 endpoints)
+        $request->mergeIfMissing(['start_date' => Carbon::today()->toDateString()]);
+        try {
+            $defaultEndDate = Carbon::parse($request->input('start_date'))->addMonths(6)->toDateString();
+        } catch (\Throwable) {
+            $defaultEndDate = Carbon::today()->addMonths(6)->toDateString();
+        }
+        $request->mergeIfMissing(['end_date' => $defaultEndDate]);
+
         $validated = $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
@@ -280,6 +290,16 @@ class RoomController extends Controller
     //    ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้ (โหลดน้อยกว่า per-day matrix)
     public function availabilityRanges(Request $request)
     {
+        // 🌟 (24/08/26) default window เมื่อไม่ส่ง params: start = today, end = start + 6 เดือน
+        //    (merge ก่อน validate → rules/422 shape เดิมทั้งหมด — เทคนิคเดียวกันทั้ง 3 endpoints)
+        $request->mergeIfMissing(['start_date' => Carbon::today()->toDateString()]);
+        try {
+            $defaultEndDate = Carbon::parse($request->input('start_date'))->addMonths(6)->toDateString();
+        } catch (\Throwable) {
+            $defaultEndDate = Carbon::today()->addMonths(6)->toDateString();
+        }
+        $request->mergeIfMissing(['end_date' => $defaultEndDate]);
+
         $validated = $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
@@ -379,6 +399,16 @@ class RoomController extends Controller
     //    ต่างจาก availabilityRanges ตรงที่คืนวันราบ ไม่กลุ่มติดกันเป็น interval
     public function unavailableDates(Request $request)
     {
+        // 🌟 (24/08/26) default window เมื่อไม่ส่ง params: start = today, end = start + 6 เดือน
+        //    (merge ก่อน validate → rules/422 shape เดิมทั้งหมด — เทคนิคเดียวกันทั้ง 3 endpoints)
+        $request->mergeIfMissing(['start_date' => Carbon::today()->toDateString()]);
+        try {
+            $defaultEndDate = Carbon::parse($request->input('start_date'))->addMonths(6)->toDateString();
+        } catch (\Throwable) {
+            $defaultEndDate = Carbon::today()->addMonths(6)->toDateString();
+        }
+        $request->mergeIfMissing(['end_date' => $defaultEndDate]);
+
         $validated = $request->validate([
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',

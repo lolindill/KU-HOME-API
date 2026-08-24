@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\GlobalRateController;
 use App\Http\Controllers\Api\V1\ImageController;
+use App\Http\Controllers\Api\V1\MockController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -47,6 +48,9 @@ Route::prefix('v1')->group(function () {
     Route::get('/availability-ranges', [RoomController::class, 'availabilityRanges']);
     Route::get('/unavailable-dates', [RoomController::class, 'unavailableDates']);
     Route::get('/unavailable-ranges', [RoomController::class, 'unavailableRanges']);
+
+    // 🚧 DRAFT / TESTING — mock sold-out ranges สำหรับ frontend test (ไม่อ่าน DB, วันที่สัมพัทธ์ today)
+    Route::get('/mock/availability-ranges', [MockController::class, 'availabilityRanges']);
 
     // 💳 Webhook (called by payment gateway — ยืนยันด้วย signature ในอนาคต)
     Route::post('/payment/webhook', [PaymentController::class, 'webhook']);

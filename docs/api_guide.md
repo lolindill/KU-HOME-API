@@ -591,8 +591,8 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 คืนจำนวนห้องว่างรายวัน × ทุก room type สำหรับทำ calendar view (แต่ละค่า = จำนวนห้องที่ขายได้ "คืนนั้น"). ทำงานคู่กับ `/availability` ที่คืนเลขเดียวต่อ range.
 
 **Query Params:**
-- `start_date` (required, date, ≥ today)
-- `end_date` (required, date, ≥ start_date)
+- `start_date` (optional, date, ≥ today) — default: `today`
+- `end_date` (optional, date, ≥ start_date) — default: `start_date + 6 เดือน` (~183 วัน)
 - 🛡️ Cap: `(end_date − start_date) ≤ 365 คืน` (สูงสุด 366 วัน) — เกินปฏิเสธด้วย `422`
 
 **Semantics:**
@@ -631,11 +631,11 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 
 **Response `422`:**
 ```json
-// ขาด required param, หรือ start_date ก่อนวันนี้
+// start_date ก่อนวันนี้ หรือ format วันที่ไม่ถูกต้อง
 {
   "status": "error",
-  "message": "The start date field is required.",
-  "errors": { "start_date": ["The start date field is required."] }
+  "message": "The start date field must be a date after or equal to today.",
+  "errors": { "start_date": ["The start date field must be a date after or equal to today."] }
 }
 
 // ช่วงเกิน 365 คืน
@@ -661,7 +661,7 @@ curl -s -H "Accept: application/json" \
 
 คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start_date, end_date}`. เบากว่า `/availability-per-day` เพราะไม่คืนจำนวนห้องว่างรายวัน — ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
 
-**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` required, cap 365 คืน)
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน)
 
 **Response `200`:**
 ```json
@@ -694,7 +694,7 @@ curl -s -H "Accept: application/json" \
 
 > ⚠️ **BREAKING (2026-08-23):** เดิมคืน flat list `unavailable_dates` วันที่ **ทุก room type เต็มพร้อมกัน** (รวมทุกประเภทเป็น list เดียว) — ตอนนี้แยกราย room type ผ่าน `room_types[]` แทน ถ้า frontend อยากได้พฤติกรรมเดิม (วันที่จองไม่ได้เลย) ให้ intersect `unavailable_dates` ของทุก type ที่มีห้องขายฝั่ง client เอง
 
-**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` required, cap 365 คืน)
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน)
 
 **Semantics:**
 - วัน "จองไม่ได้" ของ type = `total_rooms > 0 && occupied >= total_rooms` (sold-out logic เหมือน `/availability-ranges` เป๊ะ)
@@ -787,6 +787,63 @@ curl -s -H "Accept: application/json" \
 ```bash
 curl -s -H "Accept: application/json" \
   "http://localhost:8000/api/v1/unavailable-ranges"
+```
+
+---
+
+### GET `/mock/availability-ranges` — Mock sold-out intervals (Frontend testing)
+
+🚧 **DRAFT / TESTING** · 🔒 **Public**
+
+Mock data ของ sold-out intervals ราย room type สำหรับ frontend นำไปใช้พัฒนา/ทดสอบ UI ปฏิทินโดยไม่ต้องเซ็ตอัป DB หรือสร้าง booking ล่วงหน้า. วันที่คำนวณสัมพันธ์กับ `today` เสมอ (ไม่มีวันหมดอายุ).
+
+**Query Params:** ❌ ไม่รับ — ข้อมูลถูกจำลองคงที่
+
+**Mock Data Scenario:**
+- Window: `start_date` = `today`, `end_date` = `today + 30 วัน`
+- **Superior** (`00000000-0000-4000-8000-000000000001`): 2 intervals → `[today+5, today+8]`, `[today+15, today+18]`
+- **Deluxe** (`00000000-0000-4000-8000-000000000002`): 1 interval → `[today+10, today+12]`
+- **Suite** (`00000000-0000-4000-8000-000000000003`): 0 intervals → `[]` (จำลองกรณีห้องว่างตลอดทั้งเดือน)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Availability ranges fetched successfully",
+  "start_date": "2026-08-24",
+  "end_date": "2026-09-23",
+  "room_types": [
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000001",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "intervals": [
+        { "start_date": "2026-08-29", "end_date": "2026-09-01" },
+        { "start_date": "2026-09-08", "end_date": "2026-09-11" }
+      ]
+    },
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000002",
+      "name_en": "Deluxe",
+      "name_th": "ห้องดีลักซ์",
+      "intervals": [
+        { "start_date": "2026-09-03", "end_date": "2026-09-05" }
+      ]
+    },
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000003",
+      "name_en": "Suite",
+      "name_th": "ห้องสวีท",
+      "intervals": []
+    }
+  ]
+}
+```
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/mock/availability-ranges"
 ```
 
 ---

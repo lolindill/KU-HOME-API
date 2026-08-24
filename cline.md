@@ -47,7 +47,8 @@ hotel/
 │   │   │   ├── FrontDeskController.php# walk-in bookings, check-in/out, record payments (🧹 checkout creates typed task)
 │   │   │   ├── DashboardController.php# 🧹 housekeeping dashboard (Phase A: listTasks/createTask/assignTask/acceptTask/updateStatus)
 │   │   │   ├── AddonRateController.php
-│   │   │   └── ImageController.php    # 🖼️ serve image file ผ่าน signed URL (images.file)
+│   │   │   ├── ImageController.php    # 🖼️ serve image file ผ่าน signed URL (images.file)
+│   │   │   └── MockController.php     # 🚧 DRAFT / TESTING — mock availability-ranges สำหรับ frontend
 │   │   ├── Middleware/
 │   │   │   └── CheckRole.php          # role-based authorization (user.role vs allowed roles)
 │   │   └── Requests/                  # 24 Form Requests (Store*/Update* per model)
@@ -1372,5 +1373,29 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > **Testing:**
 > - `php artisan test --filter=RoomTest` — `19 passed (60 assertions)` (รวม unavailable-dates 4 tests)
 
+## ✅ Mock Endpoint + Default Window (today → +6 เดือน) สำหรับ Availability Endpoints (2026-08-24)
 
-
+> **Feature & DX Improvement** — เพิ่ม mock sold-out intervals endpoint สำหรับ frontend testing และปรับ default date window สำหรับ 3 availability endpoints:
+> 1. **`GET /api/v1/mock/availability-ranges` (Mock endpoint):**
+>    - สร้าง `MockController@availabilityRanges` พร้อม `🚧 DRAFT / TESTING`
+>    - ไม่อ่านข้อมูล DB — วันที่คำนวณสัมพันธ์กับ `Carbon::today()` (ไม่มีวันหมดอายุ, window = today → today+30):
+>      - **Superior** (fake UUID `...0001`): 2 intervals (`[today+5, today+8]`, `[today+15, today+18]`)
+>      - **Deluxe** (fake UUID `...0002`): 1 interval (`[today+10, today+12]`)
+>      - **Suite** (fake UUID `...0003`): 0 intervals (`[]`)
+>    - Response shape & message ตรงกับ endpoint จริงทุกประการ
+> 2. **Default Window `today → today+6 เดือน` เมื่อไม่ส่ง params:**
+>    - แก้ไข 3 endpoints ใน `RoomController`: `/availability-per-day`, `/availability-ranges`, `/unavailable-dates`
+>    - ใช้ `$request->mergeIfMissing(['start_date' => today])` และ `$request->mergeIfMissing(['end_date' => start + 6 เดือน])` ก่อน validation
+>    - หากส่ง `start_date` อย่างเดียว → `end_date` default เป็น `start_date + 6 เดือน`
+>    - Validation rules & 422 error shape คงเดิมทุกกรณี
+>
+> **Files Changed:**
+> - `app/Http/Controllers/Api/V1/MockController.php` (New controller)
+> - `app/Http/Controllers/Api/V1/RoomController.php` (`availabilityPerDay`, `availabilityRanges`, `unavailableDates`)
+> - `routes/api.php` (Register mock route)
+> - `tests/Feature/RoomTest.php` (Update default window tests + add mock endpoint test)
+> - `docs/api_guide.md` & `cline.md`
+>
+> **Testing:**
+> - `php artisan test --filter=RoomTest` — `22 passed (81 assertions)`
+> - Full PHPUnit suite: `263 passed (634 assertions)`
