@@ -122,7 +122,7 @@ class Booking extends Model
 
         $validTransitions = [
             'draft' => [
-                'pending' => ['user', 'guest', 'admin'], // ส่งสลิป — รอ admin ตรวจ
+                'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิป — รอ admin ตรวจ
                 'paid' => ['admin', 'system'], // front-desk เก็บเงินหน้าเคาน์เตอร์ / webhook
                 'confirmed' => ['admin'], // walk-in by admin (skip paid)
             ],
@@ -131,7 +131,7 @@ class Booking extends Model
                 'verify_error' => ['admin'], // admin reject สลิป — รอ user ส่งสลิปใหม่
             ],
             'verify_error' => [
-                'pending' => ['user', 'guest', 'admin'], // ส่งสลิปใหม่ — รอ admin ตรวจอีกครั้ง
+                'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิปใหม่ — รอ admin ตรวจอีกครั้ง
             ],
             'paid' => [
                 'confirmed' => ['admin'],

@@ -126,9 +126,7 @@ class BookingConfirmationController extends Controller
                 Storage::disk('local')->delete($slipPath);
             }
 
-            Log::error('Booking confirm failed: '.$e->getMessage());
-
-            return $this->error('เกิดข้อผิดพลาดในการส่งหลักฐานการชำระ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭', 500);
+            return $this->handleBusinessError($e);
         }
     }
 

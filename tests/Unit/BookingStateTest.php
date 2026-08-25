@@ -81,6 +81,20 @@ class BookingStateTest extends TestCase
         $this->assertEquals('pending', $booking->fresh()->status);
     }
 
+    public function test_draft_to_pending_by_ku_member(): void
+    {
+        $booking = $this->createBooking('draft');
+        $booking->transitionStatus('pending', 'ku_member');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_draft_to_pending_by_staff(): void
+    {
+        $booking = $this->createBooking('draft');
+        $booking->transitionStatus('pending', 'staff');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
     public function test_pending_to_paid_by_admin(): void
     {
         $booking = $this->createBooking('pending');
@@ -107,6 +121,20 @@ class BookingStateTest extends TestCase
     {
         $booking = $this->createBooking('verify_error');
         $booking->transitionStatus('pending', 'guest');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_verify_error_to_pending_by_ku_member(): void
+    {
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('pending', 'ku_member');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_verify_error_to_pending_by_staff(): void
+    {
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('pending', 'staff');
         $this->assertEquals('pending', $booking->fresh()->status);
     }
 

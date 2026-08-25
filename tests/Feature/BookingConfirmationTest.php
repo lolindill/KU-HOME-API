@@ -129,6 +129,32 @@ class BookingConfirmationTest extends TestCase
             ->assertJsonPath('booking_status', 'pending');
     }
 
+    public function test_ku_member_can_submit_confirmation(): void
+    {
+        $owner = User::factory()->create(['role' => 'ku_member', 'is_ku_member' => true]);
+        $booking = $this->createDraftBooking($owner->id);
+
+        $response = $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload());
+
+        $response->assertStatus(201)
+            ->assertJsonPath('booking_status', 'pending');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_staff_can_submit_confirmation(): void
+    {
+        $owner = User::factory()->create(['role' => 'staff']);
+        $booking = $this->createDraftBooking($owner->id);
+
+        $response = $this->actingAs($owner, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload());
+
+        $response->assertStatus(201)
+            ->assertJsonPath('booking_status', 'pending');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
     public function test_non_owner_cannot_submit_confirmation(): void
     {
         $owner = User::factory()->create(['role' => 'user']);
