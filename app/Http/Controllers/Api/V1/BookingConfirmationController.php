@@ -18,10 +18,15 @@ use Illuminate\Support\Facades\Storage;
  * 🌟 Refactor (24/07/26): Booking Confirmation Controller
  *
  * แทนที่ payments/receipts table (frozen) ด้วย flow ใหม่:
- *   1. user POST /bookings/{id}/confirm  → สร้าง confirmation (status=pending) + booking draft→paid
- *   2. admin PUT /booking-confirmations/{id}/verify  → pending→verified + booking paid→confirmed
- *   3. admin PUT /booking-confirmations/{id}/reject  → pending→rejected, booking ค้าง paid
+ *   1. user POST /bookings/{id}/confirm  → สร้าง confirmation (status=pending) + booking draft/verify_error→pending
+ *   2. admin PUT /booking-confirmations/{id}/verify  → pending→verified + booking pending→paid→confirmed
+ *   3. admin PUT /booking-confirmations/{id}/reject  → pending→rejected + booking pending→verify_error
  *   4. admin GET  /booking-confirmations/pending     → dashboard list
+ *
+ * 🌟 Refactor (25/08/26): booking container มี state 'pending' แล้ว — mirror กับ confirmation
+ *    (ก่อนหน้านี้ submit สลิป = draft→paid ทันทีทั้งที่ยังไม่มีใครตรวจ; ตอนนี้ 'paid' = admin ตรวจแล้วเท่านั้น
+ *     และ is_paid ถูก set ตอน verify ไม่ใช่ตอน submit)
+ * 🌟 Refactor (25/08/26): reject เปลี่ยน booking เป็น 'verify_error' แทนการกลับ draft — ไม่ถูก cleanup ลบ
  *
  * 1:N — 1 booking มีได้หลาย confirmation (history) แต่มี pending ได้ทีละ 1 row (guard กัน spam)
  */
@@ -44,16 +49,16 @@ class BookingConfirmationController extends Controller
             return $this->error('ไม่มีสิทธิ์ส่งหลักฐานการชำระสำหรับ booking นี้ค่ะ', 403);
         }
 
-        // state guard — รับเฉพาะ draft หรือ paid (paid = re-submit หลัง reject)
-        if (! in_array($booking->status, ['draft', 'paid'])) {
+        // state guard — รับเฉพาะ draft หรือ verify_error (หลัง reject booking จะเป็น verify_error เพื่อส่งใหม่)
+        if (! in_array($booking->status, ['draft', 'verify_error'], true)) {
             return $this->error(
-                "ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' (รับเฉพาะ draft/paid เท่านั้น)",
+                "ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' (รับเฉพาะ draft หรือ verify_error เท่านั้น)",
                 422
             );
         }
 
-        // payment_deadline guard (เหมือน webhook เดิม)
-        if ($booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
+        // payment_deadline guard (ตรวจเฉพาะ draft — verify_error ส่งใหม่ได้แม้หมด deadline)
+        if ($booking->status === 'draft' && $booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
             return $this->error('หมดเวลาชำระเงินแล้วค่ะ ไม่สามารถดำเนินการได้', 422);
         }
 
@@ -97,12 +102,9 @@ class BookingConfirmationController extends Controller
                 'uploaded_by' => $user->id,
             ]);
 
-            // booking transition draft → paid (เฉพาะ draft; paid แล้วจะไม่ transition ซ้ำ)
-            // 🌟 Fix 03/07/26: ใช้ PHP true + PgBoolean cast (ห้ามใช้ DB::raw('TRUE'))
-            if ($booking->status === 'draft') {
-                $booking->update(['is_paid' => true]);
-                $booking->transitionStatus('paid', $user->role);
-            }
+            // booking transition draft → pending (รอ admin ตรวจสลิป)
+            // 🌟 Refactor (25/08/26): 'paid' + is_paid จะเกิดตอน admin verify เท่านั้น ไม่ใช่ตอน submit
+            $booking->transitionStatus('pending', $user->role);
 
             DB::commit();
 
@@ -131,7 +133,7 @@ class BookingConfirmationController extends Controller
     }
 
     // ============================================================
-    // ✅ verify — admin ยืนยันสลิป (pending → verified + booking paid → confirmed)
+    // ✅ verify — admin ยืนยันสลิป (pending → verified + booking pending → paid → confirmed)
     // ============================================================
     public function verify(ReviewConfirmationRequest $request, string $id)
     {
@@ -152,9 +154,19 @@ class BookingConfirmationController extends Controller
                 'review_note' => $request->input('review_note'),
             ]);
 
+            $booking = $confirmation->booking;
+
+            // 🌟 Refactor (25/08/26): pending → paid (ตอนนี้ 'paid' = admin ตรวจแล้ว + set is_paid)
+            //    branch 'paid' เก็บไว้รองรับ legacy data ก่อน refactor (submit แล้วค้าง paid)
+            if ($booking->status === 'pending') {
+                // 🌟 Fix 03/07/26: ใช้ PHP true + PgBoolean cast (ห้ามใช้ DB::raw('TRUE'))
+                $booking->update(['is_paid' => true]);
+                $booking->transitionStatus('paid', 'admin');
+            }
+
             // booking paid → confirmed (state machine อนุญาต role=admin)
-            if ($confirmation->booking->status === 'paid') {
-                $confirmation->booking->transitionStatus('confirmed', 'admin');
+            if ($booking->status === 'paid') {
+                $booking->transitionStatus('confirmed', 'admin');
             }
 
             DB::commit();
@@ -174,7 +186,7 @@ class BookingConfirmationController extends Controller
     }
 
     // ============================================================
-    // ❌ reject — admin ปฏิเสธสลิป (pending → rejected, booking ค้าง paid)
+    // ❌ reject — admin ปฏิเสธสลิป (pending → rejected + booking pending → draft)
     // ============================================================
     public function reject(ReviewConfirmationRequest $request, string $id)
     {
@@ -195,12 +207,17 @@ class BookingConfirmationController extends Controller
                 'review_note' => $request->input('review_note'),
             ]);
 
-            // ❗ booking ยังคง paid — ไม่ transition (รอ user ส่ง slip ใหม่ = row ใหม่)
+            // 🌟 Refactor (25/08/26): booking เปลี่ยนเป็น verify_error — user ส่ง slip ใหม่ได้ (= row ใหม่)
+            //    (verify_error ไม่ถูก CleanupExpiredDrafts ลบ — รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้)
+            if ($confirmation->booking->status === 'pending') {
+                $confirmation->booking->transitionStatus('verify_error', 'admin');
+            }
+
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'ปฏิเสธสลิป — booking ยังคง paid รอผู้จองแจ้งใหม่',
+                'message' => 'ปฏิเสธสลิป — booking เปลี่ยนสถานะเป็น verify_error รอผู้จองแจ้งใหม่',
                 'confirmation' => $confirmation->fresh(['slipImage']),
                 'booking_status' => $confirmation->booking->fresh()->status,
             ], 200);

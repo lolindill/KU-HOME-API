@@ -93,19 +93,20 @@ class BookingConfirmationTest extends TestCase
         $response->assertStatus(201)
             ->assertJsonPath('status', 'success')
             ->assertJsonPath('confirmation_status', 'pending')
-            ->assertJsonPath('booking_status', 'paid');
+            ->assertJsonPath('booking_status', 'pending');
 
         // ✅ response ต้องคืน signed URL (มี signature + อายุ 15 นาที) ไม่ใช่ path เปล่าๆ
         $slipUrl = $response->json('slip_image_url');
         $this->assertStringContainsString('/api/v1/images/', $slipUrl);
         $this->assertStringContainsString('signature=', $slipUrl);
 
-        // ✅ DB assertions: confirmation created + booking paid
+        // ✅ DB assertions: confirmation created + booking pending (รอ admin ตรวจ)
         $this->assertDatabaseHas('booking_confirmations', [
             'booking_id' => $booking->id,
             'status' => 'pending',
         ]);
-        $this->assertTrue($booking->fresh()->is_paid);
+        // 🌟 Refactor (25/08/26): is_paid ยังเป็น false — submit สลิป ≠ จ่ายแล้ว (รอ admin verify)
+        $this->assertFalse($booking->fresh()->is_paid);
 
         // ✅ 🖼️ (19/08/26) สลิปอยู่ใน images table ผ่าน morph + ไฟล์เขียนลง private (local) disk
         $confirmation = BookingConfirmation::first();
@@ -125,7 +126,7 @@ class BookingConfirmationTest extends TestCase
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload());
 
         $response->assertStatus(201)
-            ->assertJsonPath('booking_status', 'paid');
+            ->assertJsonPath('booking_status', 'pending');
     }
 
     public function test_non_owner_cannot_submit_confirmation(): void
@@ -240,7 +241,7 @@ class BookingConfirmationTest extends TestCase
             'booking_id' => $booking->id,
             'status' => 'pending',
         ]);
-        $booking->update(['status' => 'paid', 'is_paid' => true]);
+        $booking->update(['status' => 'pending']);
 
         $response = $this->actingAsAdmin()
             ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify", [
@@ -257,6 +258,35 @@ class BookingConfirmationTest extends TestCase
             'review_note' => 'slip ok',
         ]);
         $this->assertNotNull($confirmation->fresh()->reviewed_by);
+
+        // 🌟 Refactor (25/08/26): is_paid ถูก set ตอน verify (pending → paid → confirmed)
+        $this->assertTrue($booking->fresh()->is_paid);
+    }
+
+    public function test_full_flow_confirm_then_verify_confirms_booking(): void
+    {
+        // 🌟 Refactor (25/08/26): flow เต็ม — draft → (submit) pending → (verify) paid → confirmed
+        $user = User::factory()->create(['role' => 'user']);
+        $booking = $this->createDraftBooking($user->id);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload())
+            ->assertStatus(201)
+            ->assertJsonPath('booking_status', 'pending');
+        $this->assertFalse($booking->fresh()->is_paid);
+
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)
+            ->where('status', 'pending')
+            ->first();
+        $this->assertNotNull($confirmation);
+
+        $this->actingAsAdmin()
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('confirmation.status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed');
+
+        $this->assertTrue($booking->fresh()->is_paid);
     }
 
     public function test_admin_can_reject_confirmation(): void
@@ -266,7 +296,7 @@ class BookingConfirmationTest extends TestCase
             'booking_id' => $booking->id,
             'status' => 'pending',
         ]);
-        $booking->update(['status' => 'paid', 'is_paid' => true]);
+        $booking->update(['status' => 'pending']);
 
         $response = $this->actingAsAdmin()
             ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/reject", [
@@ -274,17 +304,19 @@ class BookingConfirmationTest extends TestCase
             ]);
 
         $response->assertStatus(200)
-            ->assertJsonPath('confirmation.status', 'rejected');
+            ->assertJsonPath('confirmation.status', 'rejected')
+            ->assertJsonPath('booking_status', 'verify_error');
 
-        // ❗ booking ยังคง paid — ไม่ transition กลับ draft
-        $this->assertEquals('paid', $booking->fresh()->status);
+        // 🌟 Refactor (25/08/26): booking เปลี่ยนเป็น verify_error — user ส่ง slip ใหม่ได้ (row ใหม่)
+        $this->assertEquals('verify_error', $booking->fresh()->status);
+        $this->assertFalse($booking->fresh()->is_paid);
     }
 
     public function test_user_can_resubmit_after_reject(): void
     {
         $user = User::factory()->create(['role' => 'user']);
         $booking = $this->createDraftBooking($user->id);
-        $booking->update(['status' => 'paid', 'is_paid' => true]);
+        $booking->update(['status' => 'verify_error']);
 
         // 📜 row #1 — rejected (history)
         BookingConfirmation::create([
@@ -292,18 +324,43 @@ class BookingConfirmationTest extends TestCase
             'status' => 'rejected',
         ]);
 
-        // 🆕 user ส่ง slip ใหม่ → สร้าง row #2 pending
+        // 🆕 user ส่ง slip ใหม่ (booking เป็น verify_error หลัง reject) → สร้าง row #2 pending
         $response = $this->actingAs($user, 'sanctum')
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload());
 
         $response->assertStatus(201)
             ->assertJsonPath('confirmation_status', 'pending')
-            ->assertJsonPath('booking_status', 'paid'); // ไม่ transition ซ้ำ
+            ->assertJsonPath('booking_status', 'pending');
 
         // ✅ 1:N — มี 2 rows (rejected + pending)
         $this->assertEquals(2, BookingConfirmation::where('booking_id', $booking->id)->count());
         $this->assertEquals(1, BookingConfirmation::where('booking_id', $booking->id)->where('status', 'rejected')->count());
         $this->assertEquals(1, BookingConfirmation::where('booking_id', $booking->id)->where('status', 'pending')->count());
+    }
+
+    public function test_user_can_resubmit_from_verify_error_even_after_deadline_expired(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        $booking = $this->createDraftBooking($user->id);
+        // จำลองเคสที่ payment_deadline ผ่านไปแล้ว และสถานะเป็น verify_error
+        $booking->update([
+            'status' => 'verify_error',
+            'payment_deadline' => now()->subHours(2),
+        ]);
+
+        BookingConfirmation::create([
+            'booking_id' => $booking->id,
+            'status' => 'rejected',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload());
+
+        $response->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'pending')
+            ->assertJsonPath('booking_status', 'pending');
+
+        $this->assertEquals('pending', $booking->fresh()->status);
     }
 
     public function test_rejected_confirmation_stays_in_history(): void

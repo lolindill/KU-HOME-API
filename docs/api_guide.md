@@ -795,6 +795,8 @@ curl -s -H "Accept: application/json" \
 
 🚧 **DRAFT / TESTING** · 🔒 **Public**
 
+> 🗑️ **Deletion plan:** ลบ endpoint นี้ (route + `MockController` + tests + section นี้) เมื่อ frontend ย้ายไปใช้ `/availability-ranges` จริงแล้ว — **อย่าปล่อยขึ้น production**
+
 Mock data ของ sold-out intervals ราย room type สำหรับ frontend นำไปใช้พัฒนา/ทดสอบ UI ปฏิทินโดยไม่ต้องเซ็ตอัป DB หรือสร้าง booking ล่วงหน้า. วันที่คำนวณสัมพันธ์กับ `today` เสมอ (ไม่มีวันหมดอายุ).
 
 **Query Params:** ❌ ไม่รับ — ข้อมูลถูกจำลองคงที่
@@ -1516,6 +1518,7 @@ curl -s -H "Accept: application/json" \
 ### POST `/bookings/{id}/confirm` — Submit payment confirmation
 
 🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
+🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
 
@@ -1545,7 +1548,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
   "message": "ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน",
   "confirmation_id": "confirmation-uuid",
   "confirmation_status": "pending",
-  "booking_status": "paid",
+  "booking_status": "pending",
   "slip_image_url": "http://localhost/api/v1/images/<image-uuid>/file?expires=...&signature=..."
 }
 ```
@@ -1553,8 +1556,8 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 > 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — frontend ใช้ `<img src>` ตรงๆ ได้ทันที หมดอายุต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
 
 **Guards** (422 on failure):
-- ❌ Booking ไม่ใช่ `draft`/`paid` (paid = re-submit หลัง reject)
-- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว)
+- ❌ Booking ไม่ใช่ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่)
+- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft`, `verify_error` ส่งใหม่ได้แม้หมด deadline)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
 - ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
 
@@ -1562,7 +1565,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 ### PUT `/booking-confirmations/{id}/verify` — Admin verify slip
 
-🔒 **Admin only** · Pending → verified + booking paid → confirmed
+🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed` (+ `is_paid=true`)
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
@@ -1572,11 +1575,11 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 ### PUT `/booking-confirmations/{id}/reject` — Admin reject slip
 
-🔒 **Admin only** · Pending → rejected, **booking ค้าง `paid`** (รอ user ส่ง slip ใหม่ = row ใหม่)
+🔒 **Admin only** · Pending → rejected, **booking `pending → verify_error`** (รอ user ส่ง slip ใหม่ = row ใหม่)
 
 **Request Body**: `{ "review_note": "slip ไม่ชัด" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "paid" }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "verify_error" }`
 
 ---
 
@@ -2581,26 +2584,38 @@ Returns tasks with status `pending` or `in_progress`.
 
 > 🌟 **Refactor (03/07/26):** Booking = container เก็บสถานะ payment/admin flow เท่านั้น
 > `checked_in`/`checked_out`/`no_show` ย้ายไปอยู่ที่ **BookingRoom** (BR-level) แล้ว
+> 🌟 **Refactor (25/08/26):** เพิ่ม `pending` ก่อน `paid` — mirror กับ BookingConfirmation (user ส่งสลิป = รอ admin ตรวจ, `paid` = ตรวจแล้วเท่านั้น)
+> 🌟 **Refactor (25/08/26):** เพิ่ม `verify_error` เมื่อ admin reject สลิป (แทนการกลับ `draft`) — user ส่งสลิปใหม่จะกลับ `pending`
 
 ```
-   ┌─────────┐  user/guest/admin  ┌─────────┐   admin    ┌────────────┐  admin/system  ┌─────────────┐
-   │  draft  │ ────────────────► │   paid  │ ─────────► │ confirmed  │ ─────────────► │  complete   │
-   └─────────┘                    └─────────┘            └────────────┘                └─────────────┘
-       │                                                       ▲
-       │ admin (walk-in skip paid)                             │
-       └─────────────────────────────────────────────────────┘
+   ┌─────────┐ user/guest/admin ┌─────────┐  admin   ┌─────────┐   admin    ┌────────────┐  admin/system  ┌─────────────┐
+   │  draft  │ ───────────────► │ pending │ ───────► │   paid  │ ─────────► │ confirmed  │ ─────────────► │  complete   │
+   └─────────┘                  └─────────┘          └─────────┘            └────────────┘                └─────────────┘
+       │                            │
+       │ admin/system               │ admin (reject)
+       │ (เงินสดหน้าเคาน์เตอร์)         ▼
+       │                      ┌──────────────┐ user/guest/admin (ส่งสลิปใหม่)
+       │                      │ verify_error │ ───────────────────────────────┘
+       │                      └──────────────┘
+       │ admin (walk-in skip จนถึง confirmed)
+       └──────────────────────────────────────────────────► confirmed
 ```
 
 **Valid Transitions (Container):**
 
-| From          | To            | Allowed Roles              |
-|---------------|---------------|----------------------------|
-| `draft`       | `paid`        | user, guest, admin, system |
-| `draft`       | `confirmed`   | admin (walk-in only)       |
-| `paid`        | `confirmed`   | admin                      |
-| `confirmed`   | `complete`    | admin, system (auto-sync)  |
+| From          | To             | Allowed Roles              |
+|---------------|----------------|----------------------------|
+| `draft`       | `pending`      | user, guest, admin (ส่งสลิป รอตรวจ) |
+| `draft`       | `paid`         | admin, system (เงินสดหน้าเคาน์เตอร์ / webhook อนาคต) |
+| `draft`       | `confirmed`    | admin (walk-in only)       |
+| `pending`     | `paid`         | admin (verify สลิปผ่าน)     |
+| `pending`     | `verify_error` | admin (reject สลิป — ให้ user ส่งใหม่) |
+| `verify_error`| `pending`      | user, guest, admin (ส่งสลิปใหม่ รอตรวจ) |
+| `paid`        | `confirmed`    | admin                      |
+| `confirmed`   | `complete`     | admin, system (auto-sync)  |
 
 > ❌ **ไม่มี `cancelled`** — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+> 🧹 `pending` และ `verify_error` ที่หมด deadline **ไม่ถูกลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่)
 > 🗑️ **(17/08/26)** เจ้าของ/admin ลบ draft เองได้ผ่าน `DELETE /bookings/{bookingId}` (hard delete cascade + audit log `draft → deleted` ใน status_change_logs)
 > ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
 
@@ -2612,13 +2627,13 @@ Returns tasks with status `pending` or `in_progress`.
 
 ```
    ┌─────────┐  admin   ┌──────────┐
-   │ pending │ ───────► │ verified │ (terminal — booking paid → confirmed)
+   │ pending │ ───────► │ verified │ (terminal — booking pending → paid → confirmed)
    └─────────┘          └──────────┘
        │
        │ admin
        ▼
    ┌──────────┐
-   │ rejected │ (terminal — booking ค้าง paid, user สร้าง row ใหม่ถ้าจะลองอีก)
+   │ rejected │ (terminal — booking เปลี่ยนเป็น verify_error, user ส่งสลิปใหม่เพื่อลองอีก)
    └──────────┘
 ```
 
@@ -2626,8 +2641,8 @@ Returns tasks with status `pending` or `in_progress`.
 
 | From       | To         | Allowed Roles | Side effect on booking          |
 |------------|------------|---------------|---------------------------------|
-| `pending`  | `verified` | admin         | booking `paid → confirmed`     |
-| `pending`  | `rejected` | admin         | (none — booking stays `paid`)  |
+| `pending`  | `verified` | admin         | booking `pending → paid → confirmed` + `is_paid=true` |
+| `pending`  | `rejected` | admin         | booking `pending → verify_error` (ส่งใหม่ได้) |
 
 > ✅ `verified` + `rejected` = terminal (ไม่ย้อนกลับ — จะแก้ทำ row ใหม่แทน เพื่อรักษา audit trail)
 > ✅ **1 pending max guard** — ถ้ามี pending อยู่แล้ว → POST confirm จะ 422 (กัน spam)

@@ -62,15 +62,59 @@ class BookingStateTest extends TestCase
 
     // ============================================
     // ✅ Booking Container — Valid Transitions
-    // (Container states: draft → paid → confirmed → complete)
+    // (Container states: draft → pending → paid → confirmed → complete)
+    // 🌟 Refactor (25/08/26): เพิ่ม 'pending' — user ส่งสลิปรอ admin ตรวจ (mirror BookingConfirmation)
     // ❌ ไม่มี cancelled — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
     // ============================================
 
-    public function test_draft_to_paid_by_user(): void
+    public function test_draft_to_pending_by_user(): void
     {
         $booking = $this->createBooking('draft');
-        $booking->transitionStatus('paid', 'user');
+        $booking->transitionStatus('pending', 'user');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_draft_to_pending_by_guest(): void
+    {
+        $booking = $this->createBooking('draft');
+        $booking->transitionStatus('pending', 'guest');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_pending_to_paid_by_admin(): void
+    {
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('paid', 'admin');
         $this->assertEquals('paid', $booking->fresh()->status);
+    }
+
+    public function test_pending_to_verify_error_by_admin_reject(): void
+    {
+        // admin reject สลิป — booking เปลี่ยนเป็น verify_error ให้ user ส่งใหม่ได้
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('verify_error', 'admin');
+        $this->assertEquals('verify_error', $booking->fresh()->status);
+    }
+
+    public function test_verify_error_to_pending_by_user(): void
+    {
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('pending', 'user');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_verify_error_to_pending_by_guest(): void
+    {
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('pending', 'guest');
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_verify_error_to_pending_by_admin(): void
+    {
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('pending', 'admin');
+        $this->assertEquals('pending', $booking->fresh()->status);
     }
 
     public function test_draft_to_paid_by_admin(): void
@@ -112,6 +156,63 @@ class BookingStateTest extends TestCase
         $this->expectException(\Exception::class);
         $booking = $this->createBooking('draft');
         $booking->transitionStatus('confirmed', 'user');
+    }
+
+    public function test_draft_to_paid_rejected_for_user(): void
+    {
+        // 🌟 Refactor (25/08/26): user ต้องผ่าน 'pending' — ตัดสิทธิ์ draft → paid ตรงๆ
+        //    ('paid' = มี admin ตรวจสลิกแล้วเท่านั้น)
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('draft');
+        $booking->transitionStatus('paid', 'user');
+    }
+
+    public function test_pending_to_paid_rejected_for_user(): void
+    {
+        // user ไม่สามารถตัดสินใจเองว่าสลิปผ่าน — ต้องรอ admin verify
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('paid', 'user');
+    }
+
+    public function test_pending_to_verify_error_rejected_for_user(): void
+    {
+        // user ไม่สามารถ reject สลิปเองได้ — ต้องเป็น admin เท่านั้น
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('verify_error', 'user');
+    }
+
+    public function test_pending_to_draft_no_longer_allowed(): void
+    {
+        // 🌟 Refactor (25/08/26): reject เปลี่ยนเป็น verify_error แล้ว — pending → draft ไม่มีอีกต่อไป
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('draft', 'admin');
+    }
+
+    public function test_verify_error_to_paid_not_allowed(): void
+    {
+        // verify_error ต้องผ่าน pending ก่อนเสมอ — ข้ามไป paid ตรงไม่ได้
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('paid', 'admin');
+    }
+
+    public function test_verify_error_to_confirmed_not_allowed(): void
+    {
+        // verify_error ต้องผ่าน pending ก่อนเสมอ — ข้ามไป confirmed ตรงไม่ได้
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('verify_error');
+        $booking->transitionStatus('confirmed', 'admin');
+    }
+
+    public function test_pending_to_confirmed_skips_paid_not_allowed(): void
+    {
+        // pending ต้องผ่าน paid ก่อนเสมอ — ข้ามไป confirmed ตรงไม่ได้
+        $this->expectException(\Exception::class);
+        $booking = $this->createBooking('pending');
+        $booking->transitionStatus('confirmed', 'admin');
     }
 
     public function test_cannot_go_from_draft_to_complete(): void

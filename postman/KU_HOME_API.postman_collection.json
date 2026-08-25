@@ -2140,10 +2140,10 @@
                   "pm.test(\"Status code is 200 OK\", function () {",
                   "    pm.response.to.have.status(200);",
                   "});",
-                  "pm.test(\"Confirmation rejected & booking status stays paid\", function () {",
+                  "pm.test(\"Confirmation rejected & booking status becomes verify_error\", function () {",
                   "    const jsonData = pm.response.json();",
                   "    pm.expect(jsonData.status).to.eql(\"success\");",
-                  "    pm.expect(jsonData.booking_status).to.eql(\"paid\");",
+                  "    pm.expect(jsonData.booking_status).to.eql(\"verify_error\");",
                   "    pm.expect(jsonData.confirmation).to.be.an(\"object\");",
                   "    pm.expect(jsonData.confirmation.status).to.eql(\"rejected\");",
                   "});"

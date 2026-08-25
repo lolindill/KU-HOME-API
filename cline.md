@@ -307,23 +307,33 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
   
 ## State Machines
 
-### Booking Status Flow (Container — 🌟 Refactor 29/06/26: Final, no cancelled)
+### Booking Status Flow (Container — 🌟 Refactor 25/08/26: เพิ่ม pending และ verify_error)
 ```
-draft ──> paid ──> confirmed ──> complete
-  │                    ▲
-  └────────────────────┘ (admin walk-in skips paid)
+draft ──> pending ──> paid ──> confirmed ──> complete
+  │          │          ▲          ▲
+  │          │          │          │
+  │          └──> verify_error (admin reject สลิป)
+  │                 │
+  │                 └──> pending (user/guest/admin ส่งสลิปใหม่)
+  │                     │          │
+  └─────────────────────┘ (admin/system — เงินสดหน้าเคาน์เตอร์ / webhook อนาคต)
+  └─────────────────────────────┘ (admin walk-in skips ไป confirmed เลย)
 
 Role restrictions:
-  draft → paid       : user, guest, admin, system (webhook)
-  draft → confirmed  : admin only (walk-in — skips payment)
-  paid → confirmed   : admin only
-  confirmed → complete : admin, system (auto when all BR finished)
+  draft → pending        : user, guest, admin (ส่งสลิป POST /bookings/{id}/confirm — mirror BookingConfirmation)
+  draft → paid           : admin, system (front-desk เก็บเงินสด / webhook อนาคต — user ทำตรงๆ ไม่ได้อีกต่อไป)
+  pending → paid         : admin only (verify สลิปผ่าน — set is_paid=true ตอนนี้)
+  pending → verify_error : admin only (reject สลิป)
+  verify_error → pending : user, guest, admin (ส่งสลิปใหม่)
+  draft → confirmed      : admin only (walk-in — skips payment)
+  paid → confirmed       : admin only
+  confirmed → complete   : admin, system (auto when all BR finished)
 ```
 
 **❌ ไม่มี `cancelled` แล้ว** — draft ที่หมดอายุจะถูก **hard delete** โดย `CleanupExpiredDrafts` command
+**🧹 `pending` และ `verify_error` ที่หมด deadline ไม่ถูก cleanup ลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่)
 **⚠️ `checked_in` / `checked_out` / `no_show` อยู่ที่ `BookingRoom` (BR-level state machine) ไม่ใช่ booking container**
-
-**Important**: Webhook only transitions `draft → paid`. Admin must manually confirm to `confirmed`.
+**⚠️ `PUT /bookings/update/{id}` (admin) validation ยังเป็น `in:draft,paid,confirmed,complete`** — ไม่มี `pending` หรือ `verify_error` โดยตั้งใจ (เกิดจาก slip submission/rejection เท่านั้น)
 
 ### BookingRoom Status Flow (BR-level — 🌟 Refactor 25/06/26)
 ```
@@ -1383,6 +1393,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 >      - **Deluxe** (fake UUID `...0002`): 1 interval (`[today+10, today+12]`)
 >      - **Suite** (fake UUID `...0003`): 0 intervals (`[]`)
 >    - Response shape & message ตรงกับ endpoint จริงทุกประการ
+>    - 🗑️ **Deletion plan (ตัดสินใจแบบ doc-only — ไม่ใส่ env gate, 24/08/26):** ลบ endpoint นี้ (controller + route + tests + docs) เมื่อ frontend ย้ายไปใช้ `/availability-ranges` จริง — **อย่าปล่อยขึ้น production**
 > 2. **Default Window `today → today+6 เดือน` เมื่อไม่ส่ง params:**
 >    - แก้ไข 3 endpoints ใน `RoomController`: `/availability-per-day`, `/availability-ranges`, `/unavailable-dates`
 >    - ใช้ `$request->mergeIfMissing(['start_date' => today])` และ `$request->mergeIfMissing(['end_date' => start + 6 เดือน])` ก่อน validation
@@ -1399,3 +1410,64 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 > **Testing:**
 > - `php artisan test --filter=RoomTest` — `22 passed (81 assertions)`
 > - Full PHPUnit suite: `263 passed (634 assertions)`
+
+## ✅ Booking Container เพิ่ม state `pending` ก่อน `paid` (2026-08-25)
+
+> **State Machine Change** — booking container มี state `pending` แล้ว mirror กับ `BookingConfirmation` flow:
+> ก่อนหน้านี้ user ส่งสลิป = booking `draft → paid` + `is_paid=true` **ทันทีทั้งที่ยังไม่มีใครตรวจ** — ทำให้ 'paid' โกหก (และถ้า admin reject สลิป booking จะค้าง `paid` ตลอดไป = dead-end)
+
+**Flow ใหม่:**
+1. user `POST /bookings/{id}/confirm` → confirmation `pending` + booking `draft → pending` (ยังไม่ set is_paid)
+2. admin verify → confirmation `verified` + booking `pending → paid → confirmed` + `is_paid=true` (ทำใน transaction เดียว)
+3. admin reject → confirmation `rejected` + booking `pending → draft` (กลับ draft ให้ user ส่งสลิปใหม่ = row ใหม่)
+
+**Transition map ที่เปลี่ยน (`Booking::transitionStatus()`):**
+- เพิ่ม: `draft → pending` (user, guest, admin) · `pending → paid` (admin) · `pending → draft` (admin)
+- **ตัด `user`/`guest` ออกจาก `draft → paid`** — เหลือ admin, system เท่านั้น (เงินสดหน้าเคาน์เตอร์ FrontDesk / webhook อนาคต) — user ต้องผ่าน pending เสมอ
+
+**จุดที่ไม่เปลี่ยน (ตรวจสอบแล้ว):**
+- Availability queries ทั้งหมด (`draft,confirmed,checked_in`) เช็คที่ **BR-level** status — BR state machine ไม่กระทบ
+- `CleanupExpiredDrafts` ยังลบเฉพาะ `draft` — **pending ที่หมด deadline ไม่ถูกลบ** (เงินอาจโอนแล้ว รอ admin ตรวจ; reject แล้วกลับ draft จะถูกเก็บเอง)
+- `PUT /bookings/update/{id}` validation `in:draft,paid,confirmed,complete` — ไม่เพิ่ม `pending` (pending เกิดจาก slip submission เท่านั้น)
+- แก้/ลบ booking rooms ยังจำกัดเฉพาะ `draft` — booking ระหว่าง `pending` แก้ไม่ได้ (สลิกกำลังรอตรวจ)
+- FrontDesk `recordPayment` `draft → paid` (role admin) ยังใช้ได้ตามเดิม
+
+**Legacy data:** ก่อน deploy ถ้ามี booking ค้าง `paid` ที่ confirmation ยัง `pending` — verify ยังทำงาน (branch `if status === 'paid'` เก็บไว้ → confirmed ได้เลย)
+
+**Files Changed:**
+- `app/Models/Booking.php` (transitionStatus map + docblock)
+- `app/Http/Controllers/Api/V1/BookingConfirmationController.php` (confirm/verify/reject + is_paid ย้ายไป set ตอน verify)
+- `tests/Unit/BookingStateTest.php` (pending transitions + user draft→paid ต้อง fail แล้ว)
+- `tests/Feature/BookingConfirmationTest.php` (assert ใหม่ + full-flow test)
+- `tests/Feature/StatusChangeLogTest.php` (draft→paid by user → draft→pending by user)
+- `docs/api_guide.md`, `AGENTS.md`, `cline.md`
+
+**Testing:**
+- Full PHPUnit suite: `270 passed (650 assertions)`
+
+## ✅ Booking Container เพิ่ม state `verify_error` แทนการกลับ `draft` เมื่อ admin reject สลิป (2026-08-25)
+
+> **State Machine Refinement** — เมื่อ admin reject สลิป (`PUT /booking-confirmations/{id}/reject`) booking จะเปลี่ยนเป็น `verify_error` แทนการกลับเป็น `draft`
+> เพื่อแยกแยะสถานะ "สลิปมีปัญหา/ไม่ผ่าน" ออกจาก "การจองใหม่ที่ยังไม่เคยส่งสลิป"
+
+**Flow:**
+1. user `POST /bookings/{id}/confirm` → confirmation `pending` + booking `draft → pending` (หรือ `verify_error → pending`)
+2. admin verify → confirmation `verified` + booking `pending → paid → confirmed` + `is_paid=true`
+3. admin reject → confirmation `rejected` + booking `pending → verify_error` (รอ user ส่งสลิปใหม่)
+4. user re-submit → booking `verify_error → pending` (ส่งใหม่ได้เสมอแม้ payment_deadline ผ่านไปแล้ว)
+
+**จุดสำคัญ:**
+- `verify_error` **ไม่ถูก `CleanupExpiredDrafts` ลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้)
+- `POST /bookings/{id}/confirm` ตรวจ `payment_deadline` เฉพาะสถานะ `draft` เท่านั้น — สถานะ `verify_error` ได้รับการยกเว้นให้ส่งใหม่ได้ตลอด
+- ทางออกเดียวของ `verify_error` คือการส่งสลิปใหม่ (`verify_error → pending`)
+
+**Files Changed:**
+- `app/Models/Booking.php` (`transitionStatus` validTransitions map + docblock)
+- `app/Http/Controllers/Api/V1/BookingConfirmationController.php` (confirm guard รับ `['draft', 'verify_error']` + skip deadline guard สำหรับ `verify_error` + reject transition ไป `verify_error`)
+- `tests/Unit/BookingStateTest.php` (test valid `pending → verify_error`, `verify_error → pending`, and invalid transition guards)
+- `tests/Feature/BookingConfirmationTest.php` (assert reject gives `verify_error`, re-submit from `verify_error`, and re-submit after deadline expired)
+- `docs/api_guide.md`, `AGENTS.md`, `docs/booking-verify-flow.md`, `docs/database-er.md`, `postman/KU_HOME_API.postman_collection.json`, `cline.md`
+
+**Testing:**
+- Full PHPUnit suite: `278 passed (662 assertions)`
+

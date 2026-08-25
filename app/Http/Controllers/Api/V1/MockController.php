@@ -10,6 +10,9 @@ class MockController extends Controller
     /**
      * 🚧 DRAFT / TESTING — Mock sold-out intervals ราย room type สำหรับ frontend test
      *
+     * 🗑️ DELETION PLAN: ลบ endpoint นี้ (controller + route + tests + docs) เมื่อ frontend
+     *    ย้ายไปใช้ /availability-ranges จริงแล้ว — อย่าปล่อยขึ้น production
+     *
      * ไม่อ่านข้อมูลจาก DB — วันที่คำนวณสัมพันธ์กับ Carbon::today() (ไม่มีวันหมดอายุ):
      * - Window: start_date = today, end_date = today+30
      * - Superior: 2 intervals ([today+5, today+8], [today+15, today+18])

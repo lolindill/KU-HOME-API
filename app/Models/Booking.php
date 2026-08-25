@@ -99,14 +99,21 @@ class Booking extends Model
 
     /**
      * 🌟 Refactor (29/06/26): Booking = Container State Machine (Final — no cancelled)
+     * 🌟 Refactor (25/08/26): เพิ่ม 'pending' ก่อน paid — mirror BookingConfirmation flow
+     * 🌟 Refactor (25/08/26): เพิ่ม 'verify_error' แทน pending→draft เมื่อ admin reject สลิป
      *
      * Booking (container) เก็บสถานะ payment/admin flow:
-     *   draft → paid (user, guest, admin, system webhook)
+     *   draft → pending (user, guest, admin — ส่งสลิปแล้ว รอ admin ตรวจ)
+     *   pending → paid (admin — verify สลิปผ่านแล้ว)
+     *   pending → verify_error (admin — reject สลิป รอ user ส่งใหม่)
+     *   verify_error → pending (user, guest, admin — ส่งสลิปใหม่ รอตรวจ)
+     *   draft → paid (admin, system — front-desk เก็บเงินสด / webhook อนาคต)
      *   draft → confirmed (admin, walk-in เข้าตรงๆ)
      *   paid → confirmed (admin)
      *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show)
      *
      * ❌ ไม่มี cancelled แล้ว — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+     *    (pending / verify_error ที่หมด deadline ไม่ถูกลบ — รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้, ห้องยังถูก hold ตาม BR availability)
      * ⚠️ checked_in / checked_out / no_show อยู่ที่ BookingRoom (BR-level state machine)
      */
     public function transitionStatus(string $newStatus, string $userRole)
@@ -115,8 +122,16 @@ class Booking extends Model
 
         $validTransitions = [
             'draft' => [
-                'paid' => ['user', 'guest', 'admin', 'system'],
+                'pending' => ['user', 'guest', 'admin'], // ส่งสลิป — รอ admin ตรวจ
+                'paid' => ['admin', 'system'], // front-desk เก็บเงินหน้าเคาน์เตอร์ / webhook
                 'confirmed' => ['admin'], // walk-in by admin (skip paid)
+            ],
+            'pending' => [
+                'paid' => ['admin'], // admin verify สลิปผ่าน
+                'verify_error' => ['admin'], // admin reject สลิป — รอ user ส่งสลิปใหม่
+            ],
+            'verify_error' => [
+                'pending' => ['user', 'guest', 'admin'], // ส่งสลิปใหม่ — รอ admin ตรวจอีกครั้ง
             ],
             'paid' => [
                 'confirmed' => ['admin'],

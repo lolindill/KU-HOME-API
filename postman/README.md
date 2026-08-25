@@ -34,8 +34,8 @@ The test collection is engineered with full **idempotency and state isolation**,
    - Resolves real, distinct unassigned housekeeping tasks dynamically (`{{task_assign_id}}` and `{{task_accept_id}}`) rather than reusing terminal `done` tasks.
    - Genuinely exercises both the Admin assignment path (`PUT .../assign` -> 200 OK) and Maid acceptance path (`POST .../accept` -> 200 OK) on every run.
 2. **Independent Slip Verification & Rejection Flows (Folder 05):**
-   - Verifies the primary booking slip with strict 200 assertions (`paid → confirmed`).
-   - Dynamically provisions a dedicated draft booking and slip submission (`{{reject_booking_id}}` & `{{reject_confirmation_id}}`) using an isolated guest user token, strictly exercising the reject flow (`PUT .../reject` -> 200 OK) without collision or rate limit exhaustion.
+   - Verifies the primary booking slip with strict 200 assertions (`pending → paid → confirmed`).
+   - Dynamically provisions a dedicated draft booking and slip submission (`{{reject_booking_id}}` & `{{reject_confirmation_id}}`) using an isolated guest user token, strictly exercising the reject flow (`PUT .../reject` -> 200 OK, `booking_status: verify_error`) without collision or rate limit exhaustion.
 3. **Automated End-of-Run Housekeeping Cleanup (Folder 12):**
    - Automatically closes all residual unassigned tasks (`assign → done`) at the end of every run, ensuring clean initial state for subsequent test runs.
 4. **Rate Limit Throttling Isolation:**

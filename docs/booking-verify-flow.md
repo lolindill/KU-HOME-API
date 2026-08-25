@@ -1,7 +1,8 @@
-# 🌟 Booking → Admin Verify Flow
+﻿# 🌟 Booking → Admin Verify Flow
 
 > **End-to-end flow** ตั้งแต่ผู้ใช้สร้างการจอง ส่งหลักฐานการชำระ (slip) จนกระทั่งแอดมินตรวจสอบ/ยืนยัน
 > ใช้ระบบ `booking_confirmations` (1:N history) แทน payments/receipts ที่ถูก freeze ไปแล้ว 🌟 Refactor (24/07/26)
+> อัปเดตล่าสุด: เพิ่มสถานะ `pending` และ `verify_error` สำหรับ booking container (25/08/26)
 
 Base URL: `/api/v1/` · Auth: Laravel Sanctum (Bearer Token)
 
@@ -18,8 +19,8 @@ Base URL: `/api/v1/` · Auth: Laravel Sanctum (Bearer Token)
   ────────────────           ───────────────              ────────────────
   POST /login                POST /bookings               POST /bookings/{id}/confirm
   POST /register             → booking.status = draft     → confirmation.status = pending
-  → access_token             → payment_deadline = +24h    → booking.status = paid
-                                                         → slip stored at storage/slips
+  → access_token             → payment_deadline = +24h    → booking.status = pending
+                                                          → slip stored at storage/app/private/slips
 
                                           │
                                           ▼
@@ -32,11 +33,12 @@ Base URL: `/api/v1/` · Auth: Laravel Sanctum (Bearer Token)
   GET /booking-confirmations PUT /.../{id}/verify  PUT /.../{id}/reject
        /pending              → confirmation        → confirmation
                               pending→verified       pending→rejected
-                              → booking             (booking ค้าง paid
-                              paid→confirmed         รอ user ส่ง slip ใหม่)
+                              → booking             → booking
+                              pending→paid           pending→verify_error
+                              →confirmed            (รอ user ส่ง slip ใหม่)
 ```
 
-> 💡 การ reject **ไม่ได้**ย้อน booking กลับเป็น draft — booking ยัง `paid` อยู่ ผู้ใช้ส่ง slip ใหม่ = สร้าง confirmation row ใหม่ (รักษา audit trail)
+> 💡 การ reject จะเปลี่ยนสถานะ booking เป็น `verify_error` — ผู้ใช้ส่ง slip ใหม่ (`POST /bookings/{id}/confirm`) จะเปลี่ยน booking กลับมาเป็น `pending` และสร้าง confirmation row ใหม่ (รักษา audit trail)
 
 ---
 
@@ -45,35 +47,45 @@ Base URL: `/api/v1/` · Auth: Laravel Sanctum (Bearer Token)
 ### Booking (Container)
 
 ```
-   ┌─────────┐ user  ┌─────────┐ admin verify  ┌────────────┐
-   │  draft  │ ────► │   paid  │ ─────────────► │ confirmed  │ → ...complete
-   └─────────┘       └─────────┘                └────────────┘
-        │
-        └ admin walk-in skip → confirmed (ไม่เกี่ยวกับ flow นี้)
+   ┌─────────┐ user/guest/admin ┌─────────┐  admin   ┌─────────┐   admin    ┌────────────┐
+   │  draft  │ ───────────────► │ pending │ ───────► │   paid  │ ─────────► │ confirmed  │ → ...complete
+   └─────────┘                  └─────────┘          └─────────┘            └────────────┘
+       │                            │
+       │ admin/system               │ admin (reject)
+       │ (เงินสดหน้าเคาน์เตอร์)         ▼
+       │                      ┌──────────────┐ user/guest/admin (ส่งสลิปใหม่)
+       │                      │ verify_error │ ───────────────────────────────┘
+       │                      └──────────────┘
+       │ admin walk-in skip → confirmed (ไม่เกี่ยวกับ flow นี้)
+       └──────────────────────────────────────────────────► confirmed
 ```
 
-| From      | To          | Trigger               |
-|-----------|-------------|-----------------------|
-| `draft`   | `paid`      | user POST confirm (slip) |
-| `paid`    | `confirmed` | admin verify slip     |
-| `confirmed` | `complete` | (auto เมื่อ BR ทุกห้อง checked_out/no_show) |
+| From           | To             | Trigger                                      |
+|----------------|----------------|----------------------------------------------|
+| `draft`        | `pending`      | user/guest/admin POST confirm (slip)         |
+| `pending`      | `paid`         | admin verify slip (set `is_paid=true`)       |
+| `pending`      | `verify_error` | admin reject slip                            |
+| `verify_error` | `pending`      | user/guest/admin POST confirm (ส่งสลิปใหม่)    |
+| `paid`         | `confirmed`    | admin verify slip flow                       |
+| `confirmed`    | `complete`     | (auto เมื่อ BR ทุกห้อง checked_out/no_show)  |
 
 ### BookingConfirmation
 
 ```
    ┌─────────┐ admin  ┌──────────┐
-   │ pending │ ─────► │ verified │ (terminal — booking paid → confirmed)
+   │ pending │ ─────► │ verified │ (terminal — booking pending → paid → confirmed)
    └─────────┘        └──────────┘
        │
        │ admin
        ▼
    ┌──────────┐
-   │ rejected │ (terminal — booking ค้าง paid; user สร้าง row ใหม่ถ้าจะลองอีก)
+   │ rejected │ (terminal — booking เปลี่ยนเป็น verify_error; user ส่งสลิปใหม่สร้าง row ใหม่)
    └──────────┘
 ```
 
 ✅ **1 pending max guard** — ถ้ามี pending อยู่แล้ว → POST confirm จะ 422 (กัน spam)
 ✅ `verified`/`rejected` = terminal ถ้าจะแก้ต้องสร้าง row ใหม่ (audit trail)
+✅ `verify_error` ไม่ถูก `CleanupExpiredDrafts` ลบ (ห้องยังถูก hold ไว้ตาม availability)
 
 ---
 
@@ -165,7 +177,7 @@ Accept: application/json
 
 ### Step ③ — Submit Payment Proof (slip)
 
-> User แนบหลักฐานการชำระเงิน → สร้าง `booking_confirmations` row + booking `draft → paid`
+> User แนบหลักฐานการชำระเงิน → สร้าง `booking_confirmations` row + booking `draft → pending` (หรือ `verify_error → pending`)
 
 #### `POST /api/v1/bookings/{bookingId}/confirm`
 
@@ -182,6 +194,7 @@ Accept: application/json
 | `transfer_time`   | datetime  | optional               | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
 
 > 🌟 Refactor (19/08/26): ลบ `payment_method` ออกแล้ว — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว
+> 🖼️ สลิปเก็บใน private disk (`storage/app/private/slips`) และดูผ่าน signed URL อายุ 15 นาที
 
 **Example:**
 ```bash
@@ -198,16 +211,16 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
   "message": "ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน",
   "confirmation_id": "confirmation-uuid",
   "confirmation_status": "pending",
-  "booking_status": "paid",
-  "slip_image_url": "/storage/slips/abc123.jpg"
+  "booking_status": "pending",
+  "slip_image_url": "http://localhost/api/v1/images/img-uuid/file?expires=...&signature=..."
 }
 ```
 
-หลังจากนี้ `confirmation.status = pending` + `booking.status = paid` (เก็บ `confirmation_id` ไว้สำหรับ admin ใน Step ⑤)
+หลังจากนี้ `confirmation.status = pending` + `booking.status = pending` (เก็บ `confirmation_id` ไว้สำหรับ admin ใน Step ⑤)
 
 **Guards (422):**
-- ❌ Booking ไม่ใช่ `draft`/`paid` (`paid` = re-submit หลัง reject)
-- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว)
+- ❌ Booking ไม่ใช่ `draft` หรือ `verify_error`
+- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจสอบเฉพาะสถานะ `draft`, `verify_error` ส่งใหม่ได้เสมอ)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
 - ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
 
@@ -230,7 +243,6 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
       {
         "id": "confirmation-uuid",
         "booking_id": "booking-uuid",
-        "slip_image": "slips/abc123.jpg",
         "transfer_time": "2026-08-06T10:30:00.000000Z",
         "status": "pending",
         "booking": {
@@ -239,7 +251,11 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
           "total_amount": 2400,
           "user": { "id": "user-uuid", "name": "Somchai Jaidee", "email": "..." }
         },
-        "reviewer": null
+        "reviewer": null,
+        "slip_image": {
+          "id": "img-uuid",
+          "url": "http://localhost/api/v1/images/img-uuid/file?expires=...&signature=..."
+        }
       }
     ],
     "current_page": 1,
@@ -256,7 +272,7 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 
 ### Step ⑤a — Admin: Verify Slip ✅
 
-> ยืนยันว่าสลิปถูกต้อง → confirmation `pending → verified` + booking `paid → confirmed`
+> ยืนยันว่าสลิปถูกต้อง → confirmation `pending → verified` + booking `pending → paid → confirmed` (+ `is_paid=true`)
 
 #### `PUT /api/v1/booking-confirmations/{id}/verify`
 
@@ -291,7 +307,7 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 
 ### Step ⑤b — Admin: Reject Slip ❌
 
-> สลิปไม่ผ่าน → confirmation `pending → rejected` แต่ **booking ยัง `paid`** (รอ user ส่ง slip ใหม่)
+> สลิปไม่ผ่าน → confirmation `pending → rejected` + **booking `pending → verify_error`** (รอ user ส่ง slip ใหม่)
 
 #### `PUT /api/v1/booking-confirmations/{id}/reject`
 
@@ -306,17 +322,17 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 ```json
 {
   "status": "success",
-  "message": "ปฏิเสธสลิป — booking ยังคง paid รอผู้จองแจ้งใหม่",
+  "message": "ปฏิเสธสลิป — booking เปลี่ยนสถานะเป็น verify_error รอผู้จองแจ้งใหม่",
   "confirmation": {
     "id": "confirmation-uuid",
     "status": "rejected",
     "review_note": "สลิปไม่ชัด กรุณาส่งใหม่อีกครั้ง"
   },
-  "booking_status": "paid"
+  "booking_status": "verify_error"
 }
 ```
 
-➡️ **ถ้า user จะลองอีก**: กลับไป Step ③ (POST confirm ใหม่) — server สร้าง confirmation row ใหม่ status=pending (row rejected เดิมยังอยู่ใน history)
+➡️ **ถ้า user จะลองอีก**: กลับไป Step ③ (POST confirm ใหม่) — booking เปลี่ยนเป็น `pending` และ server สร้าง confirmation row ใหม่ status=pending (row rejected เดิมยังอยู่ใน history)
 
 ---
 
@@ -341,9 +357,11 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 
 | Transition | entity_type | from → to | role |
 |---|---|---|---|
-| Step ③ confirm | `booking` | `draft → paid` | `user` |
-| Step ⑤a verify | `booking_confirmation` | (ไม่เขียนใน status_change_logs — เป็น state machine ของ confirmation) | — |
+| Step ③ confirm (ครั้งแรก) | `booking` | `draft → pending` | `user` / `guest` / `admin` |
+| Step ③ confirm (ส่งใหม่) | `booking` | `verify_error → pending` | `user` / `guest` / `admin` |
+| Step ⑤a verify | `booking` | `pending → paid` | `admin` |
 | Step ⑤a verify | `booking` | `paid → confirmed` | `admin` |
+| Step ⑤b reject | `booking` | `pending → verify_error` | `admin` |
 
 #### `GET /api/v1/bookings/{id}/status-logs` — ดู audit trail (admin only)
 
@@ -361,8 +379,8 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 | Login required | ทุก protected route | 401 |
 | Ownership (user/admin) | confirm, showById | 403 |
 | Admin role | verify/reject/pending | 403 |
-| Booking status = draft/paid | confirm | 422 |
-| `payment_deadline` ไม่หมด | confirm | 422 |
+| Booking status = draft/verify_error | confirm | 422 |
+| `payment_deadline` ไม่หมด (เฉพาะ draft) | confirm | 422 |
 | 1 pending confirmation max | confirm | 422 |
 | `slip_image`/`transfer_time` เมื่อ transfer | ConfirmBookingRequest | 422 |
 | Confirmation state machine | verify/reject | 422 |
@@ -380,4 +398,4 @@ curl -X POST /api/v1/bookings/BOOKING_UUID/confirm \
 - `routes/api.php` — route definitions
 - `docs/api_guide.md` — API reference ฉบับเต็ม
 
-*Last updated: 2026-08-06 · KU HOME API v1*
+*Last updated: 2026-08-25 · KU HOME API v1*

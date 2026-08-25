@@ -81,12 +81,12 @@ class StatusChangeLogTest extends TestCase
 
     public function test_booking_transition_writes_audit_log(): void
     {
-        // draft → paid (role user)
+        // draft → pending (role user)
         $booking = $this->createBooking(['status' => 'draft']);
         $user = User::factory()->create(['role' => 'user']);
         Auth::login($user);
 
-        $booking->transitionStatus('paid', 'user');
+        $booking->transitionStatus('pending', 'user');
 
         $log = StatusChangeLog::where('entity_type', 'booking')
             ->where('entity_id', $booking->id)
@@ -94,7 +94,7 @@ class StatusChangeLogTest extends TestCase
 
         $this->assertNotNull($log, 'audit log row ควรถูกสร้างหลัง transition');
         $this->assertSame('draft', $log->from_status);
-        $this->assertSame('paid', $log->to_status);
+        $this->assertSame('pending', $log->to_status);
         $this->assertSame('user', $log->role);
         $this->assertSame((string) $user->id, (string) $log->causer_id);
     }
@@ -252,7 +252,7 @@ class StatusChangeLogTest extends TestCase
 
         try {
             DB::transaction(function () use ($booking) {
-                $booking->transitionStatus('paid', 'user'); // เขียน log row
+                $booking->transitionStatus('pending', 'user'); // เขียน log row
 
                 // จำลอง error ที่ตามมาใน transaction
                 throw new \Exception('simulated downstream error');
