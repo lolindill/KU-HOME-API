@@ -424,13 +424,13 @@ if ($USE_ADMIN && $TOKEN) {
         $PAYMENT_ID = $r['body']['payment_id'] ?? ($r['body']['data']['payment_id'] ?? null);
         saveId('PAYMENT_ID', $PAYMENT_ID);
 
-        // Webhook (public, simulate gateway callback)
+        // Webhook (deprecated/frozen -> 410 Gone)
         if ($PAYMENT_ID) {
-            test('Payment Webhook (success)', 'POST', '/payment/webhook', [
+            test('Payment Webhook (deprecated -> 410)', 'POST', '/payment/webhook', [
                 'payment_id' => $PAYMENT_ID,
                 'status' => 'success',
                 'reference_number' => 'REF-'.$TIMESTAMP,
-            ], null, 200);
+            ], null, 410);
         }
 
         // Dashboard tasks
