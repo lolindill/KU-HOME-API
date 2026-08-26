@@ -2,9 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
-use Illuminate\Database\Seeder;
 use App\Models\GlobalRate;
+use Illuminate\Database\Seeder;
 
 /**
  * 🌟 Refactor (22/07/26): GlobalRateSeeder (renamed from AddonRateSeeder)
@@ -19,36 +18,36 @@ class GlobalRateSeeder extends Seeder
     {
         $rates = [
             [
-                'rate_type'     => 'addon',
-                'code'          => 'breakfast',
-                'name_en'       => 'Breakfast',
-                'name_th'       => 'อาหารเช้า',
+                'rate_type' => 'addon',
+                'code' => 'breakfast',
+                'name_en' => 'Breakfast',
+                'name_th' => 'อาหารเช้า',
                 'default_price' => 20000, // 200 THB (satang)
-                'is_active'     => true,
+                'is_active' => true,
             ],
             [
-                'rate_type'     => 'addon',
-                'code'          => 'early_checkin',
-                'name_en'       => 'Early Check-in',
-                'name_th'       => 'เช็คอินก่อนเวลา',
-                'default_price' => 30000, // 300 THB (satang)
-                'is_active'     => true,
+                'rate_type' => 'addon',
+                'code' => 'early_checkin',
+                'name_en' => 'Early Check-in',
+                'name_th' => 'เช็คอินก่อนเวลา',
+                'default_price' => 10000, // 100 THB (satang) — 🌟 ปรับลดจาก 300 THB (26/08/26)
+                'is_active' => true,
             ],
             [
-                'rate_type'     => 'addon',
-                'code'          => 'late_checkout',
-                'name_en'       => 'Late Check-out',
-                'name_th'       => 'เช็คเอาท์ล่าช้า',
-                'default_price' => 30000, // 300 THB (satang)
-                'is_active'     => true,
+                'rate_type' => 'addon',
+                'code' => 'late_checkout',
+                'name_en' => 'Late Check-out',
+                'name_th' => 'เช็คเอาท์ล่าช้า',
+                'default_price' => 10000, // 100 THB (satang) — 🌟 ปรับลดจาก 300 THB (26/08/26)
+                'is_active' => true,
             ],
             [
-                'rate_type'     => 'addon',
-                'code'          => 'extra_bed',
-                'name_en'       => 'Extra Bed',
-                'name_th'       => 'เตียงเสริม',
+                'rate_type' => 'addon',
+                'code' => 'extra_bed',
+                'name_en' => 'Extra Bed',
+                'name_th' => 'เตียงเสริม',
                 'default_price' => 50000, // 500 THB (satang)
-                'is_active'     => true,
+                'is_active' => true,
             ],
         ];
 

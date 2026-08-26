@@ -184,8 +184,10 @@ check('booking_rooms count is 1', count($createdRooms) === 1);
 if (! empty($createdRooms)) {
     $br = $createdRooms[0];
     check('booking_room has id', ! empty($br['id']));
+    check('booking_room has room_type_id', ! empty($br['room_type_id']));
+    check('booking_room has early_checkin boolean', isset($br['early_checkin']) && is_bool($br['early_checkin']));
+    check('booking_room has late_checkout boolean', isset($br['late_checkout']) && is_bool($br['late_checkout']));
     check('booking_room has addon relation loaded', isset($br['addon']) && is_array($br['addon']));
-    check('booking_room has room_type relation loaded', isset($br['room_type']) && is_array($br['room_type']));
 
     $guests = $br['guests'] ?? [];
     check('booking_room has guests array', is_array($guests) && ! empty($guests));

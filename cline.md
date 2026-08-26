@@ -1471,3 +1471,63 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 **Testing:**
 - Full PHPUnit suite: `278 passed (662 assertions)`
 
+
+## ✅ Addon early check-in / late check-out: default rate 100 THB + response booleans + late_checkOut typo family fix (2026-08-26)
+
+> **3 เรื่องใน task เดียว** — ปรับ default rate, เพิ่ม boolean ใน response ให้ format เหมือนตอน create, และคุม booking-room format ให้เหมือนกันทุก endpoint
+> (พบบั๊กพันธุ์เดียวกันซ้อนอยู่ 3 จุด แก้ครบในรอบเดียว)
+
+**1) Default rate ปรับลด:**
+- `early_checkin` / `late_checkout`: 30000 → **10000 satang (100 THB)** ทั้งคู่
+- แก้ทั้ง `GlobalRateSeeder` + data migration `2026_08_26_100000_update_early_late_addon_default_rates.php` (DB เดิมไม่ต้อง fresh reseed; down คืน 30000)
+- ไม่แต้ `addons` rows เดิมราย booking (นโยบาย freeze ราคาตอนคิดแล้ว)
+
+**2) Response booleans (format เหมือนตอน create):**
+- `Addon::$appends = ['early_checkin', 'late_checkout']` + accessors derive จาก `*_price > 0`
+- ทุก API ที่ serialize addon (create/add/update/batch-update/getBookings/showById/assign-rooms) ได้ boolean ชื่อ field เดียวกับ input `addons.early_checkin` / `addons.late_checkout` อัตโนมัติ
+
+**3) Booking-room format เดียวกันทุก API:**
+- `autoAssignRooms` เดิม load แค่ `bookingRooms.room` → ตอนนี้ `addon` + `roomType` + `room` ครบเหมือน endpoint อื่นทุกตัว
+
+**🐞 Bug fix — `lateCheckOut_price` typo family (พบระหว่างเขียน regression test):**
+- Column จริงคือ `late_checkOut_price` (c เล็ก) แต่โค้ดเขียน `lateCheckOut_price` (C ใหญ่) 3 จุดใน `BookingController`:
+  1. `updateRoom`/`updateRooms` fallback เวลาไม่ส่ง `addons` key → อ่านไม่เจอ → **late checkout ถูก reprice เป็น 0 เงียบๆ**
+  2. `$addonData` array key ผิด → dirty-check เทียบของผิด → **แก้ราคา late checkout ผ่าน update ห้องไม่ได้เลยตลอดมา**
+  3. `recalculateBookingTotal()` → **ราคา late checkout หายจาก total_amount ทุกครั้งที่คิดยอดใหม่** (บั๊กเงินจริง)
+- แก้ทั้ง 3 จุดเป็น `late_checkOut_price`
+
+**Files Changed:**
+- `database/seeders/GlobalRateSeeder.php` (rate 10000 ทั้งคู่)
+- `database/migrations/2026_08_26_100000_update_early_late_addon_default_rates.php` (ใหม่ — data migration)
+- `app/Models/Addon.php` ($appends + accessors)
+- `app/Http/Controllers/Api/V1/BookingController.php` (typo 3 จุด + autoAssignRooms relations)
+- `tests/Feature/BookingTest.php` (response booleans + regression ไม่ส่ง addons ต้องคงราคา + เปิด/ปิดผ่าน addons ต้องเขียนได้)
+- `tests/Feature/GlobalRateSeederTest.php` (ใหม่ — ตรวจค่า seed)
+- `docs/api_guide.md`, `cline.md`
+
+**Testing:**
+- Full PHPUnit suite: `287 passed (696 assertions)` (เดิม 285 — เพิ่ม 3 tests ใหม่ ลบ 1 รวม)
+
+
+## ✅ Booking Room JSON format refactor across all APIs (2026-08-26)
+
+> **Refactor Booking Room JSON response format across all endpoints** — frontend ใช้ `room_type_id` / `room_id` lookup ข้อมูลห้องเองโดยตรง จึงตัด `room_type` / `room` nested object ออก และย้าย `early_checkin` / `late_checkout` boolean ขึ้นมาอยู่ที่ระดับ `booking_room`
+
+**1)ย้าย boolean early_checkin / late_checkout ขึ้นระดับ booking_room:**
+- `BookingRoom::$appends = ['early_checkin', 'late_checkout']` + accessors `getEarlyCheckinAttribute()` / `getLateCheckoutAttribute()` derive จาก `$this->addon?->early_checkIn_price > 0` และ `$this->addon?->late_checkOut_price > 0`
+- `Addon` ถอด `$appends` + accessors ออก (เก็บเฉพาะ field ราคาและจำนวน)
+
+**2) ซ่อน room_type / room relations จาก JSON serialization:**
+- `BookingRoom::$hidden = ['roomType', 'room']` ป้องกันการหลุดของ relation object ในทุก response
+- `BookingController` trim eager loading 7 จุด (`getBookings`, `addRooms`, `updateRoom`, `updateRooms`, `createBooking`, `showById`, `autoAssignRooms`) ให้โหลดเฉพาะ `bookingRooms.addon` (คง `recalculateBookingTotal` ที่ใช้ `$br->roomType` ภายใน)
+
+**Files Changed:**
+- `app/Models/BookingRoom.php` ($appends, $hidden, accessors)
+- `app/Models/Addon.php` (ลบ $appends และ accessors)
+- `app/Http/Controllers/Api/V1/BookingController.php` (trim eager loading 7 จุด)
+- `tests/Feature/BookingTest.php` (อัปเดต 4 tests: `test_authenticated_user_can_create_booking`, `test_create_booking_returns_early_late_boolean_addons`, `test_update_room_without_addons_key_keeps_early_late_prices`, `test_batch_update_booking_rooms_returns_mutated_rooms`)
+- `test_scripts/api_guide.php` (step 8b ใช้ `room_id` ตรงๆ)
+- `test_scripts/test_create_booking_remote.php` (เช็ค `room_type_id` + booleans)
+- `docs/api_guide.md` (อัปเดต 7 response examples + schema tables)
+- `cline.md`
+

@@ -215,11 +215,15 @@ class BookingTest extends TestCase
                     'check_out',
                     'status',
                     'guests',
+                    'early_checkin',
+                    'late_checkout',
                     'addon',
-                    'room_type',
                 ],
             ],
         ]);
+
+        $this->assertNull($response->json('booking_rooms.0.room_type'));
+        $this->assertNull($response->json('booking_rooms.0.room'));
 
         // 🛡️ Scrutinize: Verify booking linkage + total_amount calculated server-side
         $this->assertDatabaseHas('bookings', [
@@ -836,6 +840,131 @@ class BookingTest extends TestCase
         ]);
     }
 
+    /**
+     * 🌟 (26/08/26): response ต้องคืน boolean early_checkin / late_checkout ในระดับ booking_room
+     * format เหมือนตอน create ที่รับ addons.early_checkin / addons.late_checkout เป็น boolean
+     */
+    public function test_create_booking_returns_early_late_boolean_addons(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        // seed early 150 / late 250 (satang)
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 150, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 250, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
+                        'addons' => ['early_checkin' => true, 'late_checkout' => true],
+                    ],
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
+                        // ไม่ส่ง addons → boolean ต้องเป็น false ทั้งคู่
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+
+        // ห้องที่เลือก → true + ราคาจาก global_rates
+        $response->assertJsonPath('booking_rooms.0.early_checkin', true);
+        $response->assertJsonPath('booking_rooms.0.late_checkout', true);
+        $response->assertJsonPath('booking_rooms.0.addon.early_checkIn_price', 150);
+        $response->assertJsonPath('booking_rooms.0.addon.late_checkOut_price', 250);
+
+        // ห้องที่ไม่เลือก → false + ราคา 0
+        $response->assertJsonPath('booking_rooms.1.early_checkin', false);
+        $response->assertJsonPath('booking_rooms.1.late_checkout', false);
+        $response->assertJsonPath('booking_rooms.1.addon.early_checkIn_price', 0);
+        $response->assertJsonPath('booking_rooms.1.addon.late_checkOut_price', 0);
+
+        // total = (1500×2)×2 ห้อง + 150 + 250 = 6400
+        $response->assertJsonPath('total_amount', 6400);
+    }
+
+    /**
+     * 🛡️ Regression (26/08/26): PUT แก้ห้องโดยไม่ส่ง addons key มาด้วย
+     * ต้องคงราคา early/late เดิมไว้ (เคยเป็นบั๊ก: lateCheckOut_price อ่าน case ผิด → reset เป็น 0)
+     */
+    public function test_update_room_without_addons_key_keeps_early_late_prices(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // seed rate ปัจจุบันให้ตรงราคาที่เคยคิดไว้ (fallback จะ reprice ตาม rate ปัจจุบัน)
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 5000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 7000, 'is_active' => true,
+        ]);
+
+        // จำลอง addon ที่เคยเลือก early/late ไว้แล้ว
+        $br->addon->update([
+            'early_checkIn_price' => 5000,
+            'late_checkOut_price' => 7000,
+        ]);
+        // 2 คืน × 1500 + 5000 + 7000 = 15000
+        $booking->update(['total_amount' => 15000]);
+
+        // แก้แค่ billing_comment — ไม่ส่ง addons / extra_beds มาเลย
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'billing_comment' => 'Need invoice',
+            ]);
+
+        $response->assertStatus(200);
+
+        // 🛡️ ราคา early/late ต้องถูกคงไว้ (ไม่หายเป็น 0)
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_checkIn_price' => 5000,
+            'late_checkOut_price' => 7000,
+        ]);
+        $response->assertJsonPath('booking_room.early_checkin', true);
+        $response->assertJsonPath('booking_room.late_checkout', true);
+        $response->assertJsonPath('total_amount', 15000);
+
+        // 🛡️ เคส 2: ส่ง addons ชัดๆ — ปิด early (false) คง late (true)
+        //    (เคยเป็นบั๊ก: key 'lateCheckOut_price' case ผิด → write ราคา late ไม่ได้เลย)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_checkin' => false, 'late_checkout' => true],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_checkIn_price' => 0,
+            'late_checkOut_price' => 7000,
+        ]);
+        $response->assertJsonPath('booking_room.early_checkin', false);
+        $response->assertJsonPath('booking_room.late_checkout', true);
+        // total คิดใหม่ = 3000 (ห้อง 2 คืน) + 7000 (late) = 10000
+        $response->assertJsonPath('total_amount', 10000);
+    }
+
     public function test_update_room_rejects_when_no_availability(): void
     {
         $roomType = $this->createRoomType();
@@ -1236,7 +1365,7 @@ class BookingTest extends TestCase
         $this->assertNotEquals('Ghost Batch', $br->fresh()->billing_comment);
     }
 
-    public function test_batch_update_booking_rooms_returns_mutated_rooms_with_relations(): void
+    public function test_batch_update_booking_rooms_returns_mutated_rooms(): void
     {
         $user = User::factory()->create();
         $roomType = $this->createRoomType();
@@ -1275,8 +1404,9 @@ class BookingTest extends TestCase
                     'check_in',
                     'check_out',
                     'status',
+                    'early_checkin',
+                    'late_checkout',
                     'addon',
-                    'room_type',
                 ],
             ],
             'total_amount',

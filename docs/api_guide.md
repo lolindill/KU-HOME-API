@@ -906,8 +906,8 @@ curl -s -H "Accept: application/json" \
           ],
           "billing_address": null,
           "billing_comment": null,
-          "room_type": { ...room type... },
-          "room": null,
+          "early_checkin": false,
+          "late_checkout": false,
           "addon": { ...addon... }
         }
       ],
@@ -1028,6 +1028,8 @@ curl -s -H "Accept: application/json" \
       ],
       "billing_address": null,
       "billing_comment": null,
+      "early_checkin": false,
+      "late_checkout": false,
       "created_at": "2026-06-19T11:00:00.000000Z",
       "updated_at": "2026-06-19T11:00:00.000000Z",
       "addon": {
@@ -1041,15 +1043,7 @@ curl -s -H "Accept: application/json" \
         "breakfast_price": 400,
         "created_at": "2026-06-19T11:00:00.000000Z",
         "updated_at": "2026-06-19T11:00:00.000000Z"
-      },
-      "room_type": {
-        "id": "rt-uuid",
-        "name_en": "Standard Double",
-        "name_th": "สแตนดาร์ด ดับเบิล",
-        "max_guests": 2,
-        "extra_bed_enabled": false
-      },
-      "room": null
+      }
     }
   ]
 }
@@ -1141,18 +1135,15 @@ curl -s -H "Accept: application/json" \
           "nationality": "Thai"
         }
       ],
+      "early_checkin": false,
+      "late_checkout": false,
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
         "extra_bed": 0,
         "breakfast": 2,
         "breakfast_price": 400
-      },
-      "room_type": {
-        "id": "rt-uuid",
-        "name_en": "Standard Double"
-      },
-      "room": null
+      }
     }
   ],
   "added_amount": 2400,
@@ -1242,6 +1233,8 @@ curl -s -H "Accept: application/json" \
     "billing_comment": null,
     "status": "draft",
     "bed_preference": "twin",
+    "early_checkin": false,
+    "late_checkout": false,
     "created_at": "2026-08-19T02:23:13.000000Z",
     "updated_at": "2026-08-19T02:23:13.000000Z",
     "addon": {
@@ -1255,21 +1248,7 @@ curl -s -H "Accept: application/json" \
       "breakfast_price": 300,
       "created_at": "...",
       "updated_at": "..."
-    },
-    "room_type": {
-      "id": "rt-uuid-1",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
-      "max_guests": 2,
-      "extra_bed_enabled": true,
-      "max_extra_beds": 1,
-      "extra_bed_price": 300,
-      "daily_rate": 1000,
-      "description": null,
-      "created_at": "...",
-      "updated_at": "..."
-    },
-    "room": null
+    }
   },
   "total_amount": 4900
 }
@@ -1361,6 +1340,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "status": "draft",
       "bed_preference": "twin",
+      "early_checkin": false,
+      "late_checkout": false,
       "created_at": "...",
       "updated_at": "...",
       "addon": {
@@ -1374,21 +1355,7 @@ curl -s -H "Accept: application/json" \
         "breakfast_price": 0,
         "created_at": "...",
         "updated_at": "..."
-      },
-      "room_type": {
-        "id": "rt-uuid-1",
-        "name_en": "Standard",
-        "name_th": "ห้องมาตรฐาน",
-        "max_guests": 2,
-        "extra_bed_enabled": true,
-        "max_extra_beds": 1,
-        "extra_bed_price": 300,
-        "daily_rate": 1000,
-        "description": null,
-        "created_at": "...",
-        "updated_at": "..."
-      },
-      "room": null
+      }
     },
     {
       "id": "br-uuid-2",
@@ -1402,6 +1369,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "status": "draft",
       "bed_preference": null,
+      "early_checkin": false,
+      "late_checkout": false,
       "created_at": "...",
       "updated_at": "...",
       "addon": {
@@ -1415,21 +1384,7 @@ curl -s -H "Accept: application/json" \
         "breakfast_price": 300,
         "created_at": "...",
         "updated_at": "..."
-      },
-      "room_type": {
-        "id": "rt-uuid-2",
-        "name_en": "Superior",
-        "name_th": "ห้องซูพีเรียร์",
-        "max_guests": 2,
-        "extra_bed_enabled": false,
-        "max_extra_beds": 0,
-        "extra_bed_price": 0,
-        "daily_rate": 1500,
-        "description": null,
-        "created_at": "...",
-        "updated_at": "..."
-      },
-      "room": null
+      }
     }
   ],
   "total_amount": 7600
@@ -1651,9 +1606,9 @@ curl "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signat
         "guests": [...],
         "billing_address": null,
         "billing_comment": null,
-        "addon": {...},
-        "room_type": {...},
-        "room": {...}
+        "early_checkin": false,
+        "late_checkout": false,
+        "addon": {...}
       }
     ]
   }
@@ -1719,13 +1674,18 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
     "booking_rooms": [
       {
         "id": "br-uuid",
+        "room_type_id": "rt-uuid",
         "room_id": "room-uuid",
-        "room": { "id": "room-uuid", "room_number": "101", ... }
+        "early_checkin": false,
+        "late_checkout": false,
+        "addon": { ... }
       }
     ]
   }
 }
 ```
+
+> 🌟 **(26/08/26)**: `booking_rooms` ใน response นี้คืน format เดียวกันกับ endpoint อื่นๆ ทุกตัว (`addon` + `early_checkin`/`late_checkout` boolean ที่ระดับ BR — ซ่อน `room_type`/`room` object)
 
 **Response `422`:**
 - Booking not in `paid`/`confirmed` status
@@ -2142,6 +2102,8 @@ Creates a `pending` payment and returns a mock payment URL.
 
 🔒 **Public**
 
+> 🌟 **(26/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB), `late_checkout` 10000 (100 THB), `extra_bed` 50000 (500 THB) — early/late ปรับลดจาก 30000 (300 THB)
+
 **Response `200`:**
 ```json
 {
@@ -2153,7 +2115,7 @@ Creates a `pending` payment and returns a mock payment URL.
       "code": "breakfast",
       "name_en": "Breakfast",
       "name_th": "อาหารเช้า",
-      "default_price": 150,
+      "default_price": 20000,
       "is_active": true
     },
     {
@@ -2161,7 +2123,7 @@ Creates a `pending` payment and returns a mock payment URL.
       "code": "early_checkin",
       "name_en": "Early Check-in",
       "name_th": "เช็คอินก่อนเวลา",
-      "default_price": 200,
+      "default_price": 10000,
       "is_active": true
     },
     {
@@ -2169,7 +2131,7 @@ Creates a `pending` payment and returns a mock payment URL.
       "code": "late_checkout",
       "name_en": "Late Check-out",
       "name_th": "เช็คเอาท์ช้ากว่าเวลา",
-      "default_price": 200,
+      "default_price": 10000,
       "is_active": true
     },
     {
@@ -2177,7 +2139,7 @@ Creates a `pending` payment and returns a mock payment URL.
       "code": "extra_bed",
       "name_en": "Extra Bed",
       "name_th": "เตียงเสริม",
-      "default_price": 300,
+      "default_price": 50000,
       "is_active": true
     }
   ]
@@ -2359,6 +2321,8 @@ Returns tasks with status `pending` or `in_progress`.
 | `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
+| `early_checkin` | boolean | 🌟 **Virtual (26/08/26)** — computed: `addon.early_checkIn_price > 0`. Same boolean format as create input `addons.early_checkin`. Appended to every serialized booking_room. |
+| `late_checkout` | boolean | 🌟 **Virtual (26/08/26)** — computed: `addon.late_checkOut_price > 0`. Same boolean format as create input `addons.late_checkout`. Appended to every serialized booking_room. |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 

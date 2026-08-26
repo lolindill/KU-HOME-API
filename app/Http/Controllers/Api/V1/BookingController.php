@@ -42,8 +42,8 @@ class BookingController extends Controller
             $checkIn = $request->query('check_in');
             $checkOut = $request->query('check_out');
 
-            // 🌟 เปลี่ยน Eager Loading ตรงนี้ค่ะนายท่าน! จาก addon เป็น bookingRooms.addon
-            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'bookingRooms.addon'])
+            // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
+            $query = Booking::with('bookingRooms.addon')
                 ->when($user && $user->role === 'admin', function ($q) {
                     $q->with('user');
                 });
@@ -269,7 +269,7 @@ class BookingController extends Controller
             DB::commit();
 
             $bookingRoomsResponse = array_map(function ($br) {
-                return $br->fresh(['addon', 'roomType', 'room']);
+                return $br->fresh('addon');
             }, $addedRooms);
 
             return response()->json([
@@ -545,7 +545,7 @@ class BookingController extends Controller
                     : ! empty($existingAddon?->early_checkIn_price);
                 $lateCheckOutEnabled = is_array($addonInput)
                     ? ! empty($addonInput['late_checkout'])
-                    : ! empty($existingAddon?->lateCheckOut_price);
+                    : ! empty($existingAddon?->late_checkOut_price);
 
                 $roomType = RoomType::findOrFail($effectiveTypeId);
                 $nights = Carbon::parse($effectiveCheckIn)->diffInDays(Carbon::parse($effectiveCheckOut)) ?: 1;
@@ -562,7 +562,7 @@ class BookingController extends Controller
                     'breakfast' => $breakfastQty,
                     'breakfast_price' => $breakfastPrice,
                     'early_checkIn_price' => $earlyCheckInPrice,
-                    'lateCheckOut_price' => $lateCheckOutPrice,
+                    'late_checkOut_price' => $lateCheckOutPrice,
                 ];
                 if ($existingAddon) {
                     $dirtyAddonFields = [];
@@ -594,7 +594,7 @@ class BookingController extends Controller
                 'status' => 'success',
                 'message' => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
                 'booking_id' => $booking->id,
-                'booking_room' => $bookingRoom->fresh(['addon', 'roomType', 'room']),
+                'booking_room' => $bookingRoom->fresh('addon'),
                 'total_amount' => $locked->fresh()->total_amount,
             ], 200);
 
@@ -816,7 +816,7 @@ class BookingController extends Controller
                         : ! empty($existingAddon?->early_checkIn_price);
                     $lateCheckOutEnabled = is_array($addonInput)
                         ? ! empty($addonInput['late_checkout'])
-                        : ! empty($existingAddon?->lateCheckOut_price);
+                        : ! empty($existingAddon?->late_checkOut_price);
 
                     $roomType = RoomType::findOrFail($u['type_id']);
                     $nights = Carbon::parse($u['check_in'])->diffInDays(Carbon::parse($u['check_out'])) ?: 1;
@@ -832,7 +832,7 @@ class BookingController extends Controller
                         'breakfast' => $breakfastQty,
                         'breakfast_price' => $breakfastPrice,
                         'early_checkIn_price' => $earlyCheckInPrice,
-                        'lateCheckOut_price' => $lateCheckOutPrice,
+                        'late_checkOut_price' => $lateCheckOutPrice,
                     ];
                     if ($existingAddon) {
                         $dirtyAddonFields = [];
@@ -864,7 +864,7 @@ class BookingController extends Controller
             // 🌟 Response — เรียงตามลำดับ rooms ใน request
             $updatedRooms = [];
             foreach ($validated['booking_rooms'] as $roomRequest) {
-                $updatedRooms[] = $rooms[$roomRequest['booking_room_id']]->fresh(['addon', 'roomType', 'room']);
+                $updatedRooms[] = $rooms[$roomRequest['booking_room_id']]->fresh('addon');
             }
 
             return response()->json([
@@ -1028,7 +1028,7 @@ class BookingController extends Controller
                 + ($br->addon?->extra_bed_price ?? 0)
                 + ($br->addon?->breakfast_price ?? 0)
                 + ($br->addon?->early_checkIn_price ?? 0)
-                + ($br->addon?->lateCheckOut_price ?? 0);
+                + ($br->addon?->late_checkOut_price ?? 0);
         }
 
         return $total;
@@ -1190,7 +1190,7 @@ class BookingController extends Controller
 
             // 🌟 โหลด relations ของห้องที่สร้างขึ้นทั้งหมด เพื่อส่งกลับใน response
             $bookingRoomsResponse = array_map(function ($br) {
-                return $br->fresh(['addon', 'roomType', 'room']);
+                return $br->fresh('addon');
             }, $createdRooms);
 
             return response()->json([
@@ -1416,7 +1416,7 @@ class BookingController extends Controller
                 ], 401);
             }
 
-            $booking = Booking::with(['user', 'bookingRooms.addon', 'bookingRooms.roomType', 'bookingRooms.room'])
+            $booking = Booking::with(['user', 'bookingRooms.addon'])
                 ->where('id', $id)
                 ->firstOrFail();
 
@@ -1535,7 +1535,8 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
-                'booking' => $booking->load('bookingRooms.room'),
+                // 🌟 (26/08/26): load addon ให้ format booking_rooms เหมือนกับ endpoint อื่นๆ
+                'booking' => $booking->load('bookingRooms.addon'),
                 // 🏨 debug info: algorithm ที่ชนะ + cluster cost
                 'allocation' => [
                     'winner' => $result->winner,

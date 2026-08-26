@@ -424,11 +424,10 @@ $bookingDetail = $r2['body']['booking'] ?? null;
 if ($bookingDetail) {
     $bookingRooms = $bookingDetail['booking_rooms'] ?? [];
     if (! empty($bookingRooms)) {
-        $assignedRoomId = $bookingRooms[0]['room']['id'] ?? $bookingRooms[0]['room_id'] ?? null;
+        $assignedRoomId = $bookingRooms[0]['room_id'] ?? null;
         if ($assignedRoomId) {
             chainSave('ASSIGNED_ROOM_ID', $assignedRoomId);
-            $roomNumber = $bookingRooms[0]['room']['room_number'] ?? '???';
-            echo "    🛏️ Assigned Room: #{$roomNumber}\n";
+            echo "    🛏️ Assigned Room ID: {$assignedRoomId}\n";
         }
     }
 }
