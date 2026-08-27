@@ -906,8 +906,6 @@ curl -s -H "Accept: application/json" \
           ],
           "billing_address": null,
           "billing_comment": null,
-          "early_checkin": false,
-          "late_checkout": false,
           "addon": { ...addon... }
         }
       ],
@@ -955,8 +953,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "addons": {
         "breakfast": 2,
-        "early_checkin": false,
-        "late_checkout": false
+        "early_checkin": 2,
+        "late_checkout": 0
       }
     },
     {
@@ -969,7 +967,9 @@ curl -s -H "Accept: application/json" \
 ```
 
 > 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.  
-> 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.
+> 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.  
+> 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–5 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 5 ชม.).  
+> ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน
 
 **Validation Rules:**
 
@@ -992,8 +992,8 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
-| `booking_rooms.*.addons.early_checkin`      | nullable, boolean                             |
-| `booking_rooms.*.addons.late_checkout`      | nullable, boolean                             |
+| `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–5)                       |
+| `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–5)                       |
 
 > 💡 **Pricing**: Server calculates all prices from `global_rates` (room daily rates via `rate_type='daily'` + `room_type_id`) and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 
@@ -1004,7 +1004,7 @@ curl -s -H "Accept: application/json" \
   "message": "Booking and Add-ons created successfully",
   "booking_id": "booking-uuid",
   "confirmation": "202608-00001",
-  "total_amount": 2400,
+  "total_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
   "user_id": "user-uuid",
   "booking_rooms": [
@@ -1028,8 +1028,6 @@ curl -s -H "Accept: application/json" \
       ],
       "billing_address": null,
       "billing_comment": null,
-      "early_checkin": false,
-      "late_checkout": false,
       "created_at": "2026-06-19T11:00:00.000000Z",
       "updated_at": "2026-06-19T11:00:00.000000Z",
       "addon": {
@@ -1037,8 +1035,10 @@ curl -s -H "Accept: application/json" \
         "booking_room_id": "br-uuid",
         "extra_bed": 0,
         "breakfast": 2,
-        "early_checkIn_price": 0,
+        "early_checkIn_price": 200,
+        "early_hours": 2,
         "late_checkOut_price": 0,
+        "late_hours": 0,
         "extra_bed_price": 0,
         "breakfast_price": 400,
         "created_at": "2026-06-19T11:00:00.000000Z",
@@ -1098,8 +1098,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "addons": {
         "breakfast": 2,
-        "early_checkin": false,
-        "late_checkout": false
+        "early_checkin": 0,
+        "late_checkout": 0
       }
     }
   ]
@@ -1135,13 +1135,15 @@ curl -s -H "Accept: application/json" \
           "nationality": "Thai"
         }
       ],
-      "early_checkin": false,
-      "late_checkout": false,
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
         "extra_bed": 0,
         "breakfast": 2,
+        "early_checkIn_price": 0,
+        "early_hours": 0,
+        "late_checkOut_price": 0,
+        "late_hours": 0,
         "breakfast_price": 400
       }
     }
@@ -1191,7 +1193,7 @@ curl -s -H "Accept: application/json" \
   "bed_preference": "twin",
   "billing_address": null,
   "billing_comment": null,
-  "addons": { "breakfast": 2, "early_checkin": false, "late_checkout": false }
+  "addons": { "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
 }
 ```
 
@@ -1207,7 +1209,7 @@ curl -s -H "Accept: application/json" \
 | `bed_preference` | nullable `in:twin` |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
 | `addons.breakfast` | nullable integer ≥ 0 |
-| `addons.early_checkin` / `addons.late_checkout` | nullable boolean |
+| `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–5) |
 
 **Response `200`:**
 ```json
@@ -1233,8 +1235,6 @@ curl -s -H "Accept: application/json" \
     "billing_comment": null,
     "status": "draft",
     "bed_preference": "twin",
-    "early_checkin": false,
-    "late_checkout": false,
     "created_at": "2026-08-19T02:23:13.000000Z",
     "updated_at": "2026-08-19T02:23:13.000000Z",
     "addon": {
@@ -1243,7 +1243,9 @@ curl -s -H "Accept: application/json" \
       "extra_bed": 1,
       "breakfast": 2,
       "early_checkIn_price": 0,
+      "early_hours": 0,
       "late_checkOut_price": 0,
+      "late_hours": 0,
       "extra_bed_price": 300,
       "breakfast_price": 300,
       "created_at": "...",
@@ -1319,7 +1321,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.bed_preference` | nullable `in:twin` |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
 | `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
-| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable boolean |
+| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–5) |
 
 **Response `200`:**
 ```json
@@ -1340,8 +1342,6 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "status": "draft",
       "bed_preference": "twin",
-      "early_checkin": false,
-      "late_checkout": false,
       "created_at": "...",
       "updated_at": "...",
       "addon": {
@@ -1350,7 +1350,9 @@ curl -s -H "Accept: application/json" \
         "extra_bed": 1,
         "breakfast": 0,
         "early_checkIn_price": 0,
+        "early_hours": 0,
         "late_checkOut_price": 0,
+        "late_hours": 0,
         "extra_bed_price": 300,
         "breakfast_price": 0,
         "created_at": "...",
@@ -1369,8 +1371,6 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "status": "draft",
       "bed_preference": null,
-      "early_checkin": false,
-      "late_checkout": false,
       "created_at": "...",
       "updated_at": "...",
       "addon": {
@@ -1379,7 +1379,9 @@ curl -s -H "Accept: application/json" \
         "extra_bed": 0,
         "breakfast": 2,
         "early_checkIn_price": 0,
+        "early_hours": 0,
         "late_checkOut_price": 0,
+        "late_hours": 0,
         "extra_bed_price": 0,
         "breakfast_price": 300,
         "created_at": "...",
@@ -1606,8 +1608,6 @@ curl "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signat
         "guests": [...],
         "billing_address": null,
         "billing_comment": null,
-        "early_checkin": false,
-        "late_checkout": false,
         "addon": {...}
       }
     ]
@@ -1676,8 +1676,6 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
         "id": "br-uuid",
         "room_type_id": "rt-uuid",
         "room_id": "room-uuid",
-        "early_checkin": false,
-        "late_checkout": false,
         "addon": { ... }
       }
     ]
@@ -1685,7 +1683,7 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
 }
 ```
 
-> 🌟 **(26/08/26)**: `booking_rooms` ใน response นี้คืน format เดียวกันกับ endpoint อื่นๆ ทุกตัว (`addon` + `early_checkin`/`late_checkout` boolean ที่ระดับ BR — ซ่อน `room_type`/`room` object)
+> 🌟 **(26/08/26, 27/08/26)**: `booking_rooms` ใน response นี้คืน format เดียวกันกับ endpoint อื่นๆ ทุกตัว (`addon` relation — ซ่อน `room_type`/`room` object)
 
 **Response `422`:**
 - Booking not in `paid`/`confirmed` status
@@ -2229,7 +2227,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 🔒 **Public**
 
-> 🌟 **(26/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB), `late_checkout` 10000 (100 THB), `extra_bed` 50000 (500 THB) — early/late ปรับลดจาก 30000 (300 THB)
+> 🌟 **(26/08/26, 27/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–5)
 
 **Response `200`:**
 ```json
@@ -2448,8 +2446,6 @@ Returns tasks with status `pending` or `in_progress`.
 | `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
-| `early_checkin` | boolean | 🌟 **Virtual (26/08/26)** — computed: `addon.early_checkIn_price > 0`. Same boolean format as create input `addons.early_checkin`. Appended to every serialized booking_room. |
-| `late_checkout` | boolean | 🌟 **Virtual (26/08/26)** — computed: `addon.late_checkOut_price > 0`. Same boolean format as create input `addons.late_checkout`. Appended to every serialized booking_room. |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 
@@ -2534,8 +2530,10 @@ Returns tasks with status `pending` or `in_progress`.
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
 | `breakfast`            | integer | Number of breakfasts                     |
 | `breakfast_price`      | integer | Total breakfast price (baht)             |
-| `early_checkIn_price`  | integer | Early check-in price (0 if not selected) |
-| `late_checkOut_price`  | integer | Late check-out price (0 if not selected) |
+| `early_checkIn_price`  | integer | Early check-in total price (satang)      |
+| `early_hours`          | integer | Early check-in hours (0–5, default: 0)   |
+| `late_checkOut_price`  | integer | Late check-out total price (satang)      |
+| `late_hours`           | integer | Late check-out hours (0–5, default: 0)   |
 | `created_at`           | timestamp |                                        |
 | `updated_at`           | timestamp |                                        |
 
@@ -2809,6 +2807,9 @@ Returns tasks with status `pending` or `in_progress`.
 | Front Desk Ops        | ❌     | ❌    | ✅    |
 | Room Status Update    | ❌     | ❌    | ✅    |
 | Addon Rate Update     | ❌     | ❌    | ✅    |
+| Validate Discount (preview) 🎟️ | ❌ | ✅ | ✅ |
+| Apply/Remove Discount Code (draft) 🎟️ | ❌ | owner | ✅ |
+| Discounts Admin CRUD / Toggle 🎟️ | ❌ | ❌ | ✅ |
 | Dashboard/Housekeeping| ❌     | ❌    | ✅    |
 | Payment Webhook       | ✅     | ✅    | ✅    |
 
@@ -2839,8 +2840,8 @@ These endpoints exist but are **not production-ready**:
   subtotal = (room_type.rate × nights)
            + (extra_bed_qty × extra_bed_rate × nights)
            + (breakfast_qty × breakfast_rate)
-           + (early_checkin ? early_checkin_rate : 0)
-           + (late_checkout ? late_checkout_rate : 0)
+           + (early_hours × early_checkin_rate)
+           + (late_hours × late_checkout_rate)
   ```
 
 ---
@@ -2880,7 +2881,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
       "billing_address": null,
       "billing_comment": null,
-      "addons": {"breakfast": 2, "early_checkin": false, "late_checkout": false}
+      "addons": {"breakfast": 2, "early_checkin": 0, "late_checkout": 0}
     }]
   }'
 ```

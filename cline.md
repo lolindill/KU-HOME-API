@@ -1578,4 +1578,52 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Tests:** ✏️ `tests/Feature/DiscountTest.php` +7 regression cases (missing-code 422, non-owner 403, non-draft 422, duplicate-case 422, rename-blocked/rename-ok, stay-window pair)
 - Final: `php artisan test` — **320 passed (837 assertions)** · `vendor/bin/pint --dirty` — ผ่าน
 
+### 🌐 Real-domain Verification (2026-08-27) — Discount v2.1 LIVE ✅
+
+> 🎟️ สร้าง `test_scripts/test_discount_remote.php` (pattern เดียวกับ `test_*_remote.php`: env `KUHOME_BASE_URL`, register throwaway user, admin login) — รันสำเร็จ **19/19 checks** บน `https://ku-home.ku.ac.th/backend/api/v1`
+
+- **ยืนยันว่า v2.1 deploy แล้วจริง:** CRUD `/discounts`, preview quota, apply/remove code + พฤติกรรม fix #42–#45 (422 ทุกกรณี boundary) ตอบถูกต้องบน domain จริงทั้งหมด
+- คณิตเงินเป๊ะบน rate จริงของ server: 2000 → 1500 (25%), `room_amount`/`discount_amount` snapshot ครบ, DELETE code คืนยอดเต็ม
+- ⚠️ **บทเรียน WAF/throttle:** domain KU throttles ถี่กว่า throttle config ใน app (โดน 429 ง่ายใน burst) → script ต้อง pacing ~1.5s/request + retry-once-หลังพัก 65s; remote scripts ต่อๆ ไปควรใช้ wrapper pattern เดียวกัน
+- ⚠️ **PHP gotcha ที่ไม่ควรซ้ำ:** `?? 'x' === null` fail เสมอเมื่อ success case ของ field คือ `null` (JSON `discount_code:null`) — assert field-null ด้วย `array_key_exists()` + `=== null` เท่านั้น
+- Cleanup ท้าย run: draft booking hard-delete ✓, โค้ด throwaway toggle inactive ✓ (rows user/code inactive ค้าง 1-2 แถว/run = by design, FK restrict ป้องกัน DELETE)
+
+
+## ✅ Early/Late Check-in/out คิดรายชั่วโมง (100 ฿/ชม.) + ลบ boolean ทั้งระบบ (2026-08-27)
+
+> **Hourly Early/Late Check-in/out Refactor** — เปลี่ยนการคิดค่า early check-in / late check-out จาก flat ราคาเดียวต่อห้อง เป็นสูตรรายชั่วโมง (`ราคา = จำนวนชั่วโมง (int 0–5) × ราคา/ชม. จาก global_rates`) พร้อมลบ boolean ทั้งระบบตามเอกสาร [`docs/early-late-hourly-plan.md`](./docs/early-late-hourly-plan.md)
+
+### 🎯 การเปลี่ยนแปลงหลัก
+1. **สูตรคิดเงินรายชั่วโมง:**
+   - `global_rates` code `early_checkin` / `late_checkout` (10000 satang = 100 ฿) ตีความใหม่เป็นราคาต่อชั่วโมง (ไม่ต้องแก้ค่าในตาราง)
+   - `Addon` table เพิ่มคอลัมน์ `early_hours` (int, default 0) และ `late_hours` (int, default 0)
+2. **ลบ boolean ทั้งระบบ (Breaking Change):**
+   - **Input:** `addons.early_checkin` / `addons.late_checkout` เปลี่ยน type จาก `boolean` → `integer` (0–5 ชม.) ส่ง `true`/`false` จะได้ HTTP `422 Unprocessable Content`
+   - **Response:** ลบ `$appends = ['early_checkin', 'late_checkout']` และ accessors `getEarlyCheckinAttribute()` / `getLateCheckoutAttribute()` ออกจาก `BookingRoom` — response ไม่มี boolean บน booking_room แล้ว (ดูจาก `addon.early_hours` / `addon.late_hours` แทน)
+3. **Helper ศูนย์กลางใน `BookingController`:**
+   - เพิ่ม private helper `resolveEarlyLate(?array $addonInput, ?Addon $existing = null): array` จัดการ fallback เมื่อ partial update ไม่ส่ง `addons` key มา
+   - รองรับทั้ง 4 code paths: `createBooking`, `addRooms`, `updateRoom`, `updateRooms` (batch)
+
+### 📁 Files Changed
+- **Migration:** ✨ `database/migrations/2026_08_27_120000_add_early_late_hours_to_addons_table.php` (เพิ่ม `early_hours`, `late_hours` และ backfill แถวเดิมที่มีราคา > 0 ให้เป็น 1 ชม.)
+- **Models:**
+  - ✏️ `app/Models/Addon.php` (เพิ่ม `early_hours`, `late_hours` ใน `$fillable` และ `$casts`)
+  - ✏️ `app/Models/BookingRoom.php` (ลบ `$appends` และ accessors `getEarlyCheckinAttribute`, `getLateCheckoutAttribute`)
+- **Requests:** ✏️ `StoreBookingRequest.php`, `AddBookingRoomsRequest.php`, `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php` (กฎ `['nullable', 'integer', 'min:0', 'max:5', ...]` + ข้อความเตือนภาษาไทย)
+- **Controllers:** ✏️ `app/Http/Controllers/Api/V1/BookingController.php` (คิดราคาแบบรายชั่วโมง 4 จุด + helper `resolveEarlyLate`)
+- **Tests:** ✏️ `tests/Feature/BookingTest.php` (อัปเดต test เดิม + เพิ่ม tests ใหม่: boolean rejection 422, range validation 422, batch update repricing)
+- **Docs & Scripts:**
+  - ✏️ `docs/api_guide.md` (ปรับ schema tables, validation rules, request/response samples)
+  - ✏️ `docs/database-er.md` (เพิ่ม columns ใน entity `ADDONS`)
+  - ✏️ `docs/booking-verify-flow.md` (อัปเดต payload)
+  - ✏️ `test_scripts/api_guide.php`, `test_scripts/api_test_remote.php`, `test_scripts/test_create_booking_remote.php` (เปลี่ยน payload/assertions เป็น hourly)
+
+### 🗄️ Migration Required
+⚠️ **รัน `php artisan migrate`** (additive migration — ปลอดภัยสำหรับ dev/prod)
+
+### 🧪 Test Results
+- `php artisan test` — **323 passed (853 assertions)** (100% green full suite)
+- `vendor/bin/pint --dirty` — ผ่าน (clean code style)
+
+
 

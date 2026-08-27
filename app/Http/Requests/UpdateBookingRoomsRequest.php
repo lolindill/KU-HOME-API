@@ -55,8 +55,22 @@ class UpdateBookingRoomsRequest extends FormRequest
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'booking_rooms.*.addons' => 'nullable|array',
             'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
-            'booking_rooms.*.addons.early_checkin' => 'nullable|boolean',
-            'booking_rooms.*.addons.late_checkout' => 'nullable|boolean',
+            'booking_rooms.*.addons.early_checkin' => [
+                'nullable', 'integer', 'min:0', 'max:5',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-5) ค่ะ');
+                    }
+                },
+            ],
+            'booking_rooms.*.addons.late_checkout' => [
+                'nullable', 'integer', 'min:0', 'max:5',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-5) ค่ะ');
+                    }
+                },
+            ],
         ];
     }
 
@@ -78,6 +92,12 @@ class UpdateBookingRoomsRequest extends FormRequest
             'booking_rooms.*.check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
             'booking_rooms.*.check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
             'booking_rooms.*.bed_preference.in' => 'bed_preference ต้องเป็น twin เท่านั้นค่ะ',
+            'booking_rooms.*.addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-5) ค่ะ',
+            'booking_rooms.*.addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_checkout.integer' => 'จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-5) ค่ะ',
+            'booking_rooms.*.addons.late_checkout.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_checkout.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',
         ];
     }
 }

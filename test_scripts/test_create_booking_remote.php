@@ -161,8 +161,8 @@ $bookingPayload = [
             'billing_comment' => 'Tax ID: 0105559999999',
             'addons' => [
                 'breakfast' => 1,
-                'early_checkin' => false,
-                'late_checkout' => false,
+                'early_checkin' => 0,
+                'late_checkout' => 0,
             ],
         ],
     ],
@@ -185,9 +185,9 @@ if (! empty($createdRooms)) {
     $br = $createdRooms[0];
     check('booking_room has id', ! empty($br['id']));
     check('booking_room has room_type_id', ! empty($br['room_type_id']));
-    check('booking_room has early_checkin boolean', isset($br['early_checkin']) && is_bool($br['early_checkin']));
-    check('booking_room has late_checkout boolean', isset($br['late_checkout']) && is_bool($br['late_checkout']));
     check('booking_room has addon relation loaded', isset($br['addon']) && is_array($br['addon']));
+    check('addon has early_hours integer', isset($br['addon']['early_hours']) && is_int($br['addon']['early_hours']));
+    check('addon has late_hours integer', isset($br['addon']['late_hours']) && is_int($br['addon']['late_hours']));
 
     $guests = $br['guests'] ?? [];
     check('booking_room has guests array', is_array($guests) && ! empty($guests));

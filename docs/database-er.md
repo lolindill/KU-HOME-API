@@ -109,7 +109,9 @@ erDiagram
         integer extra_bed "default: 0"
         integer breakfast "default: 0"
         integer early_checkIn_price "default: 0"
+        integer early_hours "default: 0"
         integer late_checkOut_price "default: 0"
+        integer late_hours "default: 0"
         integer extra_bed_price "default: 0"
         integer breakfast_price "default: 0"
         timestamp created_at

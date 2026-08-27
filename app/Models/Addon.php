@@ -20,7 +20,9 @@ class Addon extends Model
         'extra_bed',
         'breakfast',
         'early_checkIn_price',
+        'early_hours',
         'late_checkOut_price',
+        'late_hours',
         'extra_bed_price',
         'breakfast_price',
     ];
@@ -29,7 +31,9 @@ class Addon extends Model
         'extra_bed' => 'integer',
         'breakfast' => 'integer',
         'early_checkIn_price' => 'integer',
+        'early_hours' => 'integer',
         'late_checkOut_price' => 'integer',
+        'late_hours' => 'integer',
         'extra_bed_price' => 'integer',
         'breakfast_price' => 'integer',
     ];

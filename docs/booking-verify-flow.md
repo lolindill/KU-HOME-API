@@ -1,4 +1,4 @@
-﻿# 🌟 Booking → Admin Verify Flow
+# 🌟 Booking → Admin Verify Flow
 
 > **End-to-end flow** ตั้งแต่ผู้ใช้สร้างการจอง ส่งหลักฐานการชำระ (slip) จนกระทั่งแอดมินตรวจสอบ/ยืนยัน
 > ใช้ระบบ `booking_confirmations` (1:N history) แทน payments/receipts ที่ถูก freeze ไปแล้ว 🌟 Refactor (24/07/26)
@@ -147,7 +147,7 @@ Accept: application/json
       ],
       "billing_address": null,
       "billing_comment": null,
-      "addons": { "breakfast": 2, "early_checkin": false, "late_checkout": false }
+      "addons": { "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
     }
   ]
 }

@@ -46,12 +46,6 @@ class BookingRoom extends Model
     ];
 
     /**
-     * 🌟 (26/08/26): คืน boolean early_checkin / late_checkout ในระดับ booking_room
-     * derive จากราคาใน addon ที่บันทึกไว้ (price > 0 = เลือกใช้)
-     */
-    protected $appends = ['early_checkin', 'late_checkout'];
-
-    /**
      * 🔒 ซ่อน relation roomType และ room ไม่ให้ serialize ออกไปใน JSON ทุก endpoint
      * (ให้ client ใช้เฉพาะ room_type_id / room_id ตรงๆ)
      */
@@ -147,16 +141,6 @@ class BookingRoom extends Model
     public function getTotalGuestsAttribute(): int
     {
         return is_array($this->guests) ? count($this->guests) : 0;
-    }
-
-    public function getEarlyCheckinAttribute(): bool
-    {
-        return ($this->addon?->early_checkIn_price ?? 0) > 0;
-    }
-
-    public function getLateCheckoutAttribute(): bool
-    {
-        return ($this->addon?->late_checkOut_price ?? 0) > 0;
     }
 
     // =========================================================

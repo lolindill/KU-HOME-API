@@ -342,8 +342,8 @@ $bookingData = [
             ],
             'addons' => [
                 'breakfast' => 1,
-                'early_checkin' => false,
-                'late_checkout' => false,
+                'early_checkin' => 0,
+                'late_checkout' => 0,
             ],
         ],
     ],

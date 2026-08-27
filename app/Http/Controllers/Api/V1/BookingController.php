@@ -334,8 +334,9 @@ class BookingController extends Controller
                 $addons = $roomRequest['addons'] ?? [];
                 $breakfastQty = $addons['breakfast'] ?? 0;
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = ! empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
-                $lateCheckOutPrice = ! empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
+                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addons);
+                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
+                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
 
                 // รวมยอดของห้องใหม่นี้
                 $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
@@ -361,7 +362,9 @@ class BookingController extends Controller
                     'breakfast' => $breakfastQty,
                     'breakfast_price' => $breakfastPrice,
                     'early_checkIn_price' => $earlyCheckInPrice,
+                    'early_hours' => $earlyHours,
                     'late_checkOut_price' => $lateCheckOutPrice,
+                    'late_hours' => $lateHours,
                 ]);
 
                 $addedRooms[] = $bookingRoom;
@@ -648,12 +651,7 @@ class BookingController extends Controller
                 $breakfastQty = is_array($addonInput)
                     ? ($addonInput['breakfast'] ?? 0)
                     : ($existingAddon?->breakfast ?? 0);
-                $earlyCheckInEnabled = is_array($addonInput)
-                    ? ! empty($addonInput['early_checkin'])
-                    : ! empty($existingAddon?->early_checkIn_price);
-                $lateCheckOutEnabled = is_array($addonInput)
-                    ? ! empty($addonInput['late_checkout'])
-                    : ! empty($existingAddon?->late_checkOut_price);
+                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
                 $roomType = RoomType::findOrFail($effectiveTypeId);
                 $nights = Carbon::parse($effectiveCheckIn)->diffInDays(Carbon::parse($effectiveCheckOut)) ?: 1;
@@ -661,8 +659,8 @@ class BookingController extends Controller
                 $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
                 $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = $earlyCheckInEnabled ? ($rates['early_checkin'] ?? 0) : 0;
-                $lateCheckOutPrice = $lateCheckOutEnabled ? ($rates['late_checkout'] ?? 0) : 0;
+                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
+                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
 
                 $addonData = [
                     'extra_bed' => $extraBedQty,
@@ -670,7 +668,9 @@ class BookingController extends Controller
                     'breakfast' => $breakfastQty,
                     'breakfast_price' => $breakfastPrice,
                     'early_checkIn_price' => $earlyCheckInPrice,
+                    'early_hours' => $earlyHours,
                     'late_checkOut_price' => $lateCheckOutPrice,
+                    'late_hours' => $lateHours,
                 ];
                 if ($existingAddon) {
                     $dirtyAddonFields = [];
@@ -920,20 +920,15 @@ class BookingController extends Controller
                     $breakfastQty = is_array($addonInput)
                         ? ($addonInput['breakfast'] ?? 0)
                         : ($existingAddon?->breakfast ?? 0);
-                    $earlyCheckInEnabled = is_array($addonInput)
-                        ? ! empty($addonInput['early_checkin'])
-                        : ! empty($existingAddon?->early_checkIn_price);
-                    $lateCheckOutEnabled = is_array($addonInput)
-                        ? ! empty($addonInput['late_checkout'])
-                        : ! empty($existingAddon?->late_checkOut_price);
+                    [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
                     $roomType = RoomType::findOrFail($u['type_id']);
                     $nights = Carbon::parse($u['check_in'])->diffInDays(Carbon::parse($u['check_out'])) ?: 1;
 
                     $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
                     $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                    $earlyCheckInPrice = $earlyCheckInEnabled ? ($rates['early_checkin'] ?? 0) : 0;
-                    $lateCheckOutPrice = $lateCheckOutEnabled ? ($rates['late_checkout'] ?? 0) : 0;
+                    $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
+                    $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
 
                     $addonData = [
                         'extra_bed' => $extraBedQty,
@@ -941,7 +936,9 @@ class BookingController extends Controller
                         'breakfast' => $breakfastQty,
                         'breakfast_price' => $breakfastPrice,
                         'early_checkIn_price' => $earlyCheckInPrice,
+                        'early_hours' => $earlyHours,
                         'late_checkOut_price' => $lateCheckOutPrice,
+                        'late_hours' => $lateHours,
                     ];
                     if ($existingAddon) {
                         $dirtyAddonFields = [];
@@ -1232,8 +1229,9 @@ class BookingController extends Controller
                 $addons = $roomRequest['addons'] ?? [];
                 $breakfastQty = $addons['breakfast'] ?? 0;
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = ! empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
-                $lateCheckOutPrice = ! empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
+                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addons);
+                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
+                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
 
                 $bookingRoom = BookingRoom::create([
                     'booking_id' => $booking->id,
@@ -1258,7 +1256,9 @@ class BookingController extends Controller
                     'breakfast' => $breakfastQty,
                     'breakfast_price' => $breakfastPrice,
                     'early_checkIn_price' => $earlyCheckInPrice,
+                    'early_hours' => $earlyHours,
                     'late_checkOut_price' => $lateCheckOutPrice,
+                    'late_hours' => $lateHours,
                 ]);
 
                 $createdRooms[] = $bookingRoom;
@@ -1662,5 +1662,21 @@ class BookingController extends Controller
 
             return $guest;
         }, $guests);
+    }
+
+    /**
+     * 🕐 (27/08/26): สูตรรายชั่วโมง — addons.early_checkin / addons.late_checkout รับ int จำนวนชั่วโมง (0-5)
+     * ไม่ส่ง addons key มา = ใช้ค่าจากแถว addon เดิม (fallback ตามพฤติกรรมเดิมของ updateRoom/updateRooms)
+     */
+    private function resolveEarlyLate(?array $addonInput, ?Addon $existing = null): array
+    {
+        $earlyHours = is_array($addonInput)
+            ? (int) ($addonInput['early_checkin'] ?? 0)
+            : (! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 1) : 0);
+        $lateHours = is_array($addonInput)
+            ? (int) ($addonInput['late_checkout'] ?? 0)
+            : (! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 1) : 0);
+
+        return [$earlyHours, $lateHours];
     }
 }
