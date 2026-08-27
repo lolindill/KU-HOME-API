@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,
             RoomSeeder::class,
             GlobalRateSeeder::class,
+            DiscountSeeder::class,
         ]);
     }
 }

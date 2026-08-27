@@ -32,12 +32,17 @@ class BookingRoom extends Model
         // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษีระดับห้อง
         'billing_address',
         'billing_comment',
+        // 🎟️ Discount fields (27/08/26): ค่าห้องก่อนลด และ ส่วนลดของห้องนี้ (satang)
+        'room_amount',
+        'discount_amount',
     ];
 
     protected $casts = [
         'check_in' => 'date',
         'check_out' => 'date',
         'guests' => 'array',
+        'room_amount' => 'integer',
+        'discount_amount' => 'integer',
     ];
 
     /**

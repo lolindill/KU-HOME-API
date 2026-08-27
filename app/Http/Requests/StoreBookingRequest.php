@@ -48,6 +48,9 @@ class StoreBookingRequest extends FormRequest
             'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.early_checkin' => 'nullable|boolean',
             'booking_rooms.*.addons.late_checkout' => 'nullable|boolean',
+
+            // 🎟️ Discount (27/08/26)
+            'discount_code' => 'nullable|string|max:50',
         ];
     }
 
@@ -59,6 +62,7 @@ class StoreBookingRequest extends FormRequest
         return [
             'source.required' => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
             'source.in' => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
+            'discount_code.max' => 'รหัสส่วนลดต้องไม่เกิน 50 ตัวอักษร',
             'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
             'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
             'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',

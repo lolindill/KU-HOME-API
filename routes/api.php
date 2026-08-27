@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\DiscountController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\GlobalRateController;
 use App\Http\Controllers\Api\V1\ImageController;
@@ -127,8 +128,15 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         ->where('bookingId', '[0-9a-f\-]{36}')
         ->middleware('throttle:5,1');
 
-    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
-    Route::post('/bookings/validate-discount', [BookingController::class, 'validateDiscount']);
+    // 🎟️ Discount (27/08/26) — preview โค้ด (ไม่มี side-effect ไม่ถือ slot)
+    Route::post('/discounts/validate', [DiscountController::class, 'preview'])
+        ->middleware('throttle:10,1');
+
+    // 🎟️ ใส่/เปลี่ยน/ลบ โค้ดบน draft booking (เจ้าของหรือ admin)
+    Route::put('/bookings/{bookingId}/discount-code', [BookingController::class, 'setDiscountCode'])
+        ->where('bookingId', '[0-9a-f\-]{36}')->middleware('throttle:5,1');
+    Route::delete('/bookings/{bookingId}/discount-code', [BookingController::class, 'destroyDiscountCode'])
+        ->where('bookingId', '[0-9a-f\-]{36}')->middleware('throttle:5,1');
 
     // ============================================
     // 🔐 Admin-only Routes
@@ -177,6 +185,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 🌟 Refactor (22/07/26): Global Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
         Route::put('/global-rates/{id}', [GlobalRateController::class, 'update']);
         Route::patch('/global-rates/{id}/toggle', [GlobalRateController::class, 'toggleActive']);
+
+        // 🎟️ Discounts management (admin)
+        Route::get('/discounts', [DiscountController::class, 'index']);
+        Route::post('/discounts', [DiscountController::class, 'store']);
+        Route::put('/discounts/{id}', [DiscountController::class, 'update'])->where('id', '[0-9a-f\-]{36}');
+        Route::patch('/discounts/{id}/toggle', [DiscountController::class, 'toggleActive'])->where('id', '[0-9a-f\-]{36}');
 
         // 🧹 Dashboard / Housekeeping — Admin endpoints (Fix S-B4)
         Route::prefix('dashboard')->group(function () {

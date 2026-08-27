@@ -82,6 +82,13 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - ไม่มี generic upload endpoint โดยตั้งใจ — รูปเกิดจาก flow ของเจ้าของเสมอ (draft `POST /upload-image` ถูกถอดแล้ว)
   - `app:cleanup-images` (02:30): sweep ไฟล์/row กำพร้า + ลบสลิป `rejected` เกิน `SLIP_RETENTION_DAYS` (default 30) — **สลิป `verified` ห้ามลบอัตโนมัติ** (หลักฐานการเงิน)
   - อนาคตถ้า housekeeping อยากมีรูปก่อน/หลังเก็บห้อง → ใช้ `images` table นี้ (morph `HousekeepingTask`) อย่าสร้างตารางรูปใหม่ (`HousekeepingPhoto` ตอนนี้เป็น draft ลอยไม่มี route)
+- **🎟️ Discount system (2026-08-27):** ระบบส่วนลด v2.1 บริหารจัดการผ่าน `DiscountService` (`app/Services/Discount/DiscountService.php`) เป็น single source of truth
+  - ฐานคิดเงิน: **เฉพาะค่าห้อง** (`room_amount = rate × nights`) — addon (breakfast, extra_bed, early, late) ไม่โดนลด
+  - Types: `percent` (1-100), `fixed` (satang ต่อ booking_room), `set_room_price` (satang ราคาห้อง/คืน)
+  - Quotas: 1 eligible booking_room = 1 slot; ทั้ง global (`max_uses`) และ per-user (`max_uses_per_user`) นับรวม `held` + `used`; All-or-nothing (ถ้าโควตาเหลือไม่พอ K ห้อง จะ reject 422 ทั้งชุด)
+  - Single source of truth: **ห้าม insert `discount_redemptions` นอก `DiscountService`** (ยกเว้น transitionStatus hook `held → used` และ DB cascade)
+  - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
+  - SQLite caveat: `lockForUpdate()` เป็น no-op บน SQLite — กลไกกัน race ทำงานจริงบน PostgreSQL prod เหมือน precedent `RoomAllocator.php`
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
 
@@ -108,6 +115,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 - **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `booking_rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
 - **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
 - **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
+- **DiscountRedemption:** `held → used` — apply บน draft / createBooking → `held` (คงค้างตลอด `pending` / `verify_error` / resubmit); เมื่อ booking เข้า `paid` หรือ `confirmed` (verify ผ่าน หรือ เงินสด) → `used` ถาวรผ่าน hook ใน `Booking::transitionStatus()`. การปล่อย slot คืนอัตโนมัติผ่าน FK cascade เมื่อลบ booking, ลบ booking_room หรือลบโค้ด (`removeFromDraft`).
 
 ## Housekeeping Dashboard — WebSocket Decision
 
@@ -148,7 +156,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - **`receipts` table is FROZEN (2026-07-24)** as read-only legacy — no new receipt rows, ever. New payment flow uses `booking_confirmations` (slip → admin verify/reject).
 - **`payments` table was UNFROZEN (2026-08-19)** to drop `payment_method` — the payment flow is now slip-image-only (no cash/credit_card/transfer distinction anywhere). `PaymentController::webhook` still returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
 - **Webhook has NO HMAC signature verification** (blocker #4) — waiting on payment gateway decision. Do not assume it's secure.
-- `Discount` (`validate-discount`, only `WELCOME10`) is draft/incomplete. (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions)
+- (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions · `Discount` เลิกเป็น draft แล้ว — ดู "Discount system (2026-08-27)" ใน Critical Conventions)
 
 ## Conventions
 

@@ -31,6 +31,7 @@ class Booking extends Model
         'confirmation',
         'source',
         'status',
+        'discount_code',
         'total_amount',
         'is_paid',
         'payment_deadline',
@@ -168,6 +169,15 @@ class Booking extends Model
             'causer_id' => Auth::id(),
             'note' => null,
         ]);
+
+        // 🎟️ Discount (27/08/26): เงินเข้าจริงแล้ว (verify ผ่าน / เงินสด) → ล็อก slot เป็น used ถาวร
+        //    idempotent (อัปเดตเฉพาะ held) · ครอบ draft→paid, pending→paid, draft→confirmed
+        if (in_array($newStatus, ['paid', 'confirmed'])) {
+            DiscountRedemption::query()
+                ->whereIn('booking_room_id', $this->bookingRooms()->pluck('id'))
+                ->where('status', 'held')
+                ->update(['status' => 'used']);
+        }
     }
 
     /**

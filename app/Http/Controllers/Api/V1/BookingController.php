@@ -15,6 +15,7 @@ use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\StatusChangeLog;
 use App\Models\User;
+use App\Services\Discount\DiscountService;
 use App\Services\RoomAllocator\RoomAllocator;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -22,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class BookingController extends Controller
 {
@@ -97,24 +99,127 @@ class BookingController extends Controller
         }
     }
 
-    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
-    public function validateDiscount(Request $request)
+    /**
+     * 🎟️ ใส่ / เปลี่ยน โค้ดส่วนลดให้กับการจองสถานะ draft (เจ้าของหรือ admin)
+     */
+    public function setDiscountCode(Request $request, string $bookingId)
     {
-        $request->validate([
-            'code' => 'required|string',
-            'subtotal' => 'required|numeric',
-        ]);
+        try {
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนดำเนินการค่ะนายท่าน! 🔒', 401);
+            }
 
-        $discountAmount = 0;
-        if (strtoupper($request->code) === 'WELCOME10') {
-            $discountAmount = $request->subtotal * 0.10;
+            $booking = Booking::findOrFail($bookingId);
+
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ใส่หรือลบโค้ดได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ 📝', 422);
+            }
+
+            $request->validate([
+                'code' => 'required|string|max:50',
+            ]);
+
+            $discountService = app(DiscountService::class);
+            $updatedBooking = $discountService->applyToDraft($booking, $request->code);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ใส่โค้ดส่วนลดเรียบร้อยแล้วค่ะ! 🎟️',
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon']),
+            ], 200);
+
+        } catch (ValidationException $e) {
+            // 🛡️ (27/08/26): validation ต้องคืน 422 มาตรฐาน Laravel — ไม่งั้น getCode()=0 ตกไป branch 500
+            throw $e;
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to set discount code: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการใส่โค้ดส่วนลด กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
         }
+    }
 
-        return response()->json([
-            'status' => 'success',
-            'discount_applied' => $discountAmount,
-            'net_total' => $request->subtotal - $discountAmount,
-        ]);
+    /**
+     * 🎟️ ลบโค้ดส่วนลดออกจากการจองสถานะ draft (เจ้าของหรือ admin)
+     */
+    public function destroyDiscountCode(Request $request, string $bookingId)
+    {
+        try {
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนดำเนินการค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ใส่หรือลบโค้ดได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ 📝', 422);
+            }
+
+            $discountService = app(DiscountService::class);
+            $updatedBooking = $discountService->removeFromDraft($booking);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบโค้ดส่วนลดออกจากการจองเรียบร้อยแล้วค่ะ 🎟️',
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon']),
+            ], 200);
+
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to destroy discount code: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบโค้ดส่วนลด กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
     }
 
     /**
@@ -262,9 +367,12 @@ class BookingController extends Controller
                 $addedRooms[] = $bookingRoom;
             }
 
-            // 🌟 อัปเดต total_amount (accumulate เข้ายอดเดิม)
-            $newTotal = $booking->total_amount + $addedAmount;
-            $booking->update(['total_amount' => $newTotal]);
+            // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+            if ($booking->discount_code) {
+                app(DiscountService::class)->applyToDraft($booking, $booking->discount_code);
+            } else {
+                app(DiscountService::class)->reprice($booking);
+            }
 
             DB::commit();
 
@@ -578,10 +686,11 @@ class BookingController extends Controller
                     Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
                 }
 
-                // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (idempotent)
-                $newTotal = $this->recalculateBookingTotal($locked);
-                if ($locked->total_amount !== $newTotal) {
-                    $locked->update(['total_amount' => $newTotal]);
+                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+                if ($locked->discount_code) {
+                    app(DiscountService::class)->applyToDraft($locked, $locked->discount_code);
+                } else {
+                    app(DiscountService::class)->reprice($locked);
                 }
 
                 DB::commit();
@@ -849,10 +958,11 @@ class BookingController extends Controller
                     }
                 }
 
-                // 🌟 คำนวณ total_amount ของ booking ใหม่ทั้งใบ (ครั้งเดียว — idempotent)
-                $newTotal = $this->recalculateBookingTotal($locked);
-                if ($locked->total_amount !== $newTotal) {
-                    $locked->update(['total_amount' => $newTotal]);
+                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+                if ($locked->discount_code) {
+                    app(DiscountService::class)->applyToDraft($locked, $locked->discount_code);
+                } else {
+                    app(DiscountService::class)->reprice($locked);
                 }
 
                 DB::commit();
@@ -967,7 +1077,8 @@ class BookingController extends Controller
                     'note' => 'ผู้ใช้ลบห้องออกจาก draft booking (hard delete)',
                 ]);
 
-                $locked->update(['total_amount' => $this->recalculateBookingTotal($locked)]);
+                // 🌟 Reprice total_amount ของ booking ใหม่ (27/08/26)
+                app(DiscountService::class)->reprice($locked);
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -1007,31 +1118,6 @@ class BookingController extends Controller
                 'message' => 'เกิดข้อผิดพลาดในการลบห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
-    }
-
-    /**
-     * 🌟 (17/08/26): คำนวณ total_amount ของ booking ใหม่ทั้งใบจาก server rates ปัจจุบัน
-     *
-     * - room rate × nights คิดใหม่จาก global_rates (rate_type='daily')
-     * - ราคา addon ใช้จาก Addon row ที่เก็บไว้ (ตอน update ห้องเราเพิ่งคิดใหม่แล้ว)
-     * - draft อายุ ≤ 24 ชม. — rate drift ระหว่างสร้างกับแก้ไขไม่มีนัยสำคัญ
-     */
-    private function recalculateBookingTotal(Booking $booking): int
-    {
-        $total = 0;
-
-        foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
-            $nights = $br->check_in->diffInDays($br->check_out) ?: 1;
-            $roomPriceTotal = GlobalRate::getRoomRate($br->roomType, 'daily') * $nights;
-
-            $total += $roomPriceTotal
-                + ($br->addon?->extra_bed_price ?? 0)
-                + ($br->addon?->breakfast_price ?? 0)
-                + ($br->addon?->early_checkIn_price ?? 0)
-                + ($br->addon?->late_checkOut_price ?? 0);
-        }
-
-        return $total;
     }
 
     public function createBooking(StoreBookingRequest $request)
@@ -1120,8 +1206,6 @@ class BookingController extends Controller
                 'payment_deadline' => Carbon::now()->addHours(24),
             ]);
 
-            $totalAmount = 0;
-
             // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ
             // ไม่รับ price จาก client อีกต่อไป — ป้องกัน price manipulation (#20)
             // 🌟 Refactor (22/07/26): ย้ายจาก addon_rates → global_rates (rate_type='addon')
@@ -1150,10 +1234,6 @@ class BookingController extends Controller
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
                 $earlyCheckInPrice = ! empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
                 $lateCheckOutPrice = ! empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
-
-                // รวมยอดของห้องนี้ทั้งหมด
-                $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
-                $totalAmount += $subtotal;
 
                 $bookingRoom = BookingRoom::create([
                     'booking_id' => $booking->id,
@@ -1184,7 +1264,12 @@ class BookingController extends Controller
                 $createdRooms[] = $bookingRoom;
             }
 
-            $booking->update(['total_amount' => $totalAmount]);
+            // 🎟️ Reconcile ส่วนลด & total_amount (27/08/26)
+            if (! empty($validated['discount_code'])) {
+                app(DiscountService::class)->applyToDraft($booking, $validated['discount_code']);
+            } else {
+                app(DiscountService::class)->reprice($booking);
+            }
 
             DB::commit();
 
@@ -1198,7 +1283,7 @@ class BookingController extends Controller
                 'message' => 'Booking and Add-ons created successfully',
                 'booking_id' => $booking->id,
                 'confirmation' => $booking->confirmation,
-                'total_amount' => $booking->total_amount,
+                'total_amount' => $booking->fresh()->total_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
                 'user_id' => $userId,
                 'booking_rooms' => $bookingRoomsResponse,

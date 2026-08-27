@@ -1531,3 +1531,51 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - `docs/api_guide.md` (อัปเดต 7 response examples + schema tables)
 - `cline.md`
 
+
+## ✅ Implement Discount System v2.1 (2026-08-27)
+
+> **Implement Discount System v2.1** — ระบบส่วนลดสำหรับห้องพักแบบครบวงจร (Admin CRUD, Quota Pools, Lifecycle Redemptions, Real-time Repricing, Preview Endpoints) ตามสเปก D1–D13
+
+### 📋 Key Decisions & Architecture (D1–D13)
+- **D1 ฐานคำนวณส่วนลด:** เฉพาะค่าห้องพัก (`room_amount = rate × nights`) — ค่า addon (breakfast, extra bed, early check-in, late check-out) ไม่ถูกหักส่วนลด
+- **D2 Discount Types:** `percent` (1–100), `fixed` (satang ต่อ booking_room), `set_room_price` (satang ราคาห้องต่อคืน)
+- **D3 Targeting:** `room_type_ids` (JSON nullable) — `null` = ใช้ได้ทุกประเภทห้อง
+- **D4 Windows:** `usable_from/until` (datetime vs now) + `stay_from/until` (date vs check_in/check_out)
+- **D5–D6 Quotas & All-or-Nothing:** 1 eligible booking_room = 1 slot; ทั้ง global (`max_uses`) และ per-user (`max_uses_per_user`) นับรวม `held` + `used`; ถ้า quota เหลือไม่พอ $K$ ห้อง จะปฏิเสธ 422 ทั้งชุด
+- **D7–D8 Lifecycle & Auto-Release:** apply บน draft → `held` (คงค้างตลอด `pending` / `verify_error` / resubmit); เข้า `paid` หรือ `confirmed` → `used` ถาวรผ่าน hook ใน `Booking::transitionStatus()`; คืน slot อัตโนมัติด้วย DB Foreign Key cascade เมื่อลบ booking, booking_room หรือโค้ด
+- **D9 Single Source of Truth:** `DiscountService` (`app/Services/Discount/DiscountService.php`) จัดการ quota, reprice, apply, remove ทั้งหมด
+- **D10 Known Behavior:** booking `verify_error` ที่ user ทิ้งไว้ = HELD slot ค้าง (เหมือนห้องที่ค้าง)
+- **D11 Oversell Protection:** pessimistic lock (`lockForUpdate()`), post-insert assertion ใน transaction เดียวกัน
+
+### 📁 Files Changed
+- **Migrations:** ✨ `database/migrations/2026_08_27_110000_create_discount_system_tables.php` (ตาราง `discounts`, `discount_redemptions`, เพิ่ม `discount_code` ใน `bookings` และ `room_amount`, `discount_amount` ใน `booking_rooms`)
+- **Models:** ✨ `app/Models/Discount.php` (`PgBoolean` cast, uppercase code mutator) · ✨ `app/Models/DiscountRedemption.php` · ✏️ `app/Models/Booking.php` (fillable + hook `transitionStatus`) · ✏️ `app/Models/BookingRoom.php` (fillable + integer casts)
+- **Services:** ✨ `app/Services/Discount/DiscountService.php` (`applyToDraft`, `removeFromDraft`, `isEligible`, `computeForRoom`, `reprice`)
+- **Controllers:** ✨ `app/Http/Controllers/Api/V1/DiscountController.php` (`preview`, `index`, `store`, `update`, `toggleActive`) · ✏️ `app/Http/Controllers/Api/V1/BookingController.php` (ลบ draft `validateDiscount`, เพิ่ม `setDiscountCode`, `destroyDiscountCode`, integrate ใน `createBooking`, `addRooms`, `updateRoom`, `updateRooms`, `destroyRoom`, `recalculateBookingTotal`)
+- **Requests:** ✏️ `app/Http/Requests/StoreBookingRequest.php` (เพิ่ม `discount_code` rule & messages)
+- **Routes:** ✏️ `routes/api.php` (ลบ draft route, เพิ่ม `POST /discounts/validate`, `PUT/DELETE /bookings/{id}/discount-code`, admin routes `/discounts*`)
+- **Seeders:** ✨ `database/seeders/DiscountSeeder.php` (`WELCOME10`) · ✏️ `database/seeders/DatabaseSeeder.php`
+- **Tests:** ✨ `tests/Feature/DiscountTest.php` (26 test cases ครบทุก scenario)
+- **Docs:** ✏️ `docs/api_guide.md` · ✏️ `AGENTS.md` · ✏️ `cline.md`
+
+### 🗄️ Migration Required
+⚠️ **ต้องรัน `php artisan migrate`** (หรือ `migrate:fresh --seed` บน dev)
+
+### 🧪 Test Results
+- `php artisan test` — **313 passed (810 assertions)** (100% green full suite)
+- `vendor/bin/pint --dirty` — ผ่าน (clean code style)
+
+### 🔧 Scrutinize Fixes (2026-08-27, ต่อจาก review) — bug #42–#45
+
+> ผลจากการ scrutinize แบบ end-to-end: พบ 7 findings, แก้ 5 ข้อ + เพิ่ม regression tests 7 cases (`DiscountTest` → **33 passed**)
+
+- **#42 Validation error กลายเป็น HTTP 500:** `BookingController::setDiscountCode()` เรียก `$request->validate()` ใน try/catch `\Exception` — `ValidationException` มี `getCode()=0` ตกไป branch 500. **Fix:** rethrow `ValidationException` ก่อน generic catch (คืน 422 มาตรฐาน Laravel)
+- **#43 Admin rename โค้ดที่มี hold = draft พัง:** `bookings.discount_code` เป็น string snapshot — rename แล้ว `reprice()`/re-apply หาโค้ดไม่เจอ → hold ค้างแต่ส่วนลดหาย แก้ draft ไม่ได้. **Fix:** closure rule ใน `DiscountController::update()` ปฏิเสธ (422) การเปลี่ยน `code` เมื่อ `$discount->redemptions()->exists()` — ส่งชื่อเดิม (case-insensitive match) ยังเป็น no-op ได้; rename ได้ปกติเมื่อไม่มี redemption. *ระยะยาว: พิจารณา FK `discount_id` แทน string*
+- **#44 Half-set stay window:** validation เดิมยอมรับ `stay_from` อย่างเดียว แต่ `isEligible()` ตีความเป็น "ไม่ eligible ทุกห้อง" → preview 200 แต่ apply 422. **Fix:** `required_with` บังคับเป็นคู่ทั้ง store/update
+- **#45 Duplicate code ต่าง case → 500:** DB unique rule จับไม่ได้ (`welcome10` vs `WELCOME10`) — mutator uppercase ก่อน insert เลยชน QueryException. **Fix:** closure rule เช็ค case-insensitive ทั้ง store/update (update exclude ตัวเอง)
+- **Dead code cleanup:** ลบ `recalculateBookingTotal()` (ไม่มี caller แล้วหลังย้ายไป `DiscountService::reprice()`), ลบ `$totalAmount`/`$subtotal` ที่ unused ใน `createBooking` (เก็บ `$addedAmount` ใน addRooms — ยังใช้ใน response)
+- **Known behavior (documented แทน fix):** admin ปิด/หมดอายุโค้ดที่ถืออยู่ = hold+ส่วนลดค้างใน draft แต่แก้ห้อง 422 จน user DELETE โค้ด — เขียน frontend contract ไว้ใน `docs/api_guide.md` แล้ว
+- **Tests:** ✏️ `tests/Feature/DiscountTest.php` +7 regression cases (missing-code 422, non-owner 403, non-draft 422, duplicate-case 422, rename-blocked/rename-ok, stay-window pair)
+- Final: `php artisan test` — **320 passed (837 assertions)** · `vendor/bin/pint --dirty` — ผ่าน
+
+

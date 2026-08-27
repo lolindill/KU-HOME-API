@@ -1750,28 +1750,155 @@ Each log row captures **who** changed **what** **when**:
 
 ---
 
-### POST `/bookings/validate-discount` — Validate discount code 🚧
+### POST `/discounts/validate` — Validate discount code & preview quota 🎟️
 
-🔒 **Auth required**
+🔒 **Auth required** · Rate limit: `10,1`
 
-> 🚧 **DRAFT / TESTING** — Discount system incomplete. Do not use in production.
+Preview a discount code and check live quota remaining without side effects (does NOT hold or reserve a slot).
 
 **Request Body:**
 ```json
 {
-  "code": "WELCOME10",
-  "subtotal": 2400
+  "code": "SUPER50",
+  "check_in": "2026-09-10",
+  "check_out": "2026-09-12"
 }
 ```
+> `check_in` and `check_out` are optional. If provided, the code's `stay_from` / `stay_until` window is validated.
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "discount_applied": 240,
-  "net_total": 2160
+  "message": "โค้ดใช้งานได้ค่ะนายท่าน! ✨",
+  "discount": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "code": "SUPER50",
+    "type": "percent",
+    "value": 50,
+    "room_type_ids": null,
+    "usable_from": "2026-09-01T00:00:00.000000Z",
+    "usable_until": "2026-09-30T23:59:59.000000Z",
+    "stay_from": "2026-09-01",
+    "stay_until": "2026-12-20",
+    "max_uses": 10,
+    "max_uses_per_user": 3,
+    "is_active": true,
+    "created_at": "2026-08-27T11:00:00.000000Z",
+    "updated_at": "2026-08-27T11:00:00.000000Z"
+  },
+  "quota": {
+    "global_used": 3,
+    "global_max": 10,
+    "global_remaining": 7,
+    "per_user_used": 1,
+    "per_user_max": 3,
+    "per_user_remaining": 2
+  }
 }
 ```
+
+---
+
+### PUT `/bookings/{bookingId}/discount-code` — Apply / Change discount code 🎟️
+
+🔒 **Auth required** (Owner or Admin) · Rate limit: `5,1`
+
+Applies or swaps a discount code on an existing `draft` booking. Holds quota slots for eligible rooms and reprices the booking.
+
+**Request Body:**
+```json
+{
+  "code": "SUPER50"
+}
+```
+
+> 🛡️ **Validation (2026-08-27):** missing/empty `code` → **`422`** standard Laravel validation errors (`{"message":..., "errors": {"code": [...]}}`) — ไม่ใช่ 500. Non-owner → `403`, non-draft booking → `422`.
+
+**Error responses:** `401` (ยังไม่ล็อกอิน) · `403` (ไม่ใช่เจ้าของ/admin) · `404` (ไม่พบ booking) · `422` (validation / โค้ดหมดอายุ / ปิดใช้งาน / โควตาไม่พอ / ไม่มีห้อง eligible / สถานะไม่ใช่ draft)
+
+> ⚠️ **Frontend contract (2026-08-27):** ถ้า admin **ปิดใช้งานหรือหมดอายุ** (`usable_until`) โค้ดที่ booking ถืออยู่ภายหลัง — hold + ส่วนลดเดิม**ยังค้างอยู่ใน draft** (reprice ไม่ re-validate) แต่การ `PUT .../rooms/*` จะโดน `422` ("โค้ดหมดเขต/ปิดใช้งาน") เพราะ re-apply ใหม่ไม่ผ่าน → ทางออกของ user คือ `DELETE /bookings/{bookingId}/discount-code` ก่อนแก้ไขห้อง
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ใส่โค้ดส่วนลดเรียบร้อยแล้วค่ะ! 🎟️",
+  "booking": {
+    "id": "9d1f3c2e-...",
+    "confirmation": "202608-00001",
+    "status": "draft",
+    "discount_code": "SUPER50",
+    "total_amount": 260000,
+    "booking_rooms": [
+      {
+        "id": "...",
+        "room_type_id": "...",
+        "check_in": "2026-09-10",
+        "check_out": "2026-09-12",
+        "room_amount": 400000,
+        "discount_amount": 200000,
+        "addon": {
+          "breakfast": 2,
+          "breakfast_price": 60000,
+          "extra_bed": 0,
+          "extra_bed_price": 0,
+          "early_checkIn_price": 0,
+          "late_checkOut_price": 0
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### DELETE `/bookings/{bookingId}/discount-code` — Remove discount code 🎟️
+
+🔒 **Auth required** (Owner or Admin) · Rate limit: `5,1`
+
+Removes the discount code from a `draft` booking, releases held redemption slots, and reprices the booking to full rate.
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบโค้ดส่วนลดออกจากการจองเรียบร้อยแล้วค่ะ 🎟️",
+  "booking": {
+    "id": "...",
+    "discount_code": null,
+    "total_amount": 460000,
+    "booking_rooms": [
+      {
+        "id": "...",
+        "room_amount": 400000,
+        "discount_amount": 0
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Discount Management Endpoints (Admin only) 🎟️
+
+🔒 **Admin only**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/discounts` | List all discounts (optional `?is_active=true/false`) |
+| `POST` | `/discounts` | Create a new discount (`201 Created`) |
+| `PUT` | `/discounts/{id}` | Update discount attributes |
+| `PATCH` | `/discounts/{id}/toggle` | Toggle `is_active` status |
+
+> ❄️ **Note:** Discounts cannot be deleted (`DELETE` endpoint does not exist) to protect financial audit history. Soft toggle is used instead.
+
+> 🛡️ **Update rules (2026-08-27):**
+> - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน
+> - `stay_from` / `stay_until` ต้องส่ง**มาเป็นคู่เสมอ** (`required_with` กันไว้ทั้ง store/update) — half-set window ถูกปฏิเสธ `422`
+> - ความซ้ำของ `code` เช็คแบบ **case-insensitive** (`welcome10` ≡ `WELCOME10`) — ส่งซ้ำต่าง case → `422` validation error
 
 ---
 
@@ -2697,7 +2824,6 @@ These endpoints exist but are **not production-ready**:
 | `POST /payment/webhook`             | 🚧 Demo (signature verify TBD)  |
 | `POST /front-desk/{id}/payment`     | ⚠️ Demo record-payment (admin)  |
 | Receipt model / auto-generation     | ⚠️ Demo (tied to payment flow)  |
-| `POST /bookings/validate-discount`  | 🚧 Testing only                 |
 
 > 🖼️ **(19/08/26)** — `POST /upload-image` (draft, unauthenticated) ถูก**ถอดออกแล้ว** — ระบบรูปใช้งานจริงผ่าน flow ของเจ้าของ (เช่น `POST /bookings/{id}/confirm`) + ดูผ่าน `GET /images/{id}/file` (signed URL)
 
