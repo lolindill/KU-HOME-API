@@ -951,6 +951,7 @@ curl -s -H "Accept: application/json" \
       ],
       "billing_address": null,
       "billing_comment": null,
+      "bed_preference": "king_size",
       "addons": {
         "breakfast": 2,
         "early_checkin": 2,
@@ -968,6 +969,7 @@ curl -s -H "Accept: application/json" \
 
 > 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.  
 > 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.  
+> 🏨 **Phase 1**: `bed_preference` รองรับ `king_size` หรือ `null` (default: any) — เป็น hard constraint สำหรับ allocation algorithm (`king_size` = ห้องชั้น 8; 🌟 rename 27/08/26 เดิม `twin`)  
 > 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–5 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 5 ชม.).  
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน
 
@@ -989,6 +991,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.guests.*.email`            | nullable, string, email, max 255              |
 | `booking_rooms.*.guests.*.phone`            | nullable, string, max 50                      |
 | `booking_rooms.*.guests.*.nationality`      | nullable, string, max 100                     |
+| `booking_rooms.*.bed_preference`            | nullable, in: `king_size` (ห้องชั้น 8)        |
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
@@ -1016,6 +1019,7 @@ curl -s -H "Accept: application/json" \
       "check_in": "2026-06-20",
       "check_out": "2026-06-22",
       "status": "draft",
+      "bed_preference": "king_size",
       "guests": [
         {
           "title": "Mr.",
@@ -1087,6 +1091,7 @@ curl -s -H "Accept: application/json" \
       "check_in": "2026-08-20",
       "check_out": "2026-08-22",
       "extra_beds": 0,
+      "bed_preference": "king_size",
       "guests": [
         {
           "title": "Mr.",
@@ -1190,7 +1195,7 @@ curl -s -H "Accept: application/json" \
   "guests": [
     { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
   ],
-  "bed_preference": "twin",
+  "bed_preference": "king_size",
   "billing_address": null,
   "billing_comment": null,
   "addons": { "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
@@ -1206,7 +1211,7 @@ curl -s -H "Accept: application/json" \
 | `check_out` | `sometimes` date `after:check_in` |
 | `extra_beds` | nullable integer ≥ 0 |
 | `guests.*` | เหมือน `POST /bookings` |
-| `bed_preference` | nullable `in:twin` |
+| `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
 | `addons.breakfast` | nullable integer ≥ 0 |
 | `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–5) |
@@ -1234,7 +1239,7 @@ curl -s -H "Accept: application/json" \
     "billing_address": null,
     "billing_comment": null,
     "status": "draft",
-    "bed_preference": "twin",
+    "bed_preference": "king_size",
     "created_at": "2026-08-19T02:23:13.000000Z",
     "updated_at": "2026-08-19T02:23:13.000000Z",
     "addon": {
@@ -1318,7 +1323,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
 | `booking_rooms.*.extra_beds` | nullable integer ≥ 0 |
 | `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
-| `booking_rooms.*.bed_preference` | nullable `in:twin` |
+| `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
 | `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
 | `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–5) |
@@ -1341,7 +1346,7 @@ curl -s -H "Accept: application/json" \
       "billing_address": null,
       "billing_comment": null,
       "status": "draft",
-      "bed_preference": "twin",
+      "bed_preference": "king_size",
       "created_at": "...",
       "updated_at": "...",
       "addon": {

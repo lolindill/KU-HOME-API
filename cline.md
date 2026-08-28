@@ -72,7 +72,7 @@ hotel/
 │   │       ├── Weights.php            # value object โหลดจาก config/allocation.php
 │   │       ├── CostCalculator.php     # cost() (guide) + walkCost() (🏆 Final Judge Σ pairwise)
 │   │       ├── BipartiteMatcher.php   # Kuhn's algorithm (slot ↔ room position)
-│   │       ├── BookingPriority.php    # เรียง queue: Suite → X09 → Twin → Most rooms → Checkout
+│   │       ├── BookingPriority.php    # เรียง queue: Suite → X09 → BedPref → Most rooms → Checkout
 │   │       ├── X09Seeder.php          # pin Deluxe 3-bed (builtin≥2) ถ้า booking ต้องการ extra bed
 │   │       ├── Dto/                   # RoomDto, BookingRequestDto, AllocationResult
 │   │       └── Algorithms/            # Algorithm interface + A/C/D/FF + HybridPlus (EA = production)
@@ -89,7 +89,7 @@ hotel/
 │   │   ├── 2026_06_19_110000_create_addon_rates_table.php        # 🌟 server-side pricing
 │   │   ├── 2026_07_03_000000_drop_children_from_bookings_table.php
 │   │   ├── 2026_07_13_105530_add_topology_to_rooms_table.php           # 🏨 floor/side/pos/bed_type
-│   │   └── 2026_07_13_105531_add_bed_preference_to_booking_rooms_table.php # 🏨 twin|any
+│   │   └── 2026_07_13_105531_add_bed_preference_to_booking_rooms_table.php # 🏨 king_size|any (rename 27/08/26)
 │   ├── seeders/                       # DatabaseSeeder, RoomSeeder (100 rooms), UserSeeder, AddonRateSeeder
 │   └── factories/UserFactory.php
 ├── tests/
@@ -275,19 +275,19 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### BookingRoom (`app/Models/BookingRoom.php`)
 - **Primary Key**: UUID (HasUuids trait)
-- **Fillable**: booking_id, room_type_id, room_id (nullable — assign at check-in), check_in, check_out, guests (JSON), children, status, bed_preference (🏨 twin|any — Phase 1, 13/07/26)
+- **Fillable**: booking_id, room_type_id, room_id (nullable — assign at check-in), check_in, check_out, guests (JSON), children, status, bed_preference (🏨 king_size|any — rename 27/08/26, เดิม twin)
 - **Casts**: check_in→date, check_out→date, guests→array, children→integer
 - **Status Field**: string, managed by `transitionStatus()` BR-level state machine (draft→confirmed→checked_in→checked_out/no_show)
 - **Relationships**: booking (BelongsTo), roomType (BelongsTo), room (BelongsTo), addon (HasOne)
 - 🌟 **Refactor (25/06/26)**: `check_in`/`check_out` + `status` now live here (BR-level state machine). Each room can have different dates within the same booking.
-- 🏨 **Phase 1 (13/07/26)**: เพิ่ม `bed_preference` ('twin' | null=any) — hard constraint ใน RoomAllocator (ไม่ใช่ soft cost)
+- 🏨 **Phase 1 (13/07/26)**: เพิ่ม `bed_preference` ('twin' | null=any) — hard constraint ใน RoomAllocator (ไม่ใช่ soft cost) · 🌟 **Rename (27/08/26)**: ค่าที่ request ได้เปลี่ยนเป็น 'king_size' | null=any
 
 #### Room (`app/Models/Room.php`)
 - **Primary Key**: UUID
 - **Status Field**: string (all lowercase), managed by `transitionStatusTo()` state machine
 - **Fillable**: room_type_id, room_number, status, builtin_extra_beds, status_updated_at, status_updated_by, **floor, side, pos, bed_type** (🏨 Phase 1, 13/07/26)
 - **Casts**: status_updated_at→datetime, builtin_extra_beds→integer (🌟 Fix 03/07/26)
-- **Topology** (🏨 Phase 1): `floor` (5-9), `side` (V1/V2A/V2B), `pos` (within side), `bed_type` (double|twin — twin เฉพาะชั้น 8)
+- **Topology** (🏨 Phase 1): `floor` (5-9), `side` (V1/V2A/V2B), `pos` (within side), `bed_type` (twin|king_size — king_size เฉพาะชั้น 8; 🌟 rename 27/08/26 เดิม double|twin)
 - **Relationships**: roomType (BelongsTo), bookingRooms (HasMany), housekeepingTasks (HasMany)
 
 #### RoomType (`app/Models/RoomType.php`)
@@ -1626,4 +1626,40 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - `vendor/bin/pint --dirty` — ผ่าน (clean code style)
 
 
+
+## ✅ Bed Type Rename: double|twin → twin|king_size (2026-08-27)
+
+> 🏨 เปลี่ยนชุดค่า bed_type ของระบบ + สลับชนิดเตียงต่อชั้น — floor 8 = `king_size` ทุกห้อง, ชั้นอื่น = `twin`
+
+### 🎯 Why
+- ผู้ใช้ (owner) สั่งเปลี่ยน vocabulary: เดิม `{double, twin}` → ใหม่ `{twin, king_size}` พร้อมกันกับการสลับชนิดห้องรายชั้น
+- Semantic mirror ของของเดิมเป๊ะ: `bed_preference` ขอเฉพาะ "ชนิดพิเศษประจำชั้น 8" ได้ห้องเดียว — เดิมคือ 'twin', ใหม่คือ 'king_size' (null = any คงเดิม)
+
+### 🔁 Value Mapping (Breaking Change ต่อ API consumer)
+| | เดิม | ใหม่ |
+|---|---|---|
+| ห้องชั้น 5,6,7,9 (`bed_type`) | `'double'` | `'twin'` |
+| ห้องชั้น 8 (`bed_type`) | `'twin'` | `'king_size'` |
+| `booking_rooms.bed_preference` ที่ request ได้ | `'in:twin'` | `'in:king_size'` |
+
+- Algorithm ไม่แตะ logic เลย — `matchesBedPreference()` เป็น generic equality อยู่แล้ว, `CostCalculator` penalty (+100) คงเดิม, `BookingPriority` generalize `$hasTwin` → `$hasBedPref` (`!== null`, sort position เดิม)
+- `RoomDto::fromModel` default fallback → `'twin'`
+- ⚠️ **Frontend (ku-home) ต้องเปลี่ยน payload จาก `"twin"` → `"king_size"`**
+
+### 📁 Files Changed
+- **Migration:** ✨ `database/migrations/2026_08_27_160317_change_bed_types_to_twin_king_size.php` — widen varchar(8)→varchar(16) เฉพาะ pgsql (พร้อม `SET DEFAULT 'twin'`) + backfill data (rooms ทุกห้อง → twin, ชั้น 8 → king_size, bed_preference 'twin' → 'king_size')
+- **Legacy migrations edited** (เพื่อให้ `migrate:fresh` ได้ schema ตรง vocabulary ใหม่): `2026_07_13_105530` (width 16 + default 'twin'), `2026_07_13_105531` (width 16)
+- **Seeder:** ✏️ `RoomSeeder.php` — ternary ชั้น 8 = king_size, อื่นๆ twin
+- **Requests:** ✏️ `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php` — `in:king_size` + message
+- **Allocator:** ✏️ `Dto/RoomDto.php`, `Dto/BookingRequestDto.php`, `CostCalculator.php` (comments), `BookingPriority.php` (hasBedPref)
+- **Tests:** ✏️ `RoomAllocatorIntegrationTest.php` (rename test → `test_king_size_preference_picks_floor_8_rooms`), `CostCalculatorTest.php`, `TopologyTest.php`, `tests/Feature/BookingTest.php`
+- **Docs:** ✏️ `docs/api_guide.md` (examples/validation tables), `cline.md` (entry นี้) · Historical R&D docs (`docs/algo_test/*`) ไม่แก้
+
+### 🗄️ Migration Required
+⚠️ **รัน `php artisan migrate`** — backfill data ทั้ง rooms และ booking_rooms (DB เดิมโดน update ค่าทันที, dev/prod path เดียวกัน)
+
+### ➕ Follow-up: `bed_preference` บน POST endpoints (2026-08-28)
+- **What:** `POST /bookings` (`StoreBookingRequest`) และ `POST /bookings/{id}/rooms` (`AddBookingRoomsRequest`) รับ + persist `booking_rooms.*.bed_preference` แล้ว (`'bed_preference' => $roomRequest['bed_preference'] ?? null` ใน `BookingController@createBooking` + `@addRooms`) — ก่อนหน้านี้ field นี้รับได้เฉพาะทาง PUT endpoints
+- **Vocabulary:** `in:king_size` ตรงกับ PUT และ migration (ชุดงานแรกเขียน `in:twin` ซึ่งเป็น vocabulary เก่า — แก้ให้ตรงก่อน commit)
+- **Tests:** ✨ 4 เคสใหม่ใน `BookingTest` (persist + reject ทั้ง create/add) — reject case ใช้ค่าเก่า `'twin'`/`'double'` เป็น regression guard ของ rename
 

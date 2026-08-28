@@ -1546,7 +1546,7 @@ class BookingTest extends TestCase
                     ],
                     [
                         'booking_room_id' => $br2->id,
-                        'bed_preference' => 'twin',
+                        'bed_preference' => 'king_size',
                     ],
                 ],
             ]);
@@ -1571,7 +1571,7 @@ class BookingTest extends TestCase
         ]);
 
         $this->assertEquals('Updated Note 1', $br1->fresh()->billing_comment);
-        $this->assertEquals('twin', $br2->fresh()->bed_preference);
+        $this->assertEquals('king_size', $br2->fresh()->bed_preference);
     }
 
     public function test_batch_update_with_identical_dates_skips_availability_recheck(): void
@@ -1705,6 +1705,119 @@ class BookingTest extends TestCase
 
         $response->assertStatus(401);
         $this->assertDatabaseHas('booking_rooms', ['id' => $br->id]);
+    }
+
+    // ============================================
+    // 🏨 Bed Preference Tests (Create & Add Rooms)
+    // ============================================
+
+    public function test_create_booking_persists_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(1)->toDateString(),
+                    'check_out' => now()->addDays(3)->toDateString(),
+                    'bed_preference' => 'king_size',
+                ],
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(1)->toDateString(),
+                    'check_out' => now()->addDays(3)->toDateString(),
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $bookingId = $response->json('booking_id');
+
+        $rooms = BookingRoom::where('booking_id', $bookingId)->orderBy('created_at')->get();
+        $this->assertCount(2, $rooms);
+        $this->assertEquals('king_size', $rooms[0]->bed_preference);
+        $this->assertNull($rooms[1]->bed_preference);
+    }
+
+    public function test_create_booking_rejects_invalid_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(1)->toDateString(),
+                    'check_out' => now()->addDays(3)->toDateString(),
+                    // 'twin' = ค่า vocabulary เก่า (pre-rename 27/08/26) — ต้องถูก reject
+                    'bed_preference' => 'twin',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['booking_rooms.0.bed_preference']);
+    }
+
+    public function test_add_rooms_persists_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1);
+        $existingBrId = $booking->bookingRooms->first()->id;
+
+        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(4)->toDateString(),
+                    'check_out' => now()->addDays(6)->toDateString(),
+                    'bed_preference' => 'king_size',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $newRoom = BookingRoom::where('booking_id', $booking->id)
+            ->where('id', '!=', $existingBrId)
+            ->first();
+
+        $this->assertNotNull($newRoom);
+        $this->assertEquals('king_size', $newRoom->bed_preference);
+    }
+
+    public function test_add_rooms_rejects_invalid_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(4)->toDateString(),
+                    'check_out' => now()->addDays(6)->toDateString(),
+                    'bed_preference' => 'double',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['booking_rooms.0.bed_preference']);
     }
 
     // 🌟 Refactor (18/06/26): lookup & requestPaymentForGuest routes ถูกลบแล้ว — ไม่มี public guest access

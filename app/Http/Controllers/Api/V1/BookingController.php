@@ -349,6 +349,7 @@ class BookingController extends Controller
                     'check_in' => $roomRequest['check_in'],
                     'check_out' => $roomRequest['check_out'],
                     'status' => 'draft', // BR-level state (initial, ไม่ใช่ transition)
+                    'bed_preference' => $roomRequest['bed_preference'] ?? null,
                     'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
                     'billing_address' => $roomRequest['billing_address'] ?? null,
                     'billing_comment' => $roomRequest['billing_comment'] ?? null,
@@ -1241,6 +1242,7 @@ class BookingController extends Controller
                     'check_in' => $roomRequest['check_in'],
                     'check_out' => $roomRequest['check_out'],
                     'status' => 'draft', // BR-level state
+                    'bed_preference' => $roomRequest['bed_preference'] ?? null,
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
                     'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
                     // 🧾 Billing fields (04/08/26)
