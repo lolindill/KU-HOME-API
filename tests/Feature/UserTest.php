@@ -2,9 +2,9 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
 class UserTest extends TestCase
 {
@@ -52,6 +52,38 @@ class UserTest extends TestCase
         $response = $this->deleteJson("/api/v1/users/{$user->id}");
         $response->assertStatus(200);
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
+    }
+
+    // ============================================
+    // ✅ Role assignment (staff / housekeeping / ku_member)
+    // ============================================
+
+    public function test_admin_can_assign_extended_roles(): void
+    {
+        $this->actingAsAdmin();
+
+        foreach (['staff', 'housekeeping', 'ku_member'] as $role) {
+            $user = User::factory()->create(['role' => 'user']);
+            $response = $this->putJson("/api/v1/users/{$user->id}", [
+                'role' => $role,
+            ]);
+            $response->assertStatus(200);
+            $this->assertDatabaseHas('users', ['id' => (string) $user->id, 'role' => $role]);
+        }
+    }
+
+    public function test_admin_cannot_assign_roles_outside_allowlist(): void
+    {
+        $this->actingAsAdmin();
+
+        foreach (['system', 'guest', 'superadmin'] as $role) {
+            $user = User::factory()->create(['role' => 'user']);
+            $response = $this->putJson("/api/v1/users/{$user->id}", [
+                'role' => $role,
+            ]);
+            $response->assertStatus(422);
+            $this->assertDatabaseHas('users', ['id' => (string) $user->id, 'role' => 'user']);
+        }
     }
 
     // ============================================
