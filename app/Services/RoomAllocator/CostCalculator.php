@@ -44,7 +44,7 @@ final class CostCalculator
      *    - sideMismatch   (จำนวนฝั่ง-1) × w.side
      *    - posSpread      (globalMax-globalMin)² × w.pos   ← ยกกำลังสอง
      *    - bedWaste       Σ max(0, room.beds - 1 - br.extraBeds) × w.bed
-     *    - bedPrefPenalty +100 ต่อห้องที่ผิด twin/double preference
+     *    - bedPrefPenalty +100 ต่อห้องที่ผิด bed preference
      *
      * @param  array<int, array{room: RoomDto|null, br: BookingRequestDto}>  $pairs
      */
@@ -85,7 +85,7 @@ final class CostCalculator
             }
         }
 
-        // bed preference penalty (ผิด twin/double = +100)
+        // bed preference penalty (ผิด preference = +100)
         $bedPrefPenalty = 0.0;
         foreach ($pairs as $p) {
             if ($p['room'] !== null && $p['br']->bedPreference !== null && $p['br']->bedPreference !== 'any') {

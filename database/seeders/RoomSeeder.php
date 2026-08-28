@@ -26,7 +26,7 @@ use Illuminate\Support\Str;
  *          {f}20, {f}19 Superior   (หลังลิฟต์ 2 ตัว)
  *
  *    X09 พิเศษ: {f}09 = Deluxe 3-bed builtin (builtin_extra_beds=2)
- *    ชั้น 8: bed_type='twin' ทุกห้อง (อื่นๆ bed_type='double')
+ *    ชั้น 8: bed_type='king_size' ทุกห้อง (อื่นๆ bed_type='twin')
  *
  *    อ้างอิง: docs/algo_test/room-algorithm-flow-explained.md §2 (Topology)
  */
@@ -90,8 +90,8 @@ class RoomSeeder extends Seeder
                 ['room_type_id' => $spec['id'], 'rate_type' => 'daily'],
                 [
                     'code' => null,
-                    'name_en' => $spec['name_en'] . ' Daily',
-                    'name_th' => $spec['name_en'] . ' (ราคารายวัน)',
+                    'name_en' => $spec['name_en'].' Daily',
+                    'name_th' => $spec['name_en'].' (ราคารายวัน)',
                     'default_price' => $dailyRate,
                     'is_active' => true,
                 ]
@@ -102,7 +102,7 @@ class RoomSeeder extends Seeder
         $created = 0;
 
         foreach (self::FLOORS as $floor) {
-            $bedType = $floor === 8 ? 'twin' : 'double';
+            $bedType = $floor === 8 ? 'king_size' : 'twin';
 
             // ---- V1 (ฝั่งวิว 1, pos 1-12) ----
             // {f}07 Suite (pos 1), {f}08-17 Deluxe (pos 2-11), {f}18 Suite (pos 12)

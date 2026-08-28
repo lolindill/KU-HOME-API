@@ -27,7 +27,7 @@ class BookingRoom extends Model
         'check_out',
         'guests',      // JSON: [{ title, name, firstName, lastName, email, phone, nationality }, ...]
         'status',      // draft | confirmed | checked_in | checked_out | no_show
-        // 🏨 Phase 1: bed_preference สำหรับ Room Allocation Algorithm (twin | null=any)
+        // 🏨 bed_preference สำหรับ Room Allocation Algorithm (king_size = ชั้น 8 | null=any)
         'bed_preference',
         // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษีระดับห้อง
         'billing_address',

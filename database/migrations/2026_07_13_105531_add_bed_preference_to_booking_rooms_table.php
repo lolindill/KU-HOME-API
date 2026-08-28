@@ -8,10 +8,11 @@ use Illuminate\Support\Facades\Schema;
  * 🏨 Phase 1 — เพิ่ม bed_preference ให้ booking_rooms
  *
  *    Algorithm ใหม่ต้องการรู้ว่าผู้จองแต่ละห้องต้องการเตียงประเภทใด:
- *      - 'twin' → ตรงกับ rooms.bed_type='twin' (ห้องชั้น 8 เท่านั้น)
+ *      - 'king_size' → ตรงกับ rooms.bed_type='king_size' (ห้องชั้น 8 เท่านั้น)
+ *        (27/08/26 rename: 'twin' → 'king_size' ตามชุดค่า bed_type ใหม่)
  *      - null   → ไม่ระบุ (รับได้ทุกประเภท, default)
  *
- *    ใช้ใน bedPrefPenalty (cost function) + Booking Priority (Twin ต้องจัดก่อน)
+ *    ใช้ใน bedPrefPenalty (cost function) + Booking Priority (มี preference ต้องจัดก่อน)
  *
  *    nullable เพราะ booking เดิมที่สร้างก่อน migration นี้ยังไม่มีค่า → ถือว่า 'any'
  *
@@ -22,8 +23,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('booking_rooms', function (Blueprint $table) {
-            // 'twin' | null(=any)
-            $table->string('bed_preference', 8)->nullable()->after('check_out');
+            // 'king_size' | null(=any)
+            $table->string('bed_preference', 16)->nullable()->after('check_out');
         });
     }
 

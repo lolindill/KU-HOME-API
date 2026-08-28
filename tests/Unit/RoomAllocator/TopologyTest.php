@@ -29,7 +29,7 @@ final class TopologyTest extends TestCase
             pos: $pos,
             beds: 1,
             floor: $floor,
-            bedType: 'double',
+            bedType: 'twin',
         );
     }
 

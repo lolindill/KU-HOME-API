@@ -10,7 +10,7 @@ use App\Services\RoomAllocator\Dto\BookingRequestDto;
  * 🥇 Booking Priority — เรียง Queue ก่อน Assign ห้อง
  *
  *    Port จาก playground computeBookingPriority():
- *      Priority: Suite → X09-free(ถ้ามี) → Twin → Most rooms → Least checkout
+ *      Priority: Suite → X09-free(ถ้ามี) → BedPref → Most rooms → Least checkout
  *
  *    เหตุผล: booking ที่ "จัดยาก" (มีข้อจำกัดมาก) ต้องได้สิทธิ์เลือกก่อน
  *    เหมือนกับจองที่นั่งเครื่องบิน
@@ -23,12 +23,12 @@ final class BookingPriority
      * คำนวณ trait ของ booking สำหรับใช้ใน comparator
      *
      * @param  array<BookingRequestDto>  $brs  BR DTO ของ booking นี้ (loaded + eager)
-     * @return array{hasSuite: bool, hasX09Free: bool, hasTwin: bool, roomCount: int, checkOutTs: int}
+     * @return array{hasSuite: bool, hasX09Free: bool, hasBedPref: bool, roomCount: int, checkOutTs: int}
      */
     public static function traits(Booking $booking, array $brs, Weights $w): array
     {
         $hasExtraBed = false;
-        $hasTwin = false;
+        $hasBedPref = false;
         $hasSuite = false;
 
         foreach ($brs as $br) {
@@ -38,8 +38,9 @@ final class BookingPriority
             if ($br->type === 'Deluxe' && $br->extraBeds > 0) {
                 $hasExtraBed = true;
             }
-            if ($br->bedPreference === 'twin') {
-                $hasTwin = true;
+            // 🏨 BR ที่ระบุ bed_preference (king_size = ชั้น 8) จัดยาก → ได้สิทธิ์เลือกก่อน
+            if ($br->bedPreference !== null && $br->bedPreference !== 'any') {
+                $hasBedPref = true;
             }
         }
 
@@ -68,7 +69,7 @@ final class BookingPriority
         return [
             'hasSuite' => $hasSuite,
             'hasX09Free' => $hasX09Free,
-            'hasTwin' => $hasTwin,
+            'hasBedPref' => $hasBedPref,
             'roomCount' => count($brs),
             'checkOutTs' => $checkOutTs,
         ];
@@ -94,7 +95,7 @@ final class BookingPriority
      * Comparator สำหรับ usort() — เรียงตาม priority 5 ขั้น
      *    1. hasSuite       (desc — Suite ก่อน)
      *    2. hasX09Free     (desc)
-     *    3. hasTwin        (desc)
+     *    3. hasBedPref     (desc)
      *    4. roomCount      (desc — จองเยอะกว่าก่อน)
      *    5. checkOutTs     (asc  — เช็คเอาท์เร็วกว่าก่อน)
      *
@@ -109,8 +110,8 @@ final class BookingPriority
         if ($a['hasX09Free'] !== $b['hasX09Free']) {
             return $b['hasX09Free'] <=> $a['hasX09Free'];
         }
-        if ($a['hasTwin'] !== $b['hasTwin']) {
-            return $b['hasTwin'] <=> $a['hasTwin'];
+        if ($a['hasBedPref'] !== $b['hasBedPref']) {
+            return $b['hasBedPref'] <=> $a['hasBedPref'];
         }
         if ($a['roomCount'] !== $b['roomCount']) {
             return $b['roomCount'] <=> $a['roomCount'];

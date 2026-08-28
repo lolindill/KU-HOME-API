@@ -43,8 +43,8 @@ class UpdateBookingRoomRequest extends FormRequest
             'guests.*.phone' => 'nullable|string|max:50',
             'guests.*.nationality' => 'nullable|string|max:100',
 
-            // 🏨 Phase 1: bed preference สำหรับ allocation algorithm (twin | null = any)
-            'bed_preference' => 'nullable|string|in:twin',
+            // 🏨 bed preference สำหรับ allocation algorithm (king_size = ห้องชั้น 8 | null = any)
+            'bed_preference' => 'nullable|string|in:king_size',
 
             // 🧾 Billing fields
             'billing_address' => 'nullable|string|max:255',
@@ -84,7 +84,7 @@ class UpdateBookingRoomRequest extends FormRequest
             'check_in.after_or_equal' => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
             'check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์',
             'check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอิน',
-            'bed_preference.in' => 'bed_preference ต้องเป็น twin เท่านั้นค่ะ',
+            'bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',
             'addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-5) ค่ะ',
             'addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',
             'addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-5 ชั่วโมงค่ะ',

@@ -23,7 +23,7 @@ final class BookingRequestDto
      * @param  string  $checkIn  Y-m-d
      * @param  string  $checkOut  Y-m-d
      * @param  int  $extraBeds  จำนวน extra bed ที่ขอเพิ่ม (จาก addon)
-     * @param  string|null  $bedPreference  'twin' | null (=any)
+     * @param  string|null  $bedPreference  'king_size' | null (=any)
      */
     public function __construct(
         public readonly string $brId,
@@ -36,8 +36,8 @@ final class BookingRequestDto
 
     /**
      * ตรวจว่าห้องนี้ตรงกับ bed_preference ของ BR หรือไม่ (hard constraint)
-     *    - null/any → รับได้ทุกห้อง
-     *    - 'twin'   → ต้องเป็น bed_type='twin' เท่านั้น
+     *    - null/any    → รับได้ทุกห้อง
+     *    - 'king_size' → ต้องเป็น bed_type='king_size' เท่านั้น (ชั้น 8)
      */
     public function matchesBedPreference(RoomDto $room): bool
     {

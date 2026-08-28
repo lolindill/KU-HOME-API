@@ -28,7 +28,7 @@ final class RoomDto
      * @param  int  $pos  ตำแหน่งในฝั่ง
      * @param  int  $beds  จำนวนเตียงรวม = builtin_extra_beds + 1
      * @param  int  $floor  ชั้น 5-9
-     * @param  string  $bedType  double | twin
+     * @param  string  $bedType  twin | king_size
      * @param  array<array{checkIn: string, checkOut: string}>  $reservations
      */
     public function __construct(
@@ -56,7 +56,7 @@ final class RoomDto
             pos: $room->pos ?? 1,
             beds: ($room->builtin_extra_beds ?? 0) + 1,
             floor: $room->floor ?? 5,
-            bedType: $room->bed_type ?? 'double',
+            bedType: $room->bed_type ?? 'twin',
         );
     }
 

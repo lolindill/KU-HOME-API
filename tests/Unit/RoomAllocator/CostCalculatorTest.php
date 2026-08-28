@@ -33,7 +33,7 @@ final class CostCalculatorTest extends TestCase
     }
 
     /** helper: สร้าง RoomDto อย่างง่าย */
-    private function room(string $num, string $type, string $side, int $pos, int $floor, int $beds = 1, string $bedType = 'double'): RoomDto
+    private function room(string $num, string $type, string $side, int $pos, int $floor, int $beds = 1, string $bedType = 'twin'): RoomDto
     {
         return new RoomDto(
             id: 'test-'.$num,
@@ -117,10 +117,10 @@ final class CostCalculatorTest extends TestCase
 
     public function test_cost_bed_preference_mismatch(): void
     {
-        // ห้อง double แต่ booking อยาก twin → +100
+        // ห้อง twin (ชั้นอื่น) แต่ booking อยากได้ king_size → +100
         $pairs = [CostCalculator::pair(
-            $this->room('508', 'Deluxe', 'V1', 2, 5, 1, 'double'),
-            $this->br('Deluxe', bedPref: 'twin'),
+            $this->room('508', 'Deluxe', 'V1', 2, 5), // default bed_type=twin
+            $this->br('Deluxe', bedPref: 'king_size'),
         )];
         $cost = $this->cost->cost($pairs);
         $this->assertSame(100.0, $cost);
@@ -129,8 +129,8 @@ final class CostCalculatorTest extends TestCase
     public function test_cost_bed_preference_match_no_penalty(): void
     {
         $pairs = [CostCalculator::pair(
-            $this->room('808', 'Deluxe', 'V1', 2, 8, 1, 'twin'),
-            $this->br('Deluxe', bedPref: 'twin'),
+            $this->room('808', 'Deluxe', 'V1', 2, 8, 1, 'king_size'),
+            $this->br('Deluxe', bedPref: 'king_size'),
         )];
         $this->assertSame(0.0, $this->cost->cost($pairs));
     }
@@ -140,7 +140,7 @@ final class CostCalculatorTest extends TestCase
         // ห้อง 3 เตียง (builtin_extra_beds=2) แต่ booking ขอแค่ 0 extra
         // bedWaste = max(0, 3 - 1 - 0) × 5 = 2 × 5 = 10
         $pairs = [CostCalculator::pair(
-            $this->room('509', 'Deluxe', 'V1', 3, 5, 3, 'double'), // X09 = 3 beds
+            $this->room('509', 'Deluxe', 'V1', 3, 5, 3, 'twin'), // X09 = 3 beds
             $this->br('Deluxe', extraBeds: 0),
         )];
         $cost = $this->cost->cost($pairs);

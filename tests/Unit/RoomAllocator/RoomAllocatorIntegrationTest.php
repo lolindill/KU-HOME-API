@@ -79,7 +79,7 @@ final class RoomAllocatorIntegrationTest extends TestCase
 
         $floors = [5, 6, 7, 8, 9];
         foreach ($floors as $floor) {
-            $bedType = $floor === 8 ? 'twin' : 'double';
+            $bedType = $floor === 8 ? 'king_size' : 'twin';
             // room_number suffix (2 หลักท้าย) → prepend floor ตอนสร้าง
             $v1 = [
                 ['07', 'Suite',  'V1', 1, 0],
@@ -209,23 +209,23 @@ final class RoomAllocatorIntegrationTest extends TestCase
     }
 
     // ============================================
-    // ✅ C-TWIN: 2× Deluxe pref=twin → ได้ห้องชั้น 8 (bed_type=twin)
+    // ✅ C-TWIN (king_size): 2× Deluxe pref=king_size → ได้ห้องชั้น 8 (bed_type=king_size)
     // ============================================
-    public function test_twin_preference_picks_floor_8_rooms(): void
+    public function test_king_size_preference_picks_floor_8_rooms(): void
     {
         $brs = new EloquentCollection([
-            $this->makeBr('Deluxe', '2026-07-14', '2026-07-16', bedPref: 'twin'),
-            $this->makeBr('Deluxe', '2026-07-14', '2026-07-16', bedPref: 'twin'),
+            $this->makeBr('Deluxe', '2026-07-14', '2026-07-16', bedPref: 'king_size'),
+            $this->makeBr('Deluxe', '2026-07-14', '2026-07-16', bedPref: 'king_size'),
         ]);
 
         $result = $this->allocator->allocate($brs);
 
         $this->assertTrue($result->ok);
 
-        // ทุกห้องต้องเป็น bed_type=twin (อยู่ชั้น 8) — bed_preference เป็น hard constraint
+        // ทุกห้องต้องเป็น bed_type=king_size (อยู่ชั้น 8) — bed_preference เป็น hard constraint
         $assignedRooms = Room::whereIn('id', array_values(array_filter($result->assignments)))->get();
         foreach ($assignedRooms as $room) {
-            $this->assertSame('twin', $room->bed_type, "room {$room->room_number} should be twin");
+            $this->assertSame('king_size', $room->bed_type, "room {$room->room_number} should be king_size");
         }
     }
 
