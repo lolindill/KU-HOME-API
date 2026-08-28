@@ -935,7 +935,7 @@ class BookingTest extends TestCase
         $roomType = $this->createRoomType();
         $this->createRoom($roomType);
 
-        // test 6 (เกิน 5)
+        // test 8 (เกิน 7)
         $response1 = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
@@ -944,7 +944,7 @@ class BookingTest extends TestCase
                         'room_type_id' => $roomType->id,
                         'check_in' => now()->addDay()->toDateString(),
                         'check_out' => now()->addDays(2)->toDateString(),
-                        'addons' => ['early_checkin' => 6],
+                        'addons' => ['early_checkin' => 8],
                     ],
                 ],
             ]);

@@ -1663,3 +1663,18 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Vocabulary:** `in:king_size` ตรงกับ PUT และ migration (ชุดงานแรกเขียน `in:twin` ซึ่งเป็น vocabulary เก่า — แก้ให้ตรงก่อน commit)
 - **Tests:** ✨ 4 เคสใหม่ใน `BookingTest` (persist + reject ทั้ง create/add) — reject case ใช้ค่าเก่า `'twin'`/`'double'` เป็น regression guard ของ rename
 
+
+## ✅ Early/Late Check-in/out ขยายเพดานจาก 5 → 7 ชั่วโมง (2026-08-28)
+
+> 🕐 เพิ่ม maximum ของ `addons.early_checkin` / `addons.late_checkout` จาก **5 ชม. → 7 ชม.** (owner request) — สูตรราคาคงเดิม (`ราคา = ชม. × rate/ชม. จาก global_rates`) แค่ขยายช่วง input
+
+### 📁 Files Changed
+- **Requests:** ✏️ `StoreBookingRequest.php`, `AddBookingRoomsRequest.php`, `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php` — rule `max:5` → `max:7` + ข้อความเตือนภาษาไทยเปลี่ยนช่วงเป็น `0-7` ทุกจุด (ทั้ง closure fail message และ `messages()`)
+- **Controllers:** ✏️ `app/Http/Controllers/Api/V1/BookingController.php` (comment ของ helper `resolveEarlyLate` 0-5 → 0-7 — logic คิดเงินไม่แตะเลย เพราะคูณตรงจากชั่วโมงที่ validate แล้ว)
+- **Tests:** ✏️ `tests/Feature/BookingTest.php::test_create_booking_rejects_early_hours_out_of_range` — reject case เปลี่ยนจาก `6` (เกิน 5) → `8` (เกิน 7) เพื่อให้ยังทดสอบเส้นบนได้จริง
+- **Docs:** ✏️ `docs/api_guide.md` — validation tables + pricing notes + `early_hours`/`late_hours` response tables (0–5 → 0–7 ทั้ง 7 จุด) · `docs/early-late-hourly-plan.md` ทิ้งไว้เป็น historical record (ระบุช่วงเก่า 0–5 ตามวันที่เขียน)
+
+### 📝 Notes
+- ไม่มี migration — คอลัมน์ `early_hours`/`late_hours` เป็น int ธรรมดา รับค่าใหม่ได้เลย
+- จุดคุมเพดานอยู่ที่ **Form Request validation เท่านั้น** (controller ไม่มี clamp ซ้ำ) — ถ้าอนาคตจะปรับเพดานอีก แก้ 4 ไฟล์ Request + test reject case + docs
+

@@ -970,7 +970,7 @@ curl -s -H "Accept: application/json" \
 > 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.  
 > 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.  
 > 🏨 **Phase 1**: `bed_preference` รองรับ `king_size` หรือ `null` (default: any) — เป็น hard constraint สำหรับ allocation algorithm (`king_size` = ห้องชั้น 8; 🌟 rename 27/08/26 เดิม `twin`)  
-> 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–5 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 5 ชม.).  
+> 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน
 
 **Validation Rules:**
@@ -995,8 +995,8 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
-| `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–5)                       |
-| `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–5)                       |
+| `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–7)                       |
+| `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–7)                       |
 
 > 💡 **Pricing**: Server calculates all prices from `global_rates` (room daily rates via `rate_type='daily'` + `room_type_id`) and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 
@@ -1214,7 +1214,7 @@ curl -s -H "Accept: application/json" \
 | `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
 | `addons.breakfast` | nullable integer ≥ 0 |
-| `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–5) |
+| `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–7) |
 
 **Response `200`:**
 ```json
@@ -1326,7 +1326,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
 | `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
-| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–5) |
+| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–7) |
 
 **Response `200`:**
 ```json
@@ -2232,7 +2232,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 🔒 **Public**
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–5)
+> 🌟 **(26/08/26, 27/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7)
 
 **Response `200`:**
 ```json
@@ -2536,9 +2536,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `breakfast`            | integer | Number of breakfasts                     |
 | `breakfast_price`      | integer | Total breakfast price (baht)             |
 | `early_checkIn_price`  | integer | Early check-in total price (satang)      |
-| `early_hours`          | integer | Early check-in hours (0–5, default: 0)   |
+| `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
 | `late_checkOut_price`  | integer | Late check-out total price (satang)      |
-| `late_hours`           | integer | Late check-out hours (0–5, default: 0)   |
+| `late_hours`           | integer | Late check-out hours (0–7, default: 0)   |
 | `created_at`           | timestamp |                                        |
 | `updated_at`           | timestamp |                                        |
 

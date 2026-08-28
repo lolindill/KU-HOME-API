@@ -1667,7 +1667,7 @@ class BookingController extends Controller
     }
 
     /**
-     * 🕐 (27/08/26): สูตรรายชั่วโมง — addons.early_checkin / addons.late_checkout รับ int จำนวนชั่วโมง (0-5)
+     * 🕐 (27/08/26): สูตรรายชั่วโมง — addons.early_checkin / addons.late_checkout รับ int จำนวนชั่วโมง (0-7)
      * ไม่ส่ง addons key มา = ใช้ค่าจากแถว addon เดิม (fallback ตามพฤติกรรมเดิมของ updateRoom/updateRooms)
      */
     private function resolveEarlyLate(?array $addonInput, ?Addon $existing = null): array
