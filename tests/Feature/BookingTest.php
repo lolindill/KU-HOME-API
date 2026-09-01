@@ -1126,6 +1126,199 @@ class BookingTest extends TestCase
         ]);
     }
 
+    /**
+     * 🔧 Regression (01/09/26): frontend ส่ง addons มาเป็นชื่อ column (early_hours/late_hours)
+     * + แถมราคาที่ client คิดเอง — เดิม validation ตัด key ทิ้งทำให้ "แก้ชั่วโมงแล้วไม่อัปเดต"
+     * ตอนนี้ backend รับ alias และ ignore ราคา (reprice ฝั่ง server เสมอ)
+     */
+    public function test_update_room_accepts_early_late_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast',
+            'name_en' => 'Breakfast', 'default_price' => 5000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        // เดิมมี breakfast 2 ท่าน — payload ที่ frontend ส่งไม่มี breakfast → ต้องคงเดิม ไม่หายเป็น 0
+        $br->addon->update(['breakfast' => 2, 'breakfast_price' => 10000]);
+
+        // payload แบบเดียวกับที่ frontend (bookings.ts updateBookingRoomsInBooking) ส่งจริง
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => [
+                    'early_checkIn_price' => 20000, // ราคา client ส่งมาต้องถูก ignore
+                    'early_hours' => 3,
+                    'late_checkOut_price' => 10000,
+                    'late_hours' => 2,
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 3,
+            'early_checkIn_price' => 30000, // reprice ฝั่ง server: 3 × 10000
+            'late_hours' => 2,
+            'late_checkOut_price' => 20000, // 2 × 10000
+            'breakfast' => 2,               // ไม่ส่งมา = คงเดิม
+            'breakfast_price' => 10000,
+        ]);
+        // total = ห้อง 3000 + breakfast 10000 + early 30000 + late 20000 = 63000
+        $response->assertJsonPath('total_amount', 63000);
+    }
+
+    /**
+     * 🔧 Regression (01/09/26): เคส batch update จาก report จริง — ส่ง alias hours ผ่าน
+     * PUT /bookings/{id}/rooms แล้ว addon ที่ผูกกับ booking room ต้องอัปเดตตาม
+     */
+    public function test_update_rooms_batch_accepts_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        // สถานะเดิมตาม report: early 2 ชม. (20000) + late 1 ชม. (10000)
+        $br->addon->update([
+            'early_hours' => 2,
+            'early_checkIn_price' => 20000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 10000,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addons' => [
+                            'early_checkIn_price' => 20000,
+                            'early_hours' => 1,
+                            'late_checkOut_price' => 10000,
+                            'late_hours' => 3,
+                        ],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 1,
+            'early_checkIn_price' => 10000,
+            'late_hours' => 3,
+            'late_checkOut_price' => 30000,
+        ]);
+    }
+
+    /**
+     * 🔧 (01/09/26): ถ้าส่งทั้ง canonical (early_checkin) และ alias (early_hours)
+     * canonical key ต้องชนะเสมอ — และ alias เกินขอบเขต 0-7 ต้อง 422
+     */
+    public function test_update_room_canonical_key_wins_over_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 1000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_checkin' => 2, 'early_hours' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 2,
+            'early_checkIn_price' => 2000,
+        ]);
+    }
+
+    public function test_update_room_rejects_out_of_range_hours_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_hours' => 8],
+            ]);
+
+        $response->assertJsonValidationErrors(['addons.early_hours']);
+    }
+
+    public function test_create_booking_accepts_early_late_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
+                        'addons' => ['early_hours' => 2, 'late_hours' => 1],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $response->json('booking_rooms.0.id'),
+            'early_hours' => 2,
+            'early_checkIn_price' => 20000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 10000,
+        ]);
+    }
+
     public function test_update_room_rejects_when_no_availability(): void
     {
         $roomType = $this->createRoomType();

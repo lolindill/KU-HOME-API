@@ -1701,3 +1701,24 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - `vendor/bin/pint --dirty` — ผ่าน (clean code style)
 
 
+
+## ✅ Fix: PUT booking room แล้ว addon ไม่อัปเดต — alias `early_hours`/`late_hours` + key-level PATCH (2026-09-01)
+
+### 🐞 อาการ (report จากฝั่ง frontend)
+- frontend (`ku-home` `bookings.ts::updateBookingRoomsInBooking`) ส่ง `addons: { early_hours: 1, late_hours: 3, early_checkIn_price: 20000, late_checkOut_price: 10000 }` มาที่ `PUT /bookings/{id}/rooms` (และรายห้อง)
+- API ไม่มี rule ของ key `early_hours`/`late_hours` → validation ตัดทิ้ง → canonical keys หายไปทั้งหมด → ชั่วโมงไม่ถูกอัปเดต (response ยังค่าเดิม)
+
+### 🔧 สาเหตุ + แนวทางแก้ (ฝั่ง backend รองรับ payload ของ frontend)
+1. **Alias validation:** เพิ่ม `addons.early_hours` / `addons.late_hours` (integer 0-7 + reject boolean เหมือน canonical) ใน 4 Form Requests: `StoreBookingRequest`, `AddBookingRoomsRequest`, `UpdateBookingRoomRequest`, `UpdateBookingRoomsRequest`
+2. **`BookingController::resolveEarlyLate()`:** ลำดับ resolve ต่อ key = **canonical (`early_checkin`/`late_checkout`) → alias (`early_hours`/`late_hours`) → คงค่าเดิมจากแถว addon**; เมื่อไม่ส่ง `addons` key มาเลยยังใช้ legacy fallback เดิม (ดู `early_checkIn_price` > 0)
+3. **Key-level PATCH semantics:** ส่ง `addons` มาแบบ partial (เช่นมีแต่ hours ไม่มี breakfast) = key ที่ไม่ส่ง **คงค่าเดิม** ไม่ reset เป็น 0 — ตรงกับ comment เดิมในโค้ด "ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row"; จะปิด addon ต้องส่ง `0` ชัดๆ (เดิมส่ง partial แล้ว breakfast โดนลบเงียบ ๆ = landmine)
+4. **ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ยังถูก ignore** — reprice จาก `global_rates` ฝั่ง server เสมอ (กัน price manipulation #20)
+
+### 📁 Files Changed
+- `app/Http/Requests/{StoreBookingRequest,AddBookingRoomsRequest,UpdateBookingRoomRequest,UpdateBookingRoomsRequest}.php` — alias rules + messages
+- `app/Http/Controllers/Api/V1/BookingController.php` — `resolveEarlyLate()` + breakfast key-level fallback (updateRoom + updateRooms)
+- `tests/Feature/BookingTest.php` — ✨ 5 tests: alias รายห้อง (คง breakfast), batch ตาม payload จริงจาก report, canonical ชนะ alias, alias เกิน 7 ชม. 422, create ผ่าน alias
+- `docs/api_guide.md` — ตาราง validation 3 จุด + หมายเหตุ semantics
+
+### 🧪 Test Results
+- `php artisan test` — **337 passed (911 assertions)** (100% green)

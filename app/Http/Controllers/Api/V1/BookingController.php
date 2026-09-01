@@ -646,7 +646,7 @@ class BookingController extends Controller
                     ? ($validated['extra_beds'] ?? 0)
                     : ($existingAddon?->extra_bed ?? 0);
                 $breakfastQty = is_array($addonInput)
-                    ? ($addonInput['breakfast'] ?? 0)
+                    ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
                     : ($existingAddon?->breakfast ?? 0);
                 [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
@@ -911,7 +911,7 @@ class BookingController extends Controller
                         ? ($roomRequest['extra_beds'] ?? 0)
                         : ($existingAddon?->extra_bed ?? 0);
                     $breakfastQty = is_array($addonInput)
-                        ? ($addonInput['breakfast'] ?? 0)
+                        ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
                         : ($existingAddon?->breakfast ?? 0);
                     [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
@@ -1656,16 +1656,23 @@ class BookingController extends Controller
 
     /**
      * 🕐 (27/08/26): สูตรรายชั่วโมง — addons.early_checkin / addons.late_checkout รับ int จำนวนชั่วโมง (0-7)
-     * ไม่ส่ง addons key มา = ใช้ค่าจากแถว addon เดิม (fallback ตามพฤติกรรมเดิมของ updateRoom/updateRooms)
+     * 🔧 (01/09/26): รับ alias early_hours / late_hours (frontend echo ชื่อ column กลับมา — bug "แก้ชั่วโมงแล้วไม่อัปเดต")
+     *                ลำดับ resolve ของแต่ละ key: canonical → alias → คงค่าเดิมจากแถว addon
+     * ไม่ส่ง addons key มาเลย = ใช้ค่าจากแถว addon เดิม (fallback ตามพฤติกรรมเดิมของ updateRoom/updateRooms)
      */
     private function resolveEarlyLate(?array $addonInput, ?Addon $existing = null): array
     {
-        $earlyHours = is_array($addonInput)
-            ? (int) ($addonInput['early_checkin'] ?? 0)
-            : (! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 0) : 0);
-        $lateHours = is_array($addonInput)
-            ? (int) ($addonInput['late_checkout'] ?? 0)
-            : (! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 0) : 0);
+        if (is_array($addonInput)) {
+            $earlyHours = (int) ($addonInput['early_checkin'] ?? $addonInput['early_hours']
+                ?? ($existing?->early_hours ?? 0));
+            $lateHours = (int) ($addonInput['late_checkout'] ?? $addonInput['late_hours']
+                ?? ($existing?->late_hours ?? 0));
+
+            return [$earlyHours, $lateHours];
+        }
+
+        $earlyHours = ! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 0) : 0;
+        $lateHours = ! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 0) : 0;
 
         return [$earlyHours, $lateHours];
     }

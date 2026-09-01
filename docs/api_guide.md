@@ -971,7 +971,8 @@ curl -s -H "Accept: application/json" \
 > 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.  
 > 🏨 **Phase 1**: `bed_preference` รองรับ `king_size` หรือ `null` (default: any) — เป็น hard constraint สำหรับ allocation algorithm (`king_size` = ห้องชั้น 8; 🌟 rename 27/08/26 เดิม `twin`)  
 > 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
-> ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน
+> ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
+> 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
 
 **Validation Rules:**
 
@@ -997,6 +998,8 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
 | `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–7)                       |
 | `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–7)                       |
+| `booking_rooms.*.addons.early_hours`        | nullable, integer (0–7) — alias ของ `early_checkin` |
+| `booking_rooms.*.addons.late_hours`         | nullable, integer (0–7) — alias ของ `late_checkout` |
 
 > 💡 **Pricing**: Server calculates all prices from `global_rates` (room daily rates via `rate_type='daily'` + `room_type_id`) and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 
@@ -1215,6 +1218,9 @@ curl -s -H "Accept: application/json" \
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
 | `addons.breakfast` | nullable integer ≥ 0 |
 | `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–7) |
+| `addons.early_hours` / `addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
+
+> 🔧 **(01/09/26)** Update semantics เป็น key-level PATCH: ส่ง `addons` มาเฉพาะบาง key = key ที่ไม่ส่ง **คงค่าเดิม** จากแถว addon (ไม่ reset เป็น 0) — จะปิด addon ต้องส่ง `0` ชัดๆ
 
 **Response `200`:**
 ```json
@@ -1327,6 +1333,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
 | `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
 | `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–7) |
+| `booking_rooms.*.addons.early_hours` / `booking_rooms.*.addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
+
+> 🔧 **(01/09/26)** เหมือนรายห้อง: รับ alias hours + key-level PATCH (key ที่ไม่ส่งใน `addons` = คงค่าเดิม)
 
 **Response `200`:**
 ```json
