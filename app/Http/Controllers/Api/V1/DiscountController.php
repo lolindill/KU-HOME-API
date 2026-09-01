@@ -213,8 +213,7 @@ class DiscountController extends Controller
             ],
             'type' => 'sometimes|required|in:percent,fixed,set_room_price',
             'value' => [
-                'sometimes',
-                'required',
+                'required_with:type',
                 'integer',
                 'min:0',
                 function ($attribute, $value, $fail) use ($request, $discount) {
@@ -233,6 +232,8 @@ class DiscountController extends Controller
             'stay_until' => 'nullable|date|after_or_equal:stay_from|required_with:stay_from',
             'max_uses' => 'nullable|integer|min:1',
             'max_uses_per_user' => 'nullable|integer|min:1',
+        ], [
+            'value.required_with' => 'เปลี่ยนประเภทส่วนลดต้องส่ง value มาพร้อมกันเสมอค่ะ',
         ]);
 
         $discount->update($validated);

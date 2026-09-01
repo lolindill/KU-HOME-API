@@ -1061,4 +1061,53 @@ class DiscountTest extends TestCase
                 'stay_until' => Carbon::today()->addDays(30)->toDateString(),
             ])->assertStatus(422)->assertJsonValidationErrors(['stay_from']);
     }
+
+    /**
+     * 🛡️ (28/08/26 F1): เปลี่ยน type โดยไม่ส่ง value ต้องถูก reject (422) กันกรณี fixed satang หลุดไปเป็น percent 100%
+     */
+    public function test_update_discount_type_swap_without_value_is_rejected(): void
+    {
+        $admin = $this->makeUser('admin');
+        $discount = Discount::create([
+            'code' => 'FIXEDTO100',
+            'type' => 'fixed',
+            'value' => 100000,
+            'is_active' => true,
+        ]);
+
+        // เปลี่ยนเป็น percent โดยไม่ส่ง value → 422
+        $response = $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/discounts/{$discount->id}", [
+                'type' => 'percent',
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['value'])
+            ->assertJsonPath('errors.value.0', 'เปลี่ยนประเภทส่วนลดต้องส่ง value มาพร้อมกันเสมอค่ะ');
+
+        // ส่ง type พร้อม value ที่ถูกต้อง → 200
+        $response2 = $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/discounts/{$discount->id}", [
+                'type' => 'percent',
+                'value' => 50,
+            ]);
+
+        $response2->assertStatus(200);
+        $this->assertSame('percent', $discount->fresh()->type);
+        $this->assertSame(50, $discount->fresh()->value);
+
+        // ส่งเฉพาะ value ที่เกิน 100 บน percent discount → 422
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/discounts/{$discount->id}", [
+                'value' => 150,
+            ])->assertStatus(422)
+            ->assertJsonValidationErrors(['value']);
+
+        // ส่งเฉพาะ max_uses โดยไม่ส่ง type หรือ value → 200
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/discounts/{$discount->id}", [
+                'max_uses' => 99,
+            ])->assertStatus(200);
+        $this->assertSame(99, $discount->fresh()->max_uses);
+    }
 }

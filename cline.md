@@ -1678,3 +1678,26 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - ไม่มี migration — คอลัมน์ `early_hours`/`late_hours` เป็น int ธรรมดา รับค่าใหม่ได้เลย
 - จุดคุมเพดานอยู่ที่ **Form Request validation เท่านั้น** (controller ไม่มี clamp ซ้ำ) — ถ้าอนาคตจะปรับเพดานอีก แก้ 4 ไฟล์ Request + test reject case + docs
 
+
+## ✅ Scrutinize Fixes (2026-08-28) — bug #46, #47 & Nit (Completed)
+
+> 🔧 แก้ไข findings จากการ scrutinize (`docs/scrutinize-2026-08-28-handoff.md`) ครบถ้วน พร้อมเพิ่ม regression tests ครอบคลุมทุกจุด
+
+### 🔴 #46 (RESOLVED): `PUT /discounts/{id}` เปลี่ยน `type` โดยไม่ส่ง `value` → ส่วนลด 100%
+- **สาเหตุ:** `value` rule เดิมใช้ `sometimes` ทำให้เมื่อ request ส่ง `type` แต่ไม่ส่ง `value` การตรวจ closure percent 1–100 ถูกข้าม → ค่า satang เดิมถูกใช้เป็น percent
+- **Fix:** เปลี่ยน rule `value` ใน `DiscountController::update()` เป็น `'required_with:type'` (ตัด `sometimes` ออกเพื่อให้ `required_with` ทำงานเมื่อส่ง `type`) + เพิ่ม custom validation error message `'value.required_with' => 'เปลี่ยนประเภทส่วนลดต้องส่ง value มาพร้อมกันเสมอค่ะ'`
+- **Tests:** ✨ `tests/Feature/DiscountTest.php::test_update_discount_type_swap_without_value_is_rejected` (+ edge cases: percent range clamp, standalone field updates)
+
+### 🟡 #47 (RESOLVED): draft ที่ถือโค้ด — แก้ห้องโดน rollback + error กำกวม
+- **สาเหตุ:** การ reconcile ส่วนลดใน `addRooms`, `updateRoom`, `updateRooms` เรียก `applyToDraft()` ซึ่งถ้าทุกห้องหลุด eligibility จะคืน 422 ทั่วไปโดยไม่บอกทางแก้ไข
+- **Fix:** สกัด helper `BookingController::reconcileDiscount(Booking $booking)` รวมจุด reconcile ทั้ง 3 endpoints — ดักจับ 422 แล้วแปลงเป็น error message ชี้ทางออกชัดเจน: `'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด '.$booking->discount_code.' อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ'`
+- **Tests:** ✨ `tests/Feature/BookingTest.php` (`test_update_room_ineligible_for_discount_returns_actionable_error`, `test_batch_update_rooms_ineligible_for_discount_returns_actionable_error`)
+
+### ⚪ Nit (RESOLVED): `resolveEarlyLate` dead fallback
+- **Fix:** เปลี่ยน `$existing?->early_hours ?? 1` และ `$existing?->late_hours ?? 1` เป็น `?? 0` ใน `BookingController::resolveEarlyLate()`
+
+### 🧪 Test Results
+- `php artisan test` — **332 passed (900 assertions)** (100% green full suite)
+- `vendor/bin/pint --dirty` — ผ่าน (clean code style)
+
+

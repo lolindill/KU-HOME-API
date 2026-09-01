@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\Discount;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
@@ -1818,6 +1819,97 @@ class BookingTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['booking_rooms.0.bed_preference']);
+    }
+
+    /**
+     * 🛡️ (28/08/26 F2): แก้ไขห้องใน draft booking ที่ถือโค้ดส่วนลดจนหลุด eligibility ทั้งหมด
+     * ต้องส่ง 422 พร้อมคำแนะนำให้ DELETE /bookings/{id}/discount-code ก่อน
+     */
+    public function test_update_room_ineligible_for_discount_returns_actionable_error(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $discount = Discount::create([
+            'code' => 'STAYWINDOW',
+            'type' => 'percent',
+            'value' => 20,
+            'stay_from' => now()->addDays(1)->toDateString(),
+            'stay_until' => now()->addDays(5)->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // ใส่โค้ดส่วนลดลง draft
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/discount-code", [
+                'code' => 'STAYWINDOW',
+            ])->assertStatus(200);
+
+        $this->assertSame('STAYWINDOW', $booking->fresh()->discount_code);
+
+        // ย้ายวันเข้าพักออกนอก stay_window (+10..+13) → ต้องได้ 422 พร้อมระบุวิธีลบโค้ด
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'check_in' => now()->addDays(10)->toDateString(),
+                'check_out' => now()->addDays(13)->toDateString(),
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonPath('message', 'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด STAYWINDOW อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ');
+
+        // วันที่ของห้องเดิมต้องถูก rollback
+        $this->assertEquals(now()->addDays(1)->toDateString(), $br->fresh()->check_in->toDateString());
+    }
+
+    /**
+     * 🛡️ (28/08/26 F2): Batch updateRooms ใน draft booking ที่ถือโค้ดส่วนลดจนหลุด eligibility
+     * ต้องส่ง 422 พร้อมคำแนะนำให้ DELETE /bookings/{id}/discount-code เช่นกัน
+     */
+    public function test_batch_update_rooms_ineligible_for_discount_returns_actionable_error(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $discount = Discount::create([
+            'code' => 'BATCHWIN',
+            'type' => 'percent',
+            'value' => 15,
+            'stay_from' => now()->addDays(1)->toDateString(),
+            'stay_until' => now()->addDays(5)->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/discount-code", [
+                'code' => 'BATCHWIN',
+            ])->assertStatus(200);
+
+        // Batch update ย้ายวันออกนอก stay window
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'check_in' => now()->addDays(10)->toDateString(),
+                        'check_out' => now()->addDays(12)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonPath('message', 'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด BATCHWIN อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ');
     }
 
     // 🌟 Refactor (18/06/26): lookup & requestPaymentForGuest routes ถูกลบแล้ว — ไม่มี public guest access

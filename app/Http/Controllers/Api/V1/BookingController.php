@@ -372,11 +372,7 @@ class BookingController extends Controller
             }
 
             // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-            if ($booking->discount_code) {
-                app(DiscountService::class)->applyToDraft($booking, $booking->discount_code);
-            } else {
-                app(DiscountService::class)->reprice($booking);
-            }
+            $this->reconcileDiscount($booking);
 
             DB::commit();
 
@@ -688,11 +684,7 @@ class BookingController extends Controller
                 }
 
                 // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-                if ($locked->discount_code) {
-                    app(DiscountService::class)->applyToDraft($locked, $locked->discount_code);
-                } else {
-                    app(DiscountService::class)->reprice($locked);
-                }
+                $this->reconcileDiscount($locked);
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -957,11 +949,7 @@ class BookingController extends Controller
                 }
 
                 // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-                if ($locked->discount_code) {
-                    app(DiscountService::class)->applyToDraft($locked, $locked->discount_code);
-                } else {
-                    app(DiscountService::class)->reprice($locked);
-                }
+                $this->reconcileDiscount($locked);
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -1674,11 +1662,38 @@ class BookingController extends Controller
     {
         $earlyHours = is_array($addonInput)
             ? (int) ($addonInput['early_checkin'] ?? 0)
-            : (! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 1) : 0);
+            : (! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 0) : 0);
         $lateHours = is_array($addonInput)
             ? (int) ($addonInput['late_checkout'] ?? 0)
-            : (! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 1) : 0);
+            : (! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 0) : 0);
 
         return [$earlyHours, $lateHours];
+    }
+
+    /**
+     * 🎟️ Reconcile ส่วนลด & total_amount หลังแก้ไขห้องใน draft booking (28/08/26 F2)
+     * ถ้าการแก้ไขทำให้ห้องทั้งหมดไม่เข้าเกณฑ์โค้ดส่วนลด จะแจ้งเตือนให้ user ลบโค้ดก่อน
+     */
+    private function reconcileDiscount(Booking $booking): void
+    {
+        if (! $booking->discount_code) {
+            app(DiscountService::class)->reprice($booking);
+
+            return;
+        }
+
+        try {
+            app(DiscountService::class)->applyToDraft($booking, $booking->discount_code);
+        } catch (\Exception $e) {
+            if ($e->getCode() === 422) {
+                throw new \Exception(
+                    'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด '.$booking->discount_code.' อีกต่อไป — '.
+                    'กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ',
+                    422
+                );
+            }
+
+            throw $e;
+        }
     }
 }
