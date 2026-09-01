@@ -1,28 +1,55 @@
-*.log
-.DS_Store
-.env
-.env.backup
-.env.production
-.phpactor.json
+# 🧪 Tooling caches
+/.phpunit.cache
 .phpunit.result.cache
+.phpactor.json
+
+# 🖥️ IDE / editor
 /.fleet
 /.idea
 /.nova
-/.phpunit.cache
 /.vscode
 /.zed
+
+# 🔐 Environment & secrets (.env จริงห้ามเข้า repo — ใช้ .env.example เท่านั้น)
+.env
+.env.*
+!.env.example
 /auth.json
+/storage/*.key
+
+# 🪟 OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# 📦 Dependencies & build output
 /node_modules
+/vendor
 /public/build
 /public/hot
 /public/storage
-/storage/*.key
+
+# 🗃️ Local SQLite DB (dev ใช้ sqlite — prod เป็น PostgreSQL; defense ร่วมกับ database/.gitignore)
+/database/*.sqlite
+/database/*.sqlite-journal
+/database/*.sqlite-wal
+/database/*.sqlite-shm
+
+# 🧾 Logs & runtime
+*.log
 /storage/pail
-/vendor
+
+# 🏠 Laravel Homestead
 Homestead.json
 Homestead.yaml
-Thumbs.db
+
+# 📚 docs/ — เก็บเฉพาะ api_guide + API Bin export ไว้ใน repo (ไฟล์อื่นทั้งหมด รวมถึงที่จะเพิ่มในอนาคต ไม่ track)
+/docs/*
+!/docs/api_guide.md
+!/docs/API Bin*.xlsx
+
+# 🚧 Project-specific scratch/output (KU HOME)
 api_bin_output.txt
 /.freebuff
 /.zcode
-
