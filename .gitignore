@@ -51,5 +51,6 @@ Homestead.yaml
 
 # 🚧 Project-specific scratch/output (KU HOME)
 api_bin_output.txt
+/test_scripts/
 /.freebuff
 /.zcode

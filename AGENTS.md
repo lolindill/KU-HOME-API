@@ -24,7 +24,7 @@ php artisan test tests/Unit/RoomAllocator      # directory
 vendor/bin/pint --dirty                        # lint changed files (Laravel Pint)
 ```
 
-Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_guide.php` (full lifecycle, recommended).
+Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_guide.php` (full lifecycle, recommended). **(2026-09-01: `test_scripts/` ทั้งโฟลเดอร์ถูก ignore ออกจาก repo — ไฟล์มีเฉพาะบนเครื่อง dev เดิม, fresh clone/เครื่องอื่นจะไม่มีโฟลเดอร์นี้)**
 
 Remote integration scripts ยิงตรง domain จริง — config ผ่าน env `KUHOME_BASE_URL` (default `https://ku-home.ku.ac.th/backend/api/v1`) + `KUHOME_ADMIN_EMAIL`/`KUHOME_ADMIN_PASS`; pattern `KUHOME_BASE_URL=... php test_scripts/test_*_remote.php`. 🎟️ `test_scripts/test_discount_remote.php` = Discount v2.1 end-to-end 19 checks (รวม regression #42–#45) — script pacing ~1.5s/คำสั่ง + retry-once-หลังพัก 65s เมื่อโดน 429 (WAF/throttle ฝั่ง domain KU), สร้าง throwaway code/user/booking แล้วเก็บกวาดท้าย run (โค้ดถูก toggle inactive — ไม่มี DELETE by design)
 
