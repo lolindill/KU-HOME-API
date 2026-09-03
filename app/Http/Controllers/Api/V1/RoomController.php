@@ -97,8 +97,8 @@ class RoomController extends Controller
     // 🏷️ ดึงข้อมูลประเภทห้องพักทั้งหมด
     public function allRoomTypes()
     {
-        // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1 (rate มาจาก global_rates)
-        $roomTypes = RoomType::with('dailyRateRow')->get();
+        // 🌟 Update (03/09/26): eager-load rateRows กัน N+1 (rates object)
+        $roomTypes = RoomType::with('rateRows')->get();
 
         return response()->json([
             'status' => 'success',
@@ -111,8 +111,8 @@ class RoomController extends Controller
     // 🏷️ ดึงข้อมูลประเภทห้องพักตาม ID
     public function getRoomTypeById($id)
     {
-        // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1
-        $roomType = RoomType::with('dailyRateRow')->find($id);
+        // 🌟 Update (03/09/26): eager-load rateRows กัน N+1 สำหรับ rates object
+        $roomType = RoomType::with('rateRows')->find($id);
 
         if (! $roomType) {
             return response()->json([
@@ -153,8 +153,8 @@ class RoomController extends Controller
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             }])
-            // 🌟 Add (24/07/26): eager-load dailyRateRow กัน N+1 (rate มาจาก global_rates)
-            ->with('dailyRateRow')
+            // 🌟 Update (03/09/26): eager-load rateRows กัน N+1 (rates object)
+            ->with('rateRows')
             // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
             ->when($maxGuests, fn ($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
@@ -166,9 +166,9 @@ class RoomController extends Controller
                     'name_en' => $type->name_en,
                     'name_th' => $type->name_th,
                     'available_rooms' => $availableRooms,
+                    'rates' => $type->rates,
                     // 🌟 Embed full room_type object so frontend has all fields
-                    // (max_guests, extra_bed_*, etc.)
-                    // 🌟 Add (24/07/26): daily_rate ดึงจาก global_rates มา embed ให้เลย
+                    // (max_guests, extra_bed_*, rates, etc.)
                     'room_type' => [
                         'id' => $type->id,
                         'name_en' => $type->name_en,
@@ -177,7 +177,7 @@ class RoomController extends Controller
                         'extra_bed_enabled' => $type->extra_bed_enabled,
                         'max_extra_beds' => $type->max_extra_beds,
                         'extra_bed_price' => $type->extra_bed_price,
-                        'daily_rate' => $type->daily_rate,
+                        'rates' => $type->rates,
                     ],
                     'search_criteria' => [
                         'check_in' => $checkIn->toDateString(),
@@ -223,11 +223,12 @@ class RoomController extends Controller
             ], 422);
         }
 
-        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ createBooking
         $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
             $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
         }])
+            ->with('rateRows')
             ->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
@@ -267,6 +268,7 @@ class RoomController extends Controller
                 'room_type_id' => $type->id,
                 'name_en' => $type->name_en,
                 'name_th' => $type->name_th,
+                'rates' => $type->rates,
             ];
             foreach ($dateKeys as $dateKey) {
                 $occupiedCount = $occupied[$type->id][$dateKey] ?? 0;
@@ -316,11 +318,12 @@ class RoomController extends Controller
             ], 422);
         }
 
-        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
         $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
             $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
         }])
+            ->with('rateRows')
             ->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
@@ -380,6 +383,7 @@ class RoomController extends Controller
                 'room_type_id' => $type->id,
                 'name_en' => $type->name_en,
                 'name_th' => $type->name_th,
+                'rates' => $type->rates,
                 'intervals' => array_values($intervals),
             ];
         });
@@ -425,11 +429,12 @@ class RoomController extends Controller
             ], 422);
         }
 
-        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง"
+        // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
         $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
             $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
         }])
+            ->with('rateRows')
             ->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
@@ -478,6 +483,7 @@ class RoomController extends Controller
                 'room_type_id' => $type->id,
                 'name_en' => $type->name_en,
                 'name_th' => $type->name_th,
+                'rates' => $type->rates,
                 'unavailable_dates' => $unavailableDates,
             ];
         });
@@ -506,11 +512,12 @@ class RoomController extends Controller
             ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
             ->max('check_out');
 
-        // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" ล่วงหน้า (ใช้ทั้งกรณีมี/ไม่มี booking)
+        // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityRanges/createBooking
         $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
             $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
         }])
+            ->with('rateRows')
             ->get();
 
         // 🌟 กรณีไม่มี booking เลย → ไม่สามารถ lock end ของช่วงได้ → คืน list ว่าง
@@ -524,6 +531,7 @@ class RoomController extends Controller
                     'room_type_id' => $t->id,
                     'name_en' => $t->name_en,
                     'name_th' => $t->name_th,
+                    'rates' => $t->rates,
                     'intervals' => [],
                 ])->values(),
             ]);
@@ -592,6 +600,7 @@ class RoomController extends Controller
                 'room_type_id' => $type->id,
                 'name_en' => $type->name_en,
                 'name_th' => $type->name_th,
+                'rates' => $type->rates,
                 'intervals' => array_values($intervals),
             ];
         });

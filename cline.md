@@ -1790,3 +1790,53 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 
 - frontend `ku-home` — field `amount` เป็น additive (ride along ทุก response ที่มี booking_rooms เพราะ repo ไม่มี API Resources) · ภายหลังต้องเช็ค consumer ที่อ่าน `total_amount`/`room_amount`/`added_amount` (`added_amount` ยังเป็น gross ของห้องที่เพิ่ม — naming คงเดิมตาม T4)
 
+## 📐 Room-Type `rates` Object & Money Policy (2026-09-03, ✅ Landed)
+
+> แผนงานจาก `wayfinder/room-type-rates/` (Tickets 01–06) — implement จบสมบูรณ์ 100%
+
+### 🎯 เป้าหมายและนโยบายการเงิน (Money Policy)
+- **ปัญหาเดิม:** Frontend ต้อง mock rate card เอง และการ seed ข้อมูลเดิมใช้เลขหลักบาท (`1000`, `1800`, `3500`) ทำให้เมื่อคำนวณการจองด้วย satang ยอดเงินจะเพี้ยน อีกทั้งไม่มีการแสดงเรท KU member, group rates, และ monthly rates
+- **Money Policy (ยืนยันแล้ว):**
+  - **Database Storage:** เก็บในหน่วย **integer satang** เสมอ (เช่น `100000` satang = 1,000.00 THB) รวมถึง `extra_bed_price` (0, 50000, 60000)
+  - **Wire Format (Room-Type Boundary):** ทุก endpoint ที่ส่งคืน room-type จะ serialize ข้อมูลเงิน (`rates` object และ `extra_bed_price`) เป็น **2-decimal-places decimal baht string** (เช่น `"1000.00"`, `"500.00"`)
+  - **Booking/Payment Math:** การคำนวณยอดจอง, addon, discount และ per-room amount ยังคงเป็น integer satang เหมือนเดิม ไม่ได้รับผลกระทบ
+- **Breaking Change:** ถอด virtual integer field `daily_rate` ออกจากการ serialize ของ `RoomType` โดยแทนที่ด้วย `rates` object:
+  ```json
+  "rates": {
+    "daily":   { "general": "1000.00", "ku_member": "800.00" },
+    "group":   { "min_5_rooms": "750.00", "min_10_rooms": "750.00" },
+    "monthly": "15000.00"
+  }
+  ```
+
+### 📁 สรุปไฟล์ที่มีการเปลี่ยนแปลง
+1. **Helper & Model:**
+   - `app/Support/Money.php` — **ใหม่**: `Money::satangToBaht(int $satang): string` แปลง satang เป็น baht string ด้วย pure integer math (`intdiv`, `%`, `sprintf`) ปราศจาก float precision artifacts
+   - `app/Models/RoomType.php` — `$appends = ['rates']`, ซ่อน `dailyRateRow` และ `rateRows`, เพิ่ม `rates` accessor (พร้อม zero fallback `"0.00"`), accessor/mutator `extra_bed_price` (wire baht string, storage satang), เพิ่ม relation `rateRows(): HasMany`
+   - `app/Models/GlobalRate.php` — อัปเดต `getRoomRate()` ให้รองรับ query ด้วย optional parameter `$code` สำหรับ group rates
+   - `app/Http/Controllers/Api/V1/GlobalRateController.php` — เพิ่ม `daily_ku` ใน validation allowlist และเก็บรักษา `code` เมื่ออัปเดต group rates
+2. **Controller (ทั้ง 7 Endpoints):**
+   - `app/Http/Controllers/Api/V1/RoomController.php` — eager-load `rateRows` และรวม `rates` object ใน:
+     - `allRoomTypes` (`GET /room-types`)
+     - `getRoomTypeById` (`GET /room-types/{id}`)
+     - `availability` (`GET /availability` — ทั้ง top-level และ embedded `room_type`)
+     - `availabilityPerDay` (`GET /availability-per-day`)
+     - `availabilityRanges` (`GET /availability-ranges`)
+     - `unavailableDates` (`GET /unavailable-dates`)
+     - `unavailableRanges` (`GET /unavailable-ranges`)
+3. **Database Migration & Seeder:**
+   - `database/migrations/2026_09_03_110000_drop_code_unique_from_global_rates_table.php` — **ใหม่**: ปลดล็อก unique index บน `code` ใน `global_rates` เพื่อให้แต่ละ room type สามารถแชร์ code `min_5_rooms`/`min_10_rooms` ได้
+   - `database/seeders/RoomSeeder.php` — authored ด้วยเลขบาททศนิยม และบันทึกเป็น integer satang (5 rows ต่อ room type: daily, daily_ku, group min_5_rooms, group min_10_rooms, month) พร้อม `extra_bed_price` เป็น satang (0, 50000, 60000)
+4. **Tests:**
+   - `tests/Unit/Support/MoneyTest.php` — **ใหม่**: Unit test สำหรับ `Money::satangToBaht` ครอบคลุม 0, เลขหลักเดียว, เลขมาตรฐาน, ค่าหลักล้าน, และค่าติดลบ
+   - `tests/Feature/RoomTypeRatesListTest.php` — **ใหม่**: Feature test สำหรับ `GET /room-types` และ `GET /availability`
+   - `tests/Feature/RoomTypeRatesCalendarTest.php` — **ใหม่**: Feature test สำหรับทั้ง 4 calendar endpoints พร้อมทดสอบ N+1 prevention (query log count)
+   - `tests/Feature/RoomSeederTest.php` — **ใหม่**: Feature test ทดสอบการ seed และ assert ค่า satang จริงในฐานข้อมูล
+   - `tests/Feature/RoomTest.php` — เพิ่มเทสต์ `getRoomTypeById` ทดสอบโครงสร้าง rates, extra_bed_price, และ zero fallback
+5. **Documentation:**
+   - `docs/api_guide.md` — อัปเดตตัวอย่าง response ทั้ง 7 endpoints และปรับปรุง RoomType DB Model reference พร้อมอธิบายนโยบายการเงิน
+
+### 🚨 Migration Required
+- **คำสั่งที่ต้องรันบนเซิร์ฟเวอร์/dev:** `php artisan migrate:fresh --seed` เพื่อปรับโครงสร้าง `global_rates` และ seed ข้อมูลเรทห้องพักชุดใหม่ 5 เรทต่อประเภทห้อง
+
+

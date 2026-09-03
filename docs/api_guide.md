@@ -498,18 +498,28 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 {
   "status": "success",
   "message": "All room types fetched successfully",
-  "total_types": 5,
+  "total_types": 3,
   "room_types": [
     {
       "id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
-      "description": "ห้องมาตรฐานขนาด 28 ตร.ม. พร้อมเตียงควีน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "description": "ห้องซูพีเรียร์ขนาด 28 ตร.ม.",
       "max_guests": 2,
-      "extra_bed_enabled": true,
-      "max_extra_beds": 1,
-      "extra_bed_price": 300,
-      "daily_rate": 1200,
+      "extra_bed_enabled": false,
+      "max_extra_beds": 0,
+      "extra_bed_price": "0.00",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "created_at": "...",
       "updated_at": "..."
     }
@@ -528,7 +538,29 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 {
   "status": "success",
   "message": "Room type fetched successfully",
-  "room_type": { ...room type object... }
+  "room_type": {
+    "id": "uuid",
+    "name_en": "Deluxe",
+    "name_th": "ห้องดีลักซ์",
+    "description": "ห้องดีลักซ์",
+    "max_guests": 2,
+    "extra_bed_enabled": true,
+    "max_extra_beds": 1,
+    "extra_bed_price": "500.00",
+    "rates": {
+      "daily": {
+        "general": "1200.00",
+        "ku_member": "1000.00"
+      },
+      "group": {
+        "min_5_rooms": "900.00",
+        "min_10_rooms": "750.00"
+      },
+      "monthly": "18000.00"
+    },
+    "created_at": "...",
+    "updated_at": "..."
+  }
 }
 ```
 
@@ -547,7 +579,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 - `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
   - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
   - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
-- `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `daily_rate`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก
+- `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `rates`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก (ทั้ง top-level และ embedded `room_type` มี `rates` object ในรูป baht string ทศนิยม 2 ตำแหน่ง)
 
 **Response `200`:**
 ```json
@@ -557,18 +589,39 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
   "room_types": [
     {
       "room_type_id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
       "available_rooms": 8,
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "room_type": {
         "id": "uuid",
-        "name_en": "Standard",
-        "name_th": "ห้องมาตรฐาน",
+        "name_en": "Superior",
+        "name_th": "ห้องซูพีเรียร์",
         "max_guests": 2,
-        "extra_bed_enabled": true,
-        "max_extra_beds": 1,
-        "extra_bed_price": 50000,
-        "daily_rate": 150000
+        "extra_bed_enabled": false,
+        "max_extra_beds": 0,
+        "extra_bed_price": "0.00",
+        "rates": {
+          "daily": {
+            "general": "1000.00",
+            "ku_member": "800.00"
+          },
+          "group": {
+            "min_5_rooms": "750.00",
+            "min_10_rooms": "750.00"
+          },
+          "monthly": "15000.00"
+        }
       },
       "search_criteria": {
         "check_in": "2026-06-19",
@@ -612,6 +665,17 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "room_type_id": "uuid",
       "name_en": "Superior",
       "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "2026-08-10": 39,
       "2026-08-11": 39,
       "2026-08-12": 40
@@ -620,6 +684,17 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "room_type_id": "uuid",
       "name_en": "Deluxe",
       "name_th": "ห้องดีลักซ์",
+      "rates": {
+        "daily": {
+          "general": "1200.00",
+          "ku_member": "1000.00"
+        },
+        "group": {
+          "min_5_rooms": "900.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "18000.00"
+      },
       "2026-08-10": 50,
       "2026-08-11": 50,
       "2026-08-12": 50
@@ -673,8 +748,19 @@ curl -s -H "Accept: application/json" \
   "room_types": [
     {
       "room_type_id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "intervals": [
         { "start_date": "2026-08-12", "end_date": "2026-08-13" }
       ]
@@ -711,8 +797,19 @@ curl -s -H "Accept: application/json" \
   "room_types": [
     {
       "room_type_id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "unavailable_dates": ["2026-08-12", "2026-08-13"]
     }
   ]
@@ -757,8 +854,19 @@ curl -s -H "Accept: application/json" \
   "room_types": [
     {
       "room_type_id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "intervals": [
         { "start": "2026-08-20", "end": "2026-08-22" },
         { "start": "2026-08-25", "end": "2026-08-27" }
@@ -776,7 +884,23 @@ curl -s -H "Accept: application/json" \
   "start": null,
   "end": null,
   "room_types": [
-    { "room_type_id": "uuid", "name_en": "Standard", "name_th": "ห้องมาตรฐาน", "intervals": [] }
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "intervals": []
+    }
   ]
 }
 ```
@@ -1035,6 +1159,9 @@ curl -s -H "Accept: application/json" \
       ],
       "billing_address": null,
       "billing_comment": null,
+      "room_amount": 2000,
+      "discount_amount": 0,
+      "amount": 2600,
       "created_at": "2026-06-19T11:00:00.000000Z",
       "updated_at": "2026-06-19T11:00:00.000000Z",
       "addon": {
@@ -1143,6 +1270,9 @@ curl -s -H "Accept: application/json" \
           "nationality": "Thai"
         }
       ],
+      "room_amount": 2000,
+      "discount_amount": 0,
+      "amount": 2400,
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
@@ -2529,17 +2659,26 @@ Returns tasks with status `pending` or `in_progress`.
 | `max_guests`         | integer   | Max guests per room                      |
 | `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
 | `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
-| `extra_bed_price`    | integer   | Price per extra bed (baht, default: 0)   |
-| `daily_rate`         | integer   | **Virtual** — daily rate (baht) resolved from `global_rates` (rate_type='daily'). 0 if missing/inactive. Always present in API responses. |
+| `extra_bed_price`    | string    | Price per extra bed as 2-dp baht string (e.g. `"500.00"` on wire; storage integer satang `50000`) |
+| `rates`              | object    | **Virtual** — canonical rates object `{daily: {general, ku_member}, group: {min_5_rooms, min_10_rooms}, monthly}` in 2-dp decimal baht strings resolved from `global_rates`. Fallback `"0.00"` if missing/inactive. |
 | `created_at`         | timestamp |                                          |
 | `updated_at`         | timestamp |                                          |
 
-> 💡 **Daily rate source (22/07/26):** Room daily rates live in `global_rates` (rows with `rate_type='daily'` + matching `room_type_id`). The backend auto-embeds this value as the virtual `daily_rate` field on every room type response (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`) — frontend does **not** need to call `/global-rates` separately. Use `PUT /global-rates/{id}` to edit the rate.
+> 💡 **Room Rates & Money Policy (03/09/26):**
+> - **Money Policy:** Database storage strictly uses **integer satang** (e.g. `100000` satang = 1,000.00 THB). Booking math, payment totals, and discounts remain in integer satang. At the room-type API edge (wire), all rate values and `extra_bed_price` are serialized as **2-decimal-places decimal baht strings** (e.g. `"1000.00"`, `"500.00"`).
+> - **Rate Types in `global_rates`:**
+>   - `daily` (code `null`): Daily rate for general guests (`rates.daily.general`)
+>   - `daily_ku` (code `null`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
+>   - `group` (code `min_5_rooms`): Group rate for 5+ rooms (`rates.group.min_5_rooms`)
+>   - `group` (code `min_10_rooms`): Group rate for 10+ rooms (`rates.group.min_10_rooms`)
+>   - `month` (code `null`): Long-stay monthly rate (`rates.monthly`)
+> - The legacy virtual field `daily_rate` is deprecated and dropped from JSON serialization in favor of `rates`.
 
 **Relationships:**
 - `hasMany Room`
 - `hasMany BookingRoom`
-- `hasOne GlobalRate` (daily rate, via `dailyRate()`)
+- `hasMany GlobalRate` (via `rateRows()`)
+- `hasOne GlobalRate` (daily rate, via `dailyRateRow()`)
 
 ---
 

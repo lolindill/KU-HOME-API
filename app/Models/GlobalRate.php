@@ -2,9 +2,10 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -38,7 +39,7 @@ class GlobalRate extends Model
     protected $casts = [
         'default_price' => 'integer',
         // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
-        'is_active' => \App\Casts\PgBoolean::class,
+        'is_active' => PgBoolean::class,
     ];
 
     /**
@@ -88,20 +89,26 @@ class GlobalRate extends Model
     // ----------------------------------------------------------------------
 
     /**
-     * ดึง room rate ตาม RoomType + rate_type
+     * ดึง room rate ตาม RoomType + rate_type (+ optional code)
      * ถ้าไม่พบหรือ inactive จะคืน 0
      *
-     * @param RoomType|string  $roomType  Model instance หรือ room_type_id
-     * @param string           $rateType  'daily' | 'group' | 'month'
+     * @param  RoomType|string  $roomType  Model instance หรือ room_type_id
+     * @param  string  $rateType  'daily' | 'daily_ku' | 'group' | 'month'
+     * @param  string|null  $code  รหัสกลุ่ม (เช่น 'min_5_rooms', 'min_10_rooms')
      */
-    public static function getRoomRate($roomType, string $rateType = 'daily'): int
+    public static function getRoomRate($roomType, string $rateType = 'daily', ?string $code = null): int
     {
         $roomTypeId = $roomType instanceof RoomType ? $roomType->id : $roomType;
 
-        $rate = self::where('room_type_id', $roomTypeId)
+        $query = self::where('room_type_id', $roomTypeId)
             ->where('rate_type', $rateType)
-            ->whereRaw('is_active = TRUE')
-            ->first();
+            ->whereRaw('is_active = TRUE');
+
+        if ($code !== null) {
+            $query->where('code', $code);
+        }
+
+        $rate = $query->first();
 
         return $rate ? $rate->default_price : 0;
     }

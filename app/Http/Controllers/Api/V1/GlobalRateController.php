@@ -24,8 +24,8 @@ class GlobalRateController extends Controller
         $roomTypeId = $request->query('room_type_id');
 
         $rates = GlobalRate::query()
-            ->when($rateType, fn($q) => $q->where('rate_type', $rateType))
-            ->when($roomTypeId, fn($q) => $q->where('room_type_id', $roomTypeId))
+            ->when($rateType, fn ($q) => $q->where('rate_type', $rateType))
+            ->when($roomTypeId, fn ($q) => $q->where('room_type_id', $roomTypeId))
             ->orderBy('rate_type')
             ->orderBy('code')
             ->orderBy('name_en')
@@ -52,23 +52,26 @@ class GlobalRateController extends Controller
     public function update(Request $request, string $id)
     {
         $validated = $request->validate([
-            'rate_type'     => 'sometimes|in:daily,group,month,addon',
-            'room_type_id'  => 'sometimes|nullable|uuid|exists:room_types,id',
-            'code'          => 'sometimes|nullable|string|max:255',
-            'name_en'       => 'sometimes|string|max:255',
-            'name_th'       => 'sometimes|nullable|string|max:255',
+            'rate_type' => 'sometimes|in:daily,daily_ku,group,month,addon',
+            'room_type_id' => 'sometimes|nullable|uuid|exists:room_types,id',
+            'code' => 'sometimes|nullable|string|max:255',
+            'name_en' => 'sometimes|string|max:255',
+            'name_th' => 'sometimes|nullable|string|max:255',
             'default_price' => 'sometimes|integer|min:0',
-            'is_active'     => 'sometimes|boolean',
+            'is_active' => 'sometimes|boolean',
         ]);
 
         $rate = GlobalRate::findOrFail($id);
 
         // 🌟 Validation: rate_type กับ code/room_type_id ต้องสอดคล้องกัน
         // addon → ต้องมี code, ห้ามมี room_type_id
-        // daily/group/month → ต้องมี room_type_id, code ไม่ใช้ (null)
+        // group → ต้องมี room_type_id, code เก็บ min_5_rooms / min_10_rooms
+        // daily/daily_ku/month → ต้องมี room_type_id, code ไม่ใช้ (null)
         $effectiveRateType = $validated['rate_type'] ?? $rate->rate_type;
         if ($effectiveRateType === 'addon') {
             $validated['room_type_id'] = null;
+        } elseif ($effectiveRateType === 'group') {
+            // keep code and room_type_id
         } else {
             $validated['code'] = null;
         }
@@ -85,7 +88,7 @@ class GlobalRateController extends Controller
     public function toggleActive(string $id)
     {
         $rate = GlobalRate::findOrFail($id);
-        $rate->update(['is_active' => !$rate->is_active]);
+        $rate->update(['is_active' => ! $rate->is_active]);
 
         $state = $rate->is_active ? 'เปิดใช้งาน' : 'ปิดใช้งาน';
 

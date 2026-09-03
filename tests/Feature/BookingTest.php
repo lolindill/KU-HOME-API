@@ -240,6 +240,7 @@ class BookingTest extends TestCase
 
         // 🧾 (03/09/26) amount = ยอดสุทธิต่อห้อง — invariant Σ amount == total_amount
         $this->assertEquals(3000, $booking->fresh()->bookingRooms->first()->amount);
+        $this->assertEquals(3000, $response->json('booking_rooms.0.amount'));
         $this->assertAmountInvariant($booking);
 
         // 🛡️ Verify booking_rooms with correct room_type linkage + guests JSON
