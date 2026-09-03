@@ -2,13 +2,34 @@
 
 namespace Tests;
 
+use App\Models\Booking;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\DB;
 
 abstract class TestCase extends BaseTestCase
 {
     use RefreshDatabase;
+
+    /**
+     * 🧾 (03/09/26) Invariant การเงิน: Σ booking_rooms.amount == bookings.total_amount
+     *    (ทั้งสองฝั่ง net, satang) — บังคับด้วย test เท่านั้น ไม่มี runtime guard/observer
+     *    เรียกหลังทุก mutation ที่ไหลผ่าน DiscountService::reprice()
+     */
+    protected function assertAmountInvariant(Booking $booking): void
+    {
+        $sum = (int) DB::table('booking_rooms')
+            ->where('booking_id', $booking->id)
+            ->sum('amount');
+        $total = (int) DB::table('bookings')->where('id', $booking->id)->value('total_amount');
+
+        $this->assertSame(
+            $total,
+            $sum,
+            "Invariant แตกค่ะ: Σ booking_rooms.amount ({$sum}) ≠ bookings.total_amount ({$total}) สำหรับ booking {$booking->id}"
+        );
+    }
 
     protected function actingAsAdmin(): static
     {

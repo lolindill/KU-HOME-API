@@ -238,6 +238,10 @@ class BookingTest extends TestCase
         $this->assertEquals(3000, $booking->total_amount,
             'Total amount must be calculated server-side, not trusted from client');
 
+        // 🧾 (03/09/26) amount = ยอดสุทธิต่อห้อง — invariant Σ amount == total_amount
+        $this->assertEquals(3000, $booking->fresh()->bookingRooms->first()->amount);
+        $this->assertAmountInvariant($booking);
+
         // 🛡️ Verify booking_rooms with correct room_type linkage + guests JSON
         $this->assertDatabaseHas('booking_rooms', [
             'booking_id' => $booking->id,
@@ -653,6 +657,10 @@ class BookingTest extends TestCase
         $this->assertNotNull($newBr);
         $this->assertEquals('Added Guest', $newBr->guests[0]['name']);
         $this->assertDatabaseHas('addons', ['booking_room_id' => $newBr->id]);
+
+        // 🧾 (03/09/26) ทุกห้องมี amount = 3000 → Σ = total_amount
+        $this->assertEquals(3000, $newBr->fresh()->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_admin_can_add_rooms_to_any_draft_booking(): void
@@ -843,6 +851,10 @@ class BookingTest extends TestCase
             'early_hours' => 2,
             'early_checkIn_price' => 200,
         ]);
+
+        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 300 + 100 + 200 + 0 = 5100
+        $this->assertEquals(5100, $br->fresh()->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     /**
@@ -905,6 +917,13 @@ class BookingTest extends TestCase
 
         // total = (1500×2)×2 ห้อง + 300 + 250 = 6550
         $response->assertJsonPath('total_amount', 6550);
+
+        // 🧾 (03/09/26) amount รายห้อง: มี addon = 3000+300+250 = 3550 · ไม่มี addon = 3000
+        $booking = Booking::where('user_id', $user->id)->latest('created_at')->first();
+        $amounts = $booking->bookingRooms()->with('addon')->orderBy('check_in')->pluck('amount');
+        $this->assertEquals(3550, $amounts[0]);
+        $this->assertEquals(3000, $amounts[1]);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_create_booking_rejects_boolean_early_checkin(): void
@@ -1500,6 +1519,11 @@ class BookingTest extends TestCase
 
         // payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
         $this->assertTrue($booking->fresh()->payment_deadline->equalTo($deadline));
+
+        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+100 = 3100 → Σ = 7600
+        $this->assertEquals(4500, $freshBr1->amount);
+        $this->assertEquals(3100, $freshBr2->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_user_cannot_batch_update_other_users_booking_rooms(): void
@@ -1829,6 +1853,9 @@ class BookingTest extends TestCase
             'from_status' => 'draft',
             'to_status' => 'deleted',
         ]);
+
+        // 🧾 (03/09/26) ห้องที่เหลือ amount = 3000 == total_amount หลังลบ
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_cannot_delete_last_booking_room(): void

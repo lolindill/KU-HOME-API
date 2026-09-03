@@ -152,7 +152,8 @@ class DiscountService
     }
 
     /**
-     * คำนวณยอดเงินใหม่ทั้งใบของการจอง (room_amount, discount_amount, total_amount)
+     * คำนวณยอดเงินใหม่ทั้งใบของการจอง (room_amount, discount_amount, amount, total_amount)
+     * 🧾 (03/09/26) chokepoint เดียวที่เขียน `amount` (net ต่อห้อง) — walk-in ก็เรียก method นี้
      */
     public function reprice(Booking $booking): Booking
     {
@@ -170,16 +171,22 @@ class DiscountService
                 ? $this->computeForRoom($discount, $rate, $nights)
                 : 0;
 
-            $br->update([
-                'room_amount' => $roomAmount,
-                'discount_amount' => $discountAmount,
-            ]);
-
-            $total += $roomAmount - $discountAmount
+            // 🧾 (03/09/26) ยอดสุทธิต่อห้อง — สูตรอยู่จุดเดียว (chokepoint เดียวของ booking money):
+            //    amount = room_amount − discount_amount + addon 4 รายการ
+            //    invariant Σ booking_rooms.amount == bookings.total_amount
+            $amount = $roomAmount - $discountAmount
                 + ($br->addon?->extra_bed_price ?? 0)
                 + ($br->addon?->breakfast_price ?? 0)
                 + ($br->addon?->early_checkIn_price ?? 0)
                 + ($br->addon?->late_checkOut_price ?? 0);
+
+            $br->update([
+                'room_amount' => $roomAmount,
+                'discount_amount' => $discountAmount,
+                'amount' => $amount,
+            ]);
+
+            $total += $amount;
         }
 
         $booking->update(['total_amount' => $total]);

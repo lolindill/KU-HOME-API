@@ -1850,6 +1850,7 @@ Applies or swaps a discount code on an existing `draft` booking. Holds quota slo
         "check_out": "2026-09-12",
         "room_amount": 400000,
         "discount_amount": 200000,
+        "amount": 260000,
         "addon": {
           "breakfast": 2,
           "breakfast_price": 60000,
@@ -1885,12 +1886,17 @@ Removes the discount code from a `draft` booking, releases held redemption slots
       {
         "id": "...",
         "room_amount": 400000,
-        "discount_amount": 0
+        "discount_amount": 0,
+        "amount": 400000
       }
     ]
   }
 }
 ```
+
+> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer satang) = **ยอดสุทธิต่อห้อง**:
+> `amount = room_amount − discount_amount + extra_bed_price + breakfast_price + early_checkIn_price + late_checkOut_price`
+> Server คำนวณที่จุดเดียว (`DiscountService::reprice()`) ครบทุก flow รวมถึง walk-in — **invariant: Σ `booking_rooms.amount` == `bookings.total_amount`** (ทั้งสองฝั่ง net) frontend จึงไม่ต้องบวกเอง และห้ามส่ง `amount` เข้ามาเอง (read-only, server-computed)
 
 ---
 
@@ -2460,6 +2466,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
+| `room_amount`  | integer   | Gross room price = rate × nights (satang, server-computed 27/08/26) |
+| `discount_amount` | integer | Discount applied to this room (satang, server-computed) |
+| `amount`       | integer   | 🧾 Net total per room (satang, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 

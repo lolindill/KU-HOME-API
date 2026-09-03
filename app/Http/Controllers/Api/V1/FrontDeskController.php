@@ -6,11 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePaymentRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
-use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Room;
 use App\Models\User;
+use App\Services\Discount\DiscountService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -57,8 +57,6 @@ class FrontDeskController extends Controller
 
             $checkIn = Carbon::now();
             $checkOut = Carbon::now()->addDays($validated['nights']);
-            // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (rate_type='daily') แทน room_types
-            $totalAmount = GlobalRate::getRoomRate($room->roomType, 'daily') * $validated['nights'];
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
@@ -66,7 +64,8 @@ class FrontDeskController extends Controller
                 'confirmation' => $confirmationNo,
                 'source' => 'admin',
                 'status' => 'draft', // immediately transitioned to confirmed below
-                'total_amount' => $totalAmount,
+                // 🧾 (03/09/26) total_amount ให้ reprice() เขียนแทน — single source of truth
+                'total_amount' => 0,
                 // 🌟 Fix (03/07/26): walk-in จ่ายเงินสดเสร็จแล้ว ไม่มี payment deadline
                 // (ตั้งเป็น null แทน now() ที่ทำให้ดูเหมือน "หมดอายุทันที")
                 'payment_deadline' => null,
@@ -85,6 +84,10 @@ class FrontDeskController extends Controller
                 'billing_comment' => $validated['billing_comment'] ?? null,
                 'status' => 'draft',
             ]);
+
+            // 🧾 (03/09/26) เขียน room_amount/amount/total_amount ผ่าน chokepoint เดียวกับ flow ออนไลน์
+            //    (booking ยัง draft — reprice ไม่มี guard สถานะ; walk-in ไม่มีโค้ดส่วนลด → amount = rate × nights)
+            app(DiscountService::class)->reprice($booking);
 
             // 🌟 Refactor (25/06/26): BR สองสเต็ปเพราะ state machine บังคับ draft→confirmed→checked_in
             $bookingRoom->transitionStatus('confirmed', 'admin');

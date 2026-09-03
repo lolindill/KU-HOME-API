@@ -1722,3 +1722,71 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 
 ### 🧪 Test Results
 - `php artisan test` — **337 passed (911 assertions)** (100% green)
+
+
+
+## 🗺️ Wayfinder map เปิดใหม่: Booking per-room amount (2026-09-03, charting — ยังไม่มีการแก้โค้ด)
+
+- **โจทย์:** "booking total_amount → add amount to each booking room" — ปัจจุบัน `booking_rooms` มี `room_amount`/`discount_amount` (ยุค discount v2.1) แต่ไม่มี per-room total ที่รวม addon; `bookings.total_amount` (net) เขียนโดย chokepoint เดียว `DiscountService::reprice()` ยกเว้น `FrontDeskController::walkIn` ที่ bypass
+- **Map:** `wayfinder/booking-room-amount/map.md` (tracker = local-markdown, ไม่มี gh CLI) + tickets T1–T5 (`tickets/`) — T1 (ความหมายของ `amount`: net/gross/no-column) เป็นประตูบานของทุกตั๋ว, T2 walkIn, T3 backfill, T4 API/docs contract, T5 spec รวมสำหรับ hand-off
+- **สถานะ:** ✅ เดิน map จบแล้ว (2026-09-03) — T1–T4, T6 ผู้ใช้ยืนยันครบทุก decision (รายละเอียดอยู่ `## Resolution` ของแต่ละ ticket); T5 spec รวมอยู่**หัวข้อถัดไปด้านล่าง** — ยังไม่มีการแก้โค้ด
+
+## 📐 Implementation Spec: `booking_rooms.amount` (net ต่อห้อง) — wayfinder "Booking per-room amount" (2026-09-03, ✅ implemented — รายงานผลอยู่หัวข้อ "✅ Landed" ด้านล่าง)
+
+> รวบ decision T1–T6 เป็นสเปกที่ implement ได้ทันทีโดยไม่ต้องตัดสินใจใหม่ — ห้ามฝืน invariant ที่ว่าด้านล่าง
+
+### 🎯 ความหมาย + Invariant (T1, T6)
+
+- คอลัมน์ใหม่ `booking_rooms.amount` (integer satang, default 0) = **ยอดสุทธิต่อห้อง**:
+  `amount = room_amount − discount_amount + extra_bed_price + breakfast_price + early_checkIn_price + late_checkOut_price`
+- **Invariant: Σ booking_rooms.amount == bookings.total_amount** (ทั้งสองฝั่ง net) — บังคับด้วย **test-only** ไม่มี runtime guard และ**ห้าม**ทำ model observer (repo ไม่มี events/listeners โดยตั้งใจ)
+
+### 📁 ลำดับงาน + รายการแฟ้ม
+
+1. **Migration add column** — `booking_rooms.amount` (`integer`, `default 0`, วางหลัง `discount_amount`): รันด้วย `php artisan migrate` ปกติได้ทั้ง SQLite/PostgreSQL (ห้าม SQLite-only SQL, idempotent-friendly) · **ไม่มี backfill** — ยังไม่มีข้อมูลจริง deploy ด้วย `migrate:fresh --seed` ได้ (T3) · ถ้าอนาคต prod มีข้อมูลสะสมก่อน deploy ให้เติม defensive backfill จาก stored data (`room_amount − discount_amount + addon`) ก่อนแล้วจดที่หัวข้อนี้
+2. **`app/Models/BookingRoom.php`** — `$fillable` += `'amount'`, `$casts` += `'amount' => 'integer'` (field ride along ทุก response อัตโนมัติ เพราะ repo ไม่มี API Resources — T4)
+3. **`app/Services/Discount/DiscountService.php::reprice()`** — ใน loop เดียวกับ `room_amount`/`discount_amount`: คำนวณ `$amount = $roomAmount - $discountAmount + ($br->addon?->extra_bed_price ?? 0) + ($br->addon?->breakfast_price ?? 0) + ($br->addon?->early_checkIn_price ?? 0) + ($br->addon?->late_checkOut_price ?? 0)` → ใส่ `'amount' => $amount` ใน `$br->update([...])` และเปลี่ยน `$total += ...` เป็น `$total += $amount` — **สูตรอยู่จุดเดียว** (T1)
+4. **`app/Http/Controllers/Api/V1/FrontDeskController.php::walkIn()`** — หลัง `BookingRoom::create()` **ก่อน transition ทั้งหมด** (booking ยัง `draft`): `app(DiscountService::class)->reprice($booking);` (T2 — พิสูจน์แล้ว `reprice()` ไม่มี guard สถานะ, walk-in ไม่มีโค้ดส่วนลด → `amount = room_amount = rate × nights`) · แนะนำ: ตัดการคำนวณ `$totalAmount` เขียนมือ, create booking ด้วย `total_amount => 0` แล้วให้ `reprice()` เขียนแทน (ทุกอย่างใน transaction เดิม rollback ได้)
+5. **`app/Http/Controllers/Api/V1/BookingController.php`** — **ไม่ต้องเขียน `amount` เองที่อื่นเลย**: create/addRooms/updateRoom/updateRooms(batch)/destroyRoom ไหลผ่าน `reconcileDiscount()`/`destroyRoom` → `reprice()` ครบแล้ว · เท่านั้นตรวจ response ที่คำนวณซ้ำ (`added_amount` = gross ของห้องที่เพิ่ม — คง naming เดิมได้ เทียบเคียงตอนเขียน docs)
+6. **Tests (T6 test-only invariant)** — ทำ helper เช่น `assertAmountInvariant(Booking $b): void` (query fresh จาก DB: Σ `booking_rooms.amount` vs `bookings.total_amount`) แล้วเรียกหลังทุก mutation:
+   - `BookingTest`: create / addRooms / updateRoom / batch update / destroyRoom / early-late addons
+   - `DiscountTest`: set โค้ด / remove โค้ด / eligible เฉพาะบางห้อง
+   - `FrontDeskTest`: walk-in มี `room_amount`/`amount` ครบ + invariant ผ่าน (T2)
+   - `PaymentTest`: regression — flow เดิมไม่กระทบ
+7. **Docs (T4)** — `docs/api_guide.md`: booking_room schema + สูตร amount + คำเตือน `Σ(amount) == total_amount` ให้ frontend อ้างอิงได้ · `docs/database-er.md`: คอลัมน์ใหม่ · design decision ชุดนี้ = หัวข้อนี้
+
+### ⚠️ ข้อควรระวัง
+
+- เงินเป็น **integer satang ตลอด** ห้าม float/decimal; ไม่มี boolean column ใหม่จึงไม่แตะเรื่อง `PgBoolean`
+- `reprice()` อ่าน rate จาก `GlobalRate` **ปัจจุบัน**ทุกครั้ง (พฤติกรรมเดิม) — walk-in เรียก reprice จึงได้เลขเดียวกับยอดที่เคยคำนวณเอง
+- ห้าม bypass `transitionStatus()` ตอนแตะ walkIn (state machine + audit log เดิม)
+- **Fog ค้าง (นอก scope implement):** frontend `ku-home` — additive field ประกาศผ่าน release note แล้วภายหลังเช็ค consumer ที่อ่าน `total_amount`/`room_amount`/`added_amount`
+
+## ✅ Landed: `booking_rooms.amount` (net ต่อห้อง) — implement spec ด้านบนเสร็จ (2026-09-03)
+
+> สเปก "📐 Implementation Spec: `booking_rooms.amount`" หัวข้อก่อนหน้า → **implemented ครบตามลำดับงาน 7 ขั้น** ไม่มี deviation จาก decision T1–T6
+
+### 📁 Files Changed
+
+- `database/migrations/2026_09_03_100000_add_amount_to_booking_rooms_table.php` — **ใหม่**: `booking_rooms.amount` integer default 0 (after `discount_amount`) · รัน `php artisan migrate` บน SQLite local ผ่าน (ไม่มี backfill ตาม T3)
+- `app/Models/BookingRoom.php` — `$fillable`/`$casts` += `amount` (integer)
+- `app/Services/Discount/DiscountService.php::reprice()` — สูตร `amount = room_amount − discount_amount + addon 4 รายการ` อยู่**จุดเดียว** (loop เดียวกับ room_amount/discount_amount) และ `$total += $amount`
+- `app/Http/Controllers/Api/V1/FrontDeskController.php::walkIn()` — ตัดการคำนวณ `$totalAmount` เขียนมือ (ไม่ใช้ `GlobalRate` ในไฟล์นี้แล้ว), create booking ด้วย `total_amount => 0` แล้วเรียก `app(DiscountService::class)->reprice($booking)` **หลัง** BR::create **ก่อน** transition ทั้งหมด (T2)
+- `app/Http/Controllers/Api/V1/BookingController.php` — **ไม่แตะ** (ทุก mutation path ไหลผ่าน `reconcileDiscount()`/`reprice()` อยู่แล้ว)
+- `tests/TestCase.php` — helper ใหม่ `assertAmountInvariant(Booking $b)` (query สดจาก DB: Σ `booking_rooms.amount` vs `bookings.total_amount`) ใช้ได้ทุก test ที่ extends `Tests\TestCase`
+- `tests/Feature/BookingTest.php` — invariant + amount ชัดๆ: create / addRooms / updateRoom(reprice addons) / early-late hours / batch update / destroyRoom
+- `tests/Feature/DiscountTest.php` — invariant + amount: percent (set โค้ด) / addon ไม่โดนลด (100% + breakfast) / partial eligibility ราย room type / remove โค้ด (amount กลับ gross)
+- `tests/Feature/FrontDeskTest.php` — walk-in: `room_amount == amount == 3000` + invariant (T2) · **จุ๊ยเดียวนอกสเปก:** เปลี่ยน `createRoom()` จาก `rand()` → counter ตาม precedent `BookingTest` (full suite เคยพังแบบสุ่มจาก room_number ชนกัน — จดไว้เพราะแก้ระหว่าง implement นี้)
+- `tests/Feature/PaymentTest.php` — **ไม่แตะ** — payment flow (`POST /payments`) ไม่ผ่าน booking_rooms จึงไม่มีจุด assert invariant; regression = suite เดิมยังเขียว
+- `docs/api_guide.md` — ตัวอย่าง response สองที่ (put/delete discount-code) เพิ่ม `amount` + note สูตร/invariant/read-only ให้ frontend + ตาราง BookingRoom model reference เพิ่ม `room_amount`/`discount_amount`/`amount`
+- `docs/database-er.md` — BOOKING_ROOMS entity เพิ่ม 3 คอลัมน์เงิน (room_amount, discount_amount, amount)
+
+### 🧪 Test Results
+
+- `php artisan test` — **337 passed (939 assertions)** 100% เขียว · `vendor/bin/pint --dirty` — PASS 8 ไฟล์
+- Invariant `Σ booking_rooms.amount == bookings.total_amount` ถูก assert ครบ 10 mutation จุด (6 ของ BookingTest + 4 ของ DiscountTest + walk-in)
+
+### 🌫️ Fog คงเหลือ (นอก scope)
+
+- frontend `ku-home` — field `amount` เป็น additive (ride along ทุก response ที่มี booking_rooms เพราะ repo ไม่มี API Resources) · ภายหลังต้องเช็ค consumer ที่อ่าน `total_amount`/`room_amount`/`added_amount` (`added_amount` ยังเป็น gross ของห้องที่เพิ่ม — naming คงเดิมตาม T4)
+

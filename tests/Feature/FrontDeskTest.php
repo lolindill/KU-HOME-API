@@ -39,12 +39,15 @@ class FrontDeskTest extends TestCase
         return $rt;
     }
 
+    // counter แทน rand() — เลขห้องสุ่มชนกันเองแล้ว suite พังแบบสุ่ม (เหมือน precedent ใน BookingTest)
+    private static int $roomSeq = 0;
+
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
     {
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10'.rand(1, 99),
+            'room_number' => '10'.(++self::$roomSeq),
             'status' => $status,
         ]);
     }
@@ -117,6 +120,16 @@ class FrontDeskTest extends TestCase
             'room_id' => $room->id,
             'status' => 'checked_in',
         ]);
+
+        // 🧾 (03/09/26) walk-in เข้า invariant เดียวกับ flow ออนไลน์ (T2):
+        //    reprice ตอน draft → amount = room_amount = rate × nights = 1500 × 2 = 3000
+        $booking = Booking::where('user_id', $admin->id)->where('source', 'admin')->latest('created_at')->first();
+        $this->assertNotNull($booking);
+        $this->assertEquals(3000, $booking->total_amount);
+        $br = $booking->bookingRooms()->first();
+        $this->assertEquals(3000, $br->room_amount);
+        $this->assertEquals(3000, $br->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_non_admin_cannot_walk_in_guest(): void

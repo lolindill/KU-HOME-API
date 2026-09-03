@@ -276,9 +276,12 @@ class DiscountTest extends TestCase
         foreach ($freshBooking->bookingRooms as $br) {
             $this->assertEquals(400000, $br->room_amount); // 200,000 * 2
             $this->assertEquals(200000, $br->discount_amount); // 50% of 400,000
+            // 🧾 (03/09/26) amount = 400,000 − 200,000 = 200,000 (net ต่อห้อง)
+            $this->assertEquals(200000, $br->amount);
         }
 
         $this->assertCount(2, DiscountRedemption::where('discount_id', $discount->id)->get());
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_fixed_discount_clamps_to_room_amount(): void
@@ -379,6 +382,10 @@ class DiscountTest extends TestCase
         $this->assertEquals(200000, $freshBooking->bookingRooms->first()->discount_amount);
         // Total = (200000 - 200000) + 60000 breakfast = 60000
         $this->assertEquals(60000, $freshBooking->total_amount);
+
+        // 🧾 (03/09/26) amount = 200,000 − 200,000 + 60,000 breakfast = 60,000 — addon ไม่โดนลด
+        $this->assertEquals(60000, $freshBooking->bookingRooms->first()->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     // =========================================================================
@@ -442,6 +449,11 @@ class DiscountTest extends TestCase
         // Only 1 redemption row for room A
         $this->assertCount(1, DiscountRedemption::where('booking_room_id', $brA->id)->get());
         $this->assertCount(0, DiscountRedemption::where('booking_room_id', $brB->id)->get());
+
+        // 🧾 (03/09/26) amount รายห้อง: A = 100,000 − 50,000 = 50,000 · B = 200,000 (ไม่ลด)
+        $this->assertEquals(50000, $brA->fresh()->amount);
+        $this->assertEquals(200000, $brB->fresh()->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_stay_window_rejects_outside_range(): void
@@ -692,7 +704,10 @@ class DiscountTest extends TestCase
         $this->assertNull($fresh->discount_code);
         $this->assertEquals(200000, $fresh->total_amount);
         $this->assertEquals(0, $fresh->bookingRooms->first()->discount_amount);
+        // 🧾 (03/09/26) ลบโค้ดแล้ว amount กลับไปที่ยอด gross ต่อห้อง
+        $this->assertEquals(200000, $fresh->bookingRooms->first()->amount);
         $this->assertCount(0, DiscountRedemption::all());
+        $this->assertAmountInvariant($booking);
     }
 
     // =========================================================================
