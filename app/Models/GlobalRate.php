@@ -106,6 +106,8 @@ class GlobalRate extends Model
 
         if ($code !== null) {
             $query->where('code', $code);
+        } else {
+            $query->whereNull('code');
         }
 
         $rate = $query->first();

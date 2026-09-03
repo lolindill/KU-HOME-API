@@ -344,7 +344,7 @@ class RoomTypeRatesCalendarTest extends TestCase
         $row = collect($response->json('room_types'))->firstWhere('room_type_id', (string) $rt->id);
         $this->assertNotNull($row);
 
-        $this->assertSame([
+        $expectedZero = [
             'daily' => [
                 'general' => '0.00',
                 'ku_member' => '0.00',
@@ -354,7 +354,30 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => '0.00',
             ],
             'monthly' => '0.00',
-        ], $row['rates']);
+        ];
+
+        $this->assertSame($expectedZero, $row['rates']);
+
+        // Assert zero fallback on availability-ranges
+        $resRanges = $this->getJson("/api/v1/availability-ranges?start_date={$startDate}&end_date={$endDate}");
+        $resRanges->assertStatus(200);
+        $rowRanges = collect($resRanges->json('room_types'))->firstWhere('room_type_id', (string) $rt->id);
+        $this->assertNotNull($rowRanges);
+        $this->assertSame($expectedZero, $rowRanges['rates']);
+
+        // Assert zero fallback on unavailable-dates
+        $resDates = $this->getJson("/api/v1/unavailable-dates?start_date={$startDate}&end_date={$endDate}");
+        $resDates->assertStatus(200);
+        $rowDates = collect($resDates->json('room_types'))->firstWhere('room_type_id', (string) $rt->id);
+        $this->assertNotNull($rowDates);
+        $this->assertSame($expectedZero, $rowDates['rates']);
+
+        // Assert zero fallback on unavailable-ranges
+        $resUnavailRanges = $this->getJson('/api/v1/unavailable-ranges');
+        $resUnavailRanges->assertStatus(200);
+        $rowUnavailRanges = collect($resUnavailRanges->json('room_types'))->firstWhere('room_type_id', (string) $rt->id);
+        $this->assertNotNull($rowUnavailRanges);
+        $this->assertSame($expectedZero, $rowUnavailRanges['rates']);
     }
 
     // =========================================================================

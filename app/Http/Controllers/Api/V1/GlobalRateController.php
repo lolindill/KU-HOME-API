@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdateGlobalRateRequest;
 use App\Models\GlobalRate;
 use Illuminate\Http\Request;
 
@@ -20,13 +21,17 @@ class GlobalRateController extends Controller
      */
     public function index(Request $request)
     {
-        $rateType = $request->query('rate_type');
-        $roomTypeId = $request->query('room_type_id');
+        $query = GlobalRate::query();
 
-        $rates = GlobalRate::query()
-            ->when($rateType, fn ($q) => $q->where('rate_type', $rateType))
-            ->when($roomTypeId, fn ($q) => $q->where('room_type_id', $roomTypeId))
-            ->orderBy('rate_type')
+        if ($request->has('rate_type')) {
+            $query->where('rate_type', $request->query('rate_type'));
+        }
+
+        if ($request->has('room_type_id')) {
+            $query->where('room_type_id', $request->query('room_type_id'));
+        }
+
+        $rates = $query->orderBy('rate_type')
             ->orderBy('code')
             ->orderBy('name_en')
             ->get();
@@ -49,17 +54,9 @@ class GlobalRateController extends Controller
         ], 200);
     }
 
-    public function update(Request $request, string $id)
+    public function update(UpdateGlobalRateRequest $request, string $id)
     {
-        $validated = $request->validate([
-            'rate_type' => 'sometimes|in:daily,daily_ku,group,month,addon',
-            'room_type_id' => 'sometimes|nullable|uuid|exists:room_types,id',
-            'code' => 'sometimes|nullable|string|max:255',
-            'name_en' => 'sometimes|string|max:255',
-            'name_th' => 'sometimes|nullable|string|max:255',
-            'default_price' => 'sometimes|integer|min:0',
-            'is_active' => 'sometimes|boolean',
-        ]);
+        $validated = $request->validated();
 
         $rate = GlobalRate::findOrFail($id);
 

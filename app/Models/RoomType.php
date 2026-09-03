@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RoomType extends Model
 {
@@ -30,7 +29,7 @@ class RoomType extends Model
     /**
      * 🌟 ซ่อน relationship rows ออกจาก JSON response
      */
-    protected $hidden = ['dailyRateRow', 'rateRows'];
+    protected $hidden = ['rateRows'];
 
     protected function casts(): array
     {
@@ -55,7 +54,11 @@ class RoomType extends Model
 
     public function setExtraBedPriceAttribute($value): void
     {
-        $this->attributes['extra_bed_price'] = (int) $value;
+        if (is_string($value) && str_contains($value, '.')) {
+            $this->attributes['extra_bed_price'] = Money::bahtToSatang($value);
+        } else {
+            $this->attributes['extra_bed_price'] = (int) $value;
+        }
     }
 
     /**
@@ -96,27 +99,13 @@ class RoomType extends Model
     }
 
     /**
-     * 🌟 Add (24/07/26): Room daily rate row ผูกกับ global_rates (rate_type='daily')
-     * ใช้ HasOne เพื่อให้ eager-load ได้ (with('dailyRateRow')) กัน N+1
+     * 🌟 Local Scope: Eager-load rateRows และนับจำนวนห้องที่ขายได้ (status ไม่ใช่ maintenance/reserved_closed)
      */
-    public function dailyRateRow(): HasOne
+    public function scopeWithSellableRoomsAndRates($query)
     {
-        return $this->hasOne(GlobalRate::class, 'room_type_id', 'id')
-            ->where('rate_type', 'daily')
-            ->whereRaw('is_active = TRUE');
-    }
-
-    /**
-     * 🌟 Add (24/07/26): Virtual attribute daily_rate (integer)
-     * คืน default_price ของ daily rate row ถ้าไม่พบจะเป็น 0 (เก็บไว้เป็น fallback helper)
-     */
-    public function getDailyRateAttribute(): int
-    {
-        if ($this->relationLoaded('dailyRateRow')) {
-            return $this->dailyRateRow?->default_price ?? 0;
-        }
-
-        return GlobalRate::getRoomRate($this, 'daily');
+        return $query->withCount(['rooms as total_rooms_count' => function ($q) {
+            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+        }])->with('rateRows');
     }
 
     public function rooms(): HasMany

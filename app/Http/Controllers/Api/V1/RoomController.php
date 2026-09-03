@@ -225,11 +225,7 @@ class RoomController extends Controller
 
         // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ createBooking
-        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
-            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
-        }])
-            ->with('rateRows')
-            ->get();
+        $roomTypes = RoomType::withSellableRoomsAndRates()->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availability/createBooking)
@@ -320,11 +316,7 @@ class RoomController extends Controller
 
         // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
-        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
-            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
-        }])
-            ->with('rateRows')
-            ->get();
+        $roomTypes = RoomType::withSellableRoomsAndRates()->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
@@ -431,11 +423,7 @@ class RoomController extends Controller
 
         // 🌟 โหลดทุก room type พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityPerDay/createBooking
-        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
-            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
-        }])
-            ->with('rateRows')
-            ->get();
+        $roomTypes = RoomType::withSellableRoomsAndRates()->get();
 
         // 🌟 โหลด booking_rooms ที่ overlap [start, end+1] ครั้งเดียว (matrix approach)
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
@@ -514,11 +502,7 @@ class RoomController extends Controller
 
         // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
         // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityRanges/createBooking
-        $roomTypes = RoomType::withCount(['rooms as total_rooms_count' => function ($q) {
-            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
-        }])
-            ->with('rateRows')
-            ->get();
+        $roomTypes = RoomType::withSellableRoomsAndRates()->get();
 
         // 🌟 กรณีไม่มี booking เลย → ไม่สามารถ lock end ของช่วงได้ → คืน list ว่าง
         if ($maxCheckout === null) {

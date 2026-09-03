@@ -44,4 +44,22 @@ class MoneyTest extends TestCase
         $this->assertSame('-0.50', Money::satangToBaht(-50));
         $this->assertSame('-100.00', Money::satangToBaht(-10000));
     }
+
+    public function test_converts_baht_string_to_satang(): void
+    {
+        $this->assertSame(0, Money::bahtToSatang('0.00'));
+        $this->assertSame(50000, Money::bahtToSatang('500.00'));
+        $this->assertSame(75000, Money::bahtToSatang('750.00'));
+        $this->assertSame(100000, Money::bahtToSatang('1000.00'));
+        $this->assertSame(120050, Money::bahtToSatang('1200.50'));
+        $this->assertSame(120000, Money::bahtToSatang('1200'));
+        $this->assertSame(-5000, Money::bahtToSatang('-50.00'));
+    }
+
+    public function test_converts_baht_numeric_to_satang(): void
+    {
+        $this->assertSame(0, Money::bahtToSatang(0));
+        $this->assertSame(50000, Money::bahtToSatang(500));
+        $this->assertSame(120050, Money::bahtToSatang(1200.50));
+    }
 }

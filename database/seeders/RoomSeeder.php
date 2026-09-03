@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Support\Money;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -44,9 +45,6 @@ class RoomSeeder extends Seeder
         $standardId = Str::uuid();
         $deluxeId = Str::uuid();
         $suiteId = Str::uuid();
-
-        // 🌟 Helper แปลงราคาบาท (ทศนิยม) เป็น integer satang (×100)
-        $toSatang = fn (float|int $baht): int => (int) round($baht * 100);
 
         // 🌟 Spec (03/09/26): Rate card จริง authored แบบบาททศนิยม บันทึกเป็น satang (×100)
         // 5 rows ต่อ room type: daily, daily_ku, group (min_5_rooms, min_10_rooms), month
@@ -118,7 +116,7 @@ class RoomSeeder extends Seeder
                     [
                         'name_en' => $rate['name_en'],
                         'name_th' => $rate['name_th'],
-                        'default_price' => $toSatang($rate['baht']),
+                        'default_price' => Money::bahtToSatang($rate['baht']),
                         'is_active' => true,
                     ]
                 );
