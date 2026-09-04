@@ -54,3 +54,6 @@ api_bin_output.txt
 /test_scripts/
 /.freebuff
 /.zcode
+
+# Local git worktrees (nested checkouts — never commit)
+/.worktree/
