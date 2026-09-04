@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "KU SSO → Sanctum Token Flow (KU HOME API)",
+    "output": "docs/ku-sso-sanctum-flow.html",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [1040, 950],
+    "views": [
+      { "id": "get-code", "label": "รับ code ฝั่ง browser", "focus": ["react", "ku_sso"], "note": "Browser redirect เอา authorization code — state/PKCE กัน CSRF" },
+      { "id": "exchange", "label": "แลก code เป็น Sanctum token", "focus": ["react", "ku_sso", "api", "db"], "note": "client_secret อยู่ฝั่ง server — ปลายทางคือ Sanctum bearer token" },
+      { "id": "logout", "label": "Logout 2 ชั้น", "focus": ["react", "api", "db", "ku_sso"], "note": "revoke เฉพาะ currentAccessToken + END_SESSION ฝั่ง KU" }
+    ]
+  },
+  "participants": [
+    { "id": "react", "type": "frontend", "label": "React (ku-home)", "sublabel": "browser SPA" },
+    { "id": "ku_sso", "type": "cloud", "label": "KU SSO (Keycloak)", "sublabel": "sso-dev.ku.ac.th · realm KU-Alllogin" },
+    { "id": "api", "type": "backend", "label": "KU HOME API (Laravel)", "sublabel": "Sanctum token mode" },
+    { "id": "db", "type": "database", "label": "User Store", "sublabel": "users + personal_access_tokens" }
+  ],
+  "segments": [],
+  "messages": [
+    { "from": "react", "to": "ku_sso", "y": 180, "label": "เปิด AUTHORIZATION_ENDPOINT (scope basic openid + state/PKCE)", "variant": "emphasis", "note": "REDIRECT_URI ต้องเป็น route ของ React — ถ้าให้ API รับ callback เอง จะโดน RequireJsonAccept ตบ 406 (browser ส่ง Accept: text/html)" },
+    { "from": "ku_sso", "to": "react", "y": 222, "label": "login สำเร็จ → 302 กลับ REDIRECT_URI?code=…", "variant": "return" },
+    { "from": "react", "to": "api", "y": 264, "label": "POST /api/v1/auth/sso/exchange { code } (Accept: application/json)", "variant": "emphasis", "note": "endpoint ใหม่ — ใส่ throttle:5,1 เทียบเท่า login" },
+    { "from": "api", "to": "ku_sso", "y": 306, "label": "POST TOKEN_ENDPOINT: code + client_secret (server-to-server)", "variant": "security" },
+    { "from": "ku_sso", "to": "api", "y": 348, "label": "access_token + id_token", "variant": "return" },
+    { "from": "api", "to": "ku_sso", "y": 390, "label": "GET USER_INFO (Authorization: Bearer access_token)", "variant": "default" },
+    { "from": "ku_sso", "to": "api", "y": 432, "label": "claims: email, ชื่อ-นามสกุล (ต้องทดสอบว่า scope คืน email จริง)", "variant": "return" },
+    { "from": "api", "to": "db", "y": 474, "label": "find-or-create User ด้วย email + createToken('ku_home_auth_token')", "variant": "emphasis" },
+    { "from": "db", "to": "api", "y": 516, "label": "User (role default) + plainTextToken", "variant": "return" },
+    { "from": "api", "to": "react", "y": 558, "label": "200 { status: success, token, user }", "variant": "return" },
+    { "from": "react", "to": "api", "y": 600, "label": "คำขอถัดไป: Authorization: Bearer <sanctum-token> → auth:sanctum", "variant": "default", "note": "ห้ามใช้ KU access_token ยิง API ตรง — auth:sanctum ตรวจกับ personal_access_tokens ของเราเท่านั้น" },
+    { "from": "react", "to": "api", "y": 642, "label": "POST /api/v1/logout (Bearer)", "variant": "default" },
+    { "from": "api", "to": "db", "y": 684, "label": "ลบ currentAccessToken() เท่านั้น", "variant": "default" },
+    { "from": "api", "to": "react", "y": 726, "label": "200 — token บน device อื่นยังใช้ได้ (multi-device semantics)", "variant": "return" },
+    { "from": "react", "to": "ku_sso", "y": 768, "label": "optional: redirect END_SESSION_ENDPOINT + id_token_hint + LOGOUT_REDIRECT_URI", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "api", "from": 258, "to": 576, "type": "backend" },
+    { "participant": "ku_sso", "from": 300, "to": 438, "type": "cloud" },
+    { "participant": "db", "from": 468, "to": 522, "type": "database" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "ทำไมต้อง exchange ผ่าน backend", "items": ["client_secret เก็บใน .env ฝั่ง server เท่านั้น — ห้ามลง frontend", "auth:sanctum ตรวจกับ personal_access_tokens — KU token ยิงตรงไม่ผ่าน", "ต้องมี state กัน CSRF และแนะนำเปิด PKCE ด้วย"] },
+    { "dot": "orange", "title": "Sanctum token mode ยังเดิม", "items": ["createToken() ออก token ใหม่เสมอ ไม่ revoke ของเดิม (multi-device by design)", "SSO login ครั้งแรกได้ role default — admin assign เพิ่มด้วย endpoint ที่มีอยู่", "ไม่ต้องติดตั้ง package เพิ่ม — Http client + Service class พอ"] },
+    { "dot": "rose", "title": "ก่อน implement ต้องเช็ค", "items": ["ทดสอบ userinfo ว่า scope basic openid คืน email จริง (จับคู่ user ด้วย email)", "Logout ฝั่ง Sanctum กับ session ของ KU เป็นคนละชั้น", "จด design decision ลง cline.md ก่อนเขียนโค้ดตาม protocol ของ repo"] }
+  ]
+}

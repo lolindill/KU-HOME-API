@@ -1862,3 +1862,15 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 **หมายเหตุ (correct the record):** ตอนแรกรายงานว่า FrontDesk (check-in/check-out/mark-no-show) ไม่ eager-load `addon` เป็น inconsistency — ตรวจซ้ำแล้ว response ของ endpoints เหล่านั้น **ไม่ return `booking_rooms` เลย** (return แค่ `booking_id`/`booking_status`/`room_updates`) จึงไม่มีผลต่อ client → **ไม่แก้** (การจองที่แสดง booking_rooms ทั้งหมดอยู่ใน BookingController และ load addon ครบแล้ว)
 
 **No migration needed** — การเปลี่ยนแปลงเป็น input-layer only โครงสร้าง DB (`addons` table) เหมือนเดิม
+
+## 🗺️ Wayfinder tracker ย้ายบ้าน: `docs/wayfinder/ku-sso/` → `wayfinder/ku-sso/` + convention ใหม่ (2026-09-04, docs-only)
+
+**Root cause:** map SSO (charted 2026-09-01) ถูกวางไว้ใน `docs/wayfinder/ku-sso/` แต่ `.gitignore` ปิด `/docs/*` แบบ whitelist (เก็บเฉพาะ api_guide / database-er / API Bin) → map + tickets + research + `ku-sso-sanctum-flow.json/.html` **ไม่เคยถูก track ใน git** → worktree `feature/sso-ku-all-login` (และ worktree อนาคตทุกตัว) มองไม่เห็นแผนที่ (ยืนยันแล้ว: dir ไม่มีอยู่ใน worktree)
+
+**ทางแก้ (docs-only, ไม่แตะโค้ด):**
+1. ย้าย `docs/wayfinder/ku-sso/` ทั้ง dir ไป **`wayfinder/ku-sso/`** ข้าง map เดิม 2 เรื่อง (booking-room-amount, room-type-rates — tracked อยู่แล้ว) + ย้าย `docs/ku-sso-sanctum-flow.json`/`.html` เข้า `wayfinder/ku-sso/` ให้ self-contained
+2. แก้ relative links ที่หลุดออกนอก dir: `map.md` (link flow json) + `research/integration-approach.md` (ticket path + flow json ×3)
+3. จด convention ไว้ใน **AGENTS.md หัวข้อใหม่ "🗺️ Wayfinder maps"**: map ทุกเรื่องอยู่ที่ `wayfinder/<effort>/` และ track ใน git — ห้ามเก็บใน `docs/` (ignored) และห้ามย้ายเข้า `.worktree/` (checkout ใช้แล้วทิ้ง — map หายตอน cleanup) · ticket fields `status/blocked-by/assignee` · 1 ticket ต่อ 1 session · commit tracker update ไปกับ branch ที่ทำงาน
+4. หลัง commit บน `agust-11` แล้ว fast-forward `feature/sso-ku-all-login` ใน worktree ให้เห็น map ทันที (branch ไม่มี unique commits — `--ff-only` ปลอดภัย)
+
+**ไม่แก้ skill (`~/.zcode/skills/wayfinder/SKILL.md`)** — skill เป็น user-global / repo-agnostic; มันอ้างหา "tracker doc" ของ repo อยู่แล้ว ซึ่งตอนนี้คือ AGENTS.md หัวข้อ "Wayfinder maps" นี้

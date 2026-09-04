@@ -146,6 +146,15 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - Reference R&D: `docs/algo_test/room-algorithm-playground-eav3.html` + `room-algorithm-flow-explained.md`.
 - `RoomAllocator` is bound in `AppServiceProvider` (must pass `Weights` value object — autowire fails on primitive `int`).
 
+## 🗺️ Wayfinder maps (planning tracker)
+
+งานที่ใหญ่จนต้อง **lock decision ก่อนเขียนโค้ด** ถูก chart เป็น wayfinder map บน tracker แบบ **local-markdown** และ **track ใน git**:
+
+- Maps อยู่ที่ **`wayfinder/<effort>/`** ที่ root — `map.md` + `tickets/*.md` (+ `research/`, assets) · มีอยู่: `booking-room-amount` (✅ implemented), `room-type-rates` (✅ implemented), `ku-sso` (🟢 active — KU SSO/Keycloak, อ่านก่อนแตะ auth/SSO)
+- แต่ละ ticket มี frontmatter: `label: wayfinder:<research|prototype|grilling|task>` · `type: HITL|AFK` · `status: open|closed` · `blocked-by:` · `assignee:` — **frontier** = open + blocked-by ปลดครบ + ยังไม่มี assignee
+- ธรรมเนียม: **1 ticket ต่อ 1 session** — claim ก่อนลงมือด้วยการใส่ `assignee:`; เมื่อ resolve แล้วเขียน resolution ลงตัว ticket → `status: closed` → append 1 บรรทัดใน "Decisions so far" ของ map แล้ว **commit การอัปเดต tracker ไปกับ branch ที่ทำงานอยู่เสมอ**
+- ⚠️ **ห้ามเก็บ map ใน `docs/`** (`.gitignore` ปิด `/docs/*` แบบ whitelist — map จะไม่ถูก track) และ **ห้ามย้าย map เข้า `.worktree/`** (checkout ใช้แล้วทิ้ง — map หายตอน cleanup) · เพราะ map ถูก track ผ่าน git → **ทุก worktree ใน `.worktree/*` เห็น map อัตโนมัติ** และ session ใน worktree ใช้/แก้ copy ของตัวเองได้เลย
+
 ## Documents to read before sensitive edits
 
 - [`cline.md`](./cline.md) — full history, bug index (#1–#41), refactor changelogs. **Always read the relevant section first.**
@@ -153,6 +162,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - [`docs/api_guide.md`](./docs/api_guide.md) — API reference (state machines, enums, validation rules).
 - [`docs/database-er.md`](./docs/database-er.md) — ER diagram.
 - [`docs/project-status.md`](./docs/project-status.md) — per-module completion %.
+- [`wayfinder/ku-sso/map.md`](./wayfinder/ku-sso/map.md) — 🟢 active wayfinder map (KU SSO/Keycloak) — อ่านก่อนแตะ auth/SSO (ดูหัวข้อ "Wayfinder maps" ด้านบน).
 
 ## Frozen / Deprecated (do not extend)
 
