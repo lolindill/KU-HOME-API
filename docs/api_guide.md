@@ -15,7 +15,7 @@
 5. [Bookings](#bookings-core)
 6. [Front Desk Operations](#front-desk-operations)
 7. [Payments & Webhooks](#payments--webhooks)
-8. [Addon Rates](#addon-rates)
+8. [Global Rates](#global-rates)
 9. [Dashboard / Housekeeping](#dashboard--housekeeping)
 10. [DB Models Reference](#db-models-reference)
 11. [State Machines](#state-machines)
@@ -1127,7 +1127,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.addons.early_hours`        | nullable, integer (0–7) — alias ของ `early_checkin` |
 | `booking_rooms.*.addons.late_hours`         | nullable, integer (0–7) — alias ของ `late_checkout` |
 
-> 💡 **Pricing**: Server calculates all prices from `global_rates` (room daily rates via `rate_type='daily'` + `room_type_id`) and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
+> 💡 **Pricing**: Server calculates all prices from `global_rates` and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
+>
+> ⚠️ **Known gap (04/09/26)**: ตอนคำนวณราคาจริง server ใช้แค่ `rate_type='daily'` (general) เท่านั้น — `daily_ku` / `group.min_5_rooms` / `group.min_10_rooms` / `monthly` ที่โชว์ใน `rates` object เป็น **display-only** ยังไม่ถูกใช้คิดเงินใน booking (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `201`:**
 ```json
@@ -2374,22 +2376,28 @@ Creates a `pending` payment and returns a mock payment URL.
 
 ---
 
-## Addon Rates
+## Global Rates
 
-### GET `/addon-rates` — List all addon rates
+> 🌟 **(22/07/26 renamed from "Addon Rates" / `/addon-rates`)** — ตารางเดียว (`global_rates`) เก็บทั้ง **room rate** (`rate_type` = `daily` / `daily_ku` / `group` / `month` — ผูก `room_type_id`) และ **addon rate** (`rate_type` = `addon` — ใช้ `code` เป็น key). ทุก row มี `rate_type` + `room_type_id` (null สำหรับ addon) เสมอ.
+
+### GET `/global-rates` — List all rates (room + addon)
 
 🔒 **Public**
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7)
+**Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
+
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "ดึงรายการ Add-on Rates เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ดึงรายการ Global Rates เรียบร้อยแล้วค่ะ! ✨",
   "rates": [
     {
       "id": "rate-uuid",
+      "rate_type": "addon",
+      "room_type_id": null,
       "code": "breakfast",
       "name_en": "Breakfast",
       "name_th": "อาหารเช้า",
@@ -2398,26 +2406,22 @@ Creates a `pending` payment and returns a mock payment URL.
     },
     {
       "id": "rate-uuid",
-      "code": "early_checkin",
-      "name_en": "Early Check-in",
-      "name_th": "เช็คอินก่อนเวลา",
-      "default_price": 10000,
+      "rate_type": "daily",
+      "room_type_id": "room-type-uuid",
+      "code": null,
+      "name_en": "Superior Daily General",
+      "name_th": "ห้องซูพีเรียร์ (ราคารายวัน)",
+      "default_price": 100000,
       "is_active": true
     },
     {
       "id": "rate-uuid",
-      "code": "late_checkout",
-      "name_en": "Late Check-out",
-      "name_th": "เช็คเอาท์ช้ากว่าเวลา",
-      "default_price": 10000,
-      "is_active": true
-    },
-    {
-      "id": "rate-uuid",
-      "code": "extra_bed",
-      "name_en": "Extra Bed",
-      "name_th": "เตียงเสริม",
-      "default_price": 50000,
+      "rate_type": "group",
+      "room_type_id": "room-type-uuid",
+      "code": "min_5_rooms",
+      "name_en": "Superior Group (5+ Rooms)",
+      "name_th": "ห้องซูพีเรียร์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)",
+      "default_price": 75000,
       "is_active": true
     }
   ]
@@ -2426,7 +2430,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 ---
 
-### GET `/addon-rates/{id}` — Get addon rate by ID
+### GET `/global-rates/{id}` — Get rate by ID
 
 🔒 **Public**
 
@@ -2434,39 +2438,45 @@ Creates a `pending` payment and returns a mock payment URL.
 ```json
 {
   "status": "success",
-  "message": "ดึงข้อมูล Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ดึงข้อมูล Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...rate object... }
 }
 ```
 
 ---
 
-### PUT `/addon-rates/{id}` — Update addon rate (Admin)
+### PUT `/global-rates/{id}` — Update rate (Admin)
 
 🔒 **Admin only**
 
 **Request Body (all optional):**
 ```json
 {
+  "rate_type": "addon",
+  "room_type_id": null,
+  "code": "breakfast",
   "name_en": "Breakfast Buffet",
   "name_th": "บุฟเฟ่ต์อาหารเช้า",
-  "default_price": 180,
+  "default_price": 18000,
   "is_active": true
 }
 ```
+
+> ⚠️ **Consistency rule (บังคับที่ server):** `rate_type` กับ `code`/`room_type_id` ต้องสอดคล้องกัน —
+> `addon` → ต้องมี `code`, server force `room_type_id = null` · `group` → ต้องมี `room_type_id` + `code` (`min_5_rooms` / `min_10_rooms`) · `daily` / `daily_ku` / `month` → ต้องมี `room_type_id`, server force `code = null`
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "อัปเดต Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "อัปเดต Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...updated rate... }
 }
 ```
 
 ---
 
-### PATCH `/addon-rates/{id}/toggle` — Toggle addon rate active state (Admin)
+### PATCH `/global-rates/{id}/toggle` — Toggle rate active state (Admin)
 
 🔒 **Admin only**
 
@@ -2474,7 +2484,7 @@ Creates a `pending` payment and returns a mock payment URL.
 ```json
 {
   "status": "success",
-  "message": "ปิดใช้งาน Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ปิดใช้งาน Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...rate with is_active toggled... }
 }
 ```
@@ -2960,7 +2970,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Auth (login/register) | ✅     | ✅    | ✅    |
 | Rooms (read)          | ✅     | ✅    | ✅    |
 | Availability          | ✅     | ✅    | ✅    |
-| Addon Rates (read)    | ✅     | ✅    | ✅    |
+| Global Rates (read)   | ✅     | ✅    | ✅    |
 | Profile (`/me`)       | ❌     | ✅    | ✅    |
 | Create Booking        | ❌     | ✅    | ✅    |
 | View Own Bookings     | ❌     | ✅    | ✅    |
@@ -2971,7 +2981,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Add Rooms to Booking  | ❌     | owner | ✅    |
 | Front Desk Ops        | ❌     | ❌    | ✅    |
 | Room Status Update    | ❌     | ❌    | ✅    |
-| Addon Rate Update     | ❌     | ❌    | ✅    |
+| Global Rate Update    | ❌     | ❌    | ✅    |
 | Validate Discount (preview) 🎟️ | ❌ | ✅ | ✅ |
 | Apply/Remove Discount Code (draft) 🎟️ | ❌ | owner | ✅ |
 | Discounts Admin CRUD / Toggle 🎟️ | ❌ | ❌ | ✅ |
@@ -2997,12 +3007,13 @@ These endpoints exist but are **not production-ready**:
 
 ### Pricing Notes
 
-- All prices stored as **integers** (baht, no decimals) since 2026-06-05.
+- All prices stored as **integers** (satang/cents) since 2026-06-05 — baht ที่ขอบ API เฉพาะ `rates` object + `extra_bed_price` ของ RoomType (baht string 2 ตำแหน่ง, 03/09/26).
 - Room rates come from `global_rates` (rows where `rate_type='daily'` + matching `room_type_id`).
+- ⚠️ **Known gap (04/09/26)**: booking pricing ใช้แค่ `daily` (general) — `daily_ku` / `group` / `month` rows **display-only** ผ่าน `rates` object ยังไม่เข้าสูตรคิดเงิน
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
 - Pricing formula per room:
   ```
-  subtotal = (room_type.rate × nights)
+  subtotal = (global_rates[rate_type='daily'].default_price × nights)
            + (extra_bed_qty × extra_bed_rate × nights)
            + (breakfast_qty × breakfast_rate)
            + (early_hours × early_checkin_rate)
