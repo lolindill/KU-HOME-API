@@ -326,7 +326,7 @@ class BookingController extends Controller
 
                 // 🌟 room rate จาก global_rates (rate_type='daily')
                 $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
-                $extraBedQty = $roomRequest['extra_beds'] ?? 0;
+                $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
 
@@ -642,9 +642,7 @@ class BookingController extends Controller
                 $existingAddon = $bookingRoom->addon;
                 $addonInput = $validated['addons'] ?? null;
 
-                $extraBedQty = array_key_exists('extra_beds', $validated)
-                    ? ($validated['extra_beds'] ?? 0)
-                    : ($existingAddon?->extra_bed ?? 0);
+                $extraBedQty = $this->resolveExtraBed($validated, $addonInput, $existingAddon);
                 $breakfastQty = is_array($addonInput)
                     ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
                     : ($existingAddon?->breakfast ?? 0);
@@ -907,9 +905,7 @@ class BookingController extends Controller
                     $existingAddon = $bookingRoom->addon;
                     $addonInput = $roomRequest['addons'] ?? null;
 
-                    $extraBedQty = array_key_exists('extra_beds', $roomRequest)
-                        ? ($roomRequest['extra_beds'] ?? 0)
-                        : ($existingAddon?->extra_bed ?? 0);
+                    $extraBedQty = $this->resolveExtraBed($roomRequest, $addonInput, $existingAddon);
                     $breakfastQty = is_array($addonInput)
                         ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
                         : ($existingAddon?->breakfast ?? 0);
@@ -1210,7 +1206,7 @@ class BookingController extends Controller
 
                 // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (rate_type='daily') แทน room_types
                 $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
-                $extraBedQty = $roomRequest['extra_beds'] ?? 0;
+                $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
 
@@ -1675,6 +1671,19 @@ class BookingController extends Controller
         $lateHours = ! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 0) : 0;
 
         return [$earlyHours, $lateHours];
+    }
+
+    /**
+     * 🛏️ (04/09/26): input format = output format — เตียงเสริมอยู่ใน addons object เหมือน addon อื่น ๆ
+     *    canonical: addons.extra_bed (ตรงกับ addon.extra_bed ตอน response)
+     *    alias: extra_beds (หัวห้อง — โครงสร้างเก่า เก็บไว้ให้ frontend เดิม)
+     *    ลำดับ resolve ตาม resolveEarlyLate(): canonical → alias → คงค่าเดิมจากแถว addon
+     */
+    private function resolveExtraBed(array $roomRequest, ?array $addonInput, ?Addon $existing = null): int
+    {
+        return (int) ($addonInput['extra_bed']
+            ?? $roomRequest['extra_beds']
+            ?? ($existing?->extra_bed ?? 0));
     }
 
     /**

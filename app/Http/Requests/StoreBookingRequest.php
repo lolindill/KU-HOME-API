@@ -25,6 +25,8 @@ class StoreBookingRequest extends FormRequest
             'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
             'booking_rooms.*.check_in' => 'required|date|after_or_equal:today',
             'booking_rooms.*.check_out' => 'required|date|after:booking_rooms.*.check_in',
+            // 🛏️ (04/09/26): input format = output format — canonical คือ addons.extra_bed
+            //    extra_beds (หัวห้อง) = legacy alias เก็บไว้ให้ frontend เดิม (resolve ที่ BookingController)
             'booking_rooms.*.extra_beds' => 'nullable|integer|min:0',
 
             // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง (array ของ guests)
@@ -48,6 +50,7 @@ class StoreBookingRequest extends FormRequest
             'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
 
             'booking_rooms.*.addons' => 'nullable|array',
+            'booking_rooms.*.addons.extra_bed' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.early_checkin' => [
                 'nullable', 'integer', 'min:0', 'max:7',

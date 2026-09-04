@@ -31,6 +31,8 @@ class UpdateBookingRoomsRequest extends FormRequest
             'booking_rooms.*.room_type_id' => 'sometimes|required|uuid|exists:room_types,id',
             'booking_rooms.*.check_in' => 'sometimes|required|date|after_or_equal:today',
             'booking_rooms.*.check_out' => 'sometimes|required|date|after:booking_rooms.*.check_in',
+            // 🛏️ (04/09/26): input format = output format — canonical คือ addons.extra_bed
+            //    extra_beds (หัวห้อง) = legacy alias เก็บไว้ให้ frontend เดิม (resolve ที่ BookingController)
             'booking_rooms.*.extra_beds' => 'nullable|integer|min:0',
 
             // 👥 ข้อมูลผู้เข้าพัก
@@ -54,6 +56,7 @@ class UpdateBookingRoomsRequest extends FormRequest
 
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'booking_rooms.*.addons' => 'nullable|array',
+            'booking_rooms.*.addons.extra_bed' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.early_checkin' => [
                 'nullable', 'integer', 'min:0', 'max:7',

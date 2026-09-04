@@ -1840,3 +1840,25 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **คำสั่งที่ต้องรันบนเซิร์ฟเวอร์/dev:** `php artisan migrate:fresh --seed` เพื่อปรับโครงสร้าง `global_rates` และ seed ข้อมูลเรทห้องพักชุดใหม่ 5 เรทต่อประเภทห้อง
 
 
+
+## ✅ Extra Bed ย้ายเข้า `addons` object — input format = output format (2026-09-04)
+
+**Motivation:** ทุก endpoint ที่ return booking rooms แสดงเตียงเสริมที่ `booking_rooms[].addon.extra_bed` (nested addon object) แต่ฝั่ง **input** กลับรับ `booking_rooms[].extra_beds` ที่หัวห้อง (plural) — addon ตัวเดียวที่หลุดนอก object `addons` ทำให้ input/output format ไม่ตรงกัน (frontend dev สับสน: "ทำไมส่งที่หัวห้องแต่ได้กลับมาใน addon")
+
+**Design decision:**
+- **Canonical input:** `booking_rooms[*].addons.extra_bed` (int ≥ 0) — ตรงกับ output `booking_rooms[*].addon.extra_bed` เป๊ะ
+- **Legacy alias:** `booking_rooms[*].extra_beds` (หัวห้อง) **ยังรับอยู่** เพื่อ backward-compat กับ frontend เดิม (pattern เดียวกับ alias `early_hours`/`late_hours` ของวันที่ 01/09/26)
+- **Precedence:** canonical (`addons.extra_bed`) → alias (`extra_beds`) → คงค่าเดิมจากแถว addon (update paths) — resolve ผ่าน helper ใหม่ `BookingController::resolveExtraBed()` คู่กับ `resolveEarlyLate()`
+- ราคา (`extra_bed_price`) ยังคิดฝั่ง server จาก `global_rates` เสมอ — client ส่งราคาไม่ได้ (กัน price manipulation #20 ไม่เปลี่ยน)
+- Walk-in (`FrontDeskController@walkIn`) ไม่เกี่ยว — ไม่เคยรับ addon input ตั้งแต่แรก
+
+**ไฟล์ที่เปลี่ยน:**
+1. Form Requests (4 ไฟล์) — เพิ่ม rule `addons.extra_bed => nullable|integer|min:0` + comment กำกับ alias:
+   `StoreBookingRequest.php`, `AddBookingRoomsRequest.php`, `UpdateBookingRoomRequest.php`, `UpdateBookingRoomsRequest.php`
+2. `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม `resolveExtraBed()` + เปลี่ยน 4 จุดอ่านค่า (createBooking / addRooms / updateRoom / updateRooms)
+3. `tests/Feature/BookingTest.php` — เพิ่ม `test_create_booking_accepts_extra_bed_inside_addons` (canonical + echo กลับใน response) และ `test_update_room_extra_bed_addons_key_wins_over_legacy_alias` (precedence)
+4. `docs/api_guide.md` — ตัวอย่าง request ทั้ง 4 endpoints + curl quickstart ย้าย `extra_beds` เข้า `addons` แล้ว, ตาราง validation ใส่ทั้ง canonical + alias พร้อมหมายเหตุ canonical ชนะ
+
+**หมายเหตุ (correct the record):** ตอนแรกรายงานว่า FrontDesk (check-in/check-out/mark-no-show) ไม่ eager-load `addon` เป็น inconsistency — ตรวจซ้ำแล้ว response ของ endpoints เหล่านั้น **ไม่ return `booking_rooms` เลย** (return แค่ `booking_id`/`booking_status`/`room_updates`) จึงไม่มีผลต่อ client → **ไม่แก้** (การจองที่แสดง booking_rooms ทั้งหมดอยู่ใน BookingController และ load addon ครบแล้ว)
+
+**No migration needed** — การเปลี่ยนแปลงเป็น input-layer only โครงสร้าง DB (`addons` table) เหมือนเดิม

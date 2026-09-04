@@ -1062,7 +1062,6 @@ curl -s -H "Accept: application/json" \
       "room_type_id": "rt-uuid",
       "check_in": "2026-06-20",
       "check_out": "2026-06-22",
-      "extra_beds": 0,
       "guests": [
         {
           "title": "Mr.",
@@ -1077,6 +1076,7 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "bed_preference": "king_size",
       "addons": {
+        "extra_bed": 0,
         "breakfast": 2,
         "early_checkin": 2,
         "late_checkout": 0
@@ -1097,6 +1097,7 @@ curl -s -H "Accept: application/json" \
 > 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
 > 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
+> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้
 
 **Validation Rules:**
 
@@ -1107,7 +1108,8 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
 | `booking_rooms.*.check_in`                  | required, date, ≥ today                       |
 | `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
-| `booking_rooms.*.extra_beds`                | nullable, integer, min 0                      |
+| `booking_rooms.*.addons.extra_bed`          | nullable, integer, min 0 (canonical 🛏️)       |
+| `booking_rooms.*.extra_beds`                | nullable, integer, min 0 (⚠️ legacy alias — canonical ชนะ) |
 | `booking_rooms.*.guests`                    | nullable, array                               |
 | `booking_rooms.*.guests.*.title`            | nullable, string, max 50                      |
 | `booking_rooms.*.guests.*.firstName`        | nullable, string, max 255 (or `first_name`)   |
@@ -1220,7 +1222,6 @@ curl -s -H "Accept: application/json" \
       "room_type_id": "rt-uuid",
       "check_in": "2026-08-20",
       "check_out": "2026-08-22",
-      "extra_beds": 0,
       "bed_preference": "king_size",
       "guests": [
         {
@@ -1232,6 +1233,7 @@ curl -s -H "Accept: application/json" \
       "billing_address": null,
       "billing_comment": null,
       "addons": {
+        "extra_bed": 0,
         "breakfast": 2,
         "early_checkin": 0,
         "late_checkout": 0
@@ -1324,14 +1326,13 @@ curl -s -H "Accept: application/json" \
 {
   "check_in": "2026-08-22",
   "check_out": "2026-08-25",
-  "extra_beds": 1,
   "guests": [
     { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
   ],
   "bed_preference": "king_size",
   "billing_address": null,
   "billing_comment": null,
-  "addons": { "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
+  "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
 }
 ```
 
@@ -1342,7 +1343,8 @@ curl -s -H "Accept: application/json" \
 | `room_type_id` | `sometimes` uuid exists:room_types,id |
 | `check_in` | `sometimes` date `after_or_equal:today` |
 | `check_out` | `sometimes` date `after:check_in` |
-| `extra_beds` | nullable integer ≥ 0 |
+| `addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
+| `extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
 | `guests.*` | เหมือน `POST /bookings` |
 | `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
@@ -1457,7 +1459,8 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
 | `booking_rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
 | `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
-| `booking_rooms.*.extra_beds` | nullable integer ≥ 0 |
+| `booking_rooms.*.addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
+| `booking_rooms.*.extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
 | `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
 | `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
@@ -3039,11 +3042,10 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "room_type_id": "rt-uuid",
       "check_in": "2026-07-01",
       "check_out": "2026-07-03",
-      "extra_beds": 0,
       "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
       "billing_address": null,
       "billing_comment": null,
-      "addons": {"breakfast": 2, "early_checkin": 0, "late_checkout": 0}
+      "addons": {"extra_bed": 0, "breakfast": 2, "early_checkin": 0, "late_checkout": 0}
     }]
   }'
 ```

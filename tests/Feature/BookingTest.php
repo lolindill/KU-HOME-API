@@ -1339,6 +1339,80 @@ class BookingTest extends TestCase
         ]);
     }
 
+    /**
+     * 🛏️ (04/09/26): input format = output format — extra bed อยู่ใน addons object เหมือน addon อื่น
+     * canonical `addons.extra_bed` ตรงกับ `addon.extra_bed` ตอน response
+     */
+    public function test_create_booking_accepts_extra_bed_inside_addons(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(3)->toDateString(),
+                        'addons' => ['extra_bed' => 1],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+
+        // 2 คืน × (100 extra bed) = 200 — ราคา server คิดจาก global_rates เสมอ
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $response->json('booking_rooms.0.id'),
+            'extra_bed' => 1,
+            'extra_bed_price' => 200,
+        ]);
+
+        // 3000 (ห้อง 2 คืน) + 200 = 3200
+        $this->assertEquals(3200, $response->json('total_amount'));
+
+        // input format = output format — echo กลับมาที่ addon.extra_bed
+        $this->assertEquals(1, $response->json('booking_rooms.0.addon.extra_bed'));
+    }
+
+    /** 🛏️ ส่งทั้ง canonical + alias พร้อมกัน → canonical (addons.extra_bed) ชนะเสมอ */
+    public function test_update_room_extra_bed_addons_key_wins_over_legacy_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'extra_beds' => 3,
+                'addons' => ['extra_bed' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 1,
+            'extra_bed_price' => 200,
+        ]);
+        $this->assertAmountInvariant($booking);
+    }
+
     public function test_update_room_rejects_when_no_availability(): void
     {
         $roomType = $this->createRoomType();
