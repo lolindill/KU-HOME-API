@@ -32,7 +32,7 @@ Diagram เสนอ "find-or-create User ด้วย email" — ต้อง�
 - **userinfo ไม่คืน email:** **ปฏิเสธ login 422 fail-closed** (`{"status":"error", message ไทย+emoji}`) — ไม่เดา identity จาก `preferred_username` · รอ ticket 06 ได้ test account แล้วพิสูจน์ claims จริงของ scope `basic` ก่อน หากจริงๆ ไม่มี email ค่อยกลับมาตัดสินใหม่พร้อมหลักฐาน
 - **เก็บ keycloak `sub`:** **ไม่เก็บ (YAGNI)** — split-user จับคู่ด้วย `(email, provider)` พอ · ถ้าอนาคตต้อง sync ข้อมูล KU ตรงๆ ค่อยเพิ่ม column ตอนนั้น (จด fog ไว้ใน map แล้ว)
 - **Default เสริมที่เสนอ (low-stakes, ยังไม่เคยถาม):** `name` เติมจาก claim `name` เป็นอันดับแรก ไม่มีค่อย concat `given_name` + `family_name` · email normalize lowercase ก่อน find-or-create · `title`/`phone` เว้น null · ห้าม overwrite `name` ของ user เดิมตอน re-login (find path ไม่แตะ profile)
-- **ผลต่อสถานะ ku member ตอนสร้าง user จาก KU SSO:** ยังค้างรอ [ticket 08](./08-ku-member-role-or-tag.md) — proposal นี้ไม่ตัดสินแทน
+- **ผลต่อสถานะ ku member ตอนสร้าง user จาก KU SSO:** ✅ ตอบแล้วโดย [ticket 08](./08-ku-member-role-or-tag.md) (ปิด 2026-09-04) — สร้าง user ด้วย **role `ku_member`** (คู่กับ `auth_provider=ku_sso` ถ้า proposal (ก) ผ่าน sign-off)
 
 **ประเด็นที่ proposal (ก) ทำให้ต้องจดต่อ (ยังไม่ ticket — ดู fog ใน map):**
 - `password_reset_tokens` ใช้ **`email` เป็น PK** → เมื่อ email ซ้ำได้ข้าม provider flow reset ต้องระบุ/กรอง `auth_provider` ด้วย ไม่งั้น reset ของ account password อาจไปชี้ row ที่ถูกต้องไม่ได้ (implementation session ต้องเช็ค `AuthController`/`ForgotPassword` ที่แตะ)

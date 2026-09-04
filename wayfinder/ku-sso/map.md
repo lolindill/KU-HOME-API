@@ -27,6 +27,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - [Keycloak mechanics ของ realm KU-Alllogin](./tickets/04-keycloak-mechanics-for-ku-alllogin.md): discovery จริง verify live แล้ว (4 endpoints + issuer), code ใช้ครั้งเดียว ~60 วิ, END_SESSION เป็น browser redirect + ต้อง register post_logout_redirect_uri — รายละเอียดใน [research/keycloak-mechanics.md](./research/keycloak-mechanics.md)
 - [แนวทาง integrate: hand-rolled หรือ package](./tickets/05-integration-approach-package-or-hand-rolled.md): **hand-rolled `Http` facade + Service class (0 package)** — ไม่ต้อง verify JWT เอง (userinfo บน TLS พอ) + `Http::fake` ทดสอบได้น่าแท้ — รายละเอียดใน [research/integration-approach.md](./research/integration-approach.md)
 - [ใคร login ผ่าน KU SSO บ้างใน v1](./tickets/01-users-who-signs-in-via-ku-sso.md): **โหมดคู่ขนาน** (SSO เสริม ไม่ปิด password) · `POST /register` **เปิดต่อ** · default role ตอนแรกเข้า **ยกไปตัดสินใน ticket 08** · ⚠️ **req change ภายหลัง (2026-09-01): ไม่มีการ link identity — แต่ละ provider (password/KU SSO/Google) = split user คนละ account** (ดู Amendment ใน ticket)
+- [ku_member ควรเป็น role, tag/boolean หรือ derive จาก KU linkage](./tickets/08-ku-member-role-or-tag.md): **ยืนเป็น role** — source of truth เดียวของสถานะสมาชิก · **first login KU SSO = สร้าง user role `ku_member`** (ปิดปม default role จาก ticket 01) · boolean `is_ku_member` เป็น legacy ไม่เขียนเพิ่ม (owner decision 2026-09-04)
 
 ## Not yet specified
 
@@ -37,7 +38,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06
 - Remote integration script สำหรับ SSO (pattern `test_scripts/*_remote.php`) ต้องมีไหม — รอ ticket 07
 - ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account)
-- ถ้า ticket 08 เลือกเปลี่ยนโมเดล ku_member → ต้องวางแผน migrate ผู้ใช้ `role=ku_member` เดิม + จุดเช็คส่วนลดทุกที่ — รอ ticket 08
+- ชะตา column `users.is_ku_member` หลัง ticket 08 ปิด (role เป็น source of truth): drop หรือ freeze ไม่เขียน — ตัดสินตอนเขียน spec implementation
 
 ## Out of scope
 

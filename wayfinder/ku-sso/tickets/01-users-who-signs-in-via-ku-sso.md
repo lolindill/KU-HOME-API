@@ -18,7 +18,7 @@ SSO เปิดให้ใครใช้ใน v1?
 ## Resolution (2026-09-01 — grilling กับ owner)
 
 - **โหมดคู่ขนาน:** SSO เป็นทางเลือกเสริมคู่กับ email/password เดิม — ไม่บังคับ ไม่ปิด flow เดิม · 🆕 **แผนต่อยอดของ owner: 1 account ผูกได้หลาย provider (KU ตอนนี้ + Google/Gmail ในอนาคต)** ~~→ identity model ต้อง provider-agnostic ตั้งแต่ต้น~~ *(⚠️ ถูกแทนที่โดย Amendment ด้านล่าง)*
-- **Default role ตอน SSO ครั้งแรก — ยังไม่ lock:** คำตอบตั้งต้นคือ `ku_member` แต่ owner ตั้งคำถามกับดีไซน์เองว่า *"ku_member มีผลจริงแค่กับส่วนลดอัตรา member — จำเป็นต้องเป็น role ไหม? user เป็น ku_member ได้ถ้า link account กับ KU login"* → แตกเป็น ticket [08-ku-member-role-or-tag](./08-ku-member-role-or-tag.md) ตัดสินก่อน
+- **Default role ตอน SSO ครั้งแรก — ยังไม่ lock:** คำตอบตั้งต้นคือ `ku_member` แต่ owner ตั้งคำถามกับดีไซน์เองว่า *"ku_member มีผลจริงแค่กับส่วนลดอัตรา member — จำเป็นต้องเป็น role ไหม? user เป็น ku_member ได้ถ้า link account กับ KU login"* → แตกเป็น ticket [08-ku-member-role-or-tag](./08-ku-member-role-or-tag.md) ตัดสินก่อน *(🔁 ปิดแล้ว 2026-09-04: ticket 08 ตัดสิน — first login KU SSO = สร้าง user role `ku_member`)*
 - **`POST /register`: เปิดต่อ** สำหรับ guest คนนอก — ไม่เปลี่ยน
 
 ### 📋 Amendment (2026-09-01 — requirement change จาก owner)

@@ -2,7 +2,7 @@
 
 - **label:** `wayfinder:grilling`
 - **type:** HITL
-- **status:** open
+- **status:** closed *(2026-09-04 — owner decision ในแชท)*
 - **blocked-by:** —
 - **assignee:** (ว่าง)
 - **born:** 2026-09-01 — แตกจาก resolution ของ [ticket 01](./01-users-who-signs-in-via-ku-sso.md) ("need to think about this design again")
@@ -24,3 +24,14 @@ Owner ตั้งคำถามเอง: *"ku_member is only user with tag wi
 3. **derive จาก provenance** — ไม่เก็บสถานะซ้ำ: เป็น member ก็ต่อเมื่อ user นั้น**เกิดจาก KU SSO** (ดู `auth_provider` ที่อาจเกิดใน ticket 02) — *(req change 2026-09-01: ไม่มีการ link ข้าม account แล้ว จึงไม่มี concept "unlink"; user ที่เกิดจาก KU SSO ถือสถานะตลอดชีวิตของ account นั้น)*
 
 คำถามกำกับ: กระทบ `CheckRole`/discount eligibility/`UserController` assign-role ยังไง · ผู้ใช้ `ku_member` เดิม (ที่ admin assign มา) migrate ยังไง · guest ที่เป็น "คน KU" แต่จองแบบไม่ login ผ่าน KU ได้สิทธิ์ไหม
+
+## Resolution (2026-09-04 — owner decision)
+
+**เลือกทางเลือก 1 — `ku_member` ยืนเป็น role (ไม่ใช่ tag/boolean ไม่ใช่ derive)** — ตอนนี้ระบบมีทั้ง role และ tag (`users.is_ku_member`) คู่กันมาตลอด, ที่ผ่านมาก็เคลียร์กันแล้วว่าใช้ **ku member เป็น role**
+
+- Role `ku_member` เป็น **source of truth เดียว** ของสถานะสมาชิก KU — ส่วนลด/อัตรา member เช็คจาก role ตามเดิม · `CheckRole`/`UserController` assign-role ไม่เปลี่ยน
+- **First login ผ่าน KU SSO = สร้าง user ด้วย role `ku_member`** — ปิดปม "default role ตอนแรกเข้า" ที่ [ticket 01](./01-users-who-signs-in-via-ku-sso.md) โยนมาให้ตัดสิน
+- ผู้ใช้ `role=ku_member` เดิม (admin assign) — **ไม่ต้อง migrate** (โมเดลไม่เปลี่ยน)
+- guest ที่เป็น "คน KU" แต่ไม่ login ผ่าน SSO → ได้สถานะทางเดียวคือ **admin assign role** ผ่าน endpoint เดิม (commit `06e6c43`)
+- boolean `users.is_ku_member` กลายเป็น **legacy** — ไม่ใช่ source of truth อีกต่อไป และไม่เขียนเพิ่ม · ชะตา column (drop หรือ freeze) เป็นคำถาม implementation (จด fog ใน map แล้ว)
+- ผลต่อ [ticket 02](./02-sso-identity-to-local-user-mapping.md): จุดที่เคยค้างว่า "สร้าง user จาก KU SSO ต้องเขียนอะไรลง user" → ตอบแล้ว: set role `ku_member` (คู่กับ `auth_provider=ku_sso` ถ้า proposal (ก) ผ่าน sign-off)
