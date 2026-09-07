@@ -25,3 +25,12 @@
 3. ได้รับ **CLIENT_ID / CLIENT_SECRET / USER_SCOPE** (OCS กำหนดให้) → นำมาใส่ `.env`
 4. **Test account ได้จากคู่มือเลย** (นิสิต/อาจารย์/บุคลากร อย่างละ 3 — credentials อยู่ในไฟล์ต้นฉบับ **ห้าม commit ลง repo**) — ข้อนี้ถือว่าปิดแล้ว
 5. PKCE RFC 7636 รองรับชัดเจนตามคู่มือ · endpoints ยืนยันตรงกับ research แล้ว · ทดสอบได้ 1 ปี · สอบถาม: admin@ku.ac.th
+
+## 📊 ความคืบหน้า (2026-09-07 — playground credentials จาก OCS มาถึงแล้ว)
+
+- ✅ **ฟอร์มผ่านแล้ว** — OCS ตอบกลับ: scope = **`basic openid`** · REDIRECT_URI = **`http://localhost:8000/*`** · LOGOUT_REDIRECT_URI = **`http://localhost:8000/*`** (wildcard ทั้งคู่)
+- ✅ Endpoints ที่ได้มา (auth/token/userinfo/end_session) ตรงกับ [../research/keycloak-mechanics.md](../research/keycloak-mechanics.md) ทุกตัว
+- ✅ บล็อก `KU_SSO_*` ลง `.env` แล้ว (BASE_URL / SCOPE / REDIRECT_URI / LOGOUT_REDIRECT_URI ครบ)
+- ⏳ **เหลือ: `CLIENT_ID` / `CLIENT_SECRET` ตัวจริง** — ค่าที่ส่งมายังว่าง รอค่าจากอีเมล OCS แล้วเติมแล้วถือว่าข้อ "ผลลัพธ์ที่ต้องได้" ครบ
+- ⚠️ REDIRECT_URI ที่อนุมัติเป็น **API dev server (`localhost:8000`, http) — ไม่ใช่ React** (frontend ยังไม่ตัดสิน route) — พอสำหรับ manual test เพราะ `code` จะติดมาใน URL bar แม้ page 404 · production ต้องขอ OCS เปลี่ยนเป็น route https ของ React (ค้างอยู่ใน "Not yet specified" ข้อ 2 ของ [map](../map.md))
+- END_SESSION endpoint + LOGOUT_REDIRECT_URI ที่ OCS ให้มา = เผื่ออนาคตตามหมายเหตุข้อ 5 ด้านบน — **ยังไม่ทำใน v1 ตาม decision ของ [ticket 03](./03-sso-token-and-session-contract.md)**
