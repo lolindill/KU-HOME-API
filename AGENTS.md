@@ -75,6 +75,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - 🔒 **DO NOT try to "fix" or simplify `PgBoolean` (re-litigation freeze).** We already scrutinized this and attempted alternative fixes (plain PHP `true`/`false`, string `'true'`/`'false'`, relying on Eloquent's built-in `boolean` cast) — **none of them work on PostgreSQL**. The `DB::raw('TRUE'/'FALSE')` approach inside the cast is the **final, proven solution** — leave it as-is. If you're tempted to refactor it, you are almost certainly reintroducing the bug.
 - **Money is integer satang/cents** — `total_amount`, `amount` columns/casts/validation are all `integer`, never decimal.
   - **Room-type wire format exception (2026-09-03):** ที่ขอบ API ของ RoomType (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`, และ calendar endpoints ทั้ง 4) ข้อมูลเงินสำหรับแสดงผล (`rates` object และ `extra_bed_price`) จะ serialize เป็น **2-decimal-places decimal baht string** (เช่น `"1000.00"`, `"500.00"`) เพื่อให้ frontend ใช้งานได้สะดวก แต่ **การจัดเก็บใน Database ยังคงเป็น integer satang เสมอ** (`extra_bed_price` = 50000, rates ใน `global_rates` = 100000 satang) และยอดเงินฝั่ง booking (`total_amount`, `booking_rooms.amount`, addons) ยังคงเป็น integer satang ทั้งหมด
+  - **KU Member daily rate (2026-09-07):** ผู้ใช้ role `ku_member` จะคำนวณค่าห้องรายวันด้วย `rate_type='daily_ku'` จาก `global_rates` อัตโนมัติผ่าน `GlobalRate::getEffectiveDailyRate()` (fallback ไป `daily` หากไม่มีเรท KU หรือผู้ใช้เป็น role ทั่วไป)
 - **UUID PKs everywhere** — most models use `HasUuids`. When asserting UUID equality in tests, cast to `(string)` first.
 - **Draft/testing code** is marked with `🚧 DRAFT / TESTING` comment prefix — treat as non-production.
 - **API response shape:** success `{"status":"success","message":...}` · error `{"status":"error","message":...}`. Don't leak `$e->getMessage()` on 500s — return a generic message + `Log::error()`.
@@ -91,6 +92,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - Quotas: 1 eligible booking_room = 1 slot; ทั้ง global (`max_uses`) และ per-user (`max_uses_per_user`) นับรวม `held` + `used`; All-or-nothing (ถ้าโควตาเหลือไม่พอ K ห้อง จะ reject 422 ทั้งชุด)
   - Single source of truth: **ห้าม insert `discount_redemptions` นอก `DiscountService`** (ยกเว้น transitionStatus hook `held → used` และ DB cascade)
   - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
+  - Endpoints ค้นหาและดูโค้ด (2026-09-07): `GET /discounts/{code}` (ดูรายตัวด้วย code name หรือ UUID), `GET /discounts?code=CODE` (exact match), `GET /discounts?search=TERM` (partial search) ใต้ `role:admin`
   - SQLite caveat: `lockForUpdate()` เป็น no-op บน SQLite — กลไกกัน race ทำงานจริงบน PostgreSQL prod เหมือน precedent `RoomAllocator.php`
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)

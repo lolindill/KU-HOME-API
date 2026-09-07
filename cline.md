@@ -1874,3 +1874,33 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 4. หลัง commit บน `agust-11` แล้ว fast-forward `feature/sso-ku-all-login` ใน worktree ให้เห็น map ทันที (branch ไม่มี unique commits — `--ff-only` ปลอดภัย)
 
 **ไม่แก้ skill (`~/.zcode/skills/wayfinder/SKILL.md`)** — skill เป็น user-global / repo-agnostic; มันอ้างหา "tracker doc" ของ repo อยู่แล้ว ซึ่งตอนนี้คือ AGENTS.md หัวข้อ "Wayfinder maps" นี้
+
+## 🎓 KU Member Rate Calculation (`role === 'ku_member'`) ใน Booking & Booking Rooms (2026-09-07)
+
+- **โจทย์:** "api that caculate amount rate of booking adn booking room defuet check if it ku memer user and use it rate" + ยืนยัน "ku memer now for next phase will use onlu role" และ "no new end point"
+- **Design decisions:**
+  1. **Source of Truth สำหรับ KU Member:** ตรวจสอบจาก `$user && $user->role === 'ku_member'` เท่านั้น (ไม่ใช้และไม่เขียนเพิ่มใน legacy boolean `is_ku_member` ตามข้อตกลง KU SSO ticket 08)
+  2. **Helper `GlobalRate::getEffectiveDailyRate($roomType, ?User $user)`:** ถ้าผู้ใช้มี role `ku_member` และตาราง `global_rates` มีแถว `rate_type = 'daily_ku'` ที่ active และราคา > 0 จะดึงมาคิดเงิน; หากไม่มีจะ fallback ไปใช้ `rate_type = 'daily'` (ราคาบุคคลทั่วไป) เสมอ
+  3. **Chokepoint `DiscountService::reprice(Booking $booking)`:** เปลี่ยนจากการดึงเรท `daily` แข็ง เป็นการส่ง `$booking->user` เข้า `GlobalRate::getEffectiveDailyRate()` ทำให้ `room_amount`, `discount_amount`, `amount` รายห้อง และ `total_amount` ทั้งบิลคิดจากเรท KU Member โดยอัตโนมัติ
+  4. **`BookingController`:** จุดคำนวณ `$addedAmount` ใน `addRooms()` ส่ง `$booking->user` คำนวณผ่าน `getEffectiveDailyRate()` เพื่อให้ยอดใน response ตรงกับ DB จริง; ใน `createBooking()` และ `updateRoom()` เปลี่ยนให้ตรงกัน
+- **ไฟล์ที่เปลี่ยน:**
+  1. `app/Models/GlobalRate.php` — เพิ่ม `getEffectiveDailyRate()`
+  2. `app/Services/Discount/DiscountService.php` — `reprice()` ส่ง `$booking->user` เข้า `getEffectiveDailyRate()`
+  3. `app/Http/Controllers/Api/V1/BookingController.php` — อัปเดต `addRooms`, `createBooking`, `updateRoom` ให้ใช้ `getEffectiveDailyRate()`
+  4. `docs/api_guide.md` — ปลดล็อคโน้ต known gap (04/09/26) ว่า `daily_ku` ถูกนำมาใช้งานจริงในระบบ Booking Engine เรียบร้อยแล้ว
+  5. `tests/Feature/BookingKuMemberPricingTest.php` — เทสต์ 6 เคส ครอบคลุม general user (`daily`), ku member user (`daily_ku`), fallback to `daily`, `addRooms`, invariant preservation, และ discount percentage
+- **No new endpoint & No DB migration needed**
+
+## 🎟️ Discount Lookup & Search Endpoints (2026-09-07)
+
+- **โจทย์:** เพิ่มความสะดวกให้ Admin ในการค้นหาและดึงรายละเอียดของโค้ดส่วนลด (รองรับค้นหาด้วย code name หรือ UUID)
+- **Features & Endpoints:**
+  1. `GET /api/v1/discounts/{code}`: ดึงรายละเอียดโค้ดส่วนลดรายตัว โดยระบุได้ทั้ง code name (case-insensitive) หรือ UUID (ตอบ `200 OK` พร้อม object `discount` หรือ `404 Not Found` หากไม่พบ)
+  2. `GET /api/v1/discounts?code=CODE`: กรองโค้ดส่วนลดแบบ exact match (case-insensitive)
+  3. `GET /api/v1/discounts?search=TERM`: ค้นหาโค้ดส่วนลดแบบ partial search (case-insensitive)
+- **ไฟล์ที่เปลี่ยน:**
+  1. `app/Http/Controllers/Api/V1/DiscountController.php` — เพิ่ม `show()` endpoint และ query filters ใน `index()`
+  2. `routes/api.php` — เพิ่ม route `GET /discounts/{code}` ใต้ `role:admin`
+  3. `docs/api_guide.md` — บันทึกตาราง endpoint และคำอธิบายการค้นหาโค้ดส่วนลด
+  4. `tests/Feature/DiscountTest.php` — เพิ่มเทสต์ครอบคลุม auth protection, query param filter, get by code name, get by UUID, และ 404 not found
+

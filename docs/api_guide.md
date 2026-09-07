@@ -1129,7 +1129,7 @@ curl -s -H "Accept: application/json" \
 
 > 💡 **Pricing**: Server calculates all prices from `global_rates` and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
 >
-> ⚠️ **Known gap (04/09/26)**: ตอนคำนวณราคาจริง server ใช้แค่ `rate_type='daily'` (general) เท่านั้น — `daily_ku` / `group.min_5_rooms` / `group.min_10_rooms` / `monthly` ที่โชว์ใน `rates` object เป็น **display-only** ยังไม่ถูกใช้คิดเงินใน booking (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
+> 🌟 **KU Member Pricing (07/09/26)**: สำหรับผู้ใช้ที่มี role `ku_member` ระบบจะใช้เรท `rate_type='daily_ku'` จาก `global_rates` คิดเงินโดยอัตโนมัติ (หากไม่มีหรือ inactive จะ fallback ไป `daily`) ส่วนผู้ใช้ทั่วไปจะใช้เรท `rate_type='daily'`. (`group` / `monthly` ยังคงเป็น display-only)
 
 **Response `201`:**
 ```json
@@ -2041,12 +2041,18 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/discounts` | List all discounts (optional `?is_active=true/false`) |
+| `GET` | `/discounts` | List all discounts (optional `?is_active=true/false`, `?code=CODE`, `?search=TERM`) |
+| `GET` | `/discounts/{code}` | Get discount by code name or UUID (`200 OK` / `404 Not Found`) |
 | `POST` | `/discounts` | Create a new discount (`201 Created`) |
 | `PUT` | `/discounts/{id}` | Update discount attributes |
 | `PATCH` | `/discounts/{id}/toggle` | Toggle `is_active` status |
 
 > ❄️ **Note:** Discounts cannot be deleted (`DELETE` endpoint does not exist) to protect financial audit history. Soft toggle is used instead.
+
+> 🔍 **Lookup & Search:**
+> - `GET /discounts?code=SUMMER50` — กรองรายการตามชื่อโค้ดแบบ exact match (case-insensitive)
+> - `GET /discounts?search=SUMMER` — ค้นหาโค้ดที่มีคำว่า SUMMER (partial match)
+> - `GET /discounts/SUMMER50` หรือ `GET /discounts/{uuid}` — ดึงข้อมูลโค้ดรายตัวโดยตรง (คืน object `discount`)
 
 > 🛡️ **Update rules (2026-08-27):**
 > - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน
@@ -3008,8 +3014,8 @@ These endpoints exist but are **not production-ready**:
 ### Pricing Notes
 
 - All prices stored as **integers** (satang/cents) since 2026-06-05 — baht ที่ขอบ API เฉพาะ `rates` object + `extra_bed_price` ของ RoomType (baht string 2 ตำแหน่ง, 03/09/26).
-- Room rates come from `global_rates` (rows where `rate_type='daily'` + matching `room_type_id`).
-- ⚠️ **Known gap (04/09/26)**: booking pricing ใช้แค่ `daily` (general) — `daily_ku` / `group` / `month` rows **display-only** ผ่าน `rates` object ยังไม่เข้าสูตรคิดเงิน
+- Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
+- 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
 - Pricing formula per room:
   ```
