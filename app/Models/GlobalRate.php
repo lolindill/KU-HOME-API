@@ -114,4 +114,26 @@ class GlobalRate extends Model
 
         return $rate ? $rate->default_price : 0;
     }
+
+    /**
+     * ดึง daily rate ที่มีผลบังคับใช้ตามสิทธิ์ของผู้ใช้ (User role)
+     * - ถ้า $user->role === 'ku_member' → ลองดึงเรท 'daily_ku' ก่อน
+     * - ถ้าไม่มี 'daily_ku' (หรือเป็น 0 หรือ inactive) หรือผู้ใช้ไม่ใช่ ku_member → fallback ไป 'daily'
+     *
+     * @param  RoomType|string  $roomType  Model instance หรือ room_type_id
+     * @param  User|null  $user  ผู้ใช้ที่ทำการจอง
+     */
+    public static function getEffectiveDailyRate($roomType, ?User $user = null): int
+    {
+        $roomTypeId = $roomType instanceof RoomType ? $roomType->id : $roomType;
+
+        if ($user && $user->role === 'ku_member') {
+            $kuRate = self::getRoomRate($roomTypeId, 'daily_ku');
+            if ($kuRate > 0) {
+                return $kuRate;
+            }
+        }
+
+        return self::getRoomRate($roomTypeId, 'daily');
+    }
 }

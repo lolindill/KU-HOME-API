@@ -159,11 +159,12 @@ class DiscountService
     {
         $discount = $booking->discount_code ? Discount::where('code', $booking->discount_code)->first() : null;
         $holds = DiscountRedemption::whereIn('booking_room_id', $booking->bookingRooms()->pluck('id'))->get();
+        $user = $booking->user;
         $total = 0;
 
         foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
             $nights = Carbon::parse($br->check_in)->diffInDays(Carbon::parse($br->check_out)) ?: 1;
-            $rate = GlobalRate::getRoomRate($br->roomType, 'daily');
+            $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
             $roomAmount = $rate * $nights;
 
             $isHeld = $holds->contains('booking_room_id', $br->id);

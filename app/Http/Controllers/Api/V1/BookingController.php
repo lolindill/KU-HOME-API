@@ -324,8 +324,8 @@ class BookingController extends Controller
                 $roomCheckOut = Carbon::parse($roomRequest['check_out']);
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
-                // 🌟 room rate จาก global_rates (rate_type='daily')
-                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
+                // 🌟 room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
+                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
                 $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
@@ -651,7 +651,7 @@ class BookingController extends Controller
                 $roomType = RoomType::findOrFail($effectiveTypeId);
                 $nights = Carbon::parse($effectiveCheckIn)->diffInDays(Carbon::parse($effectiveCheckOut)) ?: 1;
 
-                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
+                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
                 $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
                 $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
                 $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
@@ -1204,8 +1204,8 @@ class BookingController extends Controller
                 $roomCheckOut = Carbon::parse($roomRequest['check_out']);
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
-                // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (rate_type='daily') แทน room_types
-                $roomPriceTotal = GlobalRate::getRoomRate($roomType, 'daily') * $nights;
+                // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
+                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $request->user('sanctum')) * $nights;
                 $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
