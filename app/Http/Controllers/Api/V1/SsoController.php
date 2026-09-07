@@ -1,0 +1,83 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Services\Sso\Exceptions\InvalidClientException;
+use App\Services\Sso\Exceptions\InvalidGrantException;
+use App\Services\Sso\Exceptions\KuSsoUnavailableException;
+use App\Services\Sso\Exceptions\MissingEmailException;
+use App\Services\Sso\KuSsoService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+class SsoController extends Controller
+{
+    /**
+     * 🎫 POST /auth/sso/exchange — SPA ส่ง authorization code มาแลก Sanctum token
+     *
+     * Flow + error map ตาม wayfinder/ku-sso ticket 03 (owner sign-off 2026-09-07):
+     * invalid_grant→422 · ไม่มี email→422 · invalid_client→500 · Keycloak ล่ม→502
+     * state/PKCE validation เป็นหน้าที่ฝั่ง SPA — backend ไม่ยุ่ง
+     */
+    public function exchange(Request $request, KuSsoService $sso)
+    {
+        $validated = $request->validate([
+            'code' => 'required|string',
+        ]);
+
+        try {
+            $tokens = $sso->exchangeCode($validated['code']);
+            $claims = $sso->fetchUserinfo($tokens['access_token']); // 🗑️ ใช้ครั้งเดียวแล้วทิ้ง
+            $user = $sso->findOrCreateUser($claims);
+        } catch (InvalidGrantException $e) {
+            // code single-use — ห้าม retry, SPA ต้องเริ่ม login flow ใหม่
+            return response()->json([
+                'status' => 'error',
+                'message' => 'รหัสยืนยันหมดอายุหรือถูกใช้งานแล้ว กรุณาเข้าสู่ระบบผ่าน KU SSO อีกครั้งค่ะ 🔄',
+            ], 422);
+        } catch (MissingEmailException $e) {
+            // fail-closed (ticket 02) — ไม่เดา identity จาก claim อื่น
+            return response()->json([
+                'status' => 'error',
+                'message' => 'บัญชี KU ของท่านไม่ส่งข้อมูลอีเมลกลับมา จึงเข้าสู่ระบบไม่ได้ในขณะนี้ค่ะ 📧',
+            ], 422);
+        } catch (InvalidClientException $e) {
+            // config ฝั่งเราพัง — service log รายละเอียดไว้แล้ว ห้าม expose ออกไป
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการยืนยันตัวตนกับระบบกลางมหาวิทยาลัย กรุณาแจ้งผู้ดูแลระบบค่ะ',
+            ], 500);
+        } catch (KuSsoUnavailableException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ระบบ KU SSO ของมหาวิทยาลัยขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งค่ะ 🛰️',
+            ], 502);
+        } catch (Throwable $e) {
+            // 🚨 error ที่ไม่คาดคิด → 500 generic ไม่ leak (ตาม convention ของ repo)
+            Log::error('KU SSO exchange: unexpected error', [
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ กรุณาลองใหม่อีกครั้งค่ะ',
+            ], 500);
+        }
+
+        // Sanctum นโยบายเดียวกับ password login ทุกประการ — token ใหม่ ไม่ revoke ของเดิม (ticket 03)
+        $token = $user->createToken('ku_home_auth_token')->plainTextToken;
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'KU SSO login successful',
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+            'user' => $user,
+            // 🔖 คืนตาม contract ticket 03 — SPA เก็บไว้ใช้เป็น id_token_hint ตอน END_SESSION อนาคต (ไม่ parse)
+            'id_token' => $tokens['id_token'],
+        ], 200);
+    }
+}

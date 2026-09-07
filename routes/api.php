@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\MockController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\SsoController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Middleware\RequireJsonAccept;
 use Illuminate\Support\Facades\Route;
@@ -37,6 +38,10 @@ Route::prefix('v1')->group(function () {
     // 🔑 Auth
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+
+    // 🎫 KU SSO (wayfinder/ku-sso): SPA รับ code จาก Keycloak แล้วส่งมาแลก Sanctum token
+    //    throttle เทียบเท่า login · error map ตาม contract ticket 03
+    Route::post('/auth/sso/exchange', [SsoController::class, 'exchange'])->middleware('throttle:5,1');
 
     // 🏨 Rooms (public read-only)
     Route::get('/rooms', [RoomController::class, 'allRooms']);

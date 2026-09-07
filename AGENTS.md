@@ -94,6 +94,10 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
   - Endpoints ค้นหาและดูโค้ด (2026-09-07): `GET /discounts/{code}` (ดูรายตัวด้วย code name หรือ UUID), `GET /discounts?code=CODE` (exact match), `GET /discounts?search=TERM` (partial search) ใต้ `role:admin`
   - SQLite caveat: `lockForUpdate()` เป็น no-op บน SQLite — กลไกกัน race ทำงานจริงบน PostgreSQL prod เหมือน precedent `RoomAllocator.php`
+- **🎫 KU SSO login (2026-09-07):** Keycloak realm `KU-Alllogin` — design/spec ทั้งหมด live ที่ `wayfinder/ku-sso/map.md` (อ่านก่อนแตะ auth) · `POST /auth/sso/exchange` (public, throttle `5,1`) แลก `code` เป็น Sanctum token ผ่าน `KuSsoService` (`app/Services/Sso/` — hand-rolled `Http` facade, **0 package**)
+  - **Split-user model:** column `users.auth_provider` (`password`|`ku_sso`) + composite unique `(email, auth_provider)` — email เดียวมี account ได้หลาย provider · **ห้าม link identity** (req change 2026-09-01)
+  - `AuthController::login` มองเฉพาะ `auth_provider=password` เสมอ — อย่าถอด filter ออก · email unique ใน `StoreUserRequest`/`UpdateUserRequest` scope ต่อ provider
+  - First login KU SSO = user role `ku_member` · password สุ่มทิ้ง · KU tokens (access/id_token) ทิ้งหมดไม่เก็บ DB · config ที่ `config/ku_sso.php` ผูก `KU_SSO_*` จาก `.env` · claims จริงของ scope `basic` ยังต้อง live-verify (ดู amendment ใน ticket 02)
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
 

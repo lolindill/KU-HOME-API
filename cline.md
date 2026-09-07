@@ -1904,3 +1904,30 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   3. `docs/api_guide.md` — บันทึกตาราง endpoint และคำอธิบายการค้นหาโค้ดส่วนลด
   4. `tests/Feature/DiscountTest.php` — เพิ่มเทสต์ครอบคลุม auth protection, query param filter, get by code name, get by UUID, และ 404 not found
 
+## 🎫 KU SSO Login (Keycloak) — Implementation (2026-09-07)
+
+- **โจทย์:** implement flow จาก wayfinder map `wayfinder/ku-sso` (decision-lock ครบทุก ticket 01–09 — ทำงานบน worktree `.worktree/ku-sso-login` branch `feature/ku-sso-login`)
+- **Design decisions (ทั้งหมดมาจาก owner sign-off ใน map — ไม่มีอะไรตัดสินใหม่ยกเว้นระดับ code):**
+  1. **Lib choice: hand-rolled 0 package** (decision ticket 05) — `KuSsoService` ใช้ `Http` facade ยิง 2 call (token endpoint + userinfo) · ไม่ verify JWT เอง (userinfo บน TLS พอ ตาม OIDC Core §3.1.3.7) · ทดสอบด้วย `Http::fake` ได้โดยตรง · TLS verify คง default ON ห้าม `verify => false`
+  2. **Split user model** (ticket 02): เพิ่ม column `users.auth_provider` (`password`|`ku_sso`|`google` อนาคต, default `password`) + เปลี่ยน unique email → **composite unique `(email, auth_provider)`** — migration `2026_09_07_120000` เป็น non-destructive (users เดิมได้ `password` ผ่าน default, `php artisan migrate` ปกติพอ ไม่ต้อง fresh) · password ของ SSO user = `Str::random(64)` ทิ้ง (cast `hashed` เข้ารหัสเอง) · **ไม่เก็บ keycloak `sub`** · re-login ห้าม overwrite `name`
+  3. **First login KU SSO → role `ku_member`** (ticket 08) — คู่กับ `auth_provider=ku_sso`
+  4. **Fail-closed ถ้าไม่มี email** (ticket 02 + amendment): userinfo ไม่คืน claim `email` = 422 (คู่มือ OCS ชี้ scope `basic` อาจไม่มี `email` ตรงๆ — ยังไม่ทำ fallback chain `mail`/`google-mail`/`office365-mail` จนกว่าจะ live-verify ได้ รอ ticket 06)
+  5. **ชื่อจาก claims แบบ fallback chain** (amendment ticket 02 — ชื่อ claim ของ KU ไม่ตาม OIDC standard): full-name ลอง `name` → `thainame` → `cn` ก่อน ไม่มีค่อยประกอบ `givenname`/`given_name`/`first-name` + `surname`/`family_name`/`last-name` · ยังไม่มี test account จริง — จูน chain ตอน live-verify
+  6. **Error map ตาม contract ticket 03:** `invalid_grant`→422 (code single-use ~60 วิ ห้าม retry) · ไม่มี email→422 · `invalid_client`→500 (config เราพัง + `Log::error` ไม่ expose) · Keycloak ล่ม/timeout/5xx/ตอบไม่มี access_token→502 · validation→422 · catch-all `Throwable`→500 generic
+  7. **Response 200** = `{status, message, access_token, token_type: "Bearer", user, id_token}` — key ตรง login เดิม + `user` + `id_token` (SPA เก็บไว้เป็น `id_token_hint` เผื่อ END_SESSION อนาคต — backend ไม่ parse · END_SESSION ยังไม่ทำใน v1 ตาม ticket 03) · KU tokens ทิ้งหมด ไม่เก็บ DB · ไม่ขอ refresh_token
+  8. **จุดแก้บังคับ ticket 09:** `AuthController::login` filter `auth_provider='password'` (ไม่งั้น email ซ้ำข้าม provider อาจชน row ของ SSO แล้ว 401) · `StoreUserRequest` + `UpdateUserRequest` unique email scope **ต่อ provider ของ row นั้น** (`UpdateUserRequest` ต้อง look up provider ของ target user ก่อน) · `UserController::index` โชว์ `auth_provider` + filter `?auth_provider=` · grep audit แล้ว `where('email')` ใน `app/` มีจุดเดียวคือ login
+- **Bug ที่เจอระหว่างทำ (จดกันลืม):** `->when($request->filled('x'), fn ($q, $v) => ...)` — callback ของ `when()` รับ **boolean ของเงื่อนไข** เป็น arg ที่สอง ไม่ใช่ค่าจริงของ param → `where('auth_provider', true)` เงียบๆ ได้ 0 แถว ต้อง capture `$provider = $request->query('auth_provider')` ก่อนแล้วค่อยส่งเข้า `when()`
+- **Test gotcha (จดกันลืม):** ใน test เดียวกัน Sanctum guard **cache user ไว้ข้าม request** (set ผ่าน web guard singleton ตอน token auth สำเร็จ) — request หลัง logout ด้วย token ที่ revoked แล้วยังได้ 200! ต้อง `$this->app->make('auth')->forgetGuards()` ก่อนยิงซ้ำ (prod ไม่มีปัญหา — process ใหม่ทุก request) · ห้ามใช้ `$this->refreshApplication()` กับ SQLite `:memory:` เพราะตารางหายหมด
+- **ไฟล์ที่เปลี่ยน:**
+  1. `database/migrations/2026_09_07_120000_add_auth_provider_to_users_table.php` — เพิ่ม `auth_provider` + composite unique (SQLite drop unique ด้วยชื่อ index `users_email_unique` ได้ทั้ง PG)
+  2. `config/ku_sso.php` — ผูก `KU_SSO_*` จาก `.env` (BASE_URL/CLIENT_ID/CLIENT_SECRET/SCOPE/REDIRECT_URI/LOGOUT_REDIRECT_URI + timeout 10s/connect 5s)
+  3. `app/Services/Sso/KuSsoService.php` — `exchangeCode()` / `fetchUserinfo()` / `findOrCreateUser()` + race-guard ด้วย composite unique (catch unique violation → find แทน ตาม precedent register)
+  4. `app/Services/Sso/Exceptions/*` — `KuSsoException` base + `InvalidGrantException` / `InvalidClientException` / `KuSsoUnavailableException` / `MissingEmailException`
+  5. `app/Http/Controllers/Api/V1/SsoController.php` — `exchange()` + error map
+  6. `routes/api.php` — `POST /auth/sso/exchange` public + `throttle:5,1` เทียบเท่า login
+  7. `app/Models/User.php` — fillable `auth_provider`
+  8. `app/Http/Controllers/Api/V1/AuthController.php` + `app/Http/Requests/StoreUserRequest.php` + `app/Http/Requests/UpdateUserRequest.php` + `app/Http/Controllers/Api/V1/UserController.php` — ตามข้อ 8
+  9. `tests/Feature/SsoExchangeTest.php` — 13 เคสครอบชุด ticket 07 (สร้างใหม่ ku_member / find ของเดิมไม่ overwrite / split user / multi-device / error map ครบ / logout / throttle 429 / admin filter) · `tests/Feature/AuthTest.php` — เพิ่ม regression login scope + register ข้าม provider
+- **ยังไม่ทำ (รอ ticket 06 live-verify):** happy path กับ sso-dev จริง · ดู claims จริงของ scope `basic` (จูน name chain + ตัดสิน fallback email) · remote smoke script `test_scripts/test_sso_remote.php` (โฟลเดอร์ gitignore — สร้างบนเครื่องก่อน ถ้าจะใช้) · END_SESSION v1 defer
+- **Migration Required:** มีแค่ `php artisan migrate` ปกติ (non-destructive, users เดิมได้ `auth_provider='password'` อัตโนมัติ)
+

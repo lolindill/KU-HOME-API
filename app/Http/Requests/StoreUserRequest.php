@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreUserRequest extends FormRequest
 {
@@ -23,7 +24,12 @@ class StoreUserRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email',
+            // 🎫 split user: unique scope เฉพาะ auth_provider=password — email ที่มี SSO account อยู่แล้ว
+            //    ยังสมัคร password account ได้ (composite unique ที่ DB กันให้เอง) — ticket 09
+            'email' => [
+                'required', 'string', 'email', 'max:255',
+                Rule::unique('users', 'email')->where(fn ($query) => $query->where('auth_provider', 'password')),
+            ],
             'password' => 'required|string|min:8',
             'title' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',

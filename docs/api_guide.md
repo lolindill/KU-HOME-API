@@ -147,7 +147,7 @@ Used by `GET /bookings` and `GET /users`:
 | Field                   | Rule                                    |
 |-------------------------|-----------------------------------------|
 | `name`                  | required, string, max 255               |
-| `email`                 | required, email, unique:users           |
+| `email`                 | required, email, unique ต่อ provider (scope `auth_provider=password` — email เดียวกันมี account แยกต่อ provider ได้ ตาม split-user model ของ KU SSO) |
 | `password`              | required, string, min 8                    |
 
 ---
@@ -181,6 +181,43 @@ Used by `GET /bookings` and `GET /users`:
   "message": "อีเมลหรือรหัสผ่านไม่ถูกต้องค่ะ"
 }
 ```
+
+---
+
+### POST `/auth/sso/exchange` — KU SSO login (Keycloak)
+
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/ku-sso` (decision-lock ครบ)
+
+> Flow: SPA เปิด KU authorization endpoint รับ `code` (state/PKCE ฝั่ง browser) → ส่ง `code` มาที่นี่ → backend แลก code + client_secret (server-to-server) → ดึง userinfo → find-or-create User (`auth_provider=ku_sso`, role `ku_member` ตอนสร้างใหม่) → ออก Sanctum token
+> KU tokens **ทิ้งหมดไม่เก็บ** · Sanctum token นโยบายเดียวกับ login เดิม (ไม่ revoke ของเดิม — multi-device) · v1 ไม่มี END_SESSION
+
+**Request Body:**
+```json
+{
+  "code": "authorization-code-from-ku-redirect"
+}
+```
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "KU SSO login successful",
+  "access_token": "12|abcdef1234567890...",
+  "token_type": "Bearer",
+  "user": { ...user object (role: ku_member)... },
+  "id_token": "eyJhbGciOi..."
+}
+```
+
+**Error Map:**
+| HTTP | สถานการณ์ |
+|------|-----------|
+| `422` | validation (`code` หาย/ไม่ใช่ string) |
+| `422` | `invalid_grant` — code หมดอายุ (~60 วิ)/ใช้แล้ว → SPA ต้องเริ่ม login flow ใหม่ (ห้าม retry) |
+| `422` | userinfo ไม่คืน `email` (fail-closed — ไม่เดา identity จาก claim อื่น) |
+| `500` | `invalid_client` — `KU_SSO_CLIENT_ID/SECRET` ใน `.env` พัง (log ไว้ ไม่ expose) |
+| `502` | Keycloak ล่ม / timeout / ตอบผิดปกติ |
 
 ---
 
@@ -256,6 +293,9 @@ Revokes the current access token.
 
 **Query Params:**
 - Pagination automatic (15 per page)
+- `auth_provider` (optional) — กรองเฉพาะ provider (`password` | `ku_sso`) · 🎫 split-user model: email เดียวมีได้หลาย account ข้าม provider (2026-09-07)
+
+> ทุก user object serialize รวม field `auth_provider` (`password` เริ่มต้นสำหรับ user เก่า · `ku_sso` สำหรับ account ที่เกิดจาก KU SSO login)
 
 **Response `200`:**
 ```json
