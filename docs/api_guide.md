@@ -1947,6 +1947,40 @@ Preview a discount code and check live quota remaining without side effects (doe
 
 ---
 
+### GET `/discounts/{code}` — Get discount details by code or UUID 🎟️
+
+🔒 **Auth required** (All user roles: `user`, `ku_member`, `guest`, `staff`, `admin`, etc.) · Rate limit: `10,1`
+
+Lookup discount information by code name (case-insensitive) or UUID without requiring an active booking.
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨",
+  "discount": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "code": "SUPER50",
+    "type": "percent",
+    "value": 50,
+    "room_type_ids": null,
+    "usable_from": "2026-09-01T00:00:00.000000Z",
+    "usable_until": "2026-09-30T23:59:59.000000Z",
+    "stay_from": "2026-09-01",
+    "stay_until": "2026-12-20",
+    "max_uses": 10,
+    "max_uses_per_user": 3,
+    "is_active": true,
+    "created_at": "2026-08-27T11:00:00.000000Z",
+    "updated_at": "2026-08-27T11:00:00.000000Z"
+  }
+}
+```
+
+**Error responses:** `401` (Unauthenticated) · `404` (Not Found)
+
+---
+
 ### PUT `/bookings/{bookingId}/discount-code` — Apply / Change discount code 🎟️
 
 🔒 **Auth required** (Owner or Admin) · Rate limit: `5,1`
@@ -2041,8 +2075,8 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/discounts` | List all discounts (optional `?is_active=true/false`, `?code=CODE`, `?search=TERM`) |
-| `GET` | `/discounts/{code}` | Get discount by code name or UUID (`200 OK` / `404 Not Found`) |
+| `GET` | `/discounts` | List all discounts (Admin only, optional `?is_active=true/false`, `?code=CODE`, `?search=TERM`) |
+| `GET` | `/discounts/{code}` | Get discount by code name or UUID (**All authenticated roles**, `200 OK` / `404 Not Found`) |
 | `POST` | `/discounts` | Create a new discount (`201 Created`) |
 | `PUT` | `/discounts/{id}` | Update discount attributes |
 | `PATCH` | `/discounts/{id}/toggle` | Toggle `is_active` status |
@@ -2050,9 +2084,9 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 > ❄️ **Note:** Discounts cannot be deleted (`DELETE` endpoint does not exist) to protect financial audit history. Soft toggle is used instead.
 
 > 🔍 **Lookup & Search:**
-> - `GET /discounts?code=SUMMER50` — กรองรายการตามชื่อโค้ดแบบ exact match (case-insensitive)
-> - `GET /discounts?search=SUMMER` — ค้นหาโค้ดที่มีคำว่า SUMMER (partial match)
-> - `GET /discounts/SUMMER50` หรือ `GET /discounts/{uuid}` — ดึงข้อมูลโค้ดรายตัวโดยตรง (คืน object `discount`)
+> - `GET /discounts?code=SUMMER50` — กรองรายการตามชื่อโค้ดแบบ exact match (Admin only, case-insensitive)
+> - `GET /discounts?search=SUMMER` — ค้นหาโค้ดที่มีคำว่า SUMMER (Admin only, partial match)
+> - `GET /discounts/SUMMER50` หรือ `GET /discounts/{uuid}` — ดึงข้อมูลโค้ดรายตัวโดยตรงสำหรับทุก role (คืน object `discount`)
 
 > 🛡️ **Update rules (2026-08-27):**
 > - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน

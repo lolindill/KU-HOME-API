@@ -131,6 +131,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // 🎟️ Discount (27/08/26) — preview โค้ด (ไม่มี side-effect ไม่ถือ slot)
     Route::post('/discounts/validate', [DiscountController::class, 'preview'])
         ->middleware('throttle:10,1');
+    Route::get('/discounts/{code}', [DiscountController::class, 'show'])
+        ->middleware('throttle:10,1');
 
     // 🎟️ ใส่/เปลี่ยน/ลบ โค้ดบน draft booking (เจ้าของหรือ admin)
     Route::put('/bookings/{bookingId}/discount-code', [BookingController::class, 'setDiscountCode'])
@@ -189,7 +191,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 🎟️ Discounts management (admin)
         Route::get('/discounts', [DiscountController::class, 'index']);
         Route::post('/discounts', [DiscountController::class, 'store']);
-        Route::get('/discounts/{code}', [DiscountController::class, 'show']);
         Route::put('/discounts/{id}', [DiscountController::class, 'update'])->where('id', '[0-9a-f\-]{36}');
         Route::patch('/discounts/{id}/toggle', [DiscountController::class, 'toggleActive'])->where('id', '[0-9a-f\-]{36}');
 

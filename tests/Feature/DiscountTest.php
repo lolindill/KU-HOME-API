@@ -203,14 +203,18 @@ class DiscountTest extends TestCase
         $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts')
             ->assertStatus(403);
 
-        $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts/SOMECODE')
-            ->assertStatus(403);
-
         $this->actingAs($user, 'sanctum')->postJson('/api/v1/discounts', [
             'code' => 'HACK',
             'type' => 'percent',
             'value' => 99,
         ])->assertStatus(403);
+
+        $this->actingAs($user, 'sanctum')->putJson('/api/v1/discounts/'.Str::uuid(), [
+            'value' => 10,
+        ])->assertStatus(403);
+
+        $this->actingAs($user, 'sanctum')->patchJson('/api/v1/discounts/'.Str::uuid().'/toggle')
+            ->assertStatus(403);
     }
 
     public function test_admin_can_filter_discounts_by_code_query_param(): void
@@ -301,6 +305,39 @@ class DiscountTest extends TestCase
             ->assertJson([
                 'status' => 'error',
             ]);
+    }
+
+    public function test_all_user_roles_can_get_discount_by_code(): void
+    {
+        $discount = Discount::create([
+            'code' => 'OPENFORALL',
+            'type' => 'percent',
+            'value' => 15,
+            'is_active' => true,
+        ]);
+
+        $roles = ['user', 'guest', 'ku_member', 'staff', 'housekeeping', 'admin'];
+
+        foreach ($roles as $role) {
+            $user = $this->makeUser($role);
+            $response = $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts/openforall');
+
+            $response->assertStatus(200)
+                ->assertJson([
+                    'status' => 'success',
+                    'discount' => [
+                        'code' => 'OPENFORALL',
+                        'value' => 15,
+                    ],
+                ]);
+        }
+    }
+
+    public function test_unauthenticated_user_cannot_get_discount_by_code(): void
+    {
+        $response = $this->getJson('/api/v1/discounts/ANYCODE');
+
+        $response->assertStatus(401);
     }
 
     // =========================================================================
