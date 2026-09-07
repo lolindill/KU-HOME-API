@@ -35,10 +35,14 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 
 ## Not yet specified
 
-- env/config naming (`KU_SSO_*`?) + production realm endpoint — รอ ticket 04 + 06 *(04 ปิดแล้ว — เหลือรอ ticket 06)*
-- การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06
-- ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account) *(🆕 2026-09-07 คู่มือ OCS ชี้ว่า `basic` ไม่มี claim `email` ตรง ๆ — `mail` เฉพาะบุคลากร / `google-mail` / `office365-mail` + ชื่อ claim ไม่ตาม standard — ดู Amendment ใน [ticket 02](./tickets/02-sso-identity-to-local-user-mapping.md) และ [research/ku-playground-manual-notes.md](./research/ku-playground-manual-notes.md))*
+- env/config naming (`KU_SSO_*`?) + production realm endpoint — *(🆕 2026-09-07 naming ตกลงแล้วโดย implementation: env block `KU_SSO_*` → `config/ku_sso.php` · dev realm `sso-dev` ใช้ได้ 1 ปี — เหลือ production realm endpoint รอช่วง go-live)*
+- การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06 *(REDIRECT_URI ปัจจุบัน = `http://localhost:8000/*` สำหรับ manual test — production ต้องเป็น route https ของ React)*
+- ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account) *(🆕 2026-09-07 คู่มือ OCS ชี้ว่า `basic` ไม่มี claim `email` ตรง ๆ — `mail` เฉพาะบุคลากร / `google-mail` / `office365-mail` + ชื่อ claim ไม่ตาม standard — ดู Amendment ใน [ticket 02](./tickets/02-sso-identity-to-local-user-mapping.md) และ [research/ku-playground-manual-notes.md](./research/ku-playground-manual-notes.md) · 🆕 2026-09-07 implementation exchange endpoint + tests พร้อมแล้วบน branch `feature/ku-sso-login` — live-verify ได้ทันทีเมื่อมี test session)*
 - ชะตา column `users.is_ku_member` หลัง ticket 08 ปิด (role เป็น source of truth): drop หรือ freeze ไม่เขียน — ตัดสินตอนเขียน spec implementation
+
+### 🏗️ Implementation status (นอก map — hand-off session)
+
+- **KU SSO login v1 implemented (2026-09-07)** บน branch `feature/ku-sso-login` (worktree `.worktree/ku-sso-login`): migration `users.auth_provider` + composite unique `(email, auth_provider)` · `POST /auth/sso/exchange` + `KuSsoService` (hand-rolled 0 package) · จุดแก้บังคับของ [ticket 09](./tickets/09-password-reset-admin-views-duplicate-email.md) ครบ · feature tests ครอบชุด [ticket 07](./tickets/07-sso-test-strategy.md) (391 tests ผ่านหมด) — รายละเอียด design ใน `cline.md` หัวข้อ "KU SSO Login"
 
 ## Out of scope
 
