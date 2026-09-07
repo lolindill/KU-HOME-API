@@ -189,6 +189,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 🎟️ Discounts management (admin)
         Route::get('/discounts', [DiscountController::class, 'index']);
         Route::post('/discounts', [DiscountController::class, 'store']);
+        Route::get('/discounts/{code}', [DiscountController::class, 'show']);
         Route::put('/discounts/{id}', [DiscountController::class, 'update'])->where('id', '[0-9a-f\-]{36}');
         Route::patch('/discounts/{id}/toggle', [DiscountController::class, 'toggleActive'])->where('id', '[0-9a-f\-]{36}');
 

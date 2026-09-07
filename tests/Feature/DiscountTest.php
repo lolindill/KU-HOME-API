@@ -203,11 +203,104 @@ class DiscountTest extends TestCase
         $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts')
             ->assertStatus(403);
 
+        $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts/SOMECODE')
+            ->assertStatus(403);
+
         $this->actingAs($user, 'sanctum')->postJson('/api/v1/discounts', [
             'code' => 'HACK',
             'type' => 'percent',
             'value' => 99,
         ])->assertStatus(403);
+    }
+
+    public function test_admin_can_filter_discounts_by_code_query_param(): void
+    {
+        $admin = $this->makeUser('admin');
+
+        Discount::create([
+            'code' => 'ALPHA10',
+            'type' => 'percent',
+            'value' => 10,
+            'is_active' => true,
+        ]);
+
+        Discount::create([
+            'code' => 'BETA20',
+            'type' => 'percent',
+            'value' => 20,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/discounts?code=alpha10');
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+            ]);
+
+        $discounts = $response->json('discounts');
+        $this->assertCount(1, $discounts);
+        $this->assertEquals('ALPHA10', $discounts[0]['code']);
+    }
+
+    public function test_admin_can_get_discount_by_code_name(): void
+    {
+        $admin = $this->makeUser('admin');
+
+        $discount = Discount::create([
+            'code' => 'SPECIAL50',
+            'type' => 'percent',
+            'value' => 50,
+            'is_active' => true,
+        ]);
+
+        // Test with exact code name (case-insensitive)
+        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/discounts/special50');
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'discount' => [
+                    'id' => (string) $discount->id,
+                    'code' => 'SPECIAL50',
+                    'value' => 50,
+                ],
+            ]);
+    }
+
+    public function test_admin_can_get_discount_by_uuid(): void
+    {
+        $admin = $this->makeUser('admin');
+
+        $discount = Discount::create([
+            'code' => 'UUIDTEST',
+            'type' => 'percent',
+            'value' => 25,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson("/api/v1/discounts/{$discount->id}");
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'status' => 'success',
+                'discount' => [
+                    'id' => (string) $discount->id,
+                    'code' => 'UUIDTEST',
+                ],
+            ]);
+    }
+
+    public function test_get_discount_by_non_existent_code_returns_404(): void
+    {
+        $admin = $this->makeUser('admin');
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/discounts/NOTEXIST99');
+
+        $response->assertStatus(404)
+            ->assertJson([
+                'status' => 'error',
+            ]);
     }
 
     // =========================================================================

@@ -8,6 +8,7 @@ use App\Models\DiscountRedemption;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class DiscountController extends Controller
 {
@@ -121,6 +122,14 @@ class DiscountController extends Controller
                     $q->where('is_active', $isActive);
                 }
             })
+            ->when($request->filled('code'), function ($q) use ($request) {
+                $code = strtoupper(trim((string) $request->query('code')));
+                $q->where('code', $code);
+            })
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $search = strtoupper(trim((string) $request->query('search')));
+                $q->where('code', 'like', "%{$search}%");
+            })
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -128,6 +137,30 @@ class DiscountController extends Controller
             'status' => 'success',
             'message' => 'ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨',
             'discounts' => $discounts,
+        ], 200);
+    }
+
+    /**
+     * 👥 Admin: แสดงรายละเอียดโค้ดส่วนลด (ค้นหาด้วย Code Name หรือ UUID)
+     */
+    public function show(string $code): JsonResponse
+    {
+        $code = trim($code);
+        $discount = Str::isUuid($code)
+            ? Discount::where('id', $code)->orWhere('code', strtoupper($code))->first()
+            : Discount::where('code', strtoupper($code))->first();
+
+        if (! $discount) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "ไม่พบโค้ดส่วนลด {$code} ค่ะ 🔎",
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨',
+            'discount' => $discount,
         ], 200);
     }
 
