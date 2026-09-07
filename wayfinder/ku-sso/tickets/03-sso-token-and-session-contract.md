@@ -13,3 +13,4 @@
 - END_SESSION ฝั่ง Keycloak เป็น **required หรือ optional** ใน v1? (diagram วาดไว้เป็น dashed = optional)
 - Response shape ของ endpoint exchange — ควร mirror login เดิม (`access_token` + `token_type`) หรือคืน `user` ด้วย?
 - Error semantics: code หมดอายุ/ใช้ไปแล้ว/userinfo ล้ม → 401 หรือ 422 หรือ 502 (Keycloak ล่ม)?
+- 🆕 **(graduate จาก fog 2026-09-04 — เดิมรอ ticket 01+04 ซึ่งปิดครบแล้ว):** contract ทั้ง request/response ของ endpoint exchange — field names จริง + error mapping จาก Keycloak (`invalid_grant`, `invalid_client` ฯลฯ — ดู [../research/keycloak-mechanics.md](../research/keycloak-mechanics.md)) ให้จบใน ticket นี้ ticket เดียว

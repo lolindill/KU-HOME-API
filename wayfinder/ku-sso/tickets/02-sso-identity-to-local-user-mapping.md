@@ -2,7 +2,7 @@
 
 - **label:** `wayfinder:grilling`
 - **type:** HITL
-- **status:** open *(claimed 2026-09-04 · มี proposal draft รอ owner sign-off — ดูส่วนล่าง)*
+- **status:** closed *(2026-09-04 — owner sign-off ครบทุกข้อ)*
 - **blocked-by:** — *(ปลดบล็อก 2026-09-01: ticket 01 ปิดแล้ว — ผูกกับ ticket 08 ในเรื่องผลของ linkage ต่อ ku_member)*
 - **assignee:** kevii (2026-09-04)
 
@@ -21,9 +21,9 @@ Diagram เสนอ "find-or-create User ด้วย email" — ต้อง�
   - **(ข) ไม่แต่ schema — ปฏิเสธเมื่อชน** — SSO เจอ email ที่มี password account อยู่แล้ว = 422 ให้ใช้ password login แทน (ง่ายสุด ไม่มี migration แต่คนที่เคยสมัครด้วย KU email จะใช้ SSOไม่ได้ตลอดชีวิต)
 - 🆕 **(จาก ticket 01 + req change) ผลต่อสถานะสมาชิก:** owner โน้มว่า "เกิดจาก KU SSO = ได้สถานะ ku member (ส่วนลดอัตรา member)" — คำตอบของ [ticket 08](./08-ku-member-role-or-tag.md) กำหนดว่าตอน **สร้าง user จาก KU SSO** ต้องเขียนอะไรลง user (role? boolean `is_ku_member`? derive จาก `auth_provider`?)
 
-## Proposal (2026-09-04 — agent draft, ⏳ รอ owner sign-off)
+## Resolution (2026-09-04 — owner sign-off ครบทุกข้อ)
 
-> ⚠️ ยัง **ไม่ใช่ Resolution** — owner ไม่ได้ตอบ grilling รอบนี้ (AskUserQuestion ไม่มีคำตอบ) จึงบันทึก draft พร้อมเหตุผลไว้ ครั้งหน้า owner ยืนยันทีละข้อ (หรือเถียง) แล้วจึงปิด ticket ได้ ตัวเลือกที่แนะนำวางไว้ลำดับแรกของแต่ละข้อ
+> Proposal เดิม (agent draft) ได้รับการยืนยัน**ทีละข้อจาก owner ในแชท grilling** — ทุกข้อตรงกับตัวเลือกแนะนำ ไม่มีการแก้ รายละเอียดเหตุผลของแต่ละข้อคงไว้ด้านล่างตาม draft
 
 - **สถานะ users schema:** **(ก) เพิ่ม `auth_provider`** (`string`, values `password`|`ku_sso`|`google`, default `password`, **users เดิมทุกคน = `password`**) + เปลี่ยน unique `email` → composite unique `(email, auth_provider)` · find-or-create ด้วย `(email, provider)`
   - เหตุผล: split-user เป็น standing model รวม Google อนาคต · (ข) ทำให้คนที่เคยสมัคร password ด้วยอีเมล KU ใช้ SSO ไม่ได้ตลอดชีวิต · migration เดียวจบ (SQLite local + PostgreSQL prod ทำ composite unique ได้เหมือนกัน)
@@ -34,6 +34,6 @@ Diagram เสนอ "find-or-create User ด้วย email" — ต้อง�
 - **Default เสริมที่เสนอ (low-stakes, ยังไม่เคยถาม):** `name` เติมจาก claim `name` เป็นอันดับแรก ไม่มีค่อย concat `given_name` + `family_name` · email normalize lowercase ก่อน find-or-create · `title`/`phone` เว้น null · ห้าม overwrite `name` ของ user เดิมตอน re-login (find path ไม่แตะ profile)
 - **ผลต่อสถานะ ku member ตอนสร้าง user จาก KU SSO:** ✅ ตอบแล้วโดย [ticket 08](./08-ku-member-role-or-tag.md) (ปิด 2026-09-04) — สร้าง user ด้วย **role `ku_member`** (คู่กับ `auth_provider=ku_sso` ถ้า proposal (ก) ผ่าน sign-off)
 
-**ประเด็นที่ proposal (ก) ทำให้ต้องจดต่อ (ยังไม่ ticket — ดู fog ใน map):**
-- `password_reset_tokens` ใช้ **`email` เป็น PK** → เมื่อ email ซ้ำได้ข้าม provider flow reset ต้องระบุ/กรอง `auth_provider` ด้วย ไม่งั้น reset ของ account password อาจไปชี้ row ที่ถูกต้องไม่ได้ (implementation session ต้องเช็ค `AuthController`/`ForgotPassword` ที่แตะ)
-- `Auth::attempt` ที่ login เดิมยังปลอดภัยตามธรรมชาติ (SSO row มี password สุ่ม ไม่มีทาง match) แต่ query ที่ไล่ user ด้วย email เพียงอย่างเดียวทั่วระบบ (admin list, assign role) อาจเห็น duplicate email — implementation ต้องเลือกว่าจะโชว์ `auth_provider` ให้ admin เห็นไหม
+**ประเด็นที่ proposal (ก) ทำให้ต้องจดต่อ (ตัดสินแล้ว — แตกเป็น ticket ใหม่):**
+- `password_reset_tokens` ใช้ **`email` เป็น PK** → เมื่อ email ซ้ำได้ข้าม provider flow reset ต้องระบุ/กรอง `auth_provider` ด้วย ไม่งั้น reset ของ account password อาจไปชี้ row ที่ถูกต้องไม่ได้ → แตกเป็น ticket [09-password-reset-admin-views-duplicate-email](./09-password-reset-admin-views-duplicate-email.md) (รวมประเด็น admin view เห็น duplicate email ด้วย)
+- `Auth::attempt` ที่ login เดิมยังปลอดภัยตามธรรมชาติ (SSO row มี password สุ่ม ไม่มีทาง match) — ไม่ต้องแก้อะไร

@@ -28,13 +28,11 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - [แนวทาง integrate: hand-rolled หรือ package](./tickets/05-integration-approach-package-or-hand-rolled.md): **hand-rolled `Http` facade + Service class (0 package)** — ไม่ต้อง verify JWT เอง (userinfo บน TLS พอ) + `Http::fake` ทดสอบได้น่าแท้ — รายละเอียดใน [research/integration-approach.md](./research/integration-approach.md)
 - [ใคร login ผ่าน KU SSO บ้างใน v1](./tickets/01-users-who-signs-in-via-ku-sso.md): **โหมดคู่ขนาน** (SSO เสริม ไม่ปิด password) · `POST /register` **เปิดต่อ** · default role ตอนแรกเข้า **ยกไปตัดสินใน ticket 08** · ⚠️ **req change ภายหลัง (2026-09-01): ไม่มีการ link identity — แต่ละ provider (password/KU SSO/Google) = split user คนละ account** (ดู Amendment ใน ticket)
 - [ku_member ควรเป็น role, tag/boolean หรือ derive จาก KU linkage](./tickets/08-ku-member-role-or-tag.md): **ยืนเป็น role** — source of truth เดียวของสถานะสมาชิก · **first login KU SSO = สร้าง user role `ku_member`** (ปิดปม default role จาก ticket 01) · boolean `is_ku_member` เป็น legacy ไม่เขียนเพิ่ม (owner decision 2026-09-04)
+- [จับคู่ SSO identity กับ local user account](./tickets/02-sso-identity-to-local-user-mapping.md): **(ก) เพิ่ม `auth_provider` (`password`\|`ku_sso`\|`google`) + composite unique `(email, auth_provider)`** · password ของ SSO user = สุ่ม `Str::random(64)` ทิ้ง · userinfo ไม่คืน email = 422 fail-closed · **ไม่เก็บ** keycloak `sub` · name จาก claim `name`→concat · email lowercase · re-login ไม่ overwrite · SSO-born user = role `ku_member` (owner sign-off ครบทุกข้อ 2026-09-04)
 
 ## Not yet specified
 
-- Contract จริงของ endpoint exchange (request/response field names, error codes 401/422/502) — รอ ticket 01 + 04
-- การแก้ users table ถ้าจำเป็น (เก็บ keycloak `sub`? `password` nullable สำหรับ SSO-created user?) — รอ ticket 02 *(มี proposal draft รอ owner sign-off ใน ticket แล้ว — 2026-09-04: (ก) auth_provider + composite unique · password สุ่มทิ้ง · ไม่มี email = 422 · ไม่เก็บ sub)*
-- 🆕 ถ้า proposal (ก) ของ ticket 02 ผ่าน: flow **password reset** ต้องรองรับ email ซ้ำข้าม provider (`password_reset_tokens` ใช้ email เป็น PK) + admin views ที่ไล่ user ด้วย email อย่างเดียวอาจเห็น duplicate — graduate หลัง ticket 02 ปิด
-- env/config naming (`KU_SSO_*`?) + production realm endpoint — รอ ticket 04 + 06
+- env/config naming (`KU_SSO_*`?) + production realm endpoint — รอ ticket 04 + 06 *(04 ปิดแล้ว — เหลือรอ ticket 06)*
 - การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06
 - Remote integration script สำหรับ SSO (pattern `test_scripts/*_remote.php`) ต้องมีไหม — รอ ticket 07
 - ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account)
