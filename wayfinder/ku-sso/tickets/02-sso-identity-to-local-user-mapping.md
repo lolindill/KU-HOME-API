@@ -37,3 +37,9 @@ Diagram เสนอ "find-or-create User ด้วย email" — ต้อง�
 **ประเด็นที่ proposal (ก) ทำให้ต้องจดต่อ (ตัดสินแล้ว — แตกเป็น ticket ใหม่):**
 - `password_reset_tokens` ใช้ **`email` เป็น PK** → เมื่อ email ซ้ำได้ข้าม provider flow reset ต้องระบุ/กรอง `auth_provider` ด้วย ไม่งั้น reset ของ account password อาจไปชี้ row ที่ถูกต้องไม่ได้ → แตกเป็น ticket [09-password-reset-admin-views-duplicate-email](./09-password-reset-admin-views-duplicate-email.md) (รวมประเด็น admin view เห็น duplicate email ด้วย)
 - `Auth::attempt` ที่ login เดิมยังปลอดภัยตามธรรมชาติ (SSO row มี password สุ่ม ไม่มีทาง match) — ไม่ต้องแก้อะไร
+
+### 📋 Amendment (2026-09-07 — หลักฐานจากคู่มือ OCS `SSO_Programer_Manual_DEV.docx` — ข้อมูลเอกสาร ยังไม่ live-verified)
+
+- ⚠️ **ตาราง attribute ของ scope `basic` ไม่มี claim `email` ตรง ๆ** — email-ish ที่มี: `mail` (KU Mail — **เฉพาะบุคลากร**), `google-mail` (@ku.th), `office365-mail` (@live.ku.th) → **ความเสี่ยงจริงต่อ resolution ข้อ "ไม่มี email = 422 fail-closed"**: นิสิตอาจไม่มีอีเมลใน claims เลย ทำให้ login ไม่ได้ทั้งกลุ่ม · ยังไม่ตัดสินแทน — ต้อง live-verify ด้วย test account หลัง [ticket 06](./06-register-ku-home-client-on-sso-dev.md) แล้ว จึงจะรู้ว่า userinfo จริงคืนอะไร (เช่น ขอ scope `email` เพิ่มได้ผลไหม หรือต้องมี fallback chain `mail → google-mail → office365-mail`)
+- ⚠️ **ชื่อ claim ไม่ตาม OIDC standard:** มี `thainame`/`first-name`/`last-name`/`cn`/`givenname`/`surname`/`thaiprename` — **ไม่ใช่** `given_name`/`family_name`/`name` → default เรื่อง name ใน resolution ต้องอ่านจาก claims จริง เช่น `thainame` หรือ `cn` หรือ `givenname`+`surname` — implementation ต้องทำ mapping ตามที่ live-verify พบ
+- ได้ข้อมูลใหม่น่าสนใจ: `type-person` (1=teacher, 2=staff, 3=student, 4=alumni, 5=guest, ...) — อนาคตอาจใช้จำแนกกลุ่มผู้ใช้ (เกิน v1) · รายละเอียดครบใน [../research/ku-playground-manual-notes.md](../research/ku-playground-manual-notes.md)

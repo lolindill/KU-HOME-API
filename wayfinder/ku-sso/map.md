@@ -37,7 +37,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 
 - env/config naming (`KU_SSO_*`?) + production realm endpoint — รอ ticket 04 + 06 *(04 ปิดแล้ว — เหลือรอ ticket 06)*
 - การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06
-- ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account)
+- ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account) *(🆕 2026-09-07 คู่มือ OCS ชี้ว่า `basic` ไม่มี claim `email` ตรง ๆ — `mail` เฉพาะบุคลากร / `google-mail` / `office365-mail` + ชื่อ claim ไม่ตาม standard — ดู Amendment ใน [ticket 02](./tickets/02-sso-identity-to-local-user-mapping.md) และ [research/ku-playground-manual-notes.md](./research/ku-playground-manual-notes.md))*
 - ชะตา column `users.is_ku_member` หลัง ticket 08 ปิด (role เป็น source of truth): drop หรือ freeze ไม่เขียน — ตัดสินตอนเขียน spec implementation
 
 ## Out of scope
