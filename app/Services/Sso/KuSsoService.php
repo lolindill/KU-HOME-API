@@ -34,7 +34,7 @@ class KuSsoService
      * @throws InvalidClientException client credentials พัง (config เรา) → 500
      * @throws KuSsoUnavailableException Keycloak ล่ม/timeout/ตอบผิดปกติ → 502
      */
-    public function exchangeCode(string $code): array
+    public function exchangeCode(string $code, string $codeVerifier): array
     {
         $response = $this->httpFormCall('token', [
             'grant_type' => 'authorization_code',
@@ -43,6 +43,8 @@ class KuSsoService
             'client_secret' => config('ku_sso.client_secret'),
             // ⚠️ ต้องตรงกับ authorization request ทุก byte (RFC 6749 §4.1.3) — ค่าเดียวจาก config
             'redirect_uri' => config('ku_sso.redirect_uri'),
+            // 🔑 PKCE S256 — KU enforce ฝั่ง server (live-verify 2026-09-08, ticket 06/10) — verifier ฝั่ง SPA สร้าง เรา relay ต่อ
+            'code_verifier' => $codeVerifier,
         ]);
 
         // 🔍 OAuth 2.0 error shape: {"error": "...", "error_description": "..."} (research ticket 04 §6)
@@ -111,14 +113,23 @@ class KuSsoService
     /**
      * find-or-create User ด้วย (email, 'ku_sso') — split user ไม่มีการ link account (req change 2026-09-01)
      *
-     * @throws MissingEmailException userinfo ไม่มี email → fail-closed 422 (decision ticket 02)
+     * @throws MissingEmailException chain email→google-mail→office365-mail ไม่เจอ → fail-closed 422 (decision ticket 02 + Amendment 2)
      */
     public function findOrCreateUser(array $claims): User
     {
-        $email = strtolower(trim((string) ($claims['email'] ?? '')));
+        // 📧 email chain — verified-live 2026-09-08 (ticket 02 Amendment 2): บุคลากรมี `email`
+        //   นิสิตไม่มี `email` แต่มี `google-mail` (@ku.th) หรือ `office365-mail` (@live.ku.th)
+        $email = '';
+        foreach (['email', 'google-mail', 'office365-mail'] as $claim) {
+            $candidate = strtolower(trim((string) ($claims[$claim] ?? '')));
+            if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                $email = $candidate;
+                break;
+            }
+        }
 
-        // 📧 fail-closed — ไม่เดา identity จาก preferred_username (amendment ticket 02: รอ live-verify)
-        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        // 📧 fail-closed — chain ไม่เจอ email ที่ validate ผ่าน = ปฏิเสธทันที ไม่เดา identity จาก claim อื่น (decision ticket 02)
+        if ($email === '') {
             throw new MissingEmailException;
         }
 

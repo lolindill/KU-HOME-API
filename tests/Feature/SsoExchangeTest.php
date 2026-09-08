@@ -20,7 +20,7 @@ class SsoExchangeTest extends TestCase
 {
     use RefreshDatabase;
 
-    // 🔧 claim จำลอง — ชื่อ/email จริงของ scope `basic` ยัง unverified (amendment ใน ticket 02)
+    // 🔧 claim จำลอง — รูปแบบ claims จริง verified-live แล้ว 2026-09-08 (ticket 02 Amendment 2)
     private const CLAIMS = [
         'sub' => 'ku-user-123',
         'email' => 'somchai.j@ku.th',
@@ -29,6 +29,9 @@ class SsoExchangeTest extends TestCase
     ];
 
     private const ID_TOKEN = 'fake-id-token.jwt';
+
+    // 🔑 PKCE verifier (ticket 10) — 64 ตัวอักษร unreserved [A-Za-z0-9-._~] ตาม RFC 7636 §4.1 (ฝั่งจริง SPA สร้างเอง)
+    private const CODE_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk-._~0123456789abcdefg';
 
     private function fakeHappyPath(): void
     {
@@ -46,7 +49,10 @@ class SsoExchangeTest extends TestCase
 
     private function postExchange(string $code = 'one-time-code')
     {
-        return $this->postJson('/api/v1/auth/sso/exchange', ['code' => $code]);
+        return $this->postJson('/api/v1/auth/sso/exchange', [
+            'code' => $code,
+            'code_verifier' => self::CODE_VERIFIER,
+        ]);
     }
 
     // ✔ สำเร็จ: exchange สร้างใหม่ → role ku_member + password สุ่ม (Hash::check ต้อง fail)
@@ -75,19 +81,22 @@ class SsoExchangeTest extends TestCase
     // ✔ สำเร็จ: SSO ครั้งที่ 2 → find ของเดิม (ไม่ duplicate, ไม่ overwrite name)
     public function test_exchange_second_login_reuses_same_user_without_overwriting_name(): void
     {
-        $this->fakeHappyPath();
+        // ⚠️ อย่าเรียก Http::fake() ซ้ำใน test เดียว — stub แบบ array คือ "append" และ stub ตัวแรกชนะเสมอ
+        //   (PendingRequest::buildStubHandler ใช้ ->first()) — คำขอครั้งที่ 2 ใช้ Http::sequence() แทน
+        Http::fake([
+            '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok', 'id_token' => 'jwt']),
+            '*/protocol/openid-connect/userinfo' => Http::sequence()
+                ->push(self::CLAIMS)
+                ->push([
+                    'sub' => self::CLAIMS['sub'],
+                    'email' => 'SOMCHAI.J@KU.TH',
+                    'name' => 'ชื่อใหม่ล่าสุด',
+                ]),
+        ]);
+
         $this->postExchange();
 
         // ครั้งที่ 2: KU ส่งชื่อใหม่ + email ตัวพิมพ์ใหญ่ — ต้องยังเจอ user เดิม (email normalize lowercase)
-        Http::fake([
-            '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok-2', 'id_token' => 'jwt-2']),
-            '*/protocol/openid-connect/userinfo' => Http::response([
-                'sub' => self::CLAIMS['sub'],
-                'email' => 'SOMCHAI.J@KU.TH',
-                'name' => 'ชื่อใหม่ล่าสุด',
-            ]),
-        ]);
-
         $response = $this->postExchange();
 
         $response->assertStatus(200);
@@ -157,10 +166,11 @@ class SsoExchangeTest extends TestCase
     {
         Http::fake([
             '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok', 'id_token' => 'jwt']),
-            // scope `basic` ของ KU อาจไม่คืน email (amendment ticket 02) — fail-closed ก่อน live-verify
             '*/protocol/openid-connect/userinfo' => Http::response([
                 'sub' => 'no-email-sub',
                 'thainame' => 'ไม่มีอีเมล',
+                // verified-live 2026-09-08 (ticket 02 Amendment 2): KU อาจไม่คืน email-ish claim เลย
+                // → chain email→google-mail→office365-mail ไม่เจออะไร → fail-closed 422 ตาม decision ticket 02
             ]),
         ]);
 
@@ -169,6 +179,61 @@ class SsoExchangeTest extends TestCase
             ->assertJsonPath('status', 'error');
 
         $this->assertSame(0, User::count());
+    }
+
+    // ✔ email chain (ticket 10): นิสิตไม่มี `email` — fallback รับจาก `google-mail` (ticket 02 Amendment 2)
+    public function test_exchange_falls_back_to_google_mail_claim_for_students(): void
+    {
+        Http::fake([
+            '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok', 'id_token' => 'jwt']),
+            '*/protocol/openid-connect/userinfo' => Http::response([
+                'sub' => 'student-sub',
+                'name' => 'นิสิต เรียนดี',
+                'google-mail' => 'STUDENT.D@ku.th',
+            ]),
+        ]);
+
+        $this->postExchange()
+            ->assertStatus(200)
+            ->assertJsonPath('user.email', 'student.d@ku.th') // normalize lowercase เหมือน email หลัก
+            ->assertJsonPath('user.role', 'ku_member')
+            ->assertJsonPath('user.auth_provider', 'ku_sso');
+    }
+
+    // ✔ email chain (ticket 10): ลำดับถูกต้อง — `email` (บุคลากร) ชนะ fallback เสมอ
+    public function test_exchange_prefers_email_claim_over_fallback_claims(): void
+    {
+        Http::fake([
+            '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok', 'id_token' => 'jwt']),
+            '*/protocol/openid-connect/userinfo' => Http::response([
+                'sub' => 'staff-sub',
+                'name' => 'อาจารย์ สอนดี',
+                'email' => 'staff.e@ku.ac.th',
+                'google-mail' => 'staff.e@ku.th',
+                'office365-mail' => 'staff.e@live.ku.th',
+            ]),
+        ]);
+
+        $this->postExchange()
+            ->assertStatus(200)
+            ->assertJsonPath('user.email', 'staff.e@ku.ac.th');
+    }
+
+    // ✔ email chain (ticket 10): fallback สุดท้าย `office365-mail` (@live.ku.th) → ผ่าน
+    public function test_exchange_falls_back_to_office365_mail_claim_when_others_missing(): void
+    {
+        Http::fake([
+            '*/protocol/openid-connect/token' => Http::response(['access_token' => 'tok', 'id_token' => 'jwt']),
+            '*/protocol/openid-connect/userinfo' => Http::response([
+                'sub' => 'student2-sub',
+                'name' => 'นิสิต สอง',
+                'office365-mail' => 'STUDENT.E@live.ku.th',
+            ]),
+        ]);
+
+        $this->postExchange()
+            ->assertStatus(200)
+            ->assertJsonPath('user.email', 'student.e@live.ku.th'); // normalize lowercase เหมือน email หลัก
     }
 
     // ✔ error map: invalid_client → 500 + Log::error (config ฝั่งเราพัง)
@@ -224,6 +289,31 @@ class SsoExchangeTest extends TestCase
             ->assertJsonValidationErrors(['code']);
 
         Http::assertNothingSent();
+    }
+
+    // ✔ PKCE relay (ticket 10): ไม่ส่ง code_verifier → 422 ก่อนยิงออกนอก (KU enforce S256)
+    public function test_exchange_requires_code_verifier(): void
+    {
+        Http::fake();
+
+        $this->postJson('/api/v1/auth/sso/exchange', ['code' => 'one-time-code'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['code_verifier']);
+
+        Http::assertNothingSent();
+    }
+
+    // ✔ PKCE relay (ticket 10): backend ต้องส่ง code_verifier ต่อไปที่ token endpoint พร้อม code
+    public function test_exchange_relays_code_verifier_to_token_endpoint(): void
+    {
+        $this->fakeHappyPath();
+
+        $this->postExchange()->assertStatus(200);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/protocol/openid-connect/token')
+                && $request['code_verifier'] === self::CODE_VERIFIER;
+        });
     }
 
     // ✔ logout SSO user → currentAccessToken ถูกลบ (v1 ไม่มี END_SESSION ให้ทดสอบ — defer โดย ticket 03)

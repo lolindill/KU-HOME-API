@@ -19,16 +19,24 @@ class SsoController extends Controller
      *
      * Flow + error map ตาม wayfinder/ku-sso ticket 03 (owner sign-off 2026-09-07):
      * invalid_grant→422 · ไม่มี email→422 · invalid_client→500 · Keycloak ล่ม→502
-     * state/PKCE validation เป็นหน้าที่ฝั่ง SPA — backend ไม่ยุ่ง
+     * state ฝั่ง SPA · PKCE: SPA สร้าง verifier/challenge — backend แค่ relay code_verifier ตอน exchange
+     * (live-verify 2026-09-08: KU enforce S256 — wayfinder ticket 10)
      */
     public function exchange(Request $request, KuSsoService $sso)
     {
         $validated = $request->validate([
             'code' => 'required|string',
+            // RFC 7636 §4.1 — verifier ยาว 43–128 ตัวอักษร unreserved [A-Za-z0-9-._~]
+            'code_verifier' => ['required', 'string', 'min:43', 'max:128', 'regex:/^[A-Za-z0-9\-._~]+$/'],
+        ], [
+            'code_verifier.required' => 'กรุณาส่ง code_verifier จากฝั่ง SPA มาด้วยค่ะ 🔑',
+            'code_verifier.min' => 'code_verifier สั้นเกินไป ต้องยาวอย่างน้อย 43 ตัวอักษรค่ะ 🔑',
+            'code_verifier.max' => 'code_verifier ยาวเกินไป ต้องไม่เกิน 128 ตัวอักษรค่ะ 🔑',
+            'code_verifier.regex' => 'code_verifier มีตัวอักษรที่ไม่อนุญาต ใช้ได้เฉพาะ A-Z a-z 0-9 - . _ ~ เท่านั้นค่ะ 🔑',
         ]);
 
         try {
-            $tokens = $sso->exchangeCode($validated['code']);
+            $tokens = $sso->exchangeCode($validated['code'], $validated['code_verifier']);
             $claims = $sso->fetchUserinfo($tokens['access_token']); // 🗑️ ใช้ครั้งเดียวแล้วทิ้ง
             $user = $sso->findOrCreateUser($claims);
         } catch (InvalidGrantException $e) {

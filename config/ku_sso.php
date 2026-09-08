@@ -4,8 +4,9 @@
  * 🎫 KU SSO (Keycloak) — realm KU-Alllogin บน sso-dev.ku.ac.th
  *
  *    Design: wayfinder/ku-sso/map.md (decision-lock ครบ 2026-09-07) · hand-rolled Http facade ไม่ใช้ package
- *    Flow: SPA เปิด authorization endpoint รับ code (state/PKCE ฝั่ง browser)
- *          → POST /api/v1/auth/sso/exchange { code }
+ *    Flow: SPA เปิด authorization endpoint รับ code (state ฝั่ง SPA · PKCE: SPA สร้าง verifier/challenge
+ *          — backend relay code_verifier ตอน exchange; live-verify 2026-09-08: KU enforce S256, ticket 10)
+ *          → POST /api/v1/auth/sso/exchange { code, code_verifier }
  *          → backend แลก code + client_secret (server-to-server) → userinfo → find-or-create User
  *          → ออก Sanctum token (KU tokens ทิ้งหมด ไม่เก็บ — decision ticket 03)
  */
