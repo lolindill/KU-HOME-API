@@ -21,7 +21,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - ก่อนเขียนโค้ดจริง: จด design decision + lib choice ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ธรรมเนียม: error shape `{"status":"error","message":...}` · message ไทย + emoji · throttle login-level = `5,1`
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, ไม่มี blocked-by ค้าง, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน: [ticket 10](./tickets/10-exchange-pkce-relay-and-email-fallback.md)** — implement PKCE `code_verifier` relay + email fallback chain (handoff พร้อม spec ครบจาก live-verify session 2026-09-08 — อ่าน ticket ก่อนเริ่ม ไม่ต้อง live-verify ซ้ำ)
+- 🎯 **Frontier ปัจจุบัน: ว่าง** — ticket ครบทั้ง 10 ปิดแล้ว (ticket 10 ปิด 2026-09-08: PKCE relay + email chain implemented + live-verify ผ่านจริง) · งานต่อไปเป็นการ implement/merge บน branch `feature/ku-sso-login` ตามหัวข้อ "Implementation status" ด้านล่าง
 
 ## Decisions so far
 
@@ -34,6 +34,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - [กลยุทธ์ทดสอบ SSO โดยไม่มี browser](./tickets/07-sso-test-strategy.md): PHPUnit `Http::fake` ครอบชุดเคส 11 ข้อ (สำเร็จ/สร้างใหม่ vs find/split-user/multi-device/error map/throttle) · มี remote script **แบบ smoke** เฉพาะส่วนที่ไม่ต้อง login จริง — happy path/claims จริงรอ ticket 06 แล้ว manual ตรวจ (owner sign-off 2026-09-07)
 - [Flow password reset & admin view ภายใต้ email ซ้ำข้าม provider](./tickets/09-password-reset-admin-views-duplicate-email.md): reset **ไม่มีใน v1** (ระบบไม่มี flow อยู่แล้ว — จด spec note ว่าอนาคตต้อง scope `auth_provider=password`) · admin list **โชว์ `auth_provider` + filter `?auth_provider=`** · จุดแก้บังคับที่ไล่เจอ: `login` ต้องกรอง `auth_provider=password` · `register` unique ต้อง scope ต่อ provider (owner sign-off 2026-09-07)
 - [จดทะเบียน client บน sso-dev](./tickets/06-register-ku-home-client-on-sso-dev.md): **ปิดแล้ว — client ใช้งานได้จริง** (creds ลง `.env`, redirect_uri `http://localhost:8000/*` ยอมรับ path ชัด `/sso-callback`, หน้า login "Sign in to KU-Alllogin" ขึ้นจริง) · ❗ **PKCE S256 ถูก enforce ฝั่ง server** (ขัดคาดการณ์เดิมของ ticket 04 — แก้แล้ว) → `exchange` ต้องรับ `code_verifier` จาก SPA แล้ว relay ต่อ (amendment ของ ticket 03 — ยังรอแก้โค้ด) (live-verify 2026-09-08)
+- [Implement PKCE relay + email fallback chain](./tickets/10-exchange-pkce-relay-and-email-fallback.md): **ปิดแล้ว — implemented + live-verify ผ่านจริง** · `exchange` validate+relay `code_verifier` (RFC 7636, SPA สร้างเอง) · email chain `email → google-mail → office365-mail` (นิสิตไม่มี `email` — live ยืนยัน email นิสิตมาจาก `google-mail` บุคลากรจาก `email`) · tests 13→18 (full suite 396) · live happy path ผ่านทั้ง 2 ประเภทบัญชี (`/me` + re-login id เดิม + replay 422) (2026-09-08)
 
 ## Not yet specified
 
@@ -44,7 +45,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 
 ### 🏗️ Implementation status (นอก map — hand-off session)
 
-- **KU SSO login v1 implemented (2026-09-07)** บน branch `feature/ku-sso-login` (worktree `.worktree/ku-sso-login`): migration `users.auth_provider` + composite unique `(email, auth_provider)` · `POST /auth/sso/exchange` + `KuSsoService` (hand-rolled 0 package) · จุดแก้บังคับของ [ticket 09](./tickets/09-password-reset-admin-views-duplicate-email.md) ครบ · feature tests ครอบชุด [ticket 07](./tickets/07-sso-test-strategy.md) (391 tests ผ่านหมด) — รายละเอียด design ใน `cline.md` หัวข้อ "KU SSO Login"
+- **KU SSO login v1 implemented (2026-09-07)** บน branch `feature/ku-sso-login` (worktree `.worktree/ku-sso-login`): migration `users.auth_provider` + composite unique `(email, auth_provider)` · `POST /auth/sso/exchange` + `KuSsoService` (hand-rolled 0 package) · จุดแก้บังคับของ [ticket 09](./tickets/09-password-reset-admin-views-duplicate-email.md) ครบ · feature tests ครอบชุด [ticket 07](./tickets/07-sso-test-strategy.md) — **(2026-09-08 อัปเดตตาม ticket 10:** PKCE `code_verifier` relay + email fallback chain + live-verify ผ่านจริง 396 tests ผ่านหมด**)** — รายละเอียด design ใน `cline.md` หัวข้อ "KU SSO Login"
 
 ## Out of scope
 

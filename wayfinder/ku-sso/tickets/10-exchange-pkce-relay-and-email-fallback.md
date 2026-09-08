@@ -2,9 +2,9 @@
 
 - **label:** `wayfinder:task`
 - **type:** AFK
-- **status:** open
+- **status:** closed
 - **blocked-by:** — *(ปลดครบ 2026-09-08: [ticket 06](./06-register-ku-home-client-on-sso-dev.md) ปิด + live-verify กับ sso-dev จริงสำเร็จ)*
-- **assignee:** (ว่าง) ← **session หน้า claim ตรงนี้ก่อนลงมือ**
+- **assignee:** kevii (2026-09-08)
 
 ## Context (handoff จาก live-verify session 2026-09-08)
 
@@ -80,7 +80,27 @@ foreach (['email', 'google-mail', 'office365-mail'] as $claim) {
 
 ## Definition of done
 
-- [ ] ทั้ง 2 task + tests ใหม่ ผ่านหมด + full suite ผ่าน + pint สะอาด
-- [ ] จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md (สั้นๆ: PKCE relay + email chain + อ้าง ticket)
-- [ ] live happy path ผ่าน backend เราจริงทั้ง 2 ประเภทบัญชี (user เกิดใน DB ถูกช่อง + `/me` + re-login + replay 422)
-- [ ] เขียน resolution ลง ticket นี้ → `status: closed` + append 1 บรรทัดใน "Decisions so far" ของ [map](../map.md) + commit บน branch นี้
+- [x] ทั้ง 2 task + tests ใหม่ ผ่านหมด + full suite ผ่าน + pint สะอาด
+- [x] จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md (สั้นๆ: PKCE relay + email chain + อ้าง ticket)
+- [x] live happy path ผ่าน backend เราจริงทั้ง 2 ประเภทบัญชี (user เกิดใน DB ถูกช่อง + `/me` + re-login + replay 422)
+- [x] เขียน resolution ลง ticket นี้ → `status: closed` + append 1 บรรทัดใน "Decisions so far" ของ [map](../map.md) + commit บน branch นี้
+
+## Resolution (2026-09-08)
+
+**ทั้ง 2 task เสร็จ + live-verify ผ่านจริงผ่าน backend เราทั้ง 2 ประเภทบัญชี** — ปิด ticket
+
+**Task 1 — PKCE relay:**
+- `SsoController::exchange` validate `code_verifier` ตาม RFC 7636 §4.1 (`required · string · min:43 · max:128 · regex:[A-Za-z0-9\-._~]`) + message ไทย+emoji · ส่งต่อ `exchangeCode(code, verifier)` ใส่ `code_verifier` ใน form params ของ token endpoint
+- error map ไม่เปลี่ยน (PKCE mismatch = `invalid_grant` → 422 เดิม) · docblock `config/ku_sso.php` + controller อัปเดตตามความจริงใหม่
+
+**Task 2 — email fallback chain `email → google-mail → office365-mail`:**
+- `findOrCreateUser()` ลูป chain + `FILTER_VALIDATE_EMAIL` ทุก candidate + lowercase · chain ไม่เจอ = `MissingEmailException` 422 fail-closed เดิม · `nameFromClaims()` ไม่ถูกแตะ
+
+**Tests (`SsoExchangeTest` 13 → 18 เคส, full suite 396 passed, pint สะอาด):**
+- เพิ่ม: ไม่ส่ง `code_verifier` → 422 + `assertNothingSent` · relay จริง `code_verifier` ถึง token endpoint · นิสิต fallback `google-mail` (normalize lowercase) · `email` ชนะเมื่อมีครบ · fallback สุดท้าย `office365-mail`
+- 🐛 **Bug ที่เจอระหว่างแก้ test:** `Http::fake([...])` ซ้ำใน test เดียว **append ไม่ replace** และ consume ด้วย `->first()` → stub ตัวแรกชนะเสมอ (เคสเดิม `second_login` ผ่านโดยบังเอิญ) — แก้ด้วย `Http::sequence()` + แยก test · จดใน `cline.md` แล้ว
+
+**Live happy path (browser login จริงบน sso-dev → curl exchange ภายใน 60 วิ):**
+- บัญชีนิสิต: 200 + email มาจาก `google-mail` (@ku.th) + `role=ku_member` + `auth_provider=ku_sso` · `/me` 200 · re-login (SSO cookie auto-login) → user id เดิม · replay code → 422
+- บัญชีบุคลากร: 200 + email มาจาก claim `email` (@ku.ac.th — ยืนยันลำดับ chain ว่า `email` ชนะ `google-mail`) · user เกิดแยก id ต่างกัน · `/me` 200
+- สลับบัญชีต้อง logout KU ก่อน (END_SESSION + กดยืนยัน "Logout") ตามที่ ticket ระบุ · credentials ไม่ถูก commit (ใช้จากคู่มือ OCS เท่านั้น)
