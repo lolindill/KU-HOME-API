@@ -21,6 +21,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - ก่อนเขียนโค้ดจริง: จด design decision + lib choice ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ธรรมเนียม: error shape `{"status":"error","message":...}` · message ไทย + emoji · throttle login-level = `5,1`
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, ไม่มี blocked-by ค้าง, ยังไม่มี assignee)
+- 🎯 **Frontier ปัจจุบัน: [ticket 10](./tickets/10-exchange-pkce-relay-and-email-fallback.md)** — implement PKCE `code_verifier` relay + email fallback chain (handoff พร้อม spec ครบจาก live-verify session 2026-09-08 — อ่าน ticket ก่อนเริ่ม ไม่ต้อง live-verify ซ้ำ)
 
 ## Decisions so far
 
