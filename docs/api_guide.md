@@ -188,15 +188,23 @@ Used by `GET /bookings` and `GET /users`:
 
 🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/ku-sso` (decision-lock ครบ)
 
-> Flow: SPA เปิด KU authorization endpoint รับ `code` (state/PKCE ฝั่ง browser) → ส่ง `code` มาที่นี่ → backend แลก code + client_secret (server-to-server) → ดึง userinfo → find-or-create User (`auth_provider=ku_sso`, role `ku_member` ตอนสร้างใหม่) → ออก Sanctum token
+> Flow: SPA เปิด KU authorization endpoint รับ `code` (state ฝั่ง SPA · PKCE: SPA สร้าง code_verifier/code_challenge เอง — backend เป็นแค่ relay code_verifier ตอน exchange; live-verify 2026-09-08: KU enforce S256) → ส่ง `code` + `code_verifier` มาที่นี่ → backend แลก code + client_secret (server-to-server) → ดึง userinfo → find-or-create User (`auth_provider=ku_sso`, role `ku_member` ตอนสร้างใหม่) → ออก Sanctum token
 > KU tokens **ทิ้งหมดไม่เก็บ** · Sanctum token นโยบายเดียวกับ login เดิม (ไม่ revoke ของเดิม — multi-device) · v1 ไม่มี END_SESSION
 
 **Request Body:**
 ```json
 {
-  "code": "authorization-code-from-ku-redirect"
+  "code": "authorization-code-from-ku-redirect",
+  "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 }
 ```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `code` | required, string |
+| `code_verifier` | required, string, 43–128 ตัวอักษร charset `[A-Za-z0-9-._~]` ตาม RFC 7636 §4.1 |
 
 **Response `200`:**
 ```json
@@ -213,7 +221,7 @@ Used by `GET /bookings` and `GET /users`:
 **Error Map:**
 | HTTP | สถานการณ์ |
 |------|-----------|
-| `422` | validation (`code` หาย/ไม่ใช่ string) |
+| `422` | validation ของ `code` หรือ `code_verifier` (หาย / สั้น-ยาวเกิน / ตัวอักษรนอก charset) |
 | `422` | `invalid_grant` — code หมดอายุ (~60 วิ)/ใช้แล้ว → SPA ต้องเริ่ม login flow ใหม่ (ห้าม retry) |
 | `422` | userinfo ไม่คืน `email` (fail-closed — ไม่เดา identity จาก claim อื่น) |
 | `500` | `invalid_client` — `KU_SSO_CLIENT_ID/SECRET` ใน `.env` พัง (log ไว้ ไม่ expose) |
