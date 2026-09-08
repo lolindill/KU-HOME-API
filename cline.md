@@ -1931,6 +1931,14 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **ยังไม่ทำ (รอ ticket 06 live-verify):** happy path กับ sso-dev จริง · ดู claims จริงของ scope `basic` (จูน name chain + ตัดสิน fallback email) · remote smoke script `test_scripts/test_sso_remote.php` (โฟลเดอร์ gitignore — สร้างบนเครื่องก่อน ถ้าจะใช้) · END_SESSION v1 defer
 - **Migration Required:** มีแค่ `php artisan migrate` ปกติ (non-destructive, users เดิมได้ `auth_provider='password'` อัตโนมัติ)
 
+## 🪦 Drop `users.is_ku_member` (2026-09-08)
+
+- **Decision (owner, 2026-09-08): "drop"** ปิดปม fog สุดท้ายของ wayfinder map `ku-sso` — สถานะสมาชิกใช้ **role `ku_member` เป็น source of truth เดียว** (ticket 08); boolean flag เป็น legacy ที่ไม่มีใครเขียนเพิ่มตั้งแต่ 2026-09-07
+- **Migration:** `2026_09_08_120000_drop_is_ku_member_from_users_table.php` — `dropColumn` (down คืน `boolean default false` ได้) · `php artisan migrate` ปกติ ไม่ต้อง fresh
+- **ขอบเขตที่แก้พร้อม migration:** `User.php` (fillable + cast PgBoolean) · `StoreUserRequest`/`UpdateUserRequest` (rule) · `UserSeeder` (7 keys + pint ตัด unused import `DB`) · tests (`BookingKuMemberPricingTest` 2 จุด — comment ใหม่ยืนยันตัดสินจาก role, `BookingConfirmationTest` 1 จุด) · docs (`database-er.md` ลบ column + เสริม `auth_provider` ที่หายไป, `AGENTS.md` PgBoolean list)
+- ⚠️ **อย่าสับสน:** `is_ku_member` ใน **guests JSON ของ `booking_rooms`** เป็นคนละตัว — key นั้นไม่เคยถูกจัดเก็บอยู่แล้ว (`BookingController`/`FrontDeskController` strip ออกตอนรับ input) ไม่เกี่ยวกับ column users — ห้ามโดนลบตาม
+- ⚠️ **Breaking ต่อ consumer:** response ของ `/me` + admin user endpoints ไม่มี key `is_ku_member` แล้ว — frontend ที่ยังอ่าน key นี้ต้องเลิกอ่าน (ใช้ `role === 'ku_member'` แทน)
+
 ## 🔑 KU SSO — PKCE relay + email fallback chain (2026-09-08, wayfinder ticket 10)
 
 - **บริบท:** live-verify session พิสูจน์กับ sso-dev จริงแล้วว่า (1) KU **enforce PKCE S256 ฝั่ง server** (ขัดคาดเดิมของ ticket 04) — token exchange ไม่ส่ง `code_verifier` โดน `invalid_grant "PKCE verification failed: Code mismatch"` (2) นิสิตไม่มี claim `email` (มีแต่ `google-mail`/`office365-mail`) — โค้ดเดิมที่อ่านแค่ `email` จะ 422 นิสิตทั้งกลุ่ม (รายละเอียด claims จริงใน ticket 02 Amendment 2)

@@ -35,13 +35,13 @@ erDiagram
     USERS {
         uuid id PK
         string name
-        string email UK "unique"
+        string email UK "composite unique (email, auth_provider)"
         string password "hashed"
         string role "default: user"
+        string auth_provider "default: password — password | ku_sso | google (อนาคต)"
         string title "nullable"
         string phone "nullable"
         string nationality "default: Thai"
-        boolean is_ku_member "default: false"
         boolean ver "default: false, verification flag"
         timestamp email_verified_at "nullable"
         remember_token remember_token

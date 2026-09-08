@@ -131,7 +131,7 @@ class BookingConfirmationTest extends TestCase
 
     public function test_ku_member_can_submit_confirmation(): void
     {
-        $owner = User::factory()->create(['role' => 'ku_member', 'is_ku_member' => true]);
+        $owner = User::factory()->create(['role' => 'ku_member']);
         $booking = $this->createDraftBooking($owner->id);
 
         $response = $this->actingAs($owner, 'sanctum')

@@ -84,7 +84,6 @@ class BookingKuMemberPricingTest extends TestCase
     {
         $user = User::factory()->create([
             'role' => 'user',
-            'is_ku_member' => false,
         ]);
 
         $roomType = $this->createRoomTypeWithRates(120000, 100000);
@@ -121,8 +120,7 @@ class BookingKuMemberPricingTest extends TestCase
     public function test_ku_member_user_booking_uses_daily_ku_rate(): void
     {
         $kuMember = User::factory()->create([
-            'role' => 'ku_member',
-            'is_ku_member' => false, // Ensure only role is checked!
+            'role' => 'ku_member', // 💡 สถานะสมาชิกตัดสินจาก role เท่านั้น (column is_ku_member ถูก drop แล้ว 2026-09-08)
         ]);
 
         $roomType = $this->createRoomTypeWithRates(120000, 100000);

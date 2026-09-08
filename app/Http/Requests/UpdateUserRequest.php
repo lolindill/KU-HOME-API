@@ -43,7 +43,6 @@ class UpdateUserRequest extends FormRequest
             'phone' => 'nullable|string|max:255',
             'nationality' => 'nullable|string|max:255',
             'role' => 'nullable|string|in:user,admin,staff,housekeeping,ku_member',
-            'is_ku_member' => 'nullable|boolean',
             'ver' => 'nullable|boolean',
         ];
     }
