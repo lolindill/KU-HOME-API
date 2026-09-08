@@ -22,7 +22,7 @@
 ดูรายงานเต็ม: [../research/keycloak-mechanics.md](../research/keycloak-mechanics.md)
 
 - **Discovery document จริง verify แล้ว [VERIFIED-LIVE]** — HTTP 200 จาก `https://sso-dev.ku.ac.th/realms/KU-Alllogin/.well-known/openid-configuration` (Keycloak Quarkus ≥17) — endpoints ครบ 4 + issuer = `https://sso-dev.ku.ac.th/realms/KU-Alllogin`
-- **`basic` scope มีจริง** ใน `scopes_supported` (คู่กับ openid/email/profile) แต่คืน claim อะไร **ยัง [UNVERIFIED]** ต้องทดสอบเมื่อมี client + test account (ผูกกับ ticket 06)
+- **`basic` scope มีจริง** ใน `scopes_supported` (คู่กับ openid/email/profile) แต่คืน claim อะไร **ยัง [UNVERIFIED]** ต้องทดสอบเมื่อมี client + test account (ผูกกับ ticket 06) · **[VERIFIED-LIVE 2026-09-08]** ขอ `basic openid` → server ให้ scope จริง = `basic openid profile email` (แถมให้เอง) · claims จริง (มีทั้ง standard `name`/`given_name`/`family_name`/`email` และ KU custom `thainame`/`google-mail` ฯลฯ) สรุปครบใน Amendment 2 ของ [ticket 02](./02-sso-identity-to-local-user-mapping.md)
 - Token endpoint รับ `client_secret_post` (form fields) · **code ใช้ได้ครั้งเดียว + อายุ ~60 วิ** → exchange ต้องเร็วและห้าม retry เมื่อ `invalid_grant`
 - PKCE S256 รองรับแต่คงไม่ enforce กับ confidential client — SPA ควรส่ง `code_challenge` ไปเลย · **[CORRECTED 2026-09-08]** live test พิสูจน์ว่า **enforce จริง** — auth request ที่ไม่มี PKCE โดน 302 กลับ redirect_uri พร้อม `invalid_request: Missing parameter: code_challenge_method` (หลักฐานใน Resolution ของ [ticket 06](./06-register-ku-home-client-on-sso-dev.md))
 - Error จริง: `invalid_client` = **401** (ตรวจก่อน code), `unsupported_grant_type` = 400, userinfo ไม่มี token = **401 empty body** → ฝั่งเราเช็ค status code อย่างเดียว
