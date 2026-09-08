@@ -24,10 +24,11 @@ class UpdateUserRequest extends FormRequest
      */
     public function rules(): array
     {
-        $userId = $this->route('user') ?? $this->route('id');
+        $userId = $this->route('user') ?? $this->route('id') ?? $this->user()?->id;
 
         // 🎫 split user: unique scope ตาม provider ของ row ที่กำลังแก้ — email ซ้ำข้าม provider ได้ (ticket 09)
-        $provider = $userId ? User::find($userId)?->auth_provider : null;
+        // กรณี /profile route ไม่มี param → fallback ใช้ user ที่ login อยู่
+        $provider = $userId ? User::find($userId)?->auth_provider : 'password';
 
         return [
             'name' => 'sometimes|required|string|max:255',

@@ -101,6 +101,57 @@ class UserTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $user->id, 'name' => 'Updated Name']);
     }
 
+    public function test_profile_update_accepts_own_unchanged_email(): void
+    {
+        // 🎫 ตรวจสอบว่า user (password) อัปเดตโปรไฟล์โดยส่ง email เดิมของตัวเองแล้วต้องไม่ติด validation unique
+        $user = User::factory()->create([
+            'name' => 'เดิม',
+            'email' => 'self@example.com',
+        ]);
+        $this->actingAs($user, 'sanctum');
+
+        $response = $this->putJson('/api/v1/profile', [
+            'name' => 'ใหม่',
+            'email' => $user->email,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'name' => 'ใหม่',
+            'email' => $user->email,
+        ]);
+    }
+
+    public function test_sso_user_profile_update_accepts_own_email_even_with_password_twin(): void
+    {
+        // 🎫 split user: SSO user อัปเดตโปรไฟล์ด้วย email ตัวเองได้ แม้จะมี password twin email เดียวกัน
+        User::factory()->create([
+            'email' => 'twin@ku.th',
+            'auth_provider' => 'password',
+        ]);
+
+        $ssoUser = User::factory()->create([
+            'email' => 'twin@ku.th',
+            'auth_provider' => 'ku_sso',
+        ]);
+
+        $this->actingAs($ssoUser, 'sanctum');
+
+        $response = $this->putJson('/api/v1/profile', [
+            'name' => 'SSO Updated',
+            'email' => 'twin@ku.th',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', [
+            'id' => $ssoUser->id,
+            'name' => 'SSO Updated',
+            'email' => 'twin@ku.th',
+            'auth_provider' => 'ku_sso',
+        ]);
+    }
+
     // ============================================
     // 🔴 ROLE ESCALATION VULNERABILITY TEST
     // ============================================
