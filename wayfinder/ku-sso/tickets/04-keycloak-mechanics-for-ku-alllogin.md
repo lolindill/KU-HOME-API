@@ -24,6 +24,6 @@
 - **Discovery document จริง verify แล้ว [VERIFIED-LIVE]** — HTTP 200 จาก `https://sso-dev.ku.ac.th/realms/KU-Alllogin/.well-known/openid-configuration` (Keycloak Quarkus ≥17) — endpoints ครบ 4 + issuer = `https://sso-dev.ku.ac.th/realms/KU-Alllogin`
 - **`basic` scope มีจริง** ใน `scopes_supported` (คู่กับ openid/email/profile) แต่คืน claim อะไร **ยัง [UNVERIFIED]** ต้องทดสอบเมื่อมี client + test account (ผูกกับ ticket 06)
 - Token endpoint รับ `client_secret_post` (form fields) · **code ใช้ได้ครั้งเดียว + อายุ ~60 วิ** → exchange ต้องเร็วและห้าม retry เมื่อ `invalid_grant`
-- PKCE S256 รองรับแต่คงไม่ enforce กับ confidential client — SPA ควรส่ง `code_challenge` ไปเลย
+- PKCE S256 รองรับแต่คงไม่ enforce กับ confidential client — SPA ควรส่ง `code_challenge` ไปเลย · **[CORRECTED 2026-09-08]** live test พิสูจน์ว่า **enforce จริง** — auth request ที่ไม่มี PKCE โดน 302 กลับ redirect_uri พร้อม `invalid_request: Missing parameter: code_challenge_method` (หลักฐานใน Resolution ของ [ticket 06](./06-register-ku-home-client-on-sso-dev.md))
 - Error จริง: `invalid_client` = **401** (ตรวจก่อน code), `unsupported_grant_type` = 400, userinfo ไม่มี token = **401 empty body** → ฝั่งเราเช็ค status code อย่างเดียว
 - **END_SESSION เป็นหน้า HTML interactive** → logout ฝั่ง KU ต้องเป็น browser redirect จาก SPA + ต้องมี `id_token_hint` + `post_logout_redirect_uri` ต้อง register ใน client
