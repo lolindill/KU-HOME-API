@@ -186,7 +186,7 @@ Used by `GET /bookings` and `GET /users`:
 
 ### POST `/auth/sso/exchange` — KU SSO login (Keycloak)
 
-🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/ku-sso` (decision-lock ครบ)
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/ku-sso` (decision-lock ครบ) · 📘 คู่มือฝั่ง frontend (React/TypeScript + PKCE ตัวอย่างโค้ดครบ): [`docs/sso-frontend-guide.md`](./sso-frontend-guide.md)
 
 > Flow: SPA เปิด KU authorization endpoint รับ `code` (state ฝั่ง SPA · PKCE: SPA สร้าง code_verifier/code_challenge เอง — backend เป็นแค่ relay code_verifier ตอน exchange; live-verify 2026-09-08: KU enforce S256) → ส่ง `code` + `code_verifier` มาที่นี่ → backend แลก code + client_secret (server-to-server) → ดึง userinfo → find-or-create User (`auth_provider=ku_sso`, role `ku_member` ตอนสร้างใหม่) → ออก Sanctum token
 > KU tokens **ทิ้งหมดไม่เก็บ** · Sanctum token นโยบายเดียวกับ login เดิม (ไม่ revoke ของเดิม — multi-device) · v1 ไม่มี END_SESSION
