@@ -135,11 +135,14 @@ class RoomController extends Controller
             'check_in' => 'nullable|date|after_or_equal:today',
             'check_out' => 'nullable|date|after:check_in',
             'max_guests' => 'nullable|integer|min:1',
+            // 🌟 (09/09/26) bed_type=king_size → นับ availability เฉพาะห้อง king (ชั้น 8)
+            'bed_type' => 'nullable|string|in:king_size',
         ]);
 
         $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
         $checkOut = $request->check_out ? Carbon::parse($request->check_out) : Carbon::tomorrow();
         $maxGuests = $request->query('max_guests');
+        $bedType = $request->query('bed_type');
 
         $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
             $query->where('status', 'available');
@@ -153,15 +156,38 @@ class RoomController extends Controller
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             }])
+            // 🌟 (09/09/26) bed_type=king_size → เพิ่ม 2 counters สำหรับมิติห้อง king
+            //    king pool = sellable (status NOT IN maintenance/reserved_closed) — ตรงกับ createBooking
+            //    king occupied = hybrid ตาม lifecycle เพราะ room_id ถูก assign เฉพาะหลัง paid/confirmed:
+            //      ก่อน assign: BR bed_preference=king_size ถูก allocator บังคับเข้าห้อง king แน่นอน (hard constraint)
+            //      หลัง assign: นับตาม bed_type ของห้องจริงที่ถูก assign (BR no-preference อาจลง king ได้)
+            //      เงื่อนไข 2 แขนกันหมด (room_id null ↔ not null) — ไม่นับซ้ำ
+            ->when($bedType === 'king_size', function ($query) use ($checkIn, $checkOut) {
+                $query->withCount(['rooms as king_total_rooms' => function ($q) {
+                    $q->where('bed_type', 'king_size')
+                        ->whereNotIn('status', ['maintenance', 'reserved_closed']);
+                }])
+                    ->withCount(['bookingRooms as king_occupied_count' => function ($q) use ($checkIn, $checkOut) {
+                        $q->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                            ->where('check_in', '<', $checkOut)
+                            ->where('check_out', '>', $checkIn)
+                            ->where(function ($inner) {
+                                $inner->where(fn ($sub) => $sub
+                                    ->where('bed_preference', 'king_size')
+                                    ->whereNull('room_id'))
+                                    ->orWhereHas('room', fn ($room) => $room->where('bed_type', 'king_size'));
+                            });
+                    }]);
+            })
             // 🌟 Update (03/09/26): eager-load rateRows กัน N+1 (rates object)
             ->with('rateRows')
             // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
             ->when($maxGuests, fn ($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
-            ->map(function ($type) use ($checkIn, $checkOut, $maxGuests) {
+            ->map(function ($type) use ($checkIn, $checkOut, $maxGuests, $bedType) {
                 $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
 
-                return [
+                $row = [
                     'room_type_id' => $type->id,
                     'name_en' => $type->name_en,
                     'name_th' => $type->name_th,
@@ -185,6 +211,18 @@ class RoomController extends Controller
                         'max_guests' => $maxGuests ? (int) $maxGuests : null,
                     ],
                 ];
+
+                // 🌟 (09/09/26) bed_type=king_size → available_rooms เปลี่ยนความหมายเป็น king-aware
+                //    + ฟิลด์โปร่งใส king_total_rooms / king_occupied (frontend โชว์ "3/5 ห้อง king ว่าง" ได้)
+                //    ไม่ส่ง bed_type → payload เหมือนเดิมทุกไบต์ (backward compatible)
+                if ($bedType === 'king_size') {
+                    $row['available_rooms'] = max(0, $type->king_total_rooms - $type->king_occupied_count);
+                    $row['king_total_rooms'] = $type->king_total_rooms;
+                    $row['king_occupied'] = $type->king_occupied_count;
+                    $row['search_criteria']['bed_type'] = 'king_size';
+                }
+
+                return $row;
             });
 
         return response()->json([

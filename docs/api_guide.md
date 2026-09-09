@@ -574,11 +574,19 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 - `check_in` (optional, date, ≥ today) — default: today
 - `check_out` (optional, date, > check_in) — default: tomorrow
 - `max_guests` (optional, integer, ≥ 1) — กรองเอาเฉพาะ room type ที่รองรับจำนวนแขก >= ค่าที่ส่ง (เทียบกับคอลัมน์ `max_guests` ของ room type)
+- `bed_type` (optional, in: `king_size`) — 🌟 (09/09/26) ส่ง `bed_type=king_size` เพื่อนับ availability เฉพาะ**ห้องเตียง king** (ชั้น 8) — ส่งค่าอื่น → `422`. ไม่ส่ง → พฤติกรรมเดิมทุกอย่าง
 
 **Semantics:**
 - `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
   - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
   - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
+- 🌟 **`bed_type=king_size` mode (09/09/26):** `available_rooms` เปลี่ยนความหมายเป็น `max(0, king_total_rooms − king_occupied)` และ response เพิ่ม 2 ฟิลด์โปร่งใส:
+  - `king_total_rooms` = ห้อง `bed_type='king_size'` ที่ **sellable** (`status NOT IN (maintenance, reserved_closed)`) — ตรงกับเงื่อนไขที่ `createBooking` ใช้ตัดสิน (ไม่ใช่ `status='available'` แบบ `rooms_count` รวม)
+  - `king_occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) + overlap ช่วงค้น โดย **hybrid ตาม lifecycle** (เพราะ `room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
+    - ก่อน assign: BR `bed_preference='king_size'` และ `room_id` ยัง null → นับ (allocator บังคับห้อง king — hard constraint)
+    - หลัง assign: BR ที่ห้องที่ assign จริงมี `bed_type='king_size'` → นับ (BR no-preference อาจลง king ได้)
+    - BR ลอย (ไม่มี preference และยังไม่ assign) ไม่นับเป็น king — allocator อาจจัด twin ก็ได้
+  - `search_criteria` เพิ่ม `bed_type: "king_size"` echo กลับ
 - `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `rates`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก (ทั้ง top-level และ embedded `room_type` มี `rates` object ในรูป baht string ทศนิยม 2 ตำแหน่ง)
 
 **Response `200`:**
@@ -634,6 +642,24 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 ```
 > 💡 `max_guests` ใน `search_criteria` เป็น `null` ถ้าไม่ได้ส่งมา
 > ⚠️ `rooms_count` ใช้ `status='available'` (ต่างจาก `/availability-per-day` ที่ใช้ `status NOT IN (maintenance, reserved_closed)` — inconsistency ที่รู้กันอยู่)
+
+**Response `200` (โหมด `bed_type=king_size` — ฟิลด์ที่ต่างจากปกติ):**
+```json
+{
+  "room_type_id": "uuid",
+  "name_en": "Superior",
+  "available_rooms": 4,
+  "king_total_rooms": 5,
+  "king_occupied": 1,
+  "search_criteria": {
+    "check_in": "2026-09-10",
+    "check_out": "2026-09-12",
+    "max_guests": null,
+    "bed_type": "king_size"
+  }
+}
+```
+> 💡 ไม่ส่ง `bed_type` → ไม่มี `king_total_rooms`/`king_occupied` และ `search_criteria` ไม่มี `bed_type` (payload เหมือนเดิมทุกไบต์). Endpoints availability อื่นๆ (`/availability-per-day`, `/availability-ranges`, `/unavailable-*`) ยัง**ไม่รองรับ** `bed_type` — ขยายภายหลังถ้า frontend ต้องการ
 
 ---
 

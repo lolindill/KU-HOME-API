@@ -1904,3 +1904,21 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   3. `docs/api_guide.md` — บันทึกตาราง endpoint และคำอธิบายการค้นหาโค้ดส่วนลด
   4. `tests/Feature/DiscountTest.php` — เพิ่มเทสต์ครอบคลุม auth protection, query param filter, get by code name, get by UUID, และ 404 not found
 
+## 🛏️ King-Size Availability — `GET /availability?bed_type=king_size` (2026-09-09)
+
+- **โจทย์:** frontend โชว์จำนวน "ห้อง king (ชั้น 8) เหลือ" ไม่ได้ เพราะ availability endpoints ทั้ง 5 นับที่ระดับ room_type เท่านั้น — ไม่มีมิติ `bed_type`. ทางออก = **extend** `GET /availability` ด้วย optional param (ไม่สร้าง endpoint ใหม่) ผ่านการ grill-me 5 คำตอบ (shape / นับยังไง / response / ขอบเขต bed_type / นิยาม pool)
+- **Decisions ที่ล็อก (ห้าม re-litigate โดยไม่มี evidence ใหม่):**
+  1. **Shape:** extend `/availability` เดิม — ไม่แตะ `/availability-per-day`, `/availability-ranges`, `/unavailable-*` (ขยายภายหลังถ้า frontend ต้องการ)
+  2. **Hybrid counting ตาม lifecycle** (สำคัญ — `booking_rooms.room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
+     `king_occupied = (BR bed_preference='king_size' และ room_id IS NULL) + (BR ที่ room.bed_type='king_size')` — เงื่อนไข 2 แขนกันหมด (null ↔ not null) ไม่นับซ้ำ. BR ลอย (no-preference + ไม่ assign) ไม่นับเป็น king
+  3. **Response:** ไม่ส่ง `bed_type` = byte-identical กับเดิม; ส่งแล้ว `available_rooms` เป็น king-aware + เพิ่ม `king_total_rooms` / `king_occupied` + `search_criteria.bed_type` echo
+  4. **ขอบเขต:** `bed_type` รับ `king_size` เท่านั้น (`nullable|in:king_size` — ส่ง `twin` → 422) ตาม `bed_preference` ฝั่ง booking
+  5. **king pool = sellable** (`status NOT IN (maintenance, reserved_closed)`) — ตรงกับ `createBooking`/`withSellableRoomsAndRates` **ไม่ใช่** `status='available'` แบบ `rooms_count` รวมของ endpoint นี้ (สถานะ snapshot วันนี้บอกความว่างวันจองอนาคตไม่ได้)
+- **สูตร:** `available_rooms(king) = max(0, king_total_rooms − king_occupied)` · BR states ที่นับ `{draft, confirmed, checked_in}` เหมือนเดิม · overlap half-open เหมือนเดิม
+- **ไฟล์ที่เปลี่ยน:**
+  1. `app/Http/Controllers/Api/V1/RoomController.php` — `availability()`: validate `bed_type` + 2 withCount conditional (`king_total_rooms`, `king_occupied_count` ด้วย `whereHas('room')`) + เติมฟิลด์ใน map เฉพาะเมื่อ param มา
+  2. `tests/Feature/RoomKingAvailabilityTest.php` (ใหม่) — 10 tests: BC (ไม่ส่ง param ไม่มีฟิลด์ king), pool นับเฉพาะ king sellable, king-pref ยังไม่ assign หัก king, assigned-king หัก king, assigned-twin ไม่หัก, floating ไม่หัก, checked_out ปล่อยคืน, non-overlap ไม่หัก, AND กับ max_guests, twin/double → 422
+  3. `docs/api_guide.md` — เอกสาร param + semantics + ตัวอย่าง response โหมด king
+- **ไม่ต้อง migration** — `rooms.bed_type` + `booking_rooms.bed_preference` มีอยู่แล้ว (migration 2026-08-27) · ไม่เพิ่ม route/middleware (public read-only เดิม)
+
+
