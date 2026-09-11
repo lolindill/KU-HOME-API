@@ -12,6 +12,7 @@ use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class RoomController extends Controller
 {
@@ -43,6 +44,13 @@ class RoomController extends Controller
     // 🔍 ค้นหาห้องพักด้วย ID
     public function getRoomById($id)
     {
+        if (! Str::isUuid($id)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room not found',
+            ], 404);
+        }
+
         $room = Room::with('roomType:id,name_en')->find($id);
 
         if (! $room) {
@@ -111,6 +119,13 @@ class RoomController extends Controller
     // 🏷️ ดึงข้อมูลประเภทห้องพักตาม ID
     public function getRoomTypeById($id)
     {
+        if (! Str::isUuid($id)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room type not found',
+            ], 404);
+        }
+
         // 🌟 Update (03/09/26): eager-load rateRows กัน N+1 สำหรับ rates object
         $roomType = RoomType::with('rateRows')->find($id);
 

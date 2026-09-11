@@ -859,6 +859,130 @@ class BookingTest extends TestCase
     }
 
     /**
+     * 🛏️ (08/09/26) Update extra_bed ต้องทำให้ total_amount เปลี่ยนตาม —
+     * draft 2 คืน (1500/คืน = 3000) + extra_bed rate 100/คืน → เพิ่ม 2 เตียง = +400
+     */
+    public function test_update_extra_bed_increases_total_amount(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+
+        // extra_bed 0 → 2 : extra_bed_price = 100 × 2 เตียง × 2 คืน = 400 → total = 3400
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3400);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 2,
+            'extra_bed_price' => 400,
+        ]);
+
+        // amount = 3000 (ห้อง) − 0 + 400 = 3400
+        $this->assertEquals(3400, $br->fresh()->amount);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🛏️ (08/09/26) ลดจำนวน extra_bed ย้อนหลัง ต้องลด total_amount ลงด้วย —
+     * ต่อเนื่องจาก 2 เตียง (3400) → เหลือ 1 เตียง = −200 → 3200
+     */
+    public function test_update_extra_bed_decrease_lowers_total_amount(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // เริ่มจาก 2 เตียง → total = 3000 + 400 = 3400
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ])->assertStatus(200);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        // ลดเหลือ 1 เตียง → extra_bed_price = 100 × 1 × 2 = 200 → total = 3200
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3200);
+        $this->assertEquals(3200, $booking->fresh()->total_amount);
+
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 1,
+            'extra_bed_price' => 200,
+        ]);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🛏️ (08/09/26) ตั้ง extra_bed กลับเป็น 0 — total_amount ต้องกลับไปเท่าค่าห้องเปล่า
+     */
+    public function test_update_extra_bed_to_zero_restores_base_total(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ])->assertStatus(200);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        // ล้างเตียงเสริมหมด → กลับไป 3000 (ค่าห้องเปล่า)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 0],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3000);
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 0,
+            'extra_bed_price' => 0,
+        ]);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
      * 🕐 (27/08/26): Early/Late check-in/out คิดราคาตามสูตรรายชั่วโมง (int 0-5 ชม.)
      * ลบ boolean ออกจาก response และบันทึก early_hours / late_hours ใน Addon
      */
@@ -1077,6 +1201,86 @@ class BookingTest extends TestCase
         $response->assertJsonPath('booking_room.addon.late_hours', 1);
         // total คิดใหม่ = 3000 (ห้อง 2 คืน) + 7000 (late) = 10000
         $response->assertJsonPath('total_amount', 10000);
+    }
+
+    /**
+     * 🐛 (08/09/26) Bug repro จาก frontend จริง: ส่ง key `addon` (เอกพจน์ — mirror จาก response)
+     * เข้า batch endpoint — validation ไม่รู้จัก key นี้ → ตัดทิ้งเงียบๆ → extra_bed คงเดิม
+     * total_amount ไม่ขยับ แต่ API ตอบ 200 success (frontend เข้าใจว่าสำเร็จ)
+     */
+    public function test_batch_update_addon_singular_key_is_silently_ignored(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // payload ตาม input.png — `addon` เอกพจน์ (ผิด)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addon' => ['early_hours' => 0, 'extra_bed' => 1, 'late_hours' => 0],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        // เงียบสนิท: extra_bed ยัง 0, total คงเดิม 3000
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 0,
+            'extra_bed_price' => 0,
+        ]);
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+    }
+
+    /**
+     * ✅ (08/09/26) JSON แบบที่ frontend ควรส่ง (`addons` พหูพจน์) —
+     * batch endpoint reprice ให้ extra_bed ครบและ total_amount ขยับตาม
+     */
+    public function test_batch_update_extra_bed_with_addons_plural_key_updates_total(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // payload แบบแก้แล้ว — `addons` พหูพจน์ (ถูก)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addons' => ['extra_bed' => 1, 'early_hours' => 0, 'late_hours' => 0],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        // extra_bed 1 เตียง × 100 × 2 คืน = 200 → total = 3000 + 200 = 3200
+        $response->assertJsonPath('total_amount', 3200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'extra_bed' => 1,
+            'extra_bed_price' => 200,
+        ]);
+        $this->assertAmountInvariant($booking);
     }
 
     /**

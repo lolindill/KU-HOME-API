@@ -1919,6 +1919,12 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   1. `app/Http/Controllers/Api/V1/RoomController.php` — `availability()`: validate `bed_type` + 2 withCount conditional (`king_total_rooms`, `king_occupied_count` ด้วย `whereHas('room')`) + เติมฟิลด์ใน map เฉพาะเมื่อ param มา
   2. `tests/Feature/RoomKingAvailabilityTest.php` (ใหม่) — 10 tests: BC (ไม่ส่ง param ไม่มีฟิลด์ king), pool นับเฉพาะ king sellable, king-pref ยังไม่ assign หัก king, assigned-king หัก king, assigned-twin ไม่หัก, floating ไม่หัก, checked_out ปล่อยคืน, non-overlap ไม่หัก, AND กับ max_guests, twin/double → 422
   3. `docs/api_guide.md` — เอกสาร param + semantics + ตัวอย่าง response โหมด king
-- **ไม่ต้อง migration** — `rooms.bed_type` + `booking_rooms.bed_preference` มีอยู่แล้ว (migration 2026-08-27) · ไม่เพิ่ม route/middleware (public read-only เดิม)
+## 🐘 PostgreSQL Migration & UUID Validation Fix (2026-09-11)
 
-
+- **โจทย์:** เซิร์ฟเวอร์เปลี่ยนฐานข้อมูลไปใช้ PostgreSQL (`dbc.ku.ac.th`) แล้วรัน `php artisan migrate` ไม่ผ่านที่ `2026_07_22_100100_move_room_rate_to_global_rates` ทำให้ migrations ที่เหลือ (booking confirmations, status change logs, discount system, booking_room amount) ค้าง ไม่ถูกสร้าง
+- **Root Cause 1:** ใน migration `2026_07_22_100100_move_room_rate_to_global_rates.php` มีการใช้ `DB::table('global_rates')->insert([... 'is_active' => true ...])` ซึ่ง PDO แปลง PHP boolean `true` เป็น integer `1` ส่งผลให้ PostgreSQL ฟ้อง `SQLSTATE[42804]: Datatype mismatch: ERROR: column "is_active" is of type boolean but expression is of type integer`
+- **Root Cause 2:** Route `GET /api/v1/rooms/{id}` และ `/api/v1/room-types/{id}` เมื่อถูกเรียกด้วยค่าที่ไม่ใช่ UUID (เช่น `not-a-uuid`) ส่ง `$id` เข้า `Room::find($id)` ตรงๆ ใน PostgreSQL จะเกิด `SQLSTATE[22P02]: Invalid text representation: ERROR: invalid input syntax for type uuid` และกลายเป็น HTTP 500 แทนที่จะเป็น 404
+- **แก้ไข:**
+  1. `database/migrations/2026_07_22_100100_move_room_rate_to_global_rates.php`: เปลี่ยน `'is_active' => true` เป็น `'is_active' => DB::raw('TRUE')` ตาม AGENTS.md rule
+  2. `app/Http/Controllers/Api/V1/RoomController.php`: เพิ่ม `Str::isUuid($id)` guard ใน `getRoomById` และ `getRoomTypeById` หากไม่ใช่ UUID ให้ตอบ `404 Not Found` ทันที
+  3. `tests/Feature/RoomTest.php`: เพิ่มเทสต์สำหรับ `getRoomById` และ invalid UUID checks (404)

@@ -68,6 +68,31 @@ class RoomTest extends TestCase
         $this->assertContains($roomB->id, $roomIds, 'Room B should be in the listing');
     }
 
+    public function test_get_room_by_id_returns_room(): void
+    {
+        $room = $this->createRoom();
+        $response = $this->getJson("/api/v1/rooms/{$room->id}");
+        $response->assertStatus(200);
+        $response->assertJsonPath('status', 'success');
+        $response->assertJsonPath('room.id', $room->id);
+    }
+
+    public function test_get_room_by_invalid_uuid_returns_404(): void
+    {
+        $response = $this->getJson('/api/v1/rooms/not-a-uuid');
+        $response->assertStatus(404);
+        $response->assertJsonPath('status', 'error');
+        $response->assertJsonPath('message', 'Room not found');
+    }
+
+    public function test_get_room_type_by_invalid_uuid_returns_404(): void
+    {
+        $response = $this->getJson('/api/v1/room-types/not-a-uuid');
+        $response->assertStatus(404);
+        $response->assertJsonPath('status', 'error');
+        $response->assertJsonPath('message', 'Room type not found');
+    }
+
     public function test_anyone_can_list_room_types(): void
     {
         $roomType = $this->createRoomType();
