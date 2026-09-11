@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 /**
  * 🌟 (26/08/26): ตรวจค่า default rate ที่ GlobalRateSeeder seed
- * early_checkin / late_checkout ปรับลดจาก 300 → 100 THB (satang integer)
+ * early_checkin / late_checkout ปรับลดจาก 300 → 100 บาท (integer baht)
  */
 class GlobalRateSeederTest extends TestCase
 {
@@ -19,9 +19,9 @@ class GlobalRateSeederTest extends TestCase
     {
         $this->seed(GlobalRateSeeder::class);
 
-        $this->assertSame(10000, GlobalRate::getPrice('early_checkin'));
-        $this->assertSame(10000, GlobalRate::getPrice('late_checkout'));
-        $this->assertSame(20000, GlobalRate::getPrice('breakfast'));
-        $this->assertSame(50000, GlobalRate::getPrice('extra_bed'));
+        $this->assertSame(100, GlobalRate::getPrice('early_checkin'));
+        $this->assertSame(100, GlobalRate::getPrice('late_checkout'));
+        $this->assertSame(200, GlobalRate::getPrice('breakfast'));
+        $this->assertSame(500, GlobalRate::getPrice('extra_bed'));
     }
 }

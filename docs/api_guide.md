@@ -2089,7 +2089,7 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 }
 ```
 
-> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer satang) = **ยอดสุทธิต่อห้อง**:
+> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer baht) = **ยอดสุทธิต่อห้อง**:
 > `amount = room_amount − discount_amount + extra_bed_price + breakfast_price + early_checkIn_price + late_checkOut_price`
 > Server คำนวณที่จุดเดียว (`DiscountService::reprice()`) ครบทุก flow รวมถึง walk-in — **invariant: Σ `booking_rooms.amount` == `bookings.total_amount`** (ทั้งสองฝั่ง net) frontend จึงไม่ต้องบวกเอง และห้ามส่ง `amount` เข้ามาเอง (read-only, server-computed)
 
@@ -2452,7 +2452,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 **Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast` 200 (200 THB), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
@@ -2675,9 +2675,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
-| `room_amount`  | integer   | Gross room price = rate × nights (satang, server-computed 27/08/26) |
-| `discount_amount` | integer | Discount applied to this room (satang, server-computed) |
-| `amount`       | integer   | 🧾 Net total per room (satang, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
+| `room_amount`  | integer   | Gross room price = rate × nights (integer baht, server-computed 27/08/26) |
+| `discount_amount` | integer | Discount applied to this room (integer baht, server-computed) |
+| `amount`       | integer   | 🧾 Net total per room (integer baht, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 
@@ -2738,13 +2738,13 @@ Returns tasks with status `pending` or `in_progress`.
 | `max_guests`         | integer   | Max guests per room                      |
 | `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
 | `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
-| `extra_bed_price`    | string    | Price per extra bed as 2-dp baht string (e.g. `"500.00"` on wire; storage integer satang `50000`) |
+| `extra_bed_price`    | string    | Price per extra bed — integer baht, non-decimal (e.g. `500` = 500 THB; storage = wire, 11/09/26) |
 | `rates`              | object    | **Virtual** — canonical rates object `{daily: {general, ku_member}, group: {min_5_rooms, min_10_rooms}, monthly}` in 2-dp decimal baht strings resolved from `global_rates`. Fallback `"0.00"` if missing/inactive. |
 | `created_at`         | timestamp |                                          |
 | `updated_at`         | timestamp |                                          |
 
 > 💡 **Room Rates & Money Policy (03/09/26):**
-> - **Money Policy:** Database storage strictly uses **integer satang** (e.g. `100000` satang = 1,000.00 THB). Booking math, payment totals, and discounts remain in integer satang. At the room-type API edge (wire), all rate values and `extra_bed_price` are serialized as **2-decimal-places decimal baht strings** (e.g. `"1000.00"`, `"500.00"`).
+> - **Money Policy:** Database storage and API wire use **integer baht, non-decimal** (e.g. `1200` = 1,200 THB) — มาตรฐานใหม่ 11/09/26 (เดิม integer satang + baht string ที่ขอบ API). ทุก rate value, `extra_bed_price`, `total_amount`, `booking_rooms.amount`, addons, discounts อยู่หน่วยเดียวกันทั้งระบบ
 > - **Rate Types in `global_rates`:**
 >   - `daily` (code `null`): Daily rate for general guests (`rates.daily.general`)
 >   - `daily_ku` (code `null`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
@@ -2771,9 +2771,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
 | `breakfast`            | integer | Number of breakfasts                     |
 | `breakfast_price`      | integer | Total breakfast price (baht)             |
-| `early_checkIn_price`  | integer | Early check-in total price (satang)      |
+| `early_checkIn_price`  | integer | Early check-in total price (integer baht)|
 | `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
-| `late_checkOut_price`  | integer | Late check-out total price (satang)      |
+| `late_checkOut_price`  | integer | Late check-out total price (integer baht)|
 | `late_hours`           | integer | Late check-out hours (0–7, default: 0)   |
 | `created_at`           | timestamp |                                        |
 | `updated_at`           | timestamp |                                        |
@@ -3073,7 +3073,7 @@ These endpoints exist but are **not production-ready**:
 
 ### Pricing Notes
 
-- All prices stored as **integers** (satang/cents) since 2026-06-05 — baht ที่ขอบ API เฉพาะ `rates` object + `extra_bed_price` ของ RoomType (baht string 2 ตำแหน่ง, 03/09/26).
+- All prices stored as **integer baht (non-decimal)** since 2026-09-11 — ก่อนหน้านั้นเป็น integer satang (2026-06-05) และ `rates`/`extra_bed_price` ของ RoomType เป็น baht string 2 ตำแหน่ง (03/09/26, ยกเลิกแล้ว)
 - Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
 - 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).

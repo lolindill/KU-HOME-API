@@ -28,21 +28,21 @@ class RoomTypeRatesListTest extends TestCase
             'max_guests' => 2,
             'extra_bed_enabled' => true,
             'max_extra_beds' => 1,
-            'extra_bed_price' => 50000, // 500.00 THB
+            'extra_bed_price' => 500, // 500 THB
         ]);
 
         GlobalRate::create([
             'rate_type' => 'daily',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe Daily',
-            'default_price' => 150000, // 1,500.00 THB
+            'default_price' => 1500, // 1500 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'daily_ku',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe KU Daily',
-            'default_price' => 120000, // 1,200.00 THB
+            'default_price' => 1200, // 1200 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -50,7 +50,7 @@ class RoomTypeRatesListTest extends TestCase
             'room_type_id' => $rtFull->id,
             'code' => 'min_5_rooms',
             'name_en' => 'Deluxe Group Min 5',
-            'default_price' => 110000, // 1,100.00 THB
+            'default_price' => 1100, // 1100 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -58,14 +58,14 @@ class RoomTypeRatesListTest extends TestCase
             'room_type_id' => $rtFull->id,
             'code' => 'min_10_rooms',
             'name_en' => 'Deluxe Group Min 10',
-            'default_price' => 95000, // 950.00 THB
+            'default_price' => 950, // 950 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'month',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe Monthly',
-            'default_price' => 2000000, // 20,000.00 THB
+            'default_price' => 20000, // 20000 THB
             'is_active' => true,
         ]);
 
@@ -77,14 +77,14 @@ class RoomTypeRatesListTest extends TestCase
             'max_guests' => 1,
             'extra_bed_enabled' => false,
             'max_extra_beds' => 0,
-            'extra_bed_price' => 0, // 0.00 THB
+            'extra_bed_price' => 0, // 0 THB
         ]);
 
         GlobalRate::create([
             'rate_type' => 'daily',
             'room_type_id' => $rtPartial->id,
             'name_en' => 'Standard Daily',
-            'default_price' => 80000, // 800.00 THB
+            'default_price' => 800, // 800 THB
             'is_active' => true,
         ]);
 
@@ -95,7 +95,8 @@ class RoomTypeRatesListTest extends TestCase
         $this->assertIsArray($roomTypes);
         $this->assertCount(2, $roomTypes);
 
-        $bahtRegex = '/^\d+\.\d{2}$/';
+        // 💰 (11/09/26) integer baht (non-decimal) — ไม่มีทศนิยม .00 แล้ว
+        $bahtRegex = '/^\d+$/';
 
         foreach ($roomTypes as $item) {
             // Verify rates object structure
@@ -133,40 +134,40 @@ class RoomTypeRatesListTest extends TestCase
         // Verify exact values for Deluxe Suite (full rates)
         $fullItem = collect($roomTypes)->firstWhere('id', (string) $rtFull->id);
         $this->assertNotNull($fullItem);
-        $this->assertSame('500.00', $fullItem['extra_bed_price']);
+        $this->assertSame(500, $fullItem['extra_bed_price']);
         $this->assertSame([
             'daily' => [
-                'general' => '1500.00',
-                'ku_member' => '1200.00',
+                'general' => 1500,
+                'ku_member' => 1200,
             ],
             'group' => [
-                'min_5_rooms' => '1100.00',
-                'min_10_rooms' => '950.00',
+                'min_5_rooms' => 1100,
+                'min_10_rooms' => 950,
             ],
-            'monthly' => '20000.00',
+            'monthly' => 20000,
         ], $fullItem['rates']);
 
-        // Verify fallback to '0.00' for Standard Single (partial rates)
+        // Verify fallback to 0 for Standard Single (partial rates)
         $partialItem = collect($roomTypes)->firstWhere('id', (string) $rtPartial->id);
         $this->assertNotNull($partialItem);
-        $this->assertSame('0.00', $partialItem['extra_bed_price']);
+        $this->assertSame(0, $partialItem['extra_bed_price']);
         $this->assertSame([
             'daily' => [
-                'general' => '800.00',
-                'ku_member' => '0.00',
+                'general' => 800,
+                'ku_member' => 0,
             ],
             'group' => [
-                'min_5_rooms' => '0.00',
-                'min_10_rooms' => '0.00',
+                'min_5_rooms' => 0,
+                'min_10_rooms' => 0,
             ],
-            'monthly' => '0.00',
+            'monthly' => 0,
         ], $partialItem['rates']);
     }
 
     /**
      * 🔍 GET /api/v1/availability
      * Both top-level row and embedded room_type sub-object have identical rates objects
-     * in baht strings, daily_rate is not present, and fallback to '0.00' when some rate rows are missing.
+     * in baht strings, daily_rate is not present, and fallback to 0 when some rate rows are missing.
      */
     public function test_availability_endpoint_returns_identical_rates_in_top_level_and_embedded_room_type(): void
     {
@@ -178,21 +179,21 @@ class RoomTypeRatesListTest extends TestCase
             'max_guests' => 2,
             'extra_bed_enabled' => true,
             'max_extra_beds' => 1,
-            'extra_bed_price' => 50000, // 500.00 THB
+            'extra_bed_price' => 500, // 500 THB
         ]);
 
         GlobalRate::create([
             'rate_type' => 'daily',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe Daily',
-            'default_price' => 150000, // 1,500.00 THB
+            'default_price' => 1500, // 1500 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'daily_ku',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe KU Daily',
-            'default_price' => 120000, // 1,200.00 THB
+            'default_price' => 1200, // 1200 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -200,7 +201,7 @@ class RoomTypeRatesListTest extends TestCase
             'room_type_id' => $rtFull->id,
             'code' => 'min_5_rooms',
             'name_en' => 'Deluxe Group Min 5',
-            'default_price' => 110000, // 1,100.00 THB
+            'default_price' => 1100, // 1100 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -208,14 +209,14 @@ class RoomTypeRatesListTest extends TestCase
             'room_type_id' => $rtFull->id,
             'code' => 'min_10_rooms',
             'name_en' => 'Deluxe Group Min 10',
-            'default_price' => 95000, // 950.00 THB
+            'default_price' => 950, // 950 THB
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'month',
             'room_type_id' => $rtFull->id,
             'name_en' => 'Deluxe Monthly',
-            'default_price' => 2000000, // 20,000.00 THB
+            'default_price' => 20000, // 20000 THB
             'is_active' => true,
         ]);
 
@@ -241,7 +242,7 @@ class RoomTypeRatesListTest extends TestCase
             'rate_type' => 'daily',
             'room_type_id' => $rtPartial->id,
             'name_en' => 'Standard Daily',
-            'default_price' => 80000, // 800.00 THB
+            'default_price' => 800, // 800 THB
             'is_active' => true,
         ]);
 
@@ -291,39 +292,39 @@ class RoomTypeRatesListTest extends TestCase
         $this->assertNotNull($fullItem);
         $this->assertSame([
             'daily' => [
-                'general' => '1500.00',
-                'ku_member' => '1200.00',
+                'general' => 1500,
+                'ku_member' => 1200,
             ],
             'group' => [
-                'min_5_rooms' => '1100.00',
-                'min_10_rooms' => '950.00',
+                'min_5_rooms' => 1100,
+                'min_10_rooms' => 950,
             ],
-            'monthly' => '20000.00',
+            'monthly' => 20000,
         ], $fullItem['rates']);
-        $this->assertSame('500.00', $fullItem['room_type']['extra_bed_price']);
+        $this->assertSame(500, $fullItem['room_type']['extra_bed_price']);
 
-        // Assert Standard Single fallback to '0.00' for missing rate rows
+        // Assert Standard Single fallback to 0 for missing rate rows
         $partialItem = collect($roomTypes)->firstWhere('room_type_id', (string) $rtPartial->id);
         $this->assertNotNull($partialItem);
         $expectedPartialRates = [
             'daily' => [
-                'general' => '800.00',
-                'ku_member' => '0.00',
+                'general' => 800,
+                'ku_member' => 0,
             ],
             'group' => [
-                'min_5_rooms' => '0.00',
-                'min_10_rooms' => '0.00',
+                'min_5_rooms' => 0,
+                'min_10_rooms' => 0,
             ],
-            'monthly' => '0.00',
+            'monthly' => 0,
         ];
         $this->assertSame($expectedPartialRates, $partialItem['rates']);
         $this->assertSame($expectedPartialRates, $partialItem['room_type']['rates']);
-        $this->assertSame('0.00', $partialItem['room_type']['extra_bed_price']);
+        $this->assertSame(0, $partialItem['room_type']['extra_bed_price']);
     }
 
     /**
      * 🛡️ GET /api/v1/availability
-     * Verify fallback to '0.00' when all rate rows are missing or inactive.
+     * Verify fallback to 0 when all rate rows are missing or inactive.
      * Asserts embed does not break even without rate rows.
      */
     public function test_availability_endpoint_falls_back_to_zero_when_rate_rows_are_missing_or_inactive(): void
@@ -363,19 +364,19 @@ class RoomTypeRatesListTest extends TestCase
 
         $expectedZeroRates = [
             'daily' => [
-                'general' => '0.00',
-                'ku_member' => '0.00',
+                'general' => 0,
+                'ku_member' => 0,
             ],
             'group' => [
-                'min_5_rooms' => '0.00',
-                'min_10_rooms' => '0.00',
+                'min_5_rooms' => 0,
+                'min_10_rooms' => 0,
             ],
-            'monthly' => '0.00',
+            'monthly' => 0,
         ];
 
         $this->assertSame($expectedZeroRates, $item['rates']);
         $this->assertSame($expectedZeroRates, $item['room_type']['rates']);
-        $this->assertSame('0.00', $item['room_type']['extra_bed_price']);
+        $this->assertSame(0, $item['room_type']['extra_bed_price']);
         $this->assertArrayNotHasKey('daily_rate', $item);
         $this->assertArrayNotHasKey('daily_rate', $item['room_type']);
     }

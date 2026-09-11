@@ -34,15 +34,15 @@ class RoomTypeRatesCalendarTest extends TestCase
             'max_guests' => 2,
             'extra_bed_enabled' => true,
             'max_extra_beds' => 1,
-            'extra_bed_price' => 50000, // 500.00 THB
+            'extra_bed_price' => 500, // 500 THB
         ]);
 
         $defaultPrices = [
-            'daily' => 120000,        // 1200.00 THB
-            'daily_ku' => 100000,     // 1000.00 THB
-            'min_5_rooms' => 90000,   // 900.00 THB
-            'min_10_rooms' => 75000,  // 750.00 THB
-            'month' => 1800000,       // 18000.00 THB
+            'daily' => 1200,        // 1200 THB
+            'daily_ku' => 1000,     // 1000 THB
+            'min_5_rooms' => 900,   // 900 THB
+            'min_10_rooms' => 750,  // 750 THB
+            'month' => 18000,       // 18000 THB
         ];
         $prices = array_merge($defaultPrices, $prices);
 
@@ -131,14 +131,14 @@ class RoomTypeRatesCalendarTest extends TestCase
         $this->assertArrayHasKey('rates', $row);
         $this->assertSame([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $row['rates']);
 
         // Assert existing structure is preserved: date keys exist
@@ -172,14 +172,14 @@ class RoomTypeRatesCalendarTest extends TestCase
         $this->assertArrayHasKey('rates', $row);
         $this->assertSame([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $row['rates']);
 
         // Assert existing structure is preserved: intervals array exists
@@ -213,14 +213,14 @@ class RoomTypeRatesCalendarTest extends TestCase
         $this->assertArrayHasKey('rates', $row);
         $this->assertSame([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $row['rates']);
 
         // Assert existing structure is preserved: unavailable_dates array exists
@@ -252,14 +252,14 @@ class RoomTypeRatesCalendarTest extends TestCase
         $this->assertArrayHasKey('rates', $row);
         $this->assertSame([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $row['rates']);
 
         $this->assertArrayHasKey('intervals', $row);
@@ -277,7 +277,7 @@ class RoomTypeRatesCalendarTest extends TestCase
             'user_id' => $user->id,
             'confirmation_number' => 'KU-TEST-001',
             'status' => 'confirmed',
-            'total_amount' => 120000,
+            'total_amount' => 1200,
         ]);
 
         BookingRoom::create([
@@ -288,8 +288,8 @@ class RoomTypeRatesCalendarTest extends TestCase
             'check_in' => Carbon::today()->addDays(3)->toDateString(),
             'check_out' => Carbon::today()->addDays(5)->toDateString(),
             'status' => 'confirmed',
-            'room_amount' => 240000,
-            'total_amount' => 240000,
+            'room_amount' => 2400,
+            'total_amount' => 2400,
         ]);
 
         $response = $this->getJson('/api/v1/unavailable-ranges');
@@ -304,14 +304,14 @@ class RoomTypeRatesCalendarTest extends TestCase
         $this->assertArrayHasKey('rates', $row);
         $this->assertSame([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $row['rates']);
 
         // Assert interval generated for sold-out room
@@ -346,14 +346,14 @@ class RoomTypeRatesCalendarTest extends TestCase
 
         $expectedZero = [
             'daily' => [
-                'general' => '0.00',
-                'ku_member' => '0.00',
+                'general' => 0,
+                'ku_member' => 0,
             ],
             'group' => [
-                'min_5_rooms' => '0.00',
-                'min_10_rooms' => '0.00',
+                'min_5_rooms' => 0,
+                'min_10_rooms' => 0,
             ],
-            'monthly' => '0.00',
+            'monthly' => 0,
         ];
 
         $this->assertSame($expectedZero, $row['rates']);

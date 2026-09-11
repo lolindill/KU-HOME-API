@@ -73,8 +73,8 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 
 - **PostgreSQL strict boolean typing** — PostgreSQL rejects integer `0`/`1` in a boolean column, but PDO turns a PHP bool into exactly that, so writing `true`/`false` to a boolean column throws "Datatype mismatch" (SQLite/MySQL are lenient — this only breaks in prod). The **`App\Casts\PgBoolean`** custom cast is the canonical fix: it emits `DB::raw('TRUE'/'FALSE')` on write. Always attach it to boolean columns (`is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`) and never write raw bools / raw `DB::raw('TRUE')` by hand.
   - 🔒 **DO NOT try to "fix" or simplify `PgBoolean` (re-litigation freeze).** We already scrutinized this and attempted alternative fixes (plain PHP `true`/`false`, string `'true'`/`'false'`, relying on Eloquent's built-in `boolean` cast) — **none of them work on PostgreSQL**. The `DB::raw('TRUE'/'FALSE')` approach inside the cast is the **final, proven solution** — leave it as-is. If you're tempted to refactor it, you are almost certainly reintroducing the bug.
-- **Money is integer satang/cents** — `total_amount`, `amount` columns/casts/validation are all `integer`, never decimal.
-  - **Room-type wire format exception (2026-09-03):** ที่ขอบ API ของ RoomType (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`, และ calendar endpoints ทั้ง 4) ข้อมูลเงินสำหรับแสดงผล (`rates` object และ `extra_bed_price`) จะ serialize เป็น **2-decimal-places decimal baht string** (เช่น `"1000.00"`, `"500.00"`) เพื่อให้ frontend ใช้งานได้สะดวก แต่ **การจัดเก็บใน Database ยังคงเป็น integer satang เสมอ** (`extra_bed_price` = 50000, rates ใน `global_rates` = 100000 satang) และยอดเงินฝั่ง booking (`total_amount`, `booking_rooms.amount`, addons) ยังคงเป็น integer satang ทั้งหมด
+- **💰 Money is integer baht (non-decimal) — (2026-09-11, เดิมเป็น integer satang):** `total_amount`, `amount`, rates, addon/discount prices ทุก field เป็น `integer` หน่วย **บาทล้วน ไม่มีทศนิยม** (เช่น ห้อง 1,200 บาท/คืน เก็บและส่งเป็น `1200`) — storage = wire format เดียวกัน ไม่มีการแปลงหน่วยที่ขอบ API อีกต่อไป (helper `App\Support\Money` ถูกลบแล้ว)
+  - **Room-type wire format (อัปเดต 2026-09-11):** `rates` object และ `extra_bed_price` ของ RoomType (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`, calendar endpoints ทั้ง 4) เป็น **integer baht** (เช่น `1200`, `500`) — ยกเลิกรูปแบบ decimal baht string `"1000.00"` เดิม (2026-09-03) แล้ว · migration `2026_09_11_090000_convert_money_satang_to_integer_baht` แปลงข้อมูลเดิม ÷100 (ยกเว้น `discounts.value` type `percent` ไม่หาร)
   - **KU Member daily rate (2026-09-07):** ผู้ใช้ role `ku_member` จะคำนวณค่าห้องรายวันด้วย `rate_type='daily_ku'` จาก `global_rates` อัตโนมัติผ่าน `GlobalRate::getEffectiveDailyRate()` (fallback ไป `daily` หากไม่มีเรท KU หรือผู้ใช้เป็น role ทั่วไป)
 - **UUID PKs everywhere** — most models use `HasUuids`. When asserting UUID equality in tests, cast to `(string)` first.
 - **Draft/testing code** is marked with `🚧 DRAFT / TESTING` comment prefix — treat as non-production.
@@ -88,7 +88,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - อนาคตถ้า housekeeping อยากมีรูปก่อน/หลังเก็บห้อง → ใช้ `images` table นี้ (morph `HousekeepingTask`) อย่าสร้างตารางรูปใหม่ (`HousekeepingPhoto` ตอนนี้เป็น draft ลอยไม่มี route)
 - **🎟️ Discount system (2026-08-27):** ระบบส่วนลด v2.1 บริหารจัดการผ่าน `DiscountService` (`app/Services/Discount/DiscountService.php`) เป็น single source of truth
   - ฐานคิดเงิน: **เฉพาะค่าห้อง** (`room_amount = rate × nights`) — addon (breakfast, extra_bed, early, late) ไม่โดนลด
-  - Types: `percent` (1-100), `fixed` (satang ต่อ booking_room), `set_room_price` (satang ราคาห้อง/คืน)
+  - Types: `percent` (1-100), `fixed` (integer บาท ต่อ booking_room), `set_room_price` (integer บาท ราคาห้อง/คืน)
   - Quotas: 1 eligible booking_room = 1 slot; ทั้ง global (`max_uses`) และ per-user (`max_uses_per_user`) นับรวม `held` + `used`; All-or-nothing (ถ้าโควตาเหลือไม่พอ K ห้อง จะ reject 422 ทั้งชุด)
   - Single source of truth: **ห้าม insert `discount_redemptions` นอก `DiscountService`** (ยกเว้น transitionStatus hook `held → used` และ DB cascade)
   - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
@@ -176,7 +176,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 ## Conventions
 
 - Code comments and some error messages are in **Thai** with emoji markers (✅ 🌟 🏨 🧹 🚧 ❄️) — match the surrounding style.
-- Currency in satang (integer); dates ISO format.
+- Currency in **integer baht, non-decimal** (2026-09-11, เดิมเป็น integer satang); dates ISO format.
 - Migrations are numbered `YYYY_MM_DD_HHMMSS_*.php`; UUID PKs; atomic sequence tables (`booking_sequences`, `receipt_sequences`) for confirmation/receipt numbers.
 
 ## Task Execution & Progress Reporting Protocol (Sequential / Long Tasks)

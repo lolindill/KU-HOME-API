@@ -19,7 +19,7 @@ class BookingKuMemberPricingTest extends TestCase
 
     private static int $roomSeq = 0;
 
-    private function createRoomTypeWithRates(int $dailySatang = 120000, ?int $dailyKuSatang = 100000): RoomType
+    private function createRoomTypeWithRates(int $dailyBaht = 1200, ?int $dailyKuBaht = 1000): RoomType
     {
         $rt = RoomType::create([
             'id' => Str::uuid(),
@@ -34,17 +34,17 @@ class BookingKuMemberPricingTest extends TestCase
             'room_type_id' => $rt->id,
             'code' => null,
             'name_en' => 'Deluxe Daily General',
-            'default_price' => $dailySatang,
+            'default_price' => $dailyBaht,
             'is_active' => true,
         ]);
 
-        if ($dailyKuSatang !== null) {
+        if ($dailyKuBaht !== null) {
             GlobalRate::create([
                 'rate_type' => 'daily_ku',
                 'room_type_id' => $rt->id,
                 'code' => null,
                 'name_en' => 'Deluxe Daily KU Member',
-                'default_price' => $dailyKuSatang,
+                'default_price' => $dailyKuBaht,
                 'is_active' => true,
             ]);
         }
@@ -54,7 +54,7 @@ class BookingKuMemberPricingTest extends TestCase
             'room_type_id' => null,
             'code' => 'extra_bed',
             'name_en' => 'Extra Bed',
-            'default_price' => 50000,
+            'default_price' => 500,
             'is_active' => true,
         ]);
 
@@ -63,7 +63,7 @@ class BookingKuMemberPricingTest extends TestCase
             'room_type_id' => null,
             'code' => 'breakfast',
             'name_en' => 'Breakfast',
-            'default_price' => 15000,
+            'default_price' => 150,
             'is_active' => true,
         ]);
 
@@ -87,7 +87,7 @@ class BookingKuMemberPricingTest extends TestCase
             'is_ku_member' => false,
         ]);
 
-        $roomType = $this->createRoomTypeWithRates(120000, 100000);
+        $roomType = $this->createRoomTypeWithRates(1200, 1000);
         $this->createRoom($roomType);
 
         $checkIn = Carbon::now()->addDays(5)->toDateString();
@@ -112,10 +112,10 @@ class BookingKuMemberPricingTest extends TestCase
         $booking = Booking::with('bookingRooms')->where('user_id', $user->id)->firstOrFail();
         $room = $booking->bookingRooms->first();
 
-        // 2 nights * 120,000 satang (daily rate) = 240,000
-        $this->assertSame(240000, $room->room_amount);
-        $this->assertSame(240000, $room->amount);
-        $this->assertSame(240000, $booking->total_amount);
+        // 2 nights * 1,200 baht (daily rate) = 2,400
+        $this->assertSame(2400, $room->room_amount);
+        $this->assertSame(2400, $room->amount);
+        $this->assertSame(2400, $booking->total_amount);
     }
 
     public function test_ku_member_user_booking_uses_daily_ku_rate(): void
@@ -125,7 +125,7 @@ class BookingKuMemberPricingTest extends TestCase
             'is_ku_member' => false, // Ensure only role is checked!
         ]);
 
-        $roomType = $this->createRoomTypeWithRates(120000, 100000);
+        $roomType = $this->createRoomTypeWithRates(1200, 1000);
         $this->createRoom($roomType);
 
         $checkIn = Carbon::now()->addDays(5)->toDateString();
@@ -150,10 +150,10 @@ class BookingKuMemberPricingTest extends TestCase
         $booking = Booking::with('bookingRooms')->where('user_id', $kuMember->id)->firstOrFail();
         $room = $booking->bookingRooms->first();
 
-        // 2 nights * 100,000 satang (daily_ku rate) = 200,000
-        $this->assertSame(200000, $room->room_amount);
-        $this->assertSame(200000, $room->amount);
-        $this->assertSame(200000, $booking->total_amount);
+        // 2 nights * 1,000 baht (daily_ku rate) = 2,000
+        $this->assertSame(2000, $room->room_amount);
+        $this->assertSame(2000, $room->amount);
+        $this->assertSame(2000, $booking->total_amount);
     }
 
     public function test_ku_member_user_falls_back_to_daily_when_daily_ku_missing(): void
@@ -163,7 +163,7 @@ class BookingKuMemberPricingTest extends TestCase
         ]);
 
         // RoomType with ONLY daily rate (no daily_ku)
-        $roomType = $this->createRoomTypeWithRates(120000, null);
+        $roomType = $this->createRoomTypeWithRates(1200, null);
         $this->createRoom($roomType);
 
         $checkIn = Carbon::now()->addDays(3)->toDateString();
@@ -185,10 +185,10 @@ class BookingKuMemberPricingTest extends TestCase
         $booking = Booking::with('bookingRooms')->where('user_id', $kuMember->id)->firstOrFail();
         $room = $booking->bookingRooms->first();
 
-        // Falls back to daily rate: 120,000 satang
-        $this->assertSame(120000, $room->room_amount);
-        $this->assertSame(120000, $room->amount);
-        $this->assertSame(120000, $booking->total_amount);
+        // Falls back to daily rate: 1,200 baht
+        $this->assertSame(1200, $room->room_amount);
+        $this->assertSame(1200, $room->amount);
+        $this->assertSame(1200, $booking->total_amount);
     }
 
     public function test_ku_member_add_rooms_calculates_with_daily_ku_rate(): void
@@ -197,14 +197,14 @@ class BookingKuMemberPricingTest extends TestCase
             'role' => 'ku_member',
         ]);
 
-        $roomType = $this->createRoomTypeWithRates(120000, 100000);
+        $roomType = $this->createRoomTypeWithRates(1200, 1000);
         $this->createRoom($roomType);
         $this->createRoom($roomType);
 
         $checkIn = Carbon::now()->addDays(10)->toDateString();
         $checkOut = Carbon::now()->addDays(11)->toDateString(); // 1 night
 
-        // First room: 100,000 satang
+        // First room: 1,000 baht
         $createRes = $this->actingAs($kuMember, 'sanctum')->postJson('/api/v1/bookings', [
             'source' => 'online',
             'booking_rooms' => [
@@ -218,7 +218,7 @@ class BookingKuMemberPricingTest extends TestCase
         $createRes->assertStatus(201);
         $bookingId = $createRes->json('booking_id');
 
-        // Add second room: 1 night * 100,000 satang
+        // Add second room: 1 night * 1,000 baht
         $addRes = $this->actingAs($kuMember, 'sanctum')->postJson("/api/v1/bookings/{$bookingId}/rooms", [
             'booking_rooms' => [
                 [
@@ -230,12 +230,12 @@ class BookingKuMemberPricingTest extends TestCase
         ]);
 
         $addRes->assertStatus(200);
-        $this->assertSame(100000, $addRes->json('added_amount'));
-        $this->assertSame(200000, $addRes->json('total_amount'));
+        $this->assertSame(1000, $addRes->json('added_amount'));
+        $this->assertSame(2000, $addRes->json('total_amount'));
 
         $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
-        $this->assertSame(200000, $booking->total_amount);
-        $this->assertSame(200000, $booking->bookingRooms->sum('amount'));
+        $this->assertSame(2000, $booking->total_amount);
+        $this->assertSame(2000, $booking->bookingRooms->sum('amount'));
     }
 
     public function test_ku_member_booking_with_addons_preserves_invariant(): void
@@ -244,7 +244,7 @@ class BookingKuMemberPricingTest extends TestCase
             'role' => 'ku_member',
         ]);
 
-        $roomType = $this->createRoomTypeWithRates(120000, 100000);
+        $roomType = $this->createRoomTypeWithRates(1200, 1000);
         $this->createRoom($roomType);
 
         $checkIn = Carbon::now()->addDays(14)->toDateString();
@@ -258,8 +258,8 @@ class BookingKuMemberPricingTest extends TestCase
                     'check_in' => $checkIn,
                     'check_out' => $checkOut,
                     'addons' => [
-                        'extra_bed' => 1, // 50,000 * 2 nights = 100,000 satang
-                        'breakfast' => 2, // 15,000 * 2 qty = 30,000 satang
+                        'extra_bed' => 1, // 500 * 2 nights = 1,000 baht
+                        'breakfast' => 2, // 150 * 2 qty = 300 baht
                     ],
                 ],
             ],
@@ -270,14 +270,14 @@ class BookingKuMemberPricingTest extends TestCase
         $booking = Booking::with(['bookingRooms.addon'])->where('user_id', $kuMember->id)->firstOrFail();
         $room = $booking->bookingRooms->first();
 
-        // Room rate: 2 nights * 100,000 satang = 200,000 satang
-        $this->assertSame(200000, $room->room_amount);
-        // Addons: 100,000 (extra bed) + 30,000 (breakfast) = 130,000 satang
-        $this->assertSame(100000, $room->addon->extra_bed_price);
-        $this->assertSame(30000, $room->addon->breakfast_price);
-        // Total room amount: 200,000 + 130,000 = 330,000 satang
-        $this->assertSame(330000, $room->amount);
-        $this->assertSame(330000, $booking->total_amount);
+        // Room rate: 2 nights * 1,000 baht = 2,000 baht
+        $this->assertSame(2000, $room->room_amount);
+        // Addons: 1,000 (extra bed) + 300 (breakfast) = 1,300 baht
+        $this->assertSame(1000, $room->addon->extra_bed_price);
+        $this->assertSame(300, $room->addon->breakfast_price);
+        // Total room amount: 2,000 + 1,300 = 3,300 baht
+        $this->assertSame(3300, $room->amount);
+        $this->assertSame(3300, $booking->total_amount);
         $this->assertSame($booking->total_amount, $booking->bookingRooms->sum('amount'));
     }
 
@@ -287,7 +287,7 @@ class BookingKuMemberPricingTest extends TestCase
             'role' => 'ku_member',
         ]);
 
-        $roomType = $this->createRoomTypeWithRates(120000, 100000);
+        $roomType = $this->createRoomTypeWithRates(1200, 1000);
         $this->createRoom($roomType);
 
         Discount::create([
@@ -317,12 +317,12 @@ class BookingKuMemberPricingTest extends TestCase
         $booking = Booking::with('bookingRooms')->where('user_id', $kuMember->id)->firstOrFail();
         $room = $booking->bookingRooms->first();
 
-        // 1 night * 100,000 satang (daily_ku) = 100,000 satang
-        // 10% discount = 10,000 satang
-        // Net room amount = 90,000 satang
-        $this->assertSame(100000, $room->room_amount);
-        $this->assertSame(10000, $room->discount_amount);
-        $this->assertSame(90000, $room->amount);
-        $this->assertSame(90000, $booking->total_amount);
+        // 1 night * 1,000 baht (daily_ku) = 1,000 baht
+        // 10% discount = 100 baht
+        // Net room amount = 900 baht
+        $this->assertSame(1000, $room->room_amount);
+        $this->assertSame(100, $room->discount_amount);
+        $this->assertSame(900, $room->amount);
+        $this->assertSame(900, $booking->total_amount);
     }
 }

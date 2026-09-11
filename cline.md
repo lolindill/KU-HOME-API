@@ -58,7 +58,7 @@ hotel/
 │   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
 │   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
 │   │   ├── RoomType.php               # PgBoolean extra_bed_enabled
-│   │   ├── Payment.php                # 🔓 unfrozen (19/08/26 ลบ payment_method) — integer amount (satang)
+│   │   ├── Payment.php                # 🔓 unfrozen (19/08/26 ลบ payment_method) — integer amount (integer baht, 11/09/26)
 │   │   ├── Receipt.php                # ❄️ legacy (frozen 24/07/26) — integer amount, atomic receipt_no
 │   │   ├── BookingConfirmation.php    # 🌟 NEW (24/07/26): payment proof table, state machine pending→verified|rejected
 │   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
@@ -297,13 +297,13 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 #### Payment (`app/Models/Payment.php`)
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: booking_id, amount, status, reference_number, received_by (🌟 19/08/26: ลบ payment_method)
-- **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
+- **Casts**: amount→integer บาทล้วน (💰 11/09/26 satang→baht; legacy #30 Fixed)
 - **Relationships**: booking (BelongsTo), receiver (BelongsTo User via received_by), receipts (HasMany)
 
 #### Receipt (`app/Models/Receipt.php`)
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: receipt_no, booking_id, payment_id, amount, billing_name, billing_address
-- **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
+- **Casts**: amount→integer บาทล้วน (💰 11/09/26 satang→baht; legacy #30 Fixed)
   
 ## State Machines
 
@@ -1928,3 +1928,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   1. `database/migrations/2026_07_22_100100_move_room_rate_to_global_rates.php`: เปลี่ยน `'is_active' => true` เป็น `'is_active' => DB::raw('TRUE')` ตาม AGENTS.md rule
   2. `app/Http/Controllers/Api/V1/RoomController.php`: เพิ่ม `Str::isUuid($id)` guard ใน `getRoomById` และ `getRoomTypeById` หากไม่ใช่ UUID ให้ตอบ `404 Not Found` ทันที
   3. `tests/Feature/RoomTest.php`: เพิ่มเทสต์สำหรับ `getRoomById` และ invalid UUID checks (404)
+
+## 💰 Money Standard: integer satang → integer บาทล้วน (2026-09-11)
+
+- **โจทย์:** เปลี่ยนมาตรฐานเงินทั้งระบบจาก integer satang (สตางค์) เป็น **integer บาทล้วน non-decimal** — storage = wire format เดียวกัน ไม่มีการแปลงหน่วยที่ขอบ API อีกต่อไป
+- **สิ่งที่เปลี่ยน:**
+  1. Migration `2026_09_11_090000_convert_money_satang_to_integer_baht` — แปลงข้อมูลเดิม ÷100 ทุกคอลัมน์เงิน (`bookings.total_amount`, `booking_rooms.{room_amount,discount_amount,amount}`, `addons` 4 price cols, `global_rates.default_price`, `payments.amount`, `receipts.amount`) + `discounts.value` **เฉพาะ type `fixed`/`set_room_price`** (type `percent` 1-100 ห้ามหาร) + refresh column comment payments/receipts · driver-agnostic integer division (SQLite/PG ผลตรงกัน)
+  2. ลบ `app/Support/Money.php` + `tests/Unit/Support/MoneyTest.php` — ไม่มีจุดไหนต้องแปลง satang↔baht แล้ว
+  3. `app/Models/RoomType.php` — ลบ accessor/mutator `extra_bed_price` (เปลี่ยนเป็น cast `integer`), `rates` accessor คืน integer ตรง ๆ → **wire format เปลี่ยนจาก `"1200.00"` (baht string) เป็น `1200` (int)** ที่ `GET /room-types*`, `/availability`, calendar ทั้ง 4
+  4. Seeders — `GlobalRateSeeder` (breakfast 200, early/late 100 บาท/ชม., extra_bed 500), `RoomSeeder` (rate cards + extra_bed_price เป็น integer บาท), `DiscountSeeder` (SAVE200 → 200, DELUXE990 → 990, LIMITED50 → 100; WELCOME10 percent คงเดิม)
+  5. `StoreReceiptRequest`/`UpdateReceiptRequest` — `amount` จาก `numeric` เข้มเป็น `integer|min:0`
+  6. Tests — แปลง fixture/assertion ที่ผูกกับ seeded values (`BookingKuMemberPricingTest`, `DiscountTest`, `DiscountSeederTest`, `RoomSeederTest`, `RoomTest`, `GlobalRateSeederTest`) + wire-format tests (`RoomTypeRatesListTest` regex `/^\d+\.\d{2}$/` → `/^\d+$/`, `RoomTypeRatesCalendarTest`) + comment ใน `TestCase` · **BookingTest/FrontDeskTest/PaymentTest/BookingConfirmationTest ฯลฯ คงเลข fixture เดิม** (inline ทั้งชุด สอดคล้องภายในตัว — อ่านเป็นบาท เช่น rate 1500 บาท/คืน)
+  7. Docs — `AGENTS.md` (money convention + wire format), `docs/api_guide.md` (Money Policy + seeded defaults + ตาราง column), `docs/database-er.md` (annotations)
+- **ผล:** `php artisan migrate:fresh --seed` ผ่าน · full test suite **386 passed (1335 assertions)** · หน่วยเงินเดียวทั้งระบบ: integer บาท
+- **หมายเหตุ deploy:** DB เดิมบน server แค่ `php artisan migrate` — ข้อมูลถูกแปลง ÷100 อัตโนมัติ (ป้องกันการ rerun ด้วย migration marker; เศษสตางค์ < 100 ถูกตัดด้วย integer division)

@@ -20,7 +20,7 @@ class Payment extends Model
 
     /**
      * ✅ #30 Fixed: เปลี่ยน cast จาก decimal:2 เป็น integer
-     * มาตรฐานเดียวกันกับ Booking.total_amount = integer (satang/cents)
+     * มาตรฐานเดียวกันกับ Booking.total_amount = integer บาทล้วน (11/09/26: satang → baht)
      */
     protected $casts = [
         'amount' => 'integer',

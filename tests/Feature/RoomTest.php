@@ -105,7 +105,7 @@ class RoomTest extends TestCase
         $this->assertContains((string) $roomType->id, $ids, 'Created room type should be in the listing');
     }
 
-    public function test_get_room_type_by_id_returns_rates_object_and_baht_strings(): void
+    public function test_get_room_type_by_id_returns_rates_object_and_integer_baht(): void
     {
         $rt = RoomType::create([
             'id' => Str::uuid(),
@@ -114,21 +114,21 @@ class RoomTest extends TestCase
             'max_guests' => 2,
             'extra_bed_enabled' => true,
             'max_extra_beds' => 1,
-            'extra_bed_price' => 50000, // 50,000 satang = 500.00 THB
+            'extra_bed_price' => 500, // 500 บาท (integer baht)
         ]);
 
         GlobalRate::create([
             'rate_type' => 'daily',
             'room_type_id' => $rt->id,
             'name_en' => 'Deluxe Daily',
-            'default_price' => 120000,
+            'default_price' => 1200,
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'daily_ku',
             'room_type_id' => $rt->id,
             'name_en' => 'Deluxe KU Daily',
-            'default_price' => 100000,
+            'default_price' => 1000,
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -136,7 +136,7 @@ class RoomTest extends TestCase
             'room_type_id' => $rt->id,
             'code' => 'min_5_rooms',
             'name_en' => 'Deluxe Group Min 5',
-            'default_price' => 90000,
+            'default_price' => 900,
             'is_active' => true,
         ]);
         GlobalRate::create([
@@ -144,14 +144,14 @@ class RoomTest extends TestCase
             'room_type_id' => $rt->id,
             'code' => 'min_10_rooms',
             'name_en' => 'Deluxe Group Min 10',
-            'default_price' => 75000,
+            'default_price' => 750,
             'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'month',
             'room_type_id' => $rt->id,
             'name_en' => 'Deluxe Monthly',
-            'default_price' => 1800000,
+            'default_price' => 18000,
             'is_active' => true,
         ]);
 
@@ -159,17 +159,17 @@ class RoomTest extends TestCase
         $response->assertStatus(200);
 
         $data = $response->json('room_type');
-        $this->assertSame('500.00', $data['extra_bed_price']);
+        $this->assertSame(500, $data['extra_bed_price']);
         $this->assertEquals([
             'daily' => [
-                'general' => '1200.00',
-                'ku_member' => '1000.00',
+                'general' => 1200,
+                'ku_member' => 1000,
             ],
             'group' => [
-                'min_5_rooms' => '900.00',
-                'min_10_rooms' => '750.00',
+                'min_5_rooms' => 900,
+                'min_10_rooms' => 750,
             ],
-            'monthly' => '18000.00',
+            'monthly' => 18000,
         ], $data['rates']);
 
         // 🛡️ Invariants: daily_rate dropped, relations hidden
@@ -196,7 +196,7 @@ class RoomTest extends TestCase
             'rate_type' => 'daily',
             'room_type_id' => $rt->id,
             'name_en' => 'Basic Daily Inactive',
-            'default_price' => 150000,
+            'default_price' => 1500,
             'is_active' => false,
         ]);
 
@@ -204,17 +204,17 @@ class RoomTest extends TestCase
         $response->assertStatus(200);
 
         $data = $response->json('room_type');
-        $this->assertSame('0.00', $data['extra_bed_price']);
+        $this->assertSame(0, $data['extra_bed_price']);
         $this->assertEquals([
             'daily' => [
-                'general' => '0.00',
-                'ku_member' => '0.00',
+                'general' => 0,
+                'ku_member' => 0,
             ],
             'group' => [
-                'min_5_rooms' => '0.00',
-                'min_10_rooms' => '0.00',
+                'min_5_rooms' => 0,
+                'min_10_rooms' => 0,
             ],
-            'monthly' => '0.00',
+            'monthly' => 0,
         ], $data['rates']);
     }
 

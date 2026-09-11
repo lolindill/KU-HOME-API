@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Casts\PgBoolean;
-use App\Support\Money;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -21,8 +20,9 @@ class RoomType extends Model
     protected $keyType = 'string';
 
     /**
-     * 🌟 Update (03/09/26): เปลี่ยนจาก daily_rate (integer) เป็น rates object (baht string)
+     * 🌟 Update (11/09/26): rates object เป็น integer บาทล้วน (non-decimal)
      * รวม daily (general, ku_member), group (min_5_rooms, min_10_rooms), monthly
+     * 💰 มาตรฐานเงินใหม่: storage = wire = integer บาท ไม่มีการแปลงที่ขอบ API แล้ว
      */
     protected $appends = ['rates'];
 
@@ -39,26 +39,9 @@ class RoomType extends Model
             // 🌟 Fix L1 (03/07/26): integer casts สำหรับคอลัมน์ตัวเลข
             'max_guests' => 'integer',
             'max_extra_beds' => 'integer',
-            // 🌟 (03/09/26): extra_bed_price ใช้ accessor แปลงเป็น baht string ที่ขอบ API
+            // 💰 (11/09/26): integer บาทล้วน — ไม่มี accessor/mutator แปลงทศนิยมแล้ว
+            'extra_bed_price' => 'integer',
         ];
-    }
-
-    /**
-     * 🌟 Add (03/09/26): extra_bed_price accessor คืนเป็น baht string (เช่น "500.00")
-     * เพื่อให้สอดคล้องกับ rates object ที่ขอบ API (storage ยังคงเป็น integer satang)
-     */
-    public function getExtraBedPriceAttribute($value): string
-    {
-        return Money::satangToBaht((int) $value);
-    }
-
-    public function setExtraBedPriceAttribute($value): void
-    {
-        if (is_string($value) && str_contains($value, '.')) {
-            $this->attributes['extra_bed_price'] = Money::bahtToSatang($value);
-        } else {
-            $this->attributes['extra_bed_price'] = (int) $value;
-        }
     }
 
     /**
@@ -71,7 +54,7 @@ class RoomType extends Model
     }
 
     /**
-     * 🌟 Add (03/09/26): Canonical rates object (baht string 2 ตำแหน่ง)
+     * 🌟 Canonical rates object (integer บาทล้วน — non-decimal)
      */
     public function getRatesAttribute(): array
     {
@@ -87,14 +70,14 @@ class RoomType extends Model
 
         return [
             'daily' => [
-                'general' => Money::satangToBaht($dailyGeneral),
-                'ku_member' => Money::satangToBaht($dailyKu),
+                'general' => (int) $dailyGeneral,
+                'ku_member' => (int) $dailyKu,
             ],
             'group' => [
-                'min_5_rooms' => Money::satangToBaht($groupMin5),
-                'min_10_rooms' => Money::satangToBaht($groupMin10),
+                'min_5_rooms' => (int) $groupMin5,
+                'min_10_rooms' => (int) $groupMin10,
             ],
-            'monthly' => Money::satangToBaht($monthly),
+            'monthly' => (int) $monthly,
         ];
     }
 

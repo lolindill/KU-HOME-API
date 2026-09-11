@@ -993,7 +993,7 @@ class BookingTest extends TestCase
         $this->createRoom($roomType);
         $this->createRoom($roomType);
 
-        // seed early 150 / late 250 (satang per hour)
+        // seed early 150 / late 250 (baht per hour — integer baht)
         GlobalRate::create([
             'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
             'name_en' => 'Early Check-in', 'default_price' => 150, 'is_active' => true,
@@ -1308,7 +1308,7 @@ class BookingTest extends TestCase
 
         // br2: ไม่ส่ง addons key → ต้อง fallback คงชั่วโมงเดิมจากแถว addon (resolveEarlyLate(null, $existing))
         //    pre-seed early_hours = 2 เพื่อพิสูจน์ว่า fallback อ่าน "ชั่วโมง" ไม่ใช่ reset เป็น 0
-        //    (rate early = 100 → หลัง batch ต้องเป็น 2 ชม. × 100 = 200 satang)
+        //    (rate early = 100 → หลัง batch ต้องเป็น 2 ชม. × 100 = 200 บาท)
         $br2->addon->update([
             'early_hours' => 2,
             'early_checkIn_price' => 200,
