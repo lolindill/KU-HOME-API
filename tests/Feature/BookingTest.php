@@ -92,21 +92,19 @@ class BookingTest extends TestCase
         BookingRoom::create([
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
+            'check_in' => now()->addDays(2)->toDateString(),
+            'check_out' => now()->addDays(4)->toDateString(),
             'guests' => [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
             'rate_daily' => 1500,
-            'nights' => 2,
         ]);
 
-        return $booking->fresh(['bookingRooms']);
+        return $booking;
     }
 
     /**
-     * 🌟 (17/08/26): สร้าง draft booking สำหรับ test delete/update room —
-     * ใช้ room type ที่เรียกผ่าน createRoomType (มี rate 1500/คืน) และสร้าง Addon ให้ทุกห้อง
+     * 🌟 Helper สร้าง Draft Booking พร้อม BookingRoom และ Addon (ครบถ้วน)
      */
     private function createDraftBooking(User $user, RoomType $roomType, int $roomCount = 1, array $overrides = []): Booking
     {
@@ -123,8 +121,8 @@ class BookingTest extends TestCase
                 'booking_id' => $booking->id,
                 'room_type_id' => $roomType->id,
                 'room_id' => null,
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
+                'check_in' => now()->addDays(2)->toDateString(),
+                'check_out' => now()->addDays(4)->toDateString(),
                 'status' => 'draft',
                 'guests' => [
                     ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
@@ -162,8 +160,8 @@ class BookingTest extends TestCase
             'booking_rooms' => [
                 [
                     'room_type_id' => $roomType->id,
-                    'check_in' => now()->addDay()->toDateString(),
-                    'check_out' => now()->addDays(3)->toDateString(),
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                     'guests' => [
                         ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
                     ],
@@ -187,8 +185,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
                         ],
@@ -267,8 +265,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             [
                                 'title' => 'Mr.',
@@ -426,8 +424,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
                         ],
@@ -459,8 +457,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
                         ],
@@ -490,8 +488,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
                         ],
@@ -637,8 +635,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [['title' => 'mr', 'name' => 'Added Guest', 'nationality' => 'TH']],
                     ],
                 ],
@@ -702,8 +700,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                     ],
                 ],
             ]);
@@ -720,8 +718,8 @@ class BookingTest extends TestCase
             'booking_rooms' => [
                 [
                     'room_type_id' => $booking->bookingRooms->first()->room_type_id,
-                    'check_in' => now()->addDay()->toDateString(),
-                    'check_out' => now()->addDays(3)->toDateString(),
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                 ],
             ],
         ]);
@@ -744,8 +742,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                     ],
                 ],
             ]);
@@ -765,8 +763,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                     ],
                 ],
             ]);
@@ -1009,14 +1007,14 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'addons' => ['early_checkin' => 2, 'late_checkout' => 1],
                     ],
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         // ไม่ส่ง addons → hours เป็น 0 และราคา 0
                     ],
                 ],
@@ -1526,8 +1524,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'addons' => ['early_hours' => 2, 'late_hours' => 1],
                     ],
                 ],
@@ -1564,8 +1562,8 @@ class BookingTest extends TestCase
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'check_in' => now()->addDay()->toDateString(),
-                        'check_out' => now()->addDays(3)->toDateString(),
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'addons' => ['extra_bed' => 1],
                     ],
                 ],
@@ -1645,7 +1643,7 @@ class BookingTest extends TestCase
         $response->assertJson(['status' => 'error']);
 
         // วันที่ต้องไม่ถูกแก้ (rollback)
-        $this->assertEquals(now()->addDays(3)->toDateString(), $br->fresh()->check_out->toDateString());
+        $this->assertEquals(now()->addDays(4)->toDateString(), $br->fresh()->check_out->toDateString());
     }
 
     public function test_update_room_blocked_when_booking_not_draft(): void
@@ -2001,7 +1999,7 @@ class BookingTest extends TestCase
         $response->assertJson(['status' => 'error']);
 
         // rollback — check_out ต้องไม่ถูกแก้
-        $this->assertEquals(now()->addDays(3)->toDateString(), $br->fresh()->check_out->toDateString());
+        $this->assertEquals(now()->addDays(4)->toDateString(), $br->fresh()->check_out->toDateString());
     }
 
     public function test_unauthenticated_user_cannot_batch_update_booking_rooms(): void
@@ -2223,14 +2221,14 @@ class BookingTest extends TestCase
             'booking_rooms' => [
                 [
                     'room_type_id' => $roomType->id,
-                    'check_in' => now()->addDays(1)->toDateString(),
-                    'check_out' => now()->addDays(3)->toDateString(),
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                     'bed_preference' => 'king_size',
                 ],
                 [
                     'room_type_id' => $roomType->id,
-                    'check_in' => now()->addDays(1)->toDateString(),
-                    'check_out' => now()->addDays(3)->toDateString(),
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                 ],
             ],
         ]);
@@ -2255,8 +2253,8 @@ class BookingTest extends TestCase
             'booking_rooms' => [
                 [
                     'room_type_id' => $roomType->id,
-                    'check_in' => now()->addDays(1)->toDateString(),
-                    'check_out' => now()->addDays(3)->toDateString(),
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                     // 'twin' = ค่า vocabulary เก่า (pre-rename 27/08/26) — ต้องถูก reject
                     'bed_preference' => 'twin',
                 ],
@@ -2335,7 +2333,7 @@ class BookingTest extends TestCase
             'code' => 'STAYWINDOW',
             'type' => 'percent',
             'value' => 20,
-            'stay_from' => now()->addDays(1)->toDateString(),
+            'stay_from' => now()->addDays(2)->toDateString(),
             'stay_until' => now()->addDays(5)->toDateString(),
             'is_active' => true,
         ]);
@@ -2363,7 +2361,7 @@ class BookingTest extends TestCase
             ->assertJsonPath('message', 'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด STAYWINDOW อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ');
 
         // วันที่ของห้องเดิมต้องถูก rollback
-        $this->assertEquals(now()->addDays(1)->toDateString(), $br->fresh()->check_in->toDateString());
+        $this->assertEquals(now()->addDays(2)->toDateString(), $br->fresh()->check_in->toDateString());
     }
 
     /**
@@ -2381,7 +2379,7 @@ class BookingTest extends TestCase
             'code' => 'BATCHWIN',
             'type' => 'percent',
             'value' => 15,
-            'stay_from' => now()->addDays(1)->toDateString(),
+            'stay_from' => now()->addDays(2)->toDateString(),
             'stay_until' => now()->addDays(5)->toDateString(),
             'is_active' => true,
         ]);

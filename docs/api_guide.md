@@ -1123,7 +1123,8 @@ curl -s -H "Accept: application/json" \
 > 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
 > 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
-> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้
+> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้  
+> 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)
 
 **Validation Rules:**
 
@@ -1132,7 +1133,7 @@ curl -s -H "Accept: application/json" \
 | `source`                                    | required, in: `online`, `admin`, `line`       |
 | `booking_rooms`                             | required, array                               |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
-| `booking_rooms.*.check_in`                  | required, date, ≥ today                       |
+| `booking_rooms.*.check_in`                  | required, date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
 | `booking_rooms.*.addons.extra_bed`          | nullable, integer, min 0 (canonical 🛏️)       |
 | `booking_rooms.*.extra_beds`                | nullable, integer, min 0 (⚠️ legacy alias — canonical ชนะ) |
@@ -1271,7 +1272,7 @@ curl -s -H "Accept: application/json" \
 }
 ```
 
-**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in ≥ today` · `check_out > check_in` (รายห้อง)
+**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in` ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) · `check_out > check_in` (รายห้อง)
 
 > 💡 **Pricing**: Server คำนวณราคาจาก `global_rates` ทั้งหมด — client ส่งราคาเองไม่ได้ (เหมือน createBooking)
 
@@ -1369,7 +1370,7 @@ curl -s -H "Accept: application/json" \
 | Field | Rule |
 |-------|------|
 | `room_type_id` | `sometimes` uuid exists:room_types,id |
-| `check_in` | `sometimes` date `after_or_equal:today` |
+| `check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `check_out` | `sometimes` date `after:check_in` |
 | `addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
 | `extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
@@ -1485,7 +1486,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms` | required, array, ≥ 1 entry |
 | `booking_rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
 | `booking_rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
-| `booking_rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
+| `booking_rooms.*.check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
 | `booking_rooms.*.addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
 | `booking_rooms.*.extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |

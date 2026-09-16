@@ -1942,3 +1942,32 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   7. Docs — `AGENTS.md` (money convention + wire format), `docs/api_guide.md` (Money Policy + seeded defaults + ตาราง column), `docs/database-er.md` (annotations)
 - **ผล:** `php artisan migrate:fresh --seed` ผ่าน · full test suite **386 passed (1335 assertions)** · หน่วยเงินเดียวทั้งระบบ: integer บาท
 - **หมายเหตุ deploy:** DB เดิมบน server แค่ `php artisan migrate` — ข้อมูลถูกแปลง ÷100 อัตโนมัติ (ป้องกันการ rerun ด้วย migration marker; เศษสตางค์ < 100 ถูกตัดด้วย integer division)
+
+## 📅 Advance Notice Rule — จองล่วงหน้า ≥ 2 วัน (2026-09-16)
+
+- **โจทย์:** Wayfinder map `booking-create-rules`, Ticket 01 — ผู้ใช้ทั่วไปไม่สามารถจองห้องพักล่วงหน้าน้อยกว่า 2 วันปฏิทิน (Asia/Bangkok) ได้ เพื่อให้ทางโรงแรมมีเวลาจัดเตรียมห้องพัก
+- **Decisions ที่ล็อกตาม Spec (Wayfinder Ticket 01):**
+  1. **Rule:** `check_in` ต้องเป็นวันปัจจุบัน + อย่างน้อย 2 calendar days (`Carbon::now('Asia/Bangkok')->startOfDay()->addDays(2)`)
+  2. **Config-driven:** `config/booking.php` เก็บ `min_advance_days` (default 2, env `BOOKING_MIN_ADVANCE_DAYS`) และ `max_rooms_per_booking` (default 4, env `BOOKING_MAX_ROOMS_PER_BOOKING` สำหรับ Ticket 02)
+  3. **Shared Helper Single Source of Truth:** `App\Support\BookingRule` (`isAdmin`, `minAdvanceDays`, `maxRoomsPerBooking`, `earliestCheckInDate`, `earliestCheckInDateString`, `checkInRule`, `checkInMessage`)
+  4. **Validation Layer (4 Write Paths):** บังคับใช้ผ่าน FormRequest ทั้ง 4 เส้นทาง:
+     - `POST /api/v1/bookings` (`StoreBookingRequest`)
+     - `POST /api/v1/bookings/{id}/rooms` (`AddBookingRoomsRequest`)
+     - `PUT /api/v1/bookings/{id}/rooms/{roomId}` (`UpdateBookingRoomRequest`)
+     - `PUT /api/v1/bookings/{id}/rooms` (`UpdateBookingRoomsRequest`)
+  5. **Admin Exemption:** Admin ได้รับการยกเว้นให้สามารถจองวันนี้หรือพรุ่งนี้ได้ (`≥ today` ใน Bangkok time) แต่ห้ามจองย้อนหลังในอดีต (`< today`). ตรวจสอบสิทธิ์จาก Sanctum role (`$user->role === 'admin'`) เท่านั้น **ไม่** ตรวจจาก payload field `source` เด็ดขาดเพื่อป้องกันการปลอมแปลง
+  6. **Error Format:** HTTP `422 Unprocessable Content` พร้อมข้อความภาษาไทย:
+     - ทั่วไป: `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (หรือ N วันตาม config)
+     - Admin (เมื่อจองในอดีต): `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`
+  7. **Backward Compatibility:** Grandfathered draft bookings ที่สร้างไว้ก่อนหน้าสามารถเปิดดู (GET) ได้ปกติ ไม่กระทบ read endpoints
+- **ไฟล์ที่เปลี่ยน/เพิ่ม:**
+  1. `config/booking.php` — configuration file ใหม่
+  2. `app/Support/BookingRule.php` — helper class ใหม่
+  3. `app/Http/Requests/StoreBookingRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  4. `app/Http/Requests/AddBookingRoomsRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  5. `app/Http/Requests/UpdateBookingRoomRequest.php` — ปรับ rule และ custom message ของ `check_in`
+  6. `app/Http/Requests/UpdateBookingRoomsRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  7. `docs/api_guide.md` — อัปเดตเอกสารทั้ง 4 endpoint
+  8. `tests/Feature/BookingTest.php` — อัปเดต fixture dates จาก `+1` เป็น `+2/+4` ให้สอดคล้องกับกฎใหม่ (73 tests passed)
+  9. `tests/Feature/BookingAdvanceNoticeTest.php` — feature tests ใหม่ 15 tests ครอบคลุม boundary, 4 paths, admin exempt, spoof guard, grandfathered drafts, และ config overrides
+- **ผลการทดสอบ:** Full test suite **401 passed (1380 assertions)** ใน 62.48s · Pint clean

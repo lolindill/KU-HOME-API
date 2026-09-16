@@ -31,6 +31,7 @@ status: open
 - [grill-me 2026-09-11]: ลิมิต 4 ห้อง = **ต่อ 1 booking** (create นับอาร์เรย์ · add-rooms นับห้องเดิม+ใหม่) — ไม่นับรวมข้าม booking
 - [spec § Implementation Decisions](spec.md): config-driven (2/4 ผ่าน env) · helper กลางตัวเดียว · 422 ไทย · admin ยังห้ามย้อนหลัง · grandfathering drafts
 - [tickets/](tickets/): breakdown 2 ใบ — 01 advance-notice rule (tracer bullet: config+helper+กฎวัน 4 paths+แก้ test เดิม+docs) → 02 room cap (blocked-by 01: ใช้ config+helper ต่อ + docs ต่อท้าย) — docs ห่อในแต่ละใบ ไม่แยกใบ
+- **Ticket 01 (Advance notice rule):** จองล่วงหน้าอย่างน้อย 2 วัน (ปฏิทิน Bangkok) ผ่าน FormRequest ทั้ง 4 write paths, config-driven (default 2), admin exempt (เช็คจาก Sanctum role เท่านั้น ไม่ใช่ source=walk_in)
 
 ## Not yet specified
 
