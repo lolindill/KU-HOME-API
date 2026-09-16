@@ -3,7 +3,7 @@ label: wayfinder:task
 type: task
 title: "Advance-notice rule — จองล่วงหน้า ≥ 2 วัน (4 write paths, tracer bullet)"
 status: open
-assignee:
+assignee: antigravity (2026-09-16)
 blocked-by: []
 ---
 
