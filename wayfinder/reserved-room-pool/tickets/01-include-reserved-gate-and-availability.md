@@ -3,7 +3,7 @@ label: wayfinder:task
 type: AFK
 title: "Param gate helper + availability summary endpoint — tracer bullet"
 status: open
-assignee:
+assignee: antigravity (2026-09-16)
 blocked-by: []
 ---
 
