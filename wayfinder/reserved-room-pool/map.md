@@ -8,7 +8,7 @@ status: open
 
 ## Destination
 
-[spec.md](spec.md) (label `ready-for-agent`) — admin-only param `include_reserved` ครบ 5 surfaces (availability ×3, booking capacity checks ×3 จุด, assign-rooms → allocator, walk-in) + แก้ bug denominator (booking check นับ physical rooms เกิน capacity ขายได้) — implement ผ่าน **HTTP feature seam เดียว** (user-confirmed) — implementation tickets รอ breakdown ด้วย to-tickets
+[spec.md](spec.md) (label `ready-for-agent`) — admin-only param `include_reserved` ครบ 5 surfaces (availability ×3, booking capacity checks ×3 จุด, assign-rooms → allocator, walk-in) + แก้ bug denominator (booking check นับ physical rooms เกิน capacity ขายได้) — implement ผ่าน **HTTP feature seam เดียว** (user-confirmed) — implementation tickets ถูก breakdown ครบถ้วนแล้ว พร้อมเริ่มที่ frontier ticket 01
 
 ## Notes
 
@@ -27,15 +27,15 @@ status: open
 
 ## Tickets
 
-implementation tickets (breakdown จาก spec ด้วย to-tickets, user-approved granularity — 2026-09-11):
+implementation tickets (breakdown จาก spec ด้วย to-tickets ครบ 6 tasks + 1 grilling ticket — 2026-09-16):
 
-- `tickets/01-include-reserved-gate-and-availability.md` — ⚪ open — tracer bullet: gate helper + summary availability (+king counters) · **frontier เริ่มได้เลย**
-- `tickets/02-calendar-availability-include-reserved.md` — ⚪ open — ปฏิทิน per-day + ranges · blocked-by 01
-- `tickets/03-booking-capacity-sellable-pool.md` — ⚪ open — align denominator + flag (bug fix) · blocked-by 01
-- `tickets/04-allocator-assign-rooms-include-reserved.md` — ⚪ open — allocator + full-chain E2E · blocked-by 03
-- `tickets/05-walk-in-include-reserved.md` — ⚪ open — walk-in guard · blocked-by 01
-- `tickets/06-docs-and-memory-closeout.md` — ⚪ open — docs + memory · blocked-by 02,03,04,05
-- `tickets/90-reserved-room-checkin-lifecycle.md` — 🟢 open (HITL, อิสระ ไม่ block implementation)
+- `tickets/01-include-reserved-gate-and-availability.md` — ⚪ open — tracer bullet: gate helper + summary availability (+king counters) · **frontier เริ่มได้เลย** · blocked-by: []
+- `tickets/02-calendar-availability-include-reserved.md` — ⚪ open — ปฏิทิน per-day + ranges · blocked-by: ["01-include-reserved-gate-and-availability"]
+- `tickets/03-booking-capacity-sellable-pool.md` — ⚪ open — align denominator + flag (bug fix) · blocked-by: ["01-include-reserved-gate-and-availability"]
+- `tickets/04-allocator-assign-rooms-include-reserved.md` — ⚪ open — allocator + assign-rooms + full-chain E2E · blocked-by: ["03-booking-capacity-sellable-pool"]
+- `tickets/05-walk-in-include-reserved.md` — ⚪ open — walk-in guard + state machine compliance · blocked-by: ["01-include-reserved-gate-and-availability"]
+- `tickets/06-docs-and-memory-closeout.md` — ⚪ open — docs (api_guide) + memory (cline.md) + tracker closeout · blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-sellable-pool", "04-allocator-assign-rooms-include-reserved", "05-walk-in-include-reserved"]
+- `tickets/90-reserved-room-checkin-lifecycle.md` — 🟢 open (HITL, อิสระ ไม่ block implementation) · blocked-by: []
 
 ## Not yet specified
 
