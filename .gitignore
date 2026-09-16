@@ -55,6 +55,11 @@ api_bin_output.txt
 /test_scripts/
 /.freebuff
 /.zcode
+/.agent-hub
+
+# 🖼️ Scratch images (รูปทดสอบ ad-hoc ระดับ storage/ root — ไม่เกี่ยวกับ images table บน private disk)
+/storage/input.jpg
+/storage/respon.jpg
 
 # Local git worktrees (nested checkouts — never commit)
 /.worktree/
