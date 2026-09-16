@@ -23,7 +23,7 @@ status: open
 - [spec § Implementation Decisions](spec.md): ขอบเขต = ดู + จองได้จริง (grill #1) · request-scoped param ไม่ persist (grill #2) · non-admin ส่ง flag = เมยายีเงียบ ๆ ไม่ 403 (grill #3) · response แทนที่ `available_rooms` + field โปร่งใส `sellable_rooms`/`reserved_rooms`, ไม่ส่ง flag = byte-identical (grill #4) · walk-in รวมใน scope (grill #7)
 - [spec § Implementation Decisions](spec.md): align denominator ฝั่ง booking checks เป็น sellable pool แก้ bug overbooking-past-sellable ไปพร้อมกัน (grill #5)
 - [ticket 90](tickets/90-reserved-room-checkin-lifecycle.md): ห้องที่ถูก assign คงสถานะ `reserved_closed` — ไม่ auto-flip (grill #6) · lifecycle ตอน check-in (flip มือ vs auto) เปิด ticket รอตัดสินใจ
-- Audit: `BookingRoom::assignAvailableRoom()` เป็น dead code — assignment จริงมี path เดียวคือ assign-rooms → allocator, flag จึงต้องถึงแค่ allocator + capacity checks
+- [Audit — assignAvailableRoom() เป็น dead code](spec.md): assignment จริงมี path เดียวคือ assign-rooms → allocator, flag จึงต้องถึงแค่ allocator + capacity checks
 
 ## Tickets
 
