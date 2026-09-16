@@ -6,7 +6,7 @@ status: closed
 
 # Wayfinder Map — Room-type `rates` object
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-03)
 
 [spec.md](spec.md) (label `ready-for-agent`) implement จบ: `rates` object ครบทั้ง 7 endpoints ที่คืน room type (wire เป็นบาท 2-dp string · storage integer satang) + seeder rate card ครบ 5 rows ต่อ type + api_guide/cline.md สะท้อนจริง — tickets 01–06 ถูก tick ครบทั้งหมดแล้ว (ปิดงานเรียบร้อย 2026-09-03)
 
