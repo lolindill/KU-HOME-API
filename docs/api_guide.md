@@ -1124,14 +1124,15 @@ curl -s -H "Accept: application/json" \
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
 > 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
 > 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้  
-> 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)
+> 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)  
+> 🚪 **(16/09/26) Room Cap Rule**: การจองห้องจำกัดสูงสุด **4 ห้องต่อ 1 booking** (config: `booking.max_rooms_per_booking`) สำหรับผู้ใช้ non-admin (admin exempt — สามารถจองได้มากกว่า 4 ห้อง ตัดสินจาก Sanctum login role เท่านั้น). กฎนี้บังคับใช้ใน (a) การสร้างการจอง (`POST /bookings`) โดยนับจำนวนห้องในอาร์เรย์ `booking_rooms` (ตรวจที่ FormRequest layer) และ (b) การเพิ่มห้องเข้า draft (`POST /bookings/{id}/rooms`) โดยนับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (ตรวจที่ controller guard ก่อน `DB::beginTransaction()`). หากเกินเพดานจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
 
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
-| `booking_rooms`                             | required, array                               |
+| `booking_rooms`                             | required, array, สูงสุด 4 ห้องสำหรับทั่วไป (admin exempt: ไม่จำกัด) |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
 | `booking_rooms.*.check_in`                  | required, date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
@@ -1273,6 +1274,8 @@ curl -s -H "Accept: application/json" \
 ```
 
 **Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in` ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) · `check_out > check_in` (รายห้อง)
+
+> 🚪 **(16/09/26) Room Cap**: เมื่อเพิ่มห้องใหม่ ระบบจะนับจำนวนห้องเดิมใน booking รวมกับห้องใหม่ที่ขอเพิ่ม ต้องไม่เกิน **4 ห้อง** สำหรับ non-admin (admin ไม่จำกัด). หากรวมแล้วเกินเพดาน จะได้ HTTP `422 Unprocessable Content` พร้อม message `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
 
 > 💡 **Pricing**: Server คำนวณราคาจาก `global_rates` ทั้งหมด — client ส่งราคาเองไม่ได้ (เหมือน createBooking)
 

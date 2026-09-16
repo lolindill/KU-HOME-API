@@ -17,6 +17,7 @@ use App\Models\StatusChangeLog;
 use App\Models\User;
 use App\Services\Discount\DiscountService;
 use App\Services\RoomAllocator\RoomAllocator;
+use App\Support\BookingRule;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -260,6 +261,17 @@ class BookingController extends Controller
             // 🔒 Draft guard — เพิ่มห้องได้เฉพาะ draft state เท่านั้น
             if ($booking->status !== 'draft') {
                 throw new \Exception('ไม่สามารถเพิ่มห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะนายท่าน', 422);
+            }
+
+            // 🚪 Room cap guard (ticket 02) — นับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (admin exempt)
+            if (! BookingRule::isAdmin($user)) {
+                $existingCount = $booking->bookingRooms()->count();
+                $newCount = count($validated['booking_rooms']);
+                $maxRooms = BookingRule::maxRoomsPerBooking($user);
+
+                if (($existingCount + $newCount) > $maxRooms) {
+                    throw new \Exception(BookingRule::roomCapMessage($user), 422);
+                }
             }
 
             DB::beginTransaction();

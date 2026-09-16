@@ -1971,3 +1971,26 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   8. `tests/Feature/BookingTest.php` — อัปเดต fixture dates จาก `+1` เป็น `+2/+4` ให้สอดคล้องกับกฎใหม่ (73 tests passed)
   9. `tests/Feature/BookingAdvanceNoticeTest.php` — feature tests ใหม่ 15 tests ครอบคลุม boundary, 4 paths, admin exempt, spoof guard, grandfathered drafts, และ config overrides
 - **ผลการทดสอบ:** Full test suite **401 passed (1380 assertions)** ใน 62.48s · Pint clean
+
+## 🚪 Room Cap Rule — ลิมิต 4 ห้องต่อ 1 booking (2026-09-16)
+
+- **โจทย์:** Wayfinder map `booking-create-rules`, Ticket 02 — ผู้ใช้ทั่วไป (non-admin) ไม่สามารถจองห้องพักเกิน 4 ห้องใน 1 booking (ทั้งตอนสร้างการจองใหม่ และตอนเพิ่มห้องเข้า draft เดิม) หากต้องการจองเกินต้องติดต่อผู้ดูแลระบบ (admin)
+- **Decisions ที่ล็อกตาม Spec (Wayfinder Ticket 02):**
+  1. **Rule:** ลิมิตไม่เกิน 4 ห้องต่อ 1 booking สำหรับ non-admin (`<= 4` ห้องผ่าน, `5` ห้องได้ 422)
+  2. **Config-driven:** ใช้ knob `max_rooms_per_booking` ใน `config/booking.php` (default 4, ปรับผ่าน env `BOOKING_MAX_ROOMS_PER_BOOKING`) ที่เตรียมไว้ตั้งแต่ใบ 01
+  3. **Shared Helper:** ใช้ `App\Support\BookingRule` (`maxRoomsPerBooking`, `roomCapRule`, `roomCapMessage`, `isAdmin`) เป็น single source of truth
+  4. **Enforcement Points:**
+     - `POST /api/v1/bookings` (Create): บังคับที่ FormRequest layer (`StoreBookingRequest`) โดยตรวจนับ array `booking_rooms` ด้วย rule `max:4` (สำหรับ non-admin)
+     - `POST /api/v1/bookings/{id}/rooms` (Add rooms): บังคับที่ Controller guard ใน `BookingController@addRooms` ก่อน `DB::beginTransaction()` โดยนับห้องเดิมจริงใน booking (`$booking->bookingRooms()->count()`) รวมกับห้องใหม่ที่ขอเพิ่ม
+     - Batch edit (`PUT /bookings/{id}/rooms`) และ update booking-room รายห้อง ไม่เพิ่มจำนวนห้อง จึงคงพฤติกรรมเดิม ไม่ตรวจ cap
+  5. **Admin Exemption:** Admin ได้รับการยกเว้นทุกกรณี สามารถจองหรือเพิ่มห้องเกิน 4 ห้องได้ (เช็คจาก Sanctum login role เท่านั้น ห้ามใช้ field `source` ใน request body)
+  6. **Error Format:** HTTP `422 Unprocessable Content` พร้อมข้อความภาษาไทยแนะนำให้ติดต่อผู้ดูแล: `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"` (หรือ N ห้องตาม config)
+  7. **Backward Compatibility:** Grandfathered draft bookings ที่มีอยู่เดิมไม่ถูกกระทบ
+- **ไฟล์ที่เปลี่ยน/เพิ่ม:**
+  1. `app/Support/BookingRule.php` — เพิ่ม `roomCapRule` และ `roomCapMessage`
+  2. `app/Http/Requests/StoreBookingRequest.php` — เพิ่ม room cap validation rule และ custom message บน `booking_rooms`
+  3. `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม early guard ใน `addRooms` ก่อน `DB::beginTransaction()`
+  4. `docs/api_guide.md` — อัปเดตเอกสาร `POST /bookings` และ `POST /bookings/{id}/rooms`
+  5. `tests/Feature/BookingRoomCapTest.php` — feature tests ใหม่ 10 tests ครอบคลุม create cap (4 vs 5), add-rooms cumulative count (3+2 vs 3+1), admin exemptions, spoof guard, batch edit integrity, และ config override
+  6. `cline.md` — บันทึกประวัติและ architectural decisions
+- **ผลการทดสอบ:** Full test suite **411 passed (1413 assertions)** · Pint clean

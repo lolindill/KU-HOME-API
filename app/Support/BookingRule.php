@@ -43,7 +43,6 @@ class BookingRule
 
     /**
      * เพดานจำนวนห้องสูงสุดต่อ 1 การจอง (admin = PHP_INT_MAX, non-admin = config max_rooms_per_booking)
-     * (สำหรับ ticket 02 — เตรียมไว้ตาม spec)
      */
     public static function maxRoomsPerBooking(?User $user = null): int
     {
@@ -52,6 +51,30 @@ class BookingRule
         }
 
         return (int) config('booking.max_rooms_per_booking', 4);
+    }
+
+    /**
+     * กฎ validation สำหรับ booking_rooms (max:N สำหรับ non-admin, null สำหรับ admin)
+     */
+    public static function roomCapRule(?User $user = null): ?string
+    {
+        if (static::isAdmin($user)) {
+            return null;
+        }
+
+        $max = static::maxRoomsPerBooking($user);
+
+        return 'max:'.$max;
+    }
+
+    /**
+     * ข้อความแจ้งเตือนภาษาไทยเมื่อจำนวนห้องเกินเพดานที่กำหนด
+     */
+    public static function roomCapMessage(?User $user = null): string
+    {
+        $max = (int) config('booking.max_rooms_per_booking', 4);
+
+        return "สามารถจองได้สูงสุด {$max} ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ";
     }
 
     /**
