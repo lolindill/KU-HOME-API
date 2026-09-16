@@ -3,7 +3,7 @@ label: wayfinder:task
 type: task
 title: "Room cap — ลิมิต 4 ห้องต่อ 1 booking (non-admin)"
 status: open
-assignee:
+assignee: antigravity (2026-09-16)
 blocked-by: ["01-advance-notice-rule"]
 ---
 
