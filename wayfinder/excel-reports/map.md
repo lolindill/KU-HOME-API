@@ -19,6 +19,7 @@ Design spec (label `ready-for-agent`) ฉบับเดียว สำหร�
 
 - **Domain:** KU HOME API (Laravel 13 · PHP 8.3 · API-only · PostgreSQL prod / SQLite test) — คือ roadmap "Generate & print report templates" (Planned ใน AGENTS.md) ฉบับ Excel · server-side rendering ตาม AGENTS.md (frontend React แยก repo)
 - **Template source:** `docs/report_docAndSample/report-templates/*.json` 15 ไฟล์ + `_index.json` — ⚠️ โฟลเดอร์นี้ถูก `/docs/*` gitignore (มีเฉพาะเครื่อง dev นี้) → การวาง template ฝั่ง app เป็น decision ใน ticket 03
+- **🌟 TRUTH SOURCE (owner ประกาศ 2026-09-22):** Google Sheets ["เอกสารระบบที่พัก_Document"](https://docs.google.com/spreadsheets/d/1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw/edit) (แท็บรายงาน `gid=1127367576`) — **ชีตนี้คือความจริง** ทุก ticket ที่คุยเลย์เอาต์/คอลัมน์/metric ต้องเทียบชีตใบนี้ · template JSON เป็นตัวกลางที่แปลงจากชีต (`_index.json` อ้าง id เดียวกัน) — ถ้าขัดกัน **ชีต wins** แล้ว re-convert · public view-only · snapshot xlsx + แผนผังแท็บ↔JSON อยู่ที่ [research/truth-snapshot/](research/truth-snapshot/README.md)
 - **Schema จาก template:** `money_baht` = integer บาท (convention 2026-09-11), `date` = ISO-8601, มี `sample_data` จากชีตต้นทางใช้ mock ได้, typo/ความไม่สม่ำเสมอของต้นทางระบุใน `notes` ของแต่ละไฟล์
 - **Tracker ธรรมเนียมเดียวกับ map อื่น:** claim = เติม `assignee:` ก่อนลงมือ · 1 ticket/session · ปิด = `status: closed` + `## Resolution` · commit tracker ไปกับ branch ปัจจุบันเสมอ
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
@@ -33,6 +34,7 @@ Design spec (label `ready-for-agent`) ฉบับเดียว สำหร�
 
 - [Research: เลือก library สร้าง Excel](tickets/01-excel-library-choice.md) *(2026-09-22)*: แนะนำ **phpoffice/phpspreadsheet 5.x ใช้ตรง ๆ** — styling ครบทุกข้อ (merged cells, number format, freeze panes, print titles, A4 landscape) + `IOFactory::load()` test ได้; OpenSpout ตกเพราะ v5 ต้อง PHP 8.4+ · sign-off รอใน ticket 03 — รายละเอียด [research/excel-library.md](research/excel-library.md)
 - [Research: data-coverage audit](tickets/02-data-coverage-audit.md) *(2026-09-22)*: 15 รายงาน = **1 ✅ / 11 ⚠️ / 3 ❌** — gap เจ็บสุดคือ slip flow ไม่เก็บยอดเงิน + `payment_channel` ถูก drop แล้ว · gap 12 กลุ่ม graduate เป็น tickets 08–11 — รายละเอียด [research/data-coverage-audit.md](research/data-coverage-audit.md)
+- [สถาปัตยกรรม renderer + ที่อยู่ของ template](tickets/03-renderer-architecture.md) *(2026-09-22 — grilling defaults ⚠️ owner ไม่ตอบ AskUserQuestion, รอ sign-off ได้)*: **phpspreadsheet 5.x ใช้ตรง** (sign-off ticket 01) · **Hybrid** = engine กลาง template-driven + `ReportData` ต่อรายงาน · template JSON วางที่ **`resources/report-templates/`** ใน repo (runtime source) — ชีต truth = upstream, sync manual re-convert — snapshot ชีต + แผนผังแท็บอยู่ที่ [research/truth-snapshot/](research/truth-snapshot/README.md)
 
 ## Not yet specified
 
