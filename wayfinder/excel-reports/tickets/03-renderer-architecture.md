@@ -2,7 +2,7 @@
 label: wayfinder:grilling
 type: HITL
 title: สถาปัตยกรรม renderer — generic template-driven หรือ per-report class + template อยู่ที่ไหน
-status: closed (2026-09-22 — grilling defaults, owner ไม่ตอบ AskUserQuestion · แก้กลับได้โดยเปิด ticket ใหม่อ้างใบนี้)
+status: closed (2026-09-22 — grilling defaults ✅ owner sign-off ครบแล้ว ผ่าน grilling ใน ticket 04 วันเดียวกัน)
 assignee: maid
 blocked-by: ["01-excel-library-choice", "02-data-coverage-audit"]
 ---
@@ -63,3 +63,5 @@ interface ReportData
 - number format ต่อ `type` (`money_baht`, `date`, …) เป็น **config map ใน engine** — ค่าที่แสดงจริง (พ.ศ./ทศนิยม) เป็นของ [ticket 05](./05-formatting-print-conventions.md)
 
 **ผลต่อ map:** [ticket 04](./04-api-contract-and-roles.md) ปลด block (ตัวถัดไปของสาย API) — เพดานขนาดไฟล์/ช่วงวันที่ยังเป็น fog ค้างใน map ตามเดิม
+
+> ✅ **Owner sign-off (2026-09-22, ผ่าน grilling ตอนทำ ticket 04):** ยืนยัน D1–D4 ทั้งหมด — phpspreadsheet 5.x ใช้ตรง · Hybrid engine + ReportData · template ที่ `resources/report-templates/` — ธง "รอ sign-off" หมดอายุ
