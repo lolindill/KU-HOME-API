@@ -1,0 +1,48 @@
+---
+label: wayfinder:map
+title: "Excel report export — สร้าง Excel 15 รายงานจาก template docs/report_docAndSample"
+status: open
+---
+
+# 🗺️ Wayfinder Map — Excel report export (15 รายงาน)
+
+- **label:** `wayfinder:map`
+- **status:** open
+- **tracker:** local-markdown — tickets อยู่ใน `tickets/`, research อยู่ใน `research/` (blocking = field `blocked-by` ของแต่ละ ticket)
+- **charted:** 2026-09-22
+
+## Destination
+
+Design spec (label `ready-for-agent`) ฉบับเดียว สำหรับฟีเจอร์ **export ไฟล์ Excel (.xlsx) ของรายงานทั้ง 15 ฉบับ** ตาม template ใน `docs/report_docAndSample/report-templates/` — ตัดสินครบ: library, renderer architecture + ที่อยู่ของ template, API contract + สิทธิ์, formatting/print conventions และ data-coverage รวม design ตารางใหม่ที่จำเป็น — พอให้ implement ต่อได้โดยไม่ต้องตัดสินใจใหญ่อีก
+
+## Notes
+
+- **Domain:** KU HOME API (Laravel 13 · PHP 8.3 · API-only · PostgreSQL prod / SQLite test) — คือ roadmap "Generate & print report templates" (Planned ใน AGENTS.md) ฉบับ Excel · server-side rendering ตาม AGENTS.md (frontend React แยก repo)
+- **Template source:** `docs/report_docAndSample/report-templates/*.json` 15 ไฟล์ + `_index.json` — ⚠️ โฟลเดอร์นี้ถูก `/docs/*` gitignore (มีเฉพาะเครื่อง dev นี้) → การวาง template ฝั่ง app เป็น decision ใน ticket 03
+- **Schema จาก template:** `money_baht` = integer บาท (convention 2026-09-11), `date` = ISO-8601, มี `sample_data` จากชีตต้นทางใช้ mock ได้, typo/ความไม่สม่ำเสมอของต้นทางระบุใน `notes` ของแต่ละไฟล์
+- **Tracker ธรรมเนียมเดียวกับ map อื่น:** claim = เติม `assignee:` ก่อนลงมือ · 1 ticket/session · ปิด = `status: closed` + `## Resolution` · commit tracker ไปกับ branch ปัจจุบันเสมอ
+- ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
+- **Charting defaults (2026-09-22 — owner ไม่ได้ตอบ grill ตอน chart, ใช้ best judgment, กลับมาแก้ได้):**
+  1. Destination = **spec อย่างเดียว** (plan-don't-do — implement เป็นงานถัดไปหลัง spec ผ่าน)
+  2. ขอบเขต = **Excel เท่านั้น** — เอกสาร PDF 9 ฉบับ (document-register.json) เป็น effort แยก
+  3. รายงานที่ข้อมูลไม่พอ → **ออกแบบตารางใหม่รวมใน spec** (ไม่ตัดรายงานทิ้ง)
+
+## Decisions so far
+
+<!-- ดัชนี: 1 บรรทัดต่อ ticket ที่ปิดแล้ว — zoom เข้า ticket/research อ่านรายละเอียด -->
+
+- [Research: เลือก library สร้าง Excel](tickets/01-excel-library-choice.md) *(2026-09-22)*: แนะนำ **phpoffice/phpspreadsheet 5.x ใช้ตรง ๆ** — styling ครบทุกข้อ (merged cells, number format, freeze panes, print titles, A4 landscape) + `IOFactory::load()` test ได้; OpenSpout ตกเพราะ v5 ต้อง PHP 8.4+ · sign-off รอใน ticket 03 — รายละเอียด [research/excel-library.md](research/excel-library.md)
+- [Research: data-coverage audit](tickets/02-data-coverage-audit.md) *(2026-09-22)*: 15 รายงาน = **1 ✅ / 11 ⚠️ / 3 ❌** — gap เจ็บสุดคือ slip flow ไม่เก็บยอดเงิน + `payment_channel` ถูก drop แล้ว · gap 12 กลุ่ม graduate เป็น tickets 08–11 — รายละเอียด [research/data-coverage-audit.md](research/data-coverage-audit.md)
+
+## Not yet specified
+
+- ~~Design ตารางใหม่รายโดเมน~~ *(graduated 2026-09-22: audit ทำให้ gap ชัด → tickets 08 payment/deposit · 09 ERP/agency/booking attributes · 10 addon product model · 11 room/supplies domain tables)*
+- เอกสาร PDF ฉบับที่อาจต้องมี Excel ตารางร่วม (เช่น ใบงานแม่บ้านเป็นตารางรายวัน) — ถ้า owner ขอค่อยขยาย destination
+- เพดานขนาดไฟล์/ช่วงวันที่ export สูงสุด (กัน report ย้อนหลังทั้งปีจนเปิดไม่ไหว) — คุยตอน API contract (ticket 04) ถ้า owner ไม่ยกขึ้น ให้ default จำกัดช่วง ≤ 1 ปี · ถ้า report ใหญ่ >50k แถว phpspreadsheet อาจต้อง cache/queue (จาก research ticket 01)
+
+## Out of scope
+
+- เอกสาร PDF 9 ฉบับจาก `document-register.json` (Registration/PDPA/Quotation/Receipt/Guest Folio/ใบงานแม่บ้าน/ใบแจ้งซ่อม) + digital signature — roadmap effort แยก ("Digital signature on physical documents")
+- Export รายงานเป็น **PDF** (ต้นทางระบุ PDF/Excel — effort นี้ทำ Excel ก่อน, PDF ผลักไปหลัง)
+- หน้าจอแสดงรายงาน/กราฟฝั่ง React frontend (ku-home)
+- ระบบ scheduling/email ส่งรายงานอัตโนมัติ (ถ้ามีความต้องการจริง ค่อยเปิด effort ใหม่)
