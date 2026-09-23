@@ -6,7 +6,7 @@ status: closed
 
 # Wayfinder Map — Booking per-room amount
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-03)
 
 ตามโจทย์ "booking total_amount → add amount to each booking_room": ปลายทางคือ **spec ที่ implement ต่อได้ทันที** (หรือ change ที่ landed ถ้านายท่านสั่งต่อ) โดยตอนจบต้องได้:
 

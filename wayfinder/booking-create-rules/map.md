@@ -1,12 +1,12 @@
 ---
 label: wayfinder:map
 title: "Booking create rules — จองล่วงหน้า ≥ 2 วัน + ลิมิต 4 ห้อง (non-admin)"
-status: open
+status: closed
 ---
 
 # Wayfinder Map — Booking create rules
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-16)
 
 [spec.md](spec.md) (label `ready-for-agent`) implement จบ: non-admin จองล่วงหน้าได้
 ตั้งแต่ +2 calendar days (Asia/Bangkok) และ <= 4 ห้องต่อ 1 booking (create + add-rooms
