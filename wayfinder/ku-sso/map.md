@@ -1,13 +1,15 @@
 # 🗺️ Wayfinder Map — KU SSO (Keycloak) Integration
 
 - **label:** `wayfinder:map`
-- **status:** active
+- **status:** closed
 - **tracker:** local-markdown — tickets อยู่ใน `tickets/` ของ directory นี้ (blocking ระบุใน field `blocked-by` ของแต่ละ ticket)
 - **charted:** 2026-09-01
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-23)
 
 Spec ที่ **decision-lock ครบ** สำหรับการต่อ KU SSO (Keycloak, realm `KU-Alllogin` บน `sso-dev.ku.ac.th`) เข้ากับระบบ auth แบบ Sanctum token ของ KU HOME API — จบเมื่อ implementation session ลงมือเขียนโค้ดได้โดยไม่ต้องถาม product/security question เพิ่มอีก
+
+> ✅ **จบแล้ว (2026-09-23):** ticket ครบ 10/10 ปิด · spec ถูก implement จริง (SSO v1 + PKCE relay + email fallback chain) · live-verify ผ่านกับ sso-dev ทั้งนิสิต/บุคลากร · โค้ดถูก merge เข้า `agust-11` แล้ว (merge commit `4016505`, fast-forward จาก `feature/ku-sso-login` วันเดียวกัน) · full suite **433 passed** บน merged tree · production rollout ที่ยังรอฝ่ายอื่นจดไว้ท้าย map หัวข้อ Out of scope (effort อนาคต)
 
 ## Notes
 
@@ -21,7 +23,7 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 - ก่อนเขียนโค้ดจริง: จด design decision + lib choice ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ธรรมเนียม: error shape `{"status":"error","message":...}` · message ไทย + emoji · throttle login-level = `5,1`
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, ไม่มี blocked-by ค้าง, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน: ว่าง** — ticket ครบทั้ง 10 ปิดแล้ว (ticket 10 ปิด 2026-09-08: PKCE relay + email chain implemented + live-verify ผ่านจริง) · งานต่อไปเป็นการ implement/merge บน branch `feature/ku-sso-login` ตามหัวข้อ "Implementation status" ด้านล่าง
+- 🎯 **Frontier ปัจจุบัน: ว่าง** — ticket ครบทั้ง 10 ปิดแล้ว (ticket 10 ปิด 2026-09-08: PKCE relay + email chain implemented + live-verify ผ่านจริง) · **implementation ถูก merge เข้า `agust-11` แล้ว (2026-09-23)** — ดูหัวข้อ "Implementation status" ด้านล่าง · map ปิดเป้า ไม่มี ticket รับใหม่
 
 ## Decisions so far
 
@@ -38,17 +40,16 @@ Spec ที่ **decision-lock ครบ** สำหรับการต่อ 
 
 ## Not yet specified
 
-- env/config naming (`KU_SSO_*`?) + production realm endpoint — *(2026-09-08: naming ตกลง `KU_SSO_*` และใช้จริงแล้วตาม ticket 06 · dev realm = sso-dev playground อายุ 1 ปี · production realm endpoint ยังรอ KU IT)*
-- การประสานกับ React (รายชื่อ redirect URI ที่อนุมัติ, env sharing) — รอ ticket 06 *(2026-09-08: OCS อนุมัติ wildcard `http://localhost:8000/*` (API dev, http) แล้ว — production ต้องขอเปลี่ยนเป็น route https ของ React เมื่อ frontend ตัดสิน; PKCE enforced → SPA ต้องสร้าง code_verifier/code_challenge เอง)*
-- ยืนยัน claims จริงจาก userinfo ด้วย test account (โดยเฉพาะ `email` จาก scope `basic`) — รอ ticket 06 (client + test account) *(🆕 2026-09-07 คู่มือ OCS ชี้ว่า `basic` ไม่มี claim `email` ตรง ๆ — `mail` เฉพาะบุคลากร / `google-mail` / `office365-mail` + ชื่อ claim ไม่ตาม standard — ดู Amendment ใน [ticket 02](./tickets/02-sso-identity-to-local-user-mapping.md) และ [research/ku-playground-manual-notes.md](./research/ku-playground-manual-notes.md))*(✅ **VERIFIED-LIVE 2026-09-08** — ข้อสรุปจริง: server แถม scope `profile email`, บุคลากรมี claim `email` (ไม่ใช่ `mail`), นิสิตไม่มี `email` แต่มี `google-mail`/`office365-mail` → fallback chain = `email → google-mail → office365-mail` · มี standard `name`/`given_name`/`family_name` ด้วย · รายละเอียดใน Amendment 2 ของ [ticket 02](./tickets/02-sso-identity-to-local-user-mapping.md))*
-- ~~ชะตา column `users.is_ku_member` หลัง ticket 08 ปิด~~ *(✅ **ตัดสินแล้ว 2026-09-08 (owner): "drop"** — migration `2026_09_08_120000` ลบ column ทิ้ง · code/seeder/tests/docs เก็บ refer ครบ · `is_ku_member` ใน guests JSON ของ booking_rooms เป็น key ที่ไม่เก็บอยู่แล้ว ไม่เกี่ยวกับ column นี้ · role `ku_member` = source of truth เดียว)*
+- *(ว่าง — ตอนปิด map 2026-09-23 ไม่มี fog เหลือ: claims verified-live แล้ว (ticket 02 Amendment 2 + [ticket 10](./tickets/10-exchange-pkce-relay-and-email-fallback.md)) · `is_ku_member` ตัดสิน drop แล้ว (ticket 08 + `cline.md`) · สิ่งที่รอฝ่ายอื่น (production realm / React production redirect URI) ย้ายไป Out of scope เป็นเงื่อนไข effort production rollout)*
 
 ### 🏗️ Implementation status (นอก map — hand-off session)
 
 - **KU SSO login v1 implemented (2026-09-07)** บน branch `feature/ku-sso-login` (worktree `.worktree/ku-sso-login`): migration `users.auth_provider` + composite unique `(email, auth_provider)` · `POST /auth/sso/exchange` + `KuSsoService` (hand-rolled 0 package) · จุดแก้บังคับของ [ticket 09](./tickets/09-password-reset-admin-views-duplicate-email.md) ครบ · feature tests ครอบชุด [ticket 07](./tickets/07-sso-test-strategy.md) — **(2026-09-08 อัปเดตตาม ticket 10:** PKCE `code_verifier` relay + email fallback chain + live-verify ผ่านจริง 396 tests ผ่านหมด**)** — รายละเอียด design ใน `cline.md` หัวข้อ "KU SSO Login"
+- ✅ **Merge เข้า `agust-11` แล้ว (2026-09-23):** `feature/ku-sso-login` (หลังดูด `agust-11` ล่าสุดเข้า branch แล้ว 433 tests ผ่าน) ถูก fast-forward ยุบกลับ — `agust-11` = `feature/ku-sso-login` = `4016505` · local DB migrate ผ่าน (`auth_provider` + drop `is_ku_member` + money baht) · branch/worktree นี้จึงเก็บกวาดได้ (ยังไม่ push ขึ้น remote ณ วันปิด map)
 
 ## Out of scope
 
+- **Production rollout ของ SSO (effort อนาคต — ของที่ยังรอฝ่ายอื่นตอนปิด map 2026-09-23):** production realm endpoint **รอ KU IT** (dev realm = sso-dev playground อายุ 1 ปี) · redirect URI production ต้องเปลี่ยนเป็น route https ของ React **รอ frontend ตัดสิน** (dev: OCS อนุมัติ `http://localhost:8000/*` แล้ว; PKCE enforced → SPA สร้าง `code_verifier`/`code_challenge` เอง — คู่มือฝั่ง frontend ที่ `docs/sso-frontend-guide.md`)
 - **Implementation ของ Google login** — effort ต่อยอดหลัง map นี้จบ · ตาม req change 2026-09-01 Google = **split user แยกต่างหาก** (ไม่มีการ link กับ account อื่น จึงไม่ต้องแชร์ schema พิเศษกับทาง KU)
 - เปลี่ยน API auth ไป verify Keycloak access_token ตรงๆ (แทน Sanctum) — ขัด contract multi-client + logout semantics
 - งาน roadmap อื่น: static dashboard / report templates / digital signature / WebSocket Phase B

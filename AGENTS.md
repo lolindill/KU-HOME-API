@@ -94,10 +94,10 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
   - Endpoints ค้นหาและดูโค้ด (2026-09-07): `GET /discounts/{code}` (ดูรายตัวด้วย code name หรือ UUID), `GET /discounts?code=CODE` (exact match), `GET /discounts?search=TERM` (partial search) ใต้ `role:admin`
   - SQLite caveat: `lockForUpdate()` เป็น no-op บน SQLite — กลไกกัน race ทำงานจริงบน PostgreSQL prod เหมือน precedent `RoomAllocator.php`
-- **🎫 KU SSO login (2026-09-07):** Keycloak realm `KU-Alllogin` — design/spec ทั้งหมด live ที่ `wayfinder/ku-sso/map.md` (อ่านก่อนแตะ auth) · `POST /auth/sso/exchange` (public, throttle `5,1`) แลก `code` เป็น Sanctum token ผ่าน `KuSsoService` (`app/Services/Sso/` — hand-rolled `Http` facade, **0 package**)
+- **🎫 KU SSO login (2026-09-07, ✅ implemented + merged `agust-11` 2026-09-23):** Keycloak realm `KU-Alllogin` — design/spec ทั้งหมด live ที่ `wayfinder/ku-sso/map.md` (map ปิดแล้ว — อ่านก่อนแตะ auth) · `POST /auth/sso/exchange` (public, throttle `5,1`) แลก `code` + `code_verifier` เป็น Sanctum token ผ่าน `KuSsoService` (`app/Services/Sso/` — hand-rolled `Http` facade, **0 package**) · คู่มือฝั่ง frontend ที่ `docs/sso-frontend-guide.md`
   - **Split-user model:** column `users.auth_provider` (`password`|`ku_sso`) + composite unique `(email, auth_provider)` — email เดียวมี account ได้หลาย provider · **ห้าม link identity** (req change 2026-09-01)
   - `AuthController::login` มองเฉพาะ `auth_provider=password` เสมอ — อย่าถอด filter ออก · email unique ใน `StoreUserRequest`/`UpdateUserRequest` scope ต่อ provider
-  - First login KU SSO = user role `ku_member` · password สุ่มทิ้ง · KU tokens (access/id_token) ทิ้งหมดไม่เก็บ DB · config ที่ `config/ku_sso.php` ผูก `KU_SSO_*` จาก `.env` · claims จริงของ scope `basic` ยังต้อง live-verify (ดู amendment ใน ticket 02)
+  - First login KU SSO = user role `ku_member` · password สุ่มทิ้ง · KU tokens (access/id_token) ทิ้งหมดไม่เก็บ DB · config ที่ `config/ku_sso.php` ผูก `KU_SSO_*` จาก `.env` · **PKCE S256 enforced ฝั่ง Keycloak** — exchange ต้องรับ `code_verifier` จาก SPA แล้ว relay ต่อ · claims live-verified แล้ว (2026-09-08): บุคลากรมี claim `email` ตรง, นิสิต fallback `google-mail`/`office365-mail` (ดู ticket 02 Amendment 2) · **column `is_ku_member` ถูก drop แล้ว** (2026-09-08) — สถานะสมาชิกใช้ role `ku_member` เท่านั้น
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
 
@@ -156,7 +156,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 
 งานที่ใหญ่จนต้อง **lock decision ก่อนเขียนโค้ด** ถูก chart เป็น wayfinder map บน tracker แบบ **local-markdown** และ **track ใน git**:
 
-- Maps อยู่ที่ **`wayfinder/<effort>/`** ที่ root — `map.md` + `tickets/*.md` (+ `research/`, assets) · มีอยู่: `booking-room-amount` (✅ implemented), `room-type-rates` (✅ implemented), `ku-sso` (🟢 active — KU SSO/Keycloak, อ่านก่อนแตะ auth/SSO)
+- Maps อยู่ที่ **`wayfinder/<effort>/`** ที่ root — `map.md` + `tickets/*.md` (+ `research/`, assets) · มีอยู่: `booking-room-amount` (✅ COMPLETED 2026-09-03), `room-type-rates` (✅ COMPLETED 2026-09-03), `booking-create-rules` (✅ COMPLETED 2026-09-16), `ku-sso` (✅ COMPLETED 2026-09-23 — KU SSO/Keycloak implemented แล้ว, อ่านก่อนแตะ auth/SSO) · 🟢 ยังเปิด: `excel-reports` (open), `google-integration` (active), `reserved-room-pool` (open)
 - แต่ละ ticket มี frontmatter: `label: wayfinder:<research|prototype|grilling|task>` · `type: HITL|AFK` · `status: open|closed` · `blocked-by:` · `assignee:` — **frontier** = open + blocked-by ปลดครบ + ยังไม่มี assignee
 - ธรรมเนียม: **1 ticket ต่อ 1 session** — claim ก่อนลงมือด้วยการใส่ `assignee:`; เมื่อ resolve แล้วเขียน resolution ลงตัว ticket → `status: closed` → append 1 บรรทัดใน "Decisions so far" ของ map แล้ว **commit การอัปเดต tracker ไปกับ branch ที่ทำงานอยู่เสมอ**
 - ⚠️ **ห้ามเก็บ map ใน `docs/`** (`.gitignore` ปิด `/docs/*` แบบ whitelist — map จะไม่ถูก track) และ **ห้ามย้าย map เข้า `.worktree/`** (checkout ใช้แล้วทิ้ง — map หายตอน cleanup) · เพราะ map ถูก track ผ่าน git → **ทุก worktree ใน `.worktree/*` เห็น map อัตโนมัติ** และ session ใน worktree ใช้/แก้ copy ของตัวเองได้เลย
@@ -168,7 +168,7 @@ If asked to add realtime: use a **public** `housekeeping` channel first (simples
 - [`docs/api_guide.md`](./docs/api_guide.md) — API reference (state machines, enums, validation rules).
 - [`docs/database-er.md`](./docs/database-er.md) — ER diagram.
 - [`docs/project-status.md`](./docs/project-status.md) — per-module completion %.
-- [`wayfinder/ku-sso/map.md`](./wayfinder/ku-sso/map.md) — 🟢 active wayfinder map (KU SSO/Keycloak) — อ่านก่อนแตะ auth/SSO (ดูหัวข้อ "Wayfinder maps" ด้านบน).
+- [`wayfinder/ku-sso/map.md`](./wayfinder/ku-sso/map.md) — ✅ COMPLETED (2026-09-23) wayfinder map (KU SSO/Keycloak) — design record ของระบบ SSO ที่ implemented แล้ว · อ่านก่อนแตะ auth/SSO (ดูหัวข้อ "Wayfinder maps" ด้านบน).
 
 ## Frozen / Deprecated (do not extend)
 
