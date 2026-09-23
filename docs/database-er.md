@@ -81,7 +81,7 @@ erDiagram
         string source "default: online"
         date check_in
         date check_out
-        integer total_amount "satang/cents"
+        integer total_amount "integer baht (was satang, changed 2026-09-11)"
         boolean is_paid "default: false"
         timestamp payment_deadline "nullable"
         string status "default: draft"
@@ -101,9 +101,9 @@ erDiagram
         json guests "nullable, array of {title,name,firstName,lastName,nationality}"
         string billing_address "nullable"
         string billing_comment "nullable"
-        integer room_amount "default: 0, gross room price (satang, 27/08/26)"
-        integer discount_amount "default: 0, discount of this room (satang, 27/08/26)"
-        integer amount "default: 0, net total per room (satang, 03/09/26) — Σ amount == bookings.total_amount"
+        integer room_amount "default: 0, gross room price (integer baht, 27/08/26)"
+        integer discount_amount "default: 0, discount of this room (integer baht, 27/08/26)"
+        integer amount "default: 0, net total per room (integer baht, 03/09/26) — Σ amount == bookings.total_amount"
         timestamp created_at
         timestamp updated_at
     }
@@ -130,7 +130,7 @@ erDiagram
         string code "nullable — addon: e.g. extra_bed · group: min_5_rooms/min_10_rooms · daily/daily_ku/month: null (unique constraint dropped 03/09/26)"
         string name_en
         string name_th "nullable"
-        integer default_price "default: 0, satang"
+        integer default_price "default: 0, integer baht"
         boolean is_active "default: true"
         timestamp created_at
         timestamp updated_at
@@ -139,7 +139,7 @@ erDiagram
     PAYMENTS {
         uuid id PK
         uuid booking_id FK
-        integer amount "satang/cents (was decimal, changed 2026-06-05)"
+        integer amount "integer baht (was satang until 2026-09-11)"
         string status "default: completed"
         string reference_number "nullable"
         uuid received_by FK "nullable, staff who received"
@@ -153,7 +153,7 @@ erDiagram
         string receipt_no UK "unique, format: YYYYMM-XXXXX"
         uuid booking_id FK
         uuid payment_id FK
-        integer amount "satang/cents (was decimal, changed 2026-06-05)"
+        integer amount "integer baht (was satang until 2026-09-11)"
         string billing_name "nullable"
         text billing_address "nullable"
         timestamp issued_at "default: current"
@@ -325,9 +325,9 @@ erDiagram
    - Format: `[{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai" }]`
    - Refactored: 2026-06-18 (ย้ายจาก `bookings` table)
 
-2. **Amount as Integer** (satang/cents)
-   - `payments.amount`, `receipts.amount`, `bookings.total_amount` ใช้ `integer` (satang/cents)
-   - Changed: 2026-06-05 (จาก `decimal` เดิม)
+2. **Amount as Integer Baht (non-decimal)**
+   - `payments.amount`, `receipts.amount`, `bookings.total_amount` ใช้ `integer` หน่วย **บาทล้วน** (เช่น `1200` = 1,200 บาท)
+   - Changed: 2026-06-05 (จาก `decimal` เดิม → integer satang) · 2026-09-11 (satang → integer baht ทั้งระบบ)
 
 3. **Global Rates — Server-side Lookup** (renamed from `addon_rates`, 22/07/26)
    - `global_rates` table เก็บ default prices ทั้ง room rate (`daily` / `daily_ku` / `group` / `month` — ผูก `room_type_id`) และ addon rate (`addon` — ใช้ `code`)

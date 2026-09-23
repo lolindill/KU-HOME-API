@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreBookingRequest extends FormRequest
@@ -13,6 +14,11 @@ class StoreBookingRequest extends FormRequest
 
     public function rules(): array
     {
+        $bookingRoomsRules = ['required', 'array'];
+        if ($roomCapRule = BookingRule::roomCapRule($this->user('sanctum'))) {
+            $bookingRoomsRules[] = $roomCapRule;
+        }
+
         return [
             'source' => 'required|string|in:online,admin,line',
 
@@ -21,9 +27,10 @@ class StoreBookingRequest extends FormRequest
 
             // 🌟 Refactor (25/06/26): 1 array entry = 1 ห้อง (ไม่มี quantity multiplier แล้ว)
             // 🌟 Refactor (02/07/26): check_in/check_out ย้ายไป BR-level (แต่ละห้องต่างวันได้)
-            'booking_rooms' => 'required|array',
+            // 🚪 Room cap (16/09/26): ลิมิตห้องต่อ booking สำหรับ non-admin
+            'booking_rooms' => $bookingRoomsRules,
             'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
-            'booking_rooms.*.check_in' => 'required|date|after_or_equal:today',
+            'booking_rooms.*.check_in' => 'required|date|'.BookingRule::checkInRule($this->user('sanctum')),
             'booking_rooms.*.check_out' => 'required|date|after:booking_rooms.*.check_in',
             // 🛏️ (04/09/26): input format = output format — canonical คือ addons.extra_bed
             //    extra_beds (หัวห้อง) = legacy alias เก็บไว้ให้ frontend เดิม (resolve ที่ BookingController)
@@ -102,10 +109,11 @@ class StoreBookingRequest extends FormRequest
             'discount_code.max' => 'รหัสส่วนลดต้องไม่เกิน 50 ตัวอักษร',
             'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
             'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
+            'booking_rooms.max' => BookingRule::roomCapMessage($this->user('sanctum')),
             'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',
             'booking_rooms.*.room_type_id.exists' => 'ไม่พบประเภทห้องที่ระบุ',
             'booking_rooms.*.check_in.required' => 'กรุณาระบุวันที่เช็คอินของแต่ละห้อง',
-            'booking_rooms.*.check_in.after_or_equal' => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
+            'booking_rooms.*.check_in.after_or_equal' => BookingRule::checkInMessage($this->user('sanctum')),
             'booking_rooms.*.check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
             'booking_rooms.*.check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
             'booking_rooms.*.bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',

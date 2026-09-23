@@ -32,10 +32,10 @@ class BookingRoom extends Model
         // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษีระดับห้อง
         'billing_address',
         'billing_comment',
-        // 🎟️ Discount fields (27/08/26): ค่าห้องก่อนลด และ ส่วนลดของห้องนี้ (satang)
+        // 🎟️ Discount fields (27/08/26): ค่าห้องก่อนลด และ ส่วนลดของห้องนี้ (integer บาท)
         'room_amount',
         'discount_amount',
-        // 🧾 Net total ต่อห้อง (03/09/26): room_amount − discount_amount + addon รวมทุกอย่าง (satang)
+        // 🧾 Net total ต่อห้อง (03/09/26): room_amount − discount_amount + addon รวมทุกอย่าง (integer บาท)
         //    invariant Σ booking_rooms.amount == bookings.total_amount (บังคับด้วย test)
         'amount',
     ];

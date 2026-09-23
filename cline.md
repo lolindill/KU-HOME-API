@@ -58,7 +58,7 @@ hotel/
 │   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
 │   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
 │   │   ├── RoomType.php               # PgBoolean extra_bed_enabled
-│   │   ├── Payment.php                # 🔓 unfrozen (19/08/26 ลบ payment_method) — integer amount (satang)
+│   │   ├── Payment.php                # 🔓 unfrozen (19/08/26 ลบ payment_method) — integer amount (integer baht, 11/09/26)
 │   │   ├── Receipt.php                # ❄️ legacy (frozen 24/07/26) — integer amount, atomic receipt_no
 │   │   ├── BookingConfirmation.php    # 🌟 NEW (24/07/26): payment proof table, state machine pending→verified|rejected
 │   │   ├── Addon.php / AddonRate.php  # 🌟 AddonRate = server-side price lookup
@@ -297,13 +297,13 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 #### Payment (`app/Models/Payment.php`)
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: booking_id, amount, status, reference_number, received_by (🌟 19/08/26: ลบ payment_method)
-- **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
+- **Casts**: amount→integer บาทล้วน (💰 11/09/26 satang→baht; legacy #30 Fixed)
 - **Relationships**: booking (BelongsTo), receiver (BelongsTo User via received_by), receipts (HasMany)
 
 #### Receipt (`app/Models/Receipt.php`)
 - **Primary Key**: UUID (HasUuids trait)
 - **Fillable**: receipt_no, booking_id, payment_id, amount, billing_name, billing_address
-- **Casts**: amount→integer (satang/cents) ✅ #30 Fixed
+- **Casts**: amount→integer บาทล้วน (💰 11/09/26 satang→baht; legacy #30 Fixed)
   
 ## State Machines
 
@@ -1949,3 +1949,93 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Test gotcha (จดกันลืม):** `Http::fake([...])` เรียกซ้ำใน test เดียว **ไม่ได้ replace stub** — เป็นการ append (`Factory::fake → stubUrl → stubCallbacks->merge`) และตอน consume ใช้ `->first()` → **stub ตัวแรกชนะเสมอ** fake ที่สองเงียบๆ ไม่มีผล · ต้องการ response ต่างกันต่อ request ให้ใช้ `Http::sequence()` หรือแยก test (เคส `test_exchange_second_login_...` เดิมผ่านโดยบังเอิญเพราะ assertion ไม่ได้แยกแยะ stub)
 - **ไฟล์ที่เปลี่ยน:** `app/Http/Controllers/Api/V1/SsoController.php` (validate + relay) · `app/Services/Sso/KuSsoService.php` (signature `exchangeCode` + email chain) · `config/ku_sso.php` (comment ตามความจริงใหม่) · `tests/Feature/SsoExchangeTest.php` (13 → 18 เคส)
 
+## 🛏️ King-Size Availability — `GET /availability?bed_type=king_size` (2026-09-09)
+
+- **โจทย์:** frontend โชว์จำนวน "ห้อง king (ชั้น 8) เหลือ" ไม่ได้ เพราะ availability endpoints ทั้ง 5 นับที่ระดับ room_type เท่านั้น — ไม่มีมิติ `bed_type`. ทางออก = **extend** `GET /availability` ด้วย optional param (ไม่สร้าง endpoint ใหม่) ผ่านการ grill-me 5 คำตอบ (shape / นับยังไง / response / ขอบเขต bed_type / นิยาม pool)
+- **Decisions ที่ล็อก (ห้าม re-litigate โดยไม่มี evidence ใหม่):**
+  1. **Shape:** extend `/availability` เดิม — ไม่แตะ `/availability-per-day`, `/availability-ranges`, `/unavailable-*` (ขยายภายหลังถ้า frontend ต้องการ)
+  2. **Hybrid counting ตาม lifecycle** (สำคัญ — `booking_rooms.room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
+     `king_occupied = (BR bed_preference='king_size' และ room_id IS NULL) + (BR ที่ room.bed_type='king_size')` — เงื่อนไข 2 แขนกันหมด (null ↔ not null) ไม่นับซ้ำ. BR ลอย (no-preference + ไม่ assign) ไม่นับเป็น king
+  3. **Response:** ไม่ส่ง `bed_type` = byte-identical กับเดิม; ส่งแล้ว `available_rooms` เป็น king-aware + เพิ่ม `king_total_rooms` / `king_occupied` + `search_criteria.bed_type` echo
+  4. **ขอบเขต:** `bed_type` รับ `king_size` เท่านั้น (`nullable|in:king_size` — ส่ง `twin` → 422) ตาม `bed_preference` ฝั่ง booking
+  5. **king pool = sellable** (`status NOT IN (maintenance, reserved_closed)`) — ตรงกับ `createBooking`/`withSellableRoomsAndRates` **ไม่ใช่** `status='available'` แบบ `rooms_count` รวมของ endpoint นี้ (สถานะ snapshot วันนี้บอกความว่างวันจองอนาคตไม่ได้)
+- **สูตร:** `available_rooms(king) = max(0, king_total_rooms − king_occupied)` · BR states ที่นับ `{draft, confirmed, checked_in}` เหมือนเดิม · overlap half-open เหมือนเดิม
+- **ไฟล์ที่เปลี่ยน:**
+  1. `app/Http/Controllers/Api/V1/RoomController.php` — `availability()`: validate `bed_type` + 2 withCount conditional (`king_total_rooms`, `king_occupied_count` ด้วย `whereHas('room')`) + เติมฟิลด์ใน map เฉพาะเมื่อ param มา
+  2. `tests/Feature/RoomKingAvailabilityTest.php` (ใหม่) — 10 tests: BC (ไม่ส่ง param ไม่มีฟิลด์ king), pool นับเฉพาะ king sellable, king-pref ยังไม่ assign หัก king, assigned-king หัก king, assigned-twin ไม่หัก, floating ไม่หัก, checked_out ปล่อยคืน, non-overlap ไม่หัก, AND กับ max_guests, twin/double → 422
+  3. `docs/api_guide.md` — เอกสาร param + semantics + ตัวอย่าง response โหมด king
+## 🐘 PostgreSQL Migration & UUID Validation Fix (2026-09-11)
+
+- **โจทย์:** เซิร์ฟเวอร์เปลี่ยนฐานข้อมูลไปใช้ PostgreSQL (`dbc.ku.ac.th`) แล้วรัน `php artisan migrate` ไม่ผ่านที่ `2026_07_22_100100_move_room_rate_to_global_rates` ทำให้ migrations ที่เหลือ (booking confirmations, status change logs, discount system, booking_room amount) ค้าง ไม่ถูกสร้าง
+- **Root Cause 1:** ใน migration `2026_07_22_100100_move_room_rate_to_global_rates.php` มีการใช้ `DB::table('global_rates')->insert([... 'is_active' => true ...])` ซึ่ง PDO แปลง PHP boolean `true` เป็น integer `1` ส่งผลให้ PostgreSQL ฟ้อง `SQLSTATE[42804]: Datatype mismatch: ERROR: column "is_active" is of type boolean but expression is of type integer`
+- **Root Cause 2:** Route `GET /api/v1/rooms/{id}` และ `/api/v1/room-types/{id}` เมื่อถูกเรียกด้วยค่าที่ไม่ใช่ UUID (เช่น `not-a-uuid`) ส่ง `$id` เข้า `Room::find($id)` ตรงๆ ใน PostgreSQL จะเกิด `SQLSTATE[22P02]: Invalid text representation: ERROR: invalid input syntax for type uuid` และกลายเป็น HTTP 500 แทนที่จะเป็น 404
+- **แก้ไข:**
+  1. `database/migrations/2026_07_22_100100_move_room_rate_to_global_rates.php`: เปลี่ยน `'is_active' => true` เป็น `'is_active' => DB::raw('TRUE')` ตาม AGENTS.md rule
+  2. `app/Http/Controllers/Api/V1/RoomController.php`: เพิ่ม `Str::isUuid($id)` guard ใน `getRoomById` และ `getRoomTypeById` หากไม่ใช่ UUID ให้ตอบ `404 Not Found` ทันที
+  3. `tests/Feature/RoomTest.php`: เพิ่มเทสต์สำหรับ `getRoomById` และ invalid UUID checks (404)
+
+## 💰 Money Standard: integer satang → integer บาทล้วน (2026-09-11)
+
+- **โจทย์:** เปลี่ยนมาตรฐานเงินทั้งระบบจาก integer satang (สตางค์) เป็น **integer บาทล้วน non-decimal** — storage = wire format เดียวกัน ไม่มีการแปลงหน่วยที่ขอบ API อีกต่อไป
+- **สิ่งที่เปลี่ยน:**
+  1. Migration `2026_09_11_090000_convert_money_satang_to_integer_baht` — แปลงข้อมูลเดิม ÷100 ทุกคอลัมน์เงิน (`bookings.total_amount`, `booking_rooms.{room_amount,discount_amount,amount}`, `addons` 4 price cols, `global_rates.default_price`, `payments.amount`, `receipts.amount`) + `discounts.value` **เฉพาะ type `fixed`/`set_room_price`** (type `percent` 1-100 ห้ามหาร) + refresh column comment payments/receipts · driver-agnostic integer division (SQLite/PG ผลตรงกัน)
+  2. ลบ `app/Support/Money.php` + `tests/Unit/Support/MoneyTest.php` — ไม่มีจุดไหนต้องแปลง satang↔baht แล้ว
+  3. `app/Models/RoomType.php` — ลบ accessor/mutator `extra_bed_price` (เปลี่ยนเป็น cast `integer`), `rates` accessor คืน integer ตรง ๆ → **wire format เปลี่ยนจาก `"1200.00"` (baht string) เป็น `1200` (int)** ที่ `GET /room-types*`, `/availability`, calendar ทั้ง 4
+  4. Seeders — `GlobalRateSeeder` (breakfast 200, early/late 100 บาท/ชม., extra_bed 500), `RoomSeeder` (rate cards + extra_bed_price เป็น integer บาท), `DiscountSeeder` (SAVE200 → 200, DELUXE990 → 990, LIMITED50 → 100; WELCOME10 percent คงเดิม)
+  5. `StoreReceiptRequest`/`UpdateReceiptRequest` — `amount` จาก `numeric` เข้มเป็น `integer|min:0`
+  6. Tests — แปลง fixture/assertion ที่ผูกกับ seeded values (`BookingKuMemberPricingTest`, `DiscountTest`, `DiscountSeederTest`, `RoomSeederTest`, `RoomTest`, `GlobalRateSeederTest`) + wire-format tests (`RoomTypeRatesListTest` regex `/^\d+\.\d{2}$/` → `/^\d+$/`, `RoomTypeRatesCalendarTest`) + comment ใน `TestCase` · **BookingTest/FrontDeskTest/PaymentTest/BookingConfirmationTest ฯลฯ คงเลข fixture เดิม** (inline ทั้งชุด สอดคล้องภายในตัว — อ่านเป็นบาท เช่น rate 1500 บาท/คืน)
+  7. Docs — `AGENTS.md` (money convention + wire format), `docs/api_guide.md` (Money Policy + seeded defaults + ตาราง column), `docs/database-er.md` (annotations)
+- **ผล:** `php artisan migrate:fresh --seed` ผ่าน · full test suite **386 passed (1335 assertions)** · หน่วยเงินเดียวทั้งระบบ: integer บาท
+- **หมายเหตุ deploy:** DB เดิมบน server แค่ `php artisan migrate` — ข้อมูลถูกแปลง ÷100 อัตโนมัติ (ป้องกันการ rerun ด้วย migration marker; เศษสตางค์ < 100 ถูกตัดด้วย integer division)
+
+## 📅 Advance Notice Rule — จองล่วงหน้า ≥ 2 วัน (2026-09-16)
+
+- **โจทย์:** Wayfinder map `booking-create-rules`, Ticket 01 — ผู้ใช้ทั่วไปไม่สามารถจองห้องพักล่วงหน้าน้อยกว่า 2 วันปฏิทิน (Asia/Bangkok) ได้ เพื่อให้ทางโรงแรมมีเวลาจัดเตรียมห้องพัก
+- **Decisions ที่ล็อกตาม Spec (Wayfinder Ticket 01):**
+  1. **Rule:** `check_in` ต้องเป็นวันปัจจุบัน + อย่างน้อย 2 calendar days (`Carbon::now('Asia/Bangkok')->startOfDay()->addDays(2)`)
+  2. **Config-driven:** `config/booking.php` เก็บ `min_advance_days` (default 2, env `BOOKING_MIN_ADVANCE_DAYS`) และ `max_rooms_per_booking` (default 4, env `BOOKING_MAX_ROOMS_PER_BOOKING` สำหรับ Ticket 02)
+  3. **Shared Helper Single Source of Truth:** `App\Support\BookingRule` (`isAdmin`, `minAdvanceDays`, `maxRoomsPerBooking`, `earliestCheckInDate`, `earliestCheckInDateString`, `checkInRule`, `checkInMessage`)
+  4. **Validation Layer (4 Write Paths):** บังคับใช้ผ่าน FormRequest ทั้ง 4 เส้นทาง:
+     - `POST /api/v1/bookings` (`StoreBookingRequest`)
+     - `POST /api/v1/bookings/{id}/rooms` (`AddBookingRoomsRequest`)
+     - `PUT /api/v1/bookings/{id}/rooms/{roomId}` (`UpdateBookingRoomRequest`)
+     - `PUT /api/v1/bookings/{id}/rooms` (`UpdateBookingRoomsRequest`)
+  5. **Admin Exemption:** Admin ได้รับการยกเว้นให้สามารถจองวันนี้หรือพรุ่งนี้ได้ (`≥ today` ใน Bangkok time) แต่ห้ามจองย้อนหลังในอดีต (`< today`). ตรวจสอบสิทธิ์จาก Sanctum role (`$user->role === 'admin'`) เท่านั้น **ไม่** ตรวจจาก payload field `source` เด็ดขาดเพื่อป้องกันการปลอมแปลง
+  6. **Error Format:** HTTP `422 Unprocessable Content` พร้อมข้อความภาษาไทย:
+     - ทั่วไป: `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (หรือ N วันตาม config)
+     - Admin (เมื่อจองในอดีต): `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`
+  7. **Backward Compatibility:** Grandfathered draft bookings ที่สร้างไว้ก่อนหน้าสามารถเปิดดู (GET) ได้ปกติ ไม่กระทบ read endpoints
+- **ไฟล์ที่เปลี่ยน/เพิ่ม:**
+  1. `config/booking.php` — configuration file ใหม่
+  2. `app/Support/BookingRule.php` — helper class ใหม่
+  3. `app/Http/Requests/StoreBookingRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  4. `app/Http/Requests/AddBookingRoomsRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  5. `app/Http/Requests/UpdateBookingRoomRequest.php` — ปรับ rule และ custom message ของ `check_in`
+  6. `app/Http/Requests/UpdateBookingRoomsRequest.php` — ปรับ rule และ custom message ของ `booking_rooms.*.check_in`
+  7. `docs/api_guide.md` — อัปเดตเอกสารทั้ง 4 endpoint
+  8. `tests/Feature/BookingTest.php` — อัปเดต fixture dates จาก `+1` เป็น `+2/+4` ให้สอดคล้องกับกฎใหม่ (73 tests passed)
+  9. `tests/Feature/BookingAdvanceNoticeTest.php` — feature tests ใหม่ 15 tests ครอบคลุม boundary, 4 paths, admin exempt, spoof guard, grandfathered drafts, และ config overrides
+- **ผลการทดสอบ:** Full test suite **401 passed (1380 assertions)** ใน 62.48s · Pint clean
+
+## 🚪 Room Cap Rule — ลิมิต 4 ห้องต่อ 1 booking (2026-09-16)
+
+- **โจทย์:** Wayfinder map `booking-create-rules`, Ticket 02 — ผู้ใช้ทั่วไป (non-admin) ไม่สามารถจองห้องพักเกิน 4 ห้องใน 1 booking (ทั้งตอนสร้างการจองใหม่ และตอนเพิ่มห้องเข้า draft เดิม) หากต้องการจองเกินต้องติดต่อผู้ดูแลระบบ (admin)
+- **Decisions ที่ล็อกตาม Spec (Wayfinder Ticket 02):**
+  1. **Rule:** ลิมิตไม่เกิน 4 ห้องต่อ 1 booking สำหรับ non-admin (`<= 4` ห้องผ่าน, `5` ห้องได้ 422)
+  2. **Config-driven:** ใช้ knob `max_rooms_per_booking` ใน `config/booking.php` (default 4, ปรับผ่าน env `BOOKING_MAX_ROOMS_PER_BOOKING`) ที่เตรียมไว้ตั้งแต่ใบ 01
+  3. **Shared Helper:** ใช้ `App\Support\BookingRule` (`maxRoomsPerBooking`, `roomCapRule`, `roomCapMessage`, `isAdmin`) เป็น single source of truth
+  4. **Enforcement Points:**
+     - `POST /api/v1/bookings` (Create): บังคับที่ FormRequest layer (`StoreBookingRequest`) โดยตรวจนับ array `booking_rooms` ด้วย rule `max:4` (สำหรับ non-admin)
+     - `POST /api/v1/bookings/{id}/rooms` (Add rooms): บังคับที่ Controller guard ใน `BookingController@addRooms` ก่อน `DB::beginTransaction()` โดยนับห้องเดิมจริงใน booking (`$booking->bookingRooms()->count()`) รวมกับห้องใหม่ที่ขอเพิ่ม
+     - Batch edit (`PUT /bookings/{id}/rooms`) และ update booking-room รายห้อง ไม่เพิ่มจำนวนห้อง จึงคงพฤติกรรมเดิม ไม่ตรวจ cap
+  5. **Admin Exemption:** Admin ได้รับการยกเว้นทุกกรณี สามารถจองหรือเพิ่มห้องเกิน 4 ห้องได้ (เช็คจาก Sanctum login role เท่านั้น ห้ามใช้ field `source` ใน request body)
+  6. **Error Format:** HTTP `422 Unprocessable Content` พร้อมข้อความภาษาไทยแนะนำให้ติดต่อผู้ดูแล: `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"` (หรือ N ห้องตาม config)
+  7. **Backward Compatibility:** Grandfathered draft bookings ที่มีอยู่เดิมไม่ถูกกระทบ
+- **ไฟล์ที่เปลี่ยน/เพิ่ม:**
+  1. `app/Support/BookingRule.php` — เพิ่ม `roomCapRule` และ `roomCapMessage`
+  2. `app/Http/Requests/StoreBookingRequest.php` — เพิ่ม room cap validation rule และ custom message บน `booking_rooms`
+  3. `app/Http/Controllers/Api/V1/BookingController.php` — เพิ่ม early guard ใน `addRooms` ก่อน `DB::beginTransaction()`
+  4. `docs/api_guide.md` — อัปเดตเอกสาร `POST /bookings` และ `POST /bookings/{id}/rooms`
+  5. `tests/Feature/BookingRoomCapTest.php` — feature tests ใหม่ 10 tests ครอบคลุม create cap (4 vs 5), add-rooms cumulative count (3+2 vs 3+1), admin exemptions, spoof guard, batch edit integrity, และ config override
+  6. `cline.md` — บันทึกประวัติและ architectural decisions
+- **ผลการทดสอบ:** Full test suite **411 passed (1413 assertions)** · Pint clean

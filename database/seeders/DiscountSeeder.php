@@ -33,12 +33,12 @@ class DiscountSeeder extends Seeder
             ]
         );
 
-        // 2. Fixed: ลดคงที่ 200 บาท (20,000 สตางค์) ต่อห้อง
+        // 2. Fixed: ลดคงที่ 200 บาท (integer baht) ต่อห้อง
         Discount::updateOrCreate(
             ['code' => 'SAVE200'],
             [
                 'type' => 'fixed',
-                'value' => 20000,
+                'value' => 200,
                 'room_type_ids' => null,
                 'usable_from' => null,
                 'usable_until' => null,
@@ -50,12 +50,12 @@ class DiscountSeeder extends Seeder
             ]
         );
 
-        // 3. Set Room Price (Room Type Targeted): เหมาจ่ายห้อง Deluxe คืนละ 990 บาท (99,000 สตางค์ จากปกติ 1,200 บาท)
+        // 3. Set Room Price (Room Type Targeted): เหมาจ่ายห้อง Deluxe คืนละ 990 บาท (integer baht จากปกติ 1,200 บาท)
         Discount::updateOrCreate(
             ['code' => 'DELUXE990'],
             [
                 'type' => 'set_room_price',
-                'value' => 99000,
+                'value' => 990,
                 'room_type_ids' => $deluxe ? [$deluxe->id] : null,
                 'usable_from' => null,
                 'usable_until' => null,
@@ -67,12 +67,12 @@ class DiscountSeeder extends Seeder
             ]
         );
 
-        // 4. Quota Limited: ลดคงที่ 100 บาท (10,000 สตางค์) จำกัด 50 สิทธิ์แรก (1 สิทธิ์ต่อคน)
+        // 4. Quota Limited: ลดคงที่ 100 บาท (integer baht) จำกัด 50 สิทธิ์แรก (1 สิทธิ์ต่อคน)
         Discount::updateOrCreate(
             ['code' => 'LIMITED50'],
             [
                 'type' => 'fixed',
-                'value' => 10000,
+                'value' => 100,
                 'room_type_ids' => null,
                 'usable_from' => null,
                 'usable_until' => null,

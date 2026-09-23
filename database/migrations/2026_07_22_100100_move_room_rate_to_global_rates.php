@@ -4,6 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 /**
  * 🌟 Refactor (22/07/26): step 2 — ย้าย rate_daily_general จาก room_types ไป global_rates
@@ -30,16 +31,16 @@ return new class extends Migration
 
             if (! $exists) {
                 DB::table('global_rates')->insert([
-                    'id'                => (string) \Illuminate\Support\Str::uuid(),
-                    'rate_type'         => 'daily',
-                    'room_type_id'      => $rt->id,
-                    'code'              => null,
-                    'name_en'           => $rt->name_en . ' Daily',
-                    'name_th'           => $rt->name_en . ' (ราคารายวัน)',
-                    'default_price'     => (int) $rt->rate_daily_general,
-                    'is_active'         => true,
-                    'created_at'        => now(),
-                    'updated_at'        => now(),
+                    'id' => (string) Str::uuid(),
+                    'rate_type' => 'daily',
+                    'room_type_id' => $rt->id,
+                    'code' => null,
+                    'name_en' => $rt->name_en.' Daily',
+                    'name_th' => $rt->name_en.' (ราคารายวัน)',
+                    'default_price' => (int) $rt->rate_daily_general,
+                    'is_active' => DB::raw('TRUE'),
+                    'created_at' => now(),
+                    'updated_at' => now(),
                 ]);
             }
         }

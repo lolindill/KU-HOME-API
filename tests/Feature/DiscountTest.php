@@ -33,7 +33,7 @@ class DiscountTest extends TestCase
         ]);
     }
 
-    private function createRoomType(int $dailyRateSatang = 200000): RoomType
+    private function createRoomType(int $dailyRateBaht = 2000): RoomType
     {
         $rt = RoomType::create([
             'id' => Str::uuid(),
@@ -48,7 +48,7 @@ class DiscountTest extends TestCase
             'room_type_id' => $rt->id,
             'code' => null,
             'name_en' => 'Deluxe King Daily',
-            'default_price' => $dailyRateSatang,
+            'default_price' => $dailyRateBaht,
             'is_active' => true,
         ]);
 
@@ -179,7 +179,7 @@ class DiscountTest extends TestCase
         $discount = Discount::create([
             'code' => 'TOGGLEME',
             'type' => 'fixed',
-            'value' => 50000,
+            'value' => 500,
             'is_active' => true,
         ]);
 
@@ -364,7 +364,7 @@ class DiscountTest extends TestCase
         $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/discounts', [
             'code' => 'BADTYPE',
             'type' => 'fixed',
-            'value' => 10000,
+            'value' => 100,
             'room_type_ids' => [Str::uuid()->toString()],
         ]);
 
@@ -378,9 +378,9 @@ class DiscountTest extends TestCase
     public function test_apply_percent_discount_to_draft_booking(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000); // 2,000 THB/night
+        $roomType = $this->createRoomType(2000); // 2,000 THB/night
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 2, nights: 2);
-        // Base room price = 2 rooms * 2 nights * 200,000 = 800,000 satang
+        // Base room price = 2 rooms * 2 nights * 2,000 = 800,000 baht
 
         $discount = Discount::create([
             'code' => 'SUPER50',
@@ -401,13 +401,13 @@ class DiscountTest extends TestCase
 
         $freshBooking = $booking->fresh();
         $this->assertEquals('SUPER50', $freshBooking->discount_code);
-        $this->assertEquals(400000, $freshBooking->total_amount);
+        $this->assertEquals(4000, $freshBooking->total_amount);
 
         foreach ($freshBooking->bookingRooms as $br) {
-            $this->assertEquals(400000, $br->room_amount); // 200,000 * 2
-            $this->assertEquals(200000, $br->discount_amount); // 50% of 400,000
-            // 🧾 (03/09/26) amount = 400,000 − 200,000 = 200,000 (net ต่อห้อง)
-            $this->assertEquals(200000, $br->amount);
+            $this->assertEquals(4000, $br->room_amount); // 2,000 * 2
+            $this->assertEquals(2000, $br->discount_amount); // 50% of 4,000
+            // 🧾 (03/09/26) amount = 4,000 − 2,000 = 2,000 (net ต่อห้อง)
+            $this->assertEquals(2000, $br->amount);
         }
 
         $this->assertCount(2, DiscountRedemption::where('discount_id', $discount->id)->get());
@@ -417,13 +417,13 @@ class DiscountTest extends TestCase
     public function test_fixed_discount_clamps_to_room_amount(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000); // 1,000 THB/night
-        $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1); // roomBase = 100,000
+        $roomType = $this->createRoomType(1000); // 1,000 THB/night
+        $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1); // roomBase = 1,000
 
         Discount::create([
             'code' => 'HUGE999',
             'type' => 'fixed',
-            'value' => 500000, // 5,000 THB > 1,000 THB roomBase
+            'value' => 5000, // 5,000 THB > 1,000 THB roomBase
             'is_active' => true,
         ]);
 
@@ -432,21 +432,21 @@ class DiscountTest extends TestCase
         ])->assertStatus(200);
 
         $br = $booking->fresh()->bookingRooms->first();
-        $this->assertEquals(100000, $br->room_amount);
-        $this->assertEquals(100000, $br->discount_amount); // Clamped to room_amount
+        $this->assertEquals(1000, $br->room_amount);
+        $this->assertEquals(1000, $br->discount_amount); // Clamped to room_amount
         $this->assertEquals(0, $booking->fresh()->total_amount);
     }
 
     public function test_set_room_price_discount(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000); // rate = 2,000 THB
-        $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 2); // 400,000 satang
+        $roomType = $this->createRoomType(2000); // rate = 2,000 THB
+        $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 2); // 4,000 baht
 
         Discount::create([
             'code' => 'SPECIAL1200',
             'type' => 'set_room_price',
-            'value' => 120000, // 1,200 THB/night -> discount = (2000 - 1200) * 2 = 1,600 THB (160,000 satang)
+            'value' => 1200, // 1,200 THB/night -> discount = (2000 - 1200) * 2 = 1,600 THB (1,600 baht)
             'is_active' => true,
         ]);
 
@@ -455,21 +455,21 @@ class DiscountTest extends TestCase
         ])->assertStatus(200);
 
         $br = $booking->fresh()->bookingRooms->first();
-        $this->assertEquals(400000, $br->room_amount);
-        $this->assertEquals(160000, $br->discount_amount);
-        $this->assertEquals(240000, $booking->fresh()->total_amount); // 1,200 * 2 nights = 2,400 THB
+        $this->assertEquals(4000, $br->room_amount);
+        $this->assertEquals(1600, $br->discount_amount);
+        $this->assertEquals(2400, $booking->fresh()->total_amount); // 1,200 * 2 nights = 2,400 THB
     }
 
     public function test_set_room_price_discount_value_higher_than_rate_results_in_zero_discount(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(150000); // rate = 1,500 THB
+        $roomType = $this->createRoomType(1500); // rate = 1,500 THB
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
         Discount::create([
             'code' => 'EXPENSIVE_PROMO',
             'type' => 'set_room_price',
-            'value' => 200000, // 2,000 THB > rate 1,500 THB -> discount = 0
+            'value' => 2000, // 2,000 THB > rate 1,500 THB -> discount = 0
             'is_active' => true,
         ]);
 
@@ -478,22 +478,22 @@ class DiscountTest extends TestCase
         ])->assertStatus(200);
 
         $br = $booking->fresh()->bookingRooms->first();
-        $this->assertEquals(150000, $br->room_amount);
+        $this->assertEquals(1500, $br->room_amount);
         $this->assertEquals(0, $br->discount_amount);
-        $this->assertEquals(150000, $booking->fresh()->total_amount);
+        $this->assertEquals(1500, $booking->fresh()->total_amount);
     }
 
     public function test_addon_not_discounted(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000);
+        $roomType = $this->createRoomType(2000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
-        // Add breakfast addon: 60,000 satang
+        // Add breakfast addon: 600 baht
         $br = $booking->bookingRooms->first();
         $br->addon->update([
             'breakfast' => 2,
-            'breakfast_price' => 60000,
+            'breakfast_price' => 600,
         ]);
 
         Discount::create([
@@ -508,13 +508,13 @@ class DiscountTest extends TestCase
         ])->assertStatus(200);
 
         $freshBooking = $booking->fresh();
-        $this->assertEquals(200000, $freshBooking->bookingRooms->first()->room_amount);
-        $this->assertEquals(200000, $freshBooking->bookingRooms->first()->discount_amount);
-        // Total = (200000 - 200000) + 60000 breakfast = 60000
-        $this->assertEquals(60000, $freshBooking->total_amount);
+        $this->assertEquals(2000, $freshBooking->bookingRooms->first()->room_amount);
+        $this->assertEquals(2000, $freshBooking->bookingRooms->first()->discount_amount);
+        // Total = (2000 - 2000) + 600 breakfast = 600
+        $this->assertEquals(600, $freshBooking->total_amount);
 
-        // 🧾 (03/09/26) amount = 200,000 − 200,000 + 60,000 breakfast = 60,000 — addon ไม่โดนลด
-        $this->assertEquals(60000, $freshBooking->bookingRooms->first()->amount);
+        // 🧾 (03/09/26) amount = 2,000 − 2,000 + 600 breakfast = 600 — addon ไม่โดนลด
+        $this->assertEquals(600, $freshBooking->bookingRooms->first()->amount);
         $this->assertAmountInvariant($booking);
     }
 
@@ -525,8 +525,8 @@ class DiscountTest extends TestCase
     public function test_partial_eligibility_by_room_type(): void
     {
         $user = $this->makeUser();
-        $typeA = $this->createRoomType(100000);
-        $typeB = $this->createRoomType(200000);
+        $typeA = $this->createRoomType(1000);
+        $typeB = $this->createRoomType(2000);
 
         $booking = Booking::create([
             'id' => Str::uuid(),
@@ -572,24 +572,24 @@ class DiscountTest extends TestCase
             'code' => 'ONLY_TYPE_A',
         ])->assertStatus(200);
 
-        $this->assertEquals(50000, $brA->fresh()->discount_amount);
+        $this->assertEquals(500, $brA->fresh()->discount_amount);
         $this->assertEquals(0, $brB->fresh()->discount_amount);
-        $this->assertEquals(250000, $booking->fresh()->total_amount); // 50,000 + 200,000
+        $this->assertEquals(2500, $booking->fresh()->total_amount); // 500 + 2,000
 
         // Only 1 redemption row for room A
         $this->assertCount(1, DiscountRedemption::where('booking_room_id', $brA->id)->get());
         $this->assertCount(0, DiscountRedemption::where('booking_room_id', $brB->id)->get());
 
-        // 🧾 (03/09/26) amount รายห้อง: A = 100,000 − 50,000 = 50,000 · B = 200,000 (ไม่ลด)
-        $this->assertEquals(50000, $brA->fresh()->amount);
-        $this->assertEquals(200000, $brB->fresh()->amount);
+        // 🧾 (03/09/26) amount รายห้อง: A = 1,000 − 500 = 500 · B = 2,000 (ไม่ลด)
+        $this->assertEquals(500, $brA->fresh()->amount);
+        $this->assertEquals(2000, $brB->fresh()->amount);
         $this->assertAmountInvariant($booking);
     }
 
     public function test_stay_window_rejects_outside_range(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 2);
 
         Discount::create([
@@ -616,7 +616,7 @@ class DiscountTest extends TestCase
     {
         $user1 = $this->makeUser();
         $user2 = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
 
         $discount = Discount::create([
             'code' => 'LIMITED2',
@@ -647,7 +647,7 @@ class DiscountTest extends TestCase
     public function test_max_uses_per_user_accumulates_across_bookings(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
 
         Discount::create([
             'code' => 'PERUSER3',
@@ -681,7 +681,7 @@ class DiscountTest extends TestCase
     public function test_null_limits_mean_unlimited(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
 
         Discount::create([
             'code' => 'UNLIMITED',
@@ -704,7 +704,7 @@ class DiscountTest extends TestCase
     {
         $user1 = $this->makeUser();
         $user2 = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
 
         Discount::create([
             'code' => 'POOL5',
@@ -740,7 +740,7 @@ class DiscountTest extends TestCase
     {
         $user1 = $this->makeUser();
         $user2 = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
 
         $discount = Discount::create([
             'code' => 'SOLO1',
@@ -778,7 +778,7 @@ class DiscountTest extends TestCase
     public function test_removing_booking_room_releases_slot_via_cascade(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $discount = Discount::create([
             'code' => 'PAIR2',
             'type' => 'percent',
@@ -805,7 +805,7 @@ class DiscountTest extends TestCase
     public function test_removing_discount_code_reprices_booking(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000);
+        $roomType = $this->createRoomType(2000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
         Discount::create([
@@ -819,7 +819,7 @@ class DiscountTest extends TestCase
             'code' => 'HALF',
         ])->assertStatus(200);
 
-        $this->assertEquals(100000, $booking->fresh()->total_amount);
+        $this->assertEquals(1000, $booking->fresh()->total_amount);
 
         // Remove discount
         $response = $this->actingAs($user, 'sanctum')->deleteJson("/api/v1/bookings/{$booking->id}/discount-code");
@@ -832,10 +832,10 @@ class DiscountTest extends TestCase
 
         $fresh = $booking->fresh();
         $this->assertNull($fresh->discount_code);
-        $this->assertEquals(200000, $fresh->total_amount);
+        $this->assertEquals(2000, $fresh->total_amount);
         $this->assertEquals(0, $fresh->bookingRooms->first()->discount_amount);
         // 🧾 (03/09/26) ลบโค้ดแล้ว amount กลับไปที่ยอด gross ต่อห้อง
-        $this->assertEquals(200000, $fresh->bookingRooms->first()->amount);
+        $this->assertEquals(2000, $fresh->bookingRooms->first()->amount);
         $this->assertCount(0, DiscountRedemption::all());
         $this->assertAmountInvariant($booking);
     }
@@ -847,7 +847,7 @@ class DiscountTest extends TestCase
     public function test_redemption_stays_held_through_pending_and_verify_error(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1);
 
         $discount = Discount::create([
@@ -880,7 +880,7 @@ class DiscountTest extends TestCase
     public function test_redemption_becomes_used_on_paid(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1);
 
         $discount = Discount::create([
@@ -945,7 +945,7 @@ class DiscountTest extends TestCase
     public function test_booking_json_contains_discount_fields(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1);
 
         Discount::create([
@@ -978,14 +978,14 @@ class DiscountTest extends TestCase
             ]);
 
         $this->assertEquals('JSONTEST', $response->json('booking.discount_code'));
-        $this->assertEquals(100000, $response->json('booking.booking_rooms.0.room_amount'));
-        $this->assertEquals(20000, $response->json('booking.booking_rooms.0.discount_amount'));
+        $this->assertEquals(1000, $response->json('booking.booking_rooms.0.room_amount'));
+        $this->assertEquals(200, $response->json('booking.booking_rooms.0.discount_amount'));
     }
 
     public function test_create_booking_with_discount_code(): void
     {
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000);
+        $roomType = $this->createRoomType(2000);
 
         Discount::create([
             'code' => 'DIRECT10',
@@ -1011,7 +1011,7 @@ class DiscountTest extends TestCase
         $booking = Booking::find($bookingId);
 
         $this->assertEquals('DIRECT10', $booking->discount_code);
-        $this->assertEquals(180000, $booking->total_amount); // 200,000 - 10%
+        $this->assertEquals(1800, $booking->total_amount); // 2,000 - 10%
         $this->assertCount(1, DiscountRedemption::where('user_id', $user->id)->get());
     }
 
@@ -1019,7 +1019,7 @@ class DiscountTest extends TestCase
     {
         $admin = $this->makeUser('admin');
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(200000);
+        $roomType = $this->createRoomType(2000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
         $discount = Discount::create([
@@ -1033,7 +1033,7 @@ class DiscountTest extends TestCase
             'code' => 'LIVE_RECOMPUTE',
         ])->assertStatus(200);
 
-        $this->assertEquals(100000, $booking->fresh()->total_amount);
+        $this->assertEquals(1000, $booking->fresh()->total_amount);
 
         // Admin modifies discount from 50% to 30%
         $this->actingAs($admin, 'sanctum')->putJson("/api/v1/discounts/{$discount->id}", [
@@ -1047,9 +1047,9 @@ class DiscountTest extends TestCase
             'check_out' => Carbon::today()->addDays(7)->toDateString(),
         ])->assertStatus(200);
 
-        // Now total is recomputed with 30% discount -> 200,000 - 60,000 = 140,000
-        $this->assertEquals(140000, $booking->fresh()->total_amount);
-        $this->assertEquals(60000, $br->fresh()->discount_amount);
+        // Now total is recomputed with 30% discount -> 2,000 - 600 = 1,400
+        $this->assertEquals(1400, $booking->fresh()->total_amount);
+        $this->assertEquals(600, $br->fresh()->discount_amount);
     }
 
     // =========================================================================
@@ -1131,7 +1131,7 @@ class DiscountTest extends TestCase
     {
         $admin = $this->makeUser('admin');
         $user = $this->makeUser();
-        $roomType = $this->createRoomType(100000);
+        $roomType = $this->createRoomType(1000);
         $booking = $this->createDraftBooking($user, $roomType);
 
         $discount = Discount::create([
@@ -1153,7 +1153,7 @@ class DiscountTest extends TestCase
 
         // Hold ยังอยู่ครบ ส่วนลดยังทำงาน (reprice เจอโค้ดเดิม)
         $this->assertCount(1, DiscountRedemption::where('discount_id', $discount->id)->get());
-        $this->assertEquals(50000, $booking->fresh()->total_amount);
+        $this->assertEquals(500, $booking->fresh()->total_amount);
         $this->assertSame('OLDNAME', $discount->fresh()->code);
     }
 
@@ -1208,7 +1208,7 @@ class DiscountTest extends TestCase
     }
 
     /**
-     * 🛡️ (28/08/26 F1): เปลี่ยน type โดยไม่ส่ง value ต้องถูก reject (422) กันกรณี fixed satang หลุดไปเป็น percent 100%
+     * 🛡️ (28/08/26 F1): เปลี่ยน type โดยไม่ส่ง value ต้องถูก reject (422) กันกรณี fixed baht หลุดไปเป็น percent 100%
      */
     public function test_update_discount_type_swap_without_value_is_rejected(): void
     {
@@ -1216,7 +1216,7 @@ class DiscountTest extends TestCase
         $discount = Discount::create([
             'code' => 'FIXEDTO100',
             'type' => 'fixed',
-            'value' => 100000,
+            'value' => 1000,
             'is_active' => true,
         ]);
 

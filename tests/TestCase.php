@@ -14,7 +14,7 @@ abstract class TestCase extends BaseTestCase
 
     /**
      * 🧾 (03/09/26) Invariant การเงิน: Σ booking_rooms.amount == bookings.total_amount
-     *    (ทั้งสองฝั่ง net, satang) — บังคับด้วย test เท่านั้น ไม่มี runtime guard/observer
+     *    (ทั้งสองฝั่ง net, integer baht) — บังคับด้วย test เท่านั้น ไม่มี runtime guard/observer
      *    เรียกหลังทุก mutation ที่ไหลผ่าน DiscountService::reprice()
      */
     protected function assertAmountInvariant(Booking $booking): void

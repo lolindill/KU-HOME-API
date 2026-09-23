@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
-use App\Support\Money;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -46,9 +45,9 @@ class RoomSeeder extends Seeder
         $deluxeId = Str::uuid();
         $suiteId = Str::uuid();
 
-        // 🌟 Spec (03/09/26): Rate card จริง authored แบบบาททศนิยม บันทึกเป็น satang (×100)
+        // 💰 Spec (11/09/26): Rate card เป็น integer บาทล้วน (non-decimal) — ไม่มีการแปลง satang แล้ว
         // 5 rows ต่อ room type: daily, daily_ku, group (min_5_rooms, min_10_rooms), month
-        // extra_bed_price บันทึกเป็น satang: 0, 50000, 60000
+        // extra_bed_price เป็น integer บาท: 0, 500, 600
         $roomTypeSpecs = [
             [
                 'id' => $standardId,
@@ -57,13 +56,13 @@ class RoomSeeder extends Seeder
                 'max_guests' => 2,
                 'extra_bed_enabled' => false,
                 'max_extra_beds' => 0,
-                'extra_bed_price' => 0, // 0 satang
+                'extra_bed_price' => 0, // 0 บาท
                 'rates' => [
-                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Superior Daily General',             'name_th' => 'ห้องซูพีเรียร์ (ราคารายวัน)',                 'baht' => 1000.00],
-                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Superior Daily KU Member',           'name_th' => 'ห้องซูพีเรียร์ (ราคาสมาชิก KU)',              'baht' => 800.00],
-                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Superior Group (5+ Rooms)',          'name_th' => 'ห้องซูพีเรียร์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)',   'baht' => 750.00],
-                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Superior Group (10+ Rooms)',         'name_th' => 'ห้องซูพีเรียร์ (ราคาหมู่คณะ 10 ห้องขึ้นไป)',  'baht' => 750.00],
-                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Superior Monthly',                   'name_th' => 'ห้องซูพีเรียร์ (ราคารายเดือน)',               'baht' => 15000.00],
+                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Superior Daily General',             'name_th' => 'ห้องซูพีเรียร์ (ราคารายวัน)',                 'baht' => 1000],
+                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Superior Daily KU Member',           'name_th' => 'ห้องซูพีเรียร์ (ราคาสมาชิก KU)',              'baht' => 800],
+                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Superior Group (5+ Rooms)',          'name_th' => 'ห้องซูพีเรียร์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)',   'baht' => 750],
+                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Superior Group (10+ Rooms)',         'name_th' => 'ห้องซูพีเรียร์ (ราคาหมู่คณะ 10 ห้องขึ้นไป)',  'baht' => 750],
+                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Superior Monthly',                   'name_th' => 'ห้องซูพีเรียร์ (ราคารายเดือน)',               'baht' => 15000],
                 ],
             ],
             [
@@ -73,13 +72,13 @@ class RoomSeeder extends Seeder
                 'max_guests' => 2,
                 'extra_bed_enabled' => true,
                 'max_extra_beds' => 1,
-                'extra_bed_price' => 50000, // 50,000 satang (500.00 THB)
+                'extra_bed_price' => 500, // 500 บาท (integer baht)
                 'rates' => [
-                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Deluxe Daily General',               'name_th' => 'ห้องดีลักซ์ (ราคารายวัน)',                   'baht' => 1200.00],
-                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Deluxe Daily KU Member',             'name_th' => 'ห้องดีลักซ์ (ราคาสมาชิก KU)',                'baht' => 1000.00],
-                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Deluxe Group (5+ Rooms)',            'name_th' => 'ห้องดีลักซ์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)',     'baht' => 900.00],
-                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Deluxe Group (10+ Rooms)',           'name_th' => 'ห้องดีลักซ์ (ราคาหมู่คณะ 10 ห้องขึ้นไป)',    'baht' => 750.00],
-                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Deluxe Monthly',                     'name_th' => 'ห้องดีลักซ์ (ราคารายเดือน)',                 'baht' => 18000.00],
+                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Deluxe Daily General',               'name_th' => 'ห้องดีลักซ์ (ราคารายวัน)',                   'baht' => 1200],
+                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Deluxe Daily KU Member',             'name_th' => 'ห้องดีลักซ์ (ราคาสมาชิก KU)',                'baht' => 1000],
+                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Deluxe Group (5+ Rooms)',            'name_th' => 'ห้องดีลักซ์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)',     'baht' => 900],
+                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Deluxe Group (10+ Rooms)',           'name_th' => 'ห้องดีลักซ์ (ราคาหมู่คณะ 10 ห้องขึ้นไป)',    'baht' => 750],
+                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Deluxe Monthly',                     'name_th' => 'ห้องดีลักซ์ (ราคารายเดือน)',                 'baht' => 18000],
                 ],
             ],
             [
@@ -89,13 +88,13 @@ class RoomSeeder extends Seeder
                 'max_guests' => 4,
                 'extra_bed_enabled' => true,
                 'max_extra_beds' => 2,
-                'extra_bed_price' => 60000, // 60,000 satang (600.00 THB)
+                'extra_bed_price' => 600, // 600 บาท (integer baht)
                 'rates' => [
-                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Suite Daily General',                'name_th' => 'ห้องสวีท (ราคารายวัน)',                     'baht' => 1800.00],
-                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Suite Daily KU Member',              'name_th' => 'ห้องสวีท (ราคาสมาชิก KU)',                  'baht' => 1500.00],
-                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Suite Group (5+ Rooms)',             'name_th' => 'ห้องสวีท (ราคาหมู่คณะ 5 ห้องขึ้นไป)',        'baht' => 1350.00],
-                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Suite Group (10+ Rooms)',            'name_th' => 'ห้องสวีท (ราคาหมู่คณะ 10 ห้องขึ้นไป)',       'baht' => 1350.00],
-                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Suite Monthly',                      'name_th' => 'ห้องสวีท (ราคารายเดือน)',                   'baht' => 27000.00],
+                    ['rate_type' => 'daily',    'code' => null,           'name_en' => 'Suite Daily General',                'name_th' => 'ห้องสวีท (ราคารายวัน)',                     'baht' => 1800],
+                    ['rate_type' => 'daily_ku', 'code' => null,           'name_en' => 'Suite Daily KU Member',              'name_th' => 'ห้องสวีท (ราคาสมาชิก KU)',                  'baht' => 1500],
+                    ['rate_type' => 'group',    'code' => 'min_5_rooms',  'name_en' => 'Suite Group (5+ Rooms)',             'name_th' => 'ห้องสวีท (ราคาหมู่คณะ 5 ห้องขึ้นไป)',        'baht' => 1350],
+                    ['rate_type' => 'group',    'code' => 'min_10_rooms', 'name_en' => 'Suite Group (10+ Rooms)',            'name_th' => 'ห้องสวีท (ราคาหมู่คณะ 10 ห้องขึ้นไป)',       'baht' => 1350],
+                    ['rate_type' => 'month',    'code' => null,           'name_en' => 'Suite Monthly',                      'name_th' => 'ห้องสวีท (ราคารายเดือน)',                   'baht' => 27000],
                 ],
             ],
         ];
@@ -116,7 +115,7 @@ class RoomSeeder extends Seeder
                     [
                         'name_en' => $rate['name_en'],
                         'name_th' => $rate['name_th'],
-                        'default_price' => Money::bahtToSatang($rate['baht']),
+                        'default_price' => (int) $rate['baht'],
                         'is_active' => true,
                     ]
                 );

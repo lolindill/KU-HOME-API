@@ -622,11 +622,19 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 - `check_in` (optional, date, ≥ today) — default: today
 - `check_out` (optional, date, > check_in) — default: tomorrow
 - `max_guests` (optional, integer, ≥ 1) — กรองเอาเฉพาะ room type ที่รองรับจำนวนแขก >= ค่าที่ส่ง (เทียบกับคอลัมน์ `max_guests` ของ room type)
+- `bed_type` (optional, in: `king_size`) — 🌟 (09/09/26) ส่ง `bed_type=king_size` เพื่อนับ availability เฉพาะ**ห้องเตียง king** (ชั้น 8) — ส่งค่าอื่น → `422`. ไม่ส่ง → พฤติกรรมเดิมทุกอย่าง
 
 **Semantics:**
 - `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
   - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
   - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
+- 🌟 **`bed_type=king_size` mode (09/09/26):** `available_rooms` เปลี่ยนความหมายเป็น `max(0, king_total_rooms − king_occupied)` และ response เพิ่ม 2 ฟิลด์โปร่งใส:
+  - `king_total_rooms` = ห้อง `bed_type='king_size'` ที่ **sellable** (`status NOT IN (maintenance, reserved_closed)`) — ตรงกับเงื่อนไขที่ `createBooking` ใช้ตัดสิน (ไม่ใช่ `status='available'` แบบ `rooms_count` รวม)
+  - `king_occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) + overlap ช่วงค้น โดย **hybrid ตาม lifecycle** (เพราะ `room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
+    - ก่อน assign: BR `bed_preference='king_size'` และ `room_id` ยัง null → นับ (allocator บังคับห้อง king — hard constraint)
+    - หลัง assign: BR ที่ห้องที่ assign จริงมี `bed_type='king_size'` → นับ (BR no-preference อาจลง king ได้)
+    - BR ลอย (ไม่มี preference และยังไม่ assign) ไม่นับเป็น king — allocator อาจจัด twin ก็ได้
+  - `search_criteria` เพิ่ม `bed_type: "king_size"` echo กลับ
 - `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `rates`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก (ทั้ง top-level และ embedded `room_type` มี `rates` object ในรูป baht string ทศนิยม 2 ตำแหน่ง)
 
 **Response `200`:**
@@ -682,6 +690,24 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 ```
 > 💡 `max_guests` ใน `search_criteria` เป็น `null` ถ้าไม่ได้ส่งมา
 > ⚠️ `rooms_count` ใช้ `status='available'` (ต่างจาก `/availability-per-day` ที่ใช้ `status NOT IN (maintenance, reserved_closed)` — inconsistency ที่รู้กันอยู่)
+
+**Response `200` (โหมด `bed_type=king_size` — ฟิลด์ที่ต่างจากปกติ):**
+```json
+{
+  "room_type_id": "uuid",
+  "name_en": "Superior",
+  "available_rooms": 4,
+  "king_total_rooms": 5,
+  "king_occupied": 1,
+  "search_criteria": {
+    "check_in": "2026-09-10",
+    "check_out": "2026-09-12",
+    "max_guests": null,
+    "bed_type": "king_size"
+  }
+}
+```
+> 💡 ไม่ส่ง `bed_type` → ไม่มี `king_total_rooms`/`king_occupied` และ `search_criteria` ไม่มี `bed_type` (payload เหมือนเดิมทุกไบต์). Endpoints availability อื่นๆ (`/availability-per-day`, `/availability-ranges`, `/unavailable-*`) ยัง**ไม่รองรับ** `bed_type` — ขยายภายหลังถ้า frontend ต้องการ
 
 ---
 
@@ -1145,16 +1171,18 @@ curl -s -H "Accept: application/json" \
 > 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
 > ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
 > 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
-> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้
+> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้  
+> 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)  
+> 🚪 **(16/09/26) Room Cap Rule**: การจองห้องจำกัดสูงสุด **4 ห้องต่อ 1 booking** (config: `booking.max_rooms_per_booking`) สำหรับผู้ใช้ non-admin (admin exempt — สามารถจองได้มากกว่า 4 ห้อง ตัดสินจาก Sanctum login role เท่านั้น). กฎนี้บังคับใช้ใน (a) การสร้างการจอง (`POST /bookings`) โดยนับจำนวนห้องในอาร์เรย์ `booking_rooms` (ตรวจที่ FormRequest layer) และ (b) การเพิ่มห้องเข้า draft (`POST /bookings/{id}/rooms`) โดยนับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (ตรวจที่ controller guard ก่อน `DB::beginTransaction()`). หากเกินเพดานจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
 
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
-| `booking_rooms`                             | required, array                               |
+| `booking_rooms`                             | required, array, สูงสุด 4 ห้องสำหรับทั่วไป (admin exempt: ไม่จำกัด) |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
-| `booking_rooms.*.check_in`                  | required, date, ≥ today                       |
+| `booking_rooms.*.check_in`                  | required, date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
 | `booking_rooms.*.addons.extra_bed`          | nullable, integer, min 0 (canonical 🛏️)       |
 | `booking_rooms.*.extra_beds`                | nullable, integer, min 0 (⚠️ legacy alias — canonical ชนะ) |
@@ -1293,7 +1321,9 @@ curl -s -H "Accept: application/json" \
 }
 ```
 
-**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in ≥ today` · `check_out > check_in` (รายห้อง)
+**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in` ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) · `check_out > check_in` (รายห้อง)
+
+> 🚪 **(16/09/26) Room Cap**: เมื่อเพิ่มห้องใหม่ ระบบจะนับจำนวนห้องเดิมใน booking รวมกับห้องใหม่ที่ขอเพิ่ม ต้องไม่เกิน **4 ห้อง** สำหรับ non-admin (admin ไม่จำกัด). หากรวมแล้วเกินเพดาน จะได้ HTTP `422 Unprocessable Content` พร้อม message `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
 
 > 💡 **Pricing**: Server คำนวณราคาจาก `global_rates` ทั้งหมด — client ส่งราคาเองไม่ได้ (เหมือน createBooking)
 
@@ -1391,7 +1421,7 @@ curl -s -H "Accept: application/json" \
 | Field | Rule |
 |-------|------|
 | `room_type_id` | `sometimes` uuid exists:room_types,id |
-| `check_in` | `sometimes` date `after_or_equal:today` |
+| `check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `check_out` | `sometimes` date `after:check_in` |
 | `addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
 | `extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
@@ -1507,7 +1537,7 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms` | required, array, ≥ 1 entry |
 | `booking_rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
 | `booking_rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
-| `booking_rooms.*.check_in` | `sometimes` date `after_or_equal:today` |
+| `booking_rooms.*.check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
 | `booking_rooms.*.addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
 | `booking_rooms.*.extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
@@ -2111,7 +2141,7 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 }
 ```
 
-> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer satang) = **ยอดสุทธิต่อห้อง**:
+> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer baht) = **ยอดสุทธิต่อห้อง**:
 > `amount = room_amount − discount_amount + extra_bed_price + breakfast_price + early_checkIn_price + late_checkOut_price`
 > Server คำนวณที่จุดเดียว (`DiscountService::reprice()`) ครบทุก flow รวมถึง walk-in — **invariant: Σ `booking_rooms.amount` == `bookings.total_amount`** (ทั้งสองฝั่ง net) frontend จึงไม่ต้องบวกเอง และห้ามส่ง `amount` เข้ามาเอง (read-only, server-computed)
 
@@ -2474,7 +2504,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 **Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (satang integers): `breakfast` 20000 (200 THB), `early_checkin` 10000 (100 THB **ต่อชั่วโมง**), `late_checkout` 10000 (100 THB **ต่อชั่วโมง**), `extra_bed` 50000 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast` 200 (200 THB), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
@@ -2697,9 +2727,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
 | `billing_address` | string | Billing address (nullable)                          |
 | `billing_comment` | string | Billing note/comment (nullable)                     |
-| `room_amount`  | integer   | Gross room price = rate × nights (satang, server-computed 27/08/26) |
-| `discount_amount` | integer | Discount applied to this room (satang, server-computed) |
-| `amount`       | integer   | 🧾 Net total per room (satang, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
+| `room_amount`  | integer   | Gross room price = rate × nights (integer baht, server-computed 27/08/26) |
+| `discount_amount` | integer | Discount applied to this room (integer baht, server-computed) |
+| `amount`       | integer   | 🧾 Net total per room (integer baht, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 
@@ -2760,13 +2790,13 @@ Returns tasks with status `pending` or `in_progress`.
 | `max_guests`         | integer   | Max guests per room                      |
 | `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
 | `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
-| `extra_bed_price`    | string    | Price per extra bed as 2-dp baht string (e.g. `"500.00"` on wire; storage integer satang `50000`) |
+| `extra_bed_price`    | string    | Price per extra bed — integer baht, non-decimal (e.g. `500` = 500 THB; storage = wire, 11/09/26) |
 | `rates`              | object    | **Virtual** — canonical rates object `{daily: {general, ku_member}, group: {min_5_rooms, min_10_rooms}, monthly}` in 2-dp decimal baht strings resolved from `global_rates`. Fallback `"0.00"` if missing/inactive. |
 | `created_at`         | timestamp |                                          |
 | `updated_at`         | timestamp |                                          |
 
 > 💡 **Room Rates & Money Policy (03/09/26):**
-> - **Money Policy:** Database storage strictly uses **integer satang** (e.g. `100000` satang = 1,000.00 THB). Booking math, payment totals, and discounts remain in integer satang. At the room-type API edge (wire), all rate values and `extra_bed_price` are serialized as **2-decimal-places decimal baht strings** (e.g. `"1000.00"`, `"500.00"`).
+> - **Money Policy:** Database storage and API wire use **integer baht, non-decimal** (e.g. `1200` = 1,200 THB) — มาตรฐานใหม่ 11/09/26 (เดิม integer satang + baht string ที่ขอบ API). ทุก rate value, `extra_bed_price`, `total_amount`, `booking_rooms.amount`, addons, discounts อยู่หน่วยเดียวกันทั้งระบบ
 > - **Rate Types in `global_rates`:**
 >   - `daily` (code `null`): Daily rate for general guests (`rates.daily.general`)
 >   - `daily_ku` (code `null`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
@@ -2793,9 +2823,9 @@ Returns tasks with status `pending` or `in_progress`.
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
 | `breakfast`            | integer | Number of breakfasts                     |
 | `breakfast_price`      | integer | Total breakfast price (baht)             |
-| `early_checkIn_price`  | integer | Early check-in total price (satang)      |
+| `early_checkIn_price`  | integer | Early check-in total price (integer baht)|
 | `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
-| `late_checkOut_price`  | integer | Late check-out total price (satang)      |
+| `late_checkOut_price`  | integer | Late check-out total price (integer baht)|
 | `late_hours`           | integer | Late check-out hours (0–7, default: 0)   |
 | `created_at`           | timestamp |                                        |
 | `updated_at`           | timestamp |                                        |
@@ -3095,7 +3125,7 @@ These endpoints exist but are **not production-ready**:
 
 ### Pricing Notes
 
-- All prices stored as **integers** (satang/cents) since 2026-06-05 — baht ที่ขอบ API เฉพาะ `rates` object + `extra_bed_price` ของ RoomType (baht string 2 ตำแหน่ง, 03/09/26).
+- All prices stored as **integer baht (non-decimal)** since 2026-09-11 — ก่อนหน้านั้นเป็น integer satang (2026-06-05) และ `rates`/`extra_bed_price` ของ RoomType เป็น baht string 2 ตำแหน่ง (03/09/26, ยกเลิกแล้ว)
 - Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
 - 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
