@@ -6,9 +6,7 @@ status: closed
 
 # Wayfinder Map — `room-state-periods` (ห้องสำรอง/ซ่อมแซม มีระยะเวลา)
 
-## Destination
-
-✅ COMPLETED (2026-09-24)
+## Destination ✅ COMPLETED (2026-09-24)
 
 ตัดสิน + spec (`ready-for-agent`) ของโมเดล **กำหนดระยะเวลา (period)** ให้สถานะ "ห้องสำรอง" และ "ซ่อมแซม (maintenance)" ทำงานเหมือน booking — เป็นช่วงวันที่ ไม่ใช่สถานะตายตัว — รวมผลที่ตามมาทั้งหมด: ผลต่อ decision `is_reserved` flag (ticket 90 ของ map `reserved-room-pool`), state machine, การนับ availability ทุก endpoint, และงาน freeze ค้างของ map เดิม
 
