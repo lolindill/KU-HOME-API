@@ -2039,3 +2039,65 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   5. `tests/Feature/BookingRoomCapTest.php` — feature tests ใหม่ 10 tests ครอบคลุม create cap (4 vs 5), add-rooms cumulative count (3+2 vs 3+1), admin exemptions, spoof guard, batch edit integrity, และ config override
   6. `cline.md` — บันทึกประวัติและ architectural decisions
 - **ผลการทดสอบ:** Full test suite **411 passed (1413 assertions)** · Pint clean
+
+## 🧊 WebSocket realtime — ยกเลิกถาวรจาก roadmap (2026-09-23, owner decision)
+
+- สถานะเปลี่ยนจาก **DEFERRED (รอหลักฐาน polling ไม่พอ)** → **CANCELLED (ตัดออกจาก roadmap ทั้งหมด)** — housekeeping dashboard ใช้ **polling เป็นดีไซน์สุดท้าย** (Phase A จบ 2026-07-15)
+- เหตุผลเดิมยังยืนเป็น record ห้าม re-litigate: auth gap (private channel คืน 403 บน API-only + Sanctum), YAGNI, cost (Reverb server + queue worker + Echo wiring)
+- **ห้ามเสนอ WebSocket/Reverb/Echo ซ้ำ** — จะทำได้ต่อเมื่อ owner สั่งใหม่เท่านั้น
+- อัปเดตหัวข้อ "Housekeeping Dashboard" ใน `AGENTS.md` เป็นสถานะ CANCELLED แล้ว (background เดิมอยู่ใน `house_keep_plan.md`)
+
+## 🛡️ TOCTOU createBooking — ปิดปัญหาด้วย draft real-time (2026-09-23, owner decision)
+
+- **สรุปเดิม:** availability count ใน `createBooking()` ทำใน `DB::beginTransaction()` แต่ไม่มี `lockForUpdate` บน room/BR pool → เคยจดว่ามี TOCTOU window (2 request พร้อมกันผ่าน check ทั้งคู่แต่ห้องไม่พอ)
+- **มติใหม่: ถือว่าเคลียร์โดย design** เพราะ:
+  1. availability count นับ `booking_rooms` ตั้งแต่ status `draft` — `whereIn('status', ['draft','confirmed','checked_in'])` ใน `BookingController::createBooking` (block ห้องตั้งแต่มีคนจองตอนนั้น)
+  2. flow ปัจจุบัน **สร้าง draft booking แบบ real-time ทันทีที่ผู้ใช้เริ่มจอง** — draft กิน slot ทันที + `payment_deadline` 24 ชม. → คำขอถัดไปเห็น draft ใน count และถูกตัดจำนวนห้องทันที
+  3. draft หมดอายุถูก `CleanupExpiredDrafts` (02:00) กวาดแล้วคืน slot อัตโนมัติ
+- หน้าต่าง race คงเหลือเฉพาะจังหวะ create-draft พร้อมกันเป๊ะมิลลิวินาที — **owner ยอมรับ risk นี้แล้ว ปิดเป็นข้อติดตาม · ห้ามเติม `lockForUpdate` เองโดยไม่มีหลักฐาน**
+- เปิดใหม่ได้เมื่อเจอ overbooking จริงใน prod — ทางแก้ที่จดไว้: `Room::where('room_type_id',$rtId)->lockForUpdate()->count()` ก่อน count overlap (SQLite no-op — ทำงานจริงบน PostgreSQL) แล้วจดที่นี่อีกครั้ง
+
+## ⏱️ REQ-008 — Draft Lock 15 นาที + scope holdingSlot (2026-09-24, owner decision)
+
+- **owner decision:** "draft + payment deadline รวม 15 นาที" (แทน 24 ชม. เดิม — ตรง REQ-008 ของ SRS v2: ผู้กดก่อนล็อกห้อง 15 นาที หมดเวลาแล้วปลดล็อกเป็นห้องว่างคืน)
+- **การเปลี่ยนแปลง:**
+  1. `config/booking.php` ใหม่: `payment_deadline_minutes` (env `BOOKING_PAYMENT_DEADLINE_MINUTES`, default 15) — ใช้ใน `BookingController::createBooking`
+  2. **`BookingRoom::scopeHoldingSlot()`** — scope กลางของ "ชุดสถานะที่กิน slot": draft(ยังไม่หมด deadline) + confirmed + checked_in · **draft ที่ `payment_deadline` ผ่านไปแล้วไม่กิน slot** — ปลดล็อกห้องทันทีตอน query (deadline `null` = กิน slot ตามเดิม — walk-in style) · แทนที่ `whereIn('status', ['draft','confirmed','checked_in'])` เดิมครบ **13 จุด**: BookingController 4 write paths, RoomController calendar/availability 7 จุด, `RoomAllocator`, `BookingPriority`, `BookingRoom::assignAvailableRoom()` — **ห้ามเขียน whereIn ชุดนี้เองนอก scope อีก**
+  3. `CleanupExpiredDrafts` schedule จาก daily 02:00 → **ทุก 5 นาที** (`routes/console.php`) — เพราะ deadline สั้นลงมาก sweep วันละครั้งไม่ทัน; command เป็นแค่ garbage-collect (slot ปลดจริงที่ query)
+- ผลข้างเคียงที่ออกแบบไว้: `BookingConfirmationController` guard เดิม (ส่งสลิปบน draft ที่หมด deadline = 422) ทำงานร่วมโดยตรง — user ต้องส่งสลิปภายใน 15 นาที; `verify_error` ส่งใหม่ได้แม้หมด deadline (ไม่เปลี่ยน)
+- Tests: `tests/Feature/DraftSlotReleaseTest.php` (4 tests — ล็อกภายใน 15 นาที / ปลดทันทีเมื่อหมดเวลา / availability endpoint เห็น slot คืน / sweep ลบจริง) · Full suite 461 passed
+
+## 🗓️ Long stay — จองรายเดือน / จองเหมา (2026-09-24, SRS v2 REQ-014/026/027 — owner สั่งทำจาก gap ตรวจ SRS)
+
+- สถานะเดิม: ไม่มี cap จำนวนคืนอยู่แล้ว (จอง 30 คืนผ่านอยู่แล้วโดยกฎเดิม) — gap จริงคือ "ระบบไม่รู้จัก concept รายเดือน/จองเหมา"
+- **การเปลี่ยนแปลง (ไม่มี migration — derived ทั้งหมด):**
+  1. `config/booking.php`: `monthly_min_nights` (env `BOOKING_MONTHLY_MIN_NIGHTS`, default **30** — REQ-026) + `block_min_nights` (env `BOOKING_BLOCK_MIN_NIGHTS`, default **21** — REQ-027 จองเหมา ใช้กติกาตามรายเดือน)
+  2. `BookingRoom` appends ใหม่: **`nights`** (จำนวนคืน — mirror สูตร controller, ครึ่งวันนับ 1 คืน) + **`stay_type`**: `monthly` | `block` | `daily` — ออกทุก response ที่ serialize BookingRoom
+  3. ส่วนลดใช้กับ long stay ได้ตามระบบเดิม (REQ-026 — DiscountService คิดเฉพาะ `room_amount`)
+- 🚧 **ยังไม่ครบ REQ-026:** การจ่ายเงินแบบ มัดจำ/ค้างชำระ(ERP) ของรายเดือน รอ design แมป `wayfinder/booking-payment-types` (payment_type) — จะอ้าง stay_type ตอน implement ได้
+- Tests: `tests/Feature/BookingLongStayTest.php` (5 tests — 30 คืน monthly / 21 คืน block จองวันเดียวกันโดย admin / 3 คืน daily / 60 คืนไม่โดน cap / ส่วนลด 10% บน 30 คืน = 45,000−4,500)
+
+## ⏱️ REQ-001.4 — Sanctum token หมดอายุ 8 ชั่วโมง (2026-09-24, owner decision)
+
+- `config/sanctum.php`: `expiration` จาก `null` → **480 นาที** (env `SANCTUM_TOKEN_EXPIRATION_MINUTES`) — token เกิน 8 ชม. นับจาก `created_at` ถูก Sanctum guard ปฏิเสธ 401
+- ⚠️ **ความหมายเปลี่ยนจากเดิม "token ไม่หมดอายุเองทั้ง life"** — จุดที่เกี่ยว: multi-device semantics ยังเหมือนเดิม (token แต่ละตัวหมดอายุอิสระ, logout ยังลบเฉพาะ current token) แต่ตอนนี้ทุก token มีอายุ 8 ชม. · เป็น **hard expiry ไม่ใช่ sliding inactivity** — SRS เขียนว่า "ไม่มีการเคลื่อนไหว 8 ชม." แต่เลือก hard expiry เพราะเป็นกลไก built-in ของ Sanctum (proven, 0 custom code) และเข้มกว่า (กัน token ค้างข้ามวัน) — ถ้าอนาคตอยากได้ sliding จริง ต้องทำ middleware อ่าน `last_used_at` ก่อน guard (จดไว้ อย่าแก้ expiration ให้กลายเป็น sliding)
+- ผลต่อ frontend: ควรจับ 401 แล้ว redirect ไป login (SsoExchange/AuthController ไม่ต้องแก้ — `createToken` เหมือนเดิม)
+- Tests: `tests/Feature/SanctumTokenExpirationTest.php` (3 tests — ใช้ได้ / 479 นาทียังอยู่ / 481 นาที 401)
+
+## ⏰ REQ-032/034 — Early/Late ไม่เกิน 7 ชั่วโมง (2026-09-24 — ตรวจแล้ว มีอยู่แล้ว + ปิดช่อง test)
+
+- ตรวจจาก SRS v2 gap list แล้วพบว่า **validation `max:7` มีครบทั้ง 4 write paths อยู่แล้ว** (StoreBookingRequest / AddBookingRoomsRequest / UpdateBookingRoomRequest / UpdateBookingRoomsRequest — ทั้ง canonical `early_checkin`/`late_checkout` และ alias `early_hours`/`late_hours`, ข้อความไทยครบ)
+- ช่องที่หายคือ test — เพิ่ม `tests/Feature/BookingAddonHoursCapTest.php` 3 tests ครอบ add-rooms (`early_hours=8` → 422) / แก้รายห้อง (`late_checkout=8`) / แก้ batch (`late_hours=8`) — create path มี BookingTest คุมอยู่แล้ว
+
+## 📋 SRS v2 Gap Register — ของที่เหลือจาก SRS (srs_room_booking_v2.pdf) (2026-09-24)
+
+> owner ตรวจ PDF SRS v2 เทียบระบบ แล้วสั่ง: ทำข้อ 1/2/5/6 (+ต่อมาย้าย 7 มาจด) · เพิ่ม ticket ในแมปเปิดสำหรับ 8/9/11 · ที่เหลือ "take note" — รายการจด ณ วันที่ 24/09/26:
+
+1. **REQ-042/044/045 — ค่าเสียหาย/ค่าปรับ add-on ต่อห้อง-ต่อ booking + upgrade ห้องจ่ายส่วนต่าง:** ยังไม่มีทั้งโค้ด/แมป — งานใหญ่ ต้อง chart แมปใหม่ก่อนเขียนโค้ด (booking domain, ยุ่ง state machine + reconciliation)
+2. **REQ-020/040/009.2 — เอกสาร Quotation / ใบ confirm 2 รูปแบบ (แสดง/ไม่แสดงราคา) / Guest Folio:** PDF documents effort — excel-reports ตัดเป็น out-of-scope ไว้แล้ว ยังไม่มีใคร chart (จับคู่ roadmap "report templates + digital signature")
+3. **REQ-033 — ไฟล์หลักฐาน check-in (บัตรประชาชน/Registration/guest register/PDPA) เก็บ 1 ปี:** `images` table + private disk พร้อม (morph ได้กับ BookingRoom) แต่ยังไม่มี endpoint อัปโหลดหลักฐานตอน check-in + ไม่มี retention 1 ปีใน `app:cleanup-images` (ตอนนี้ sweep แค่ orphan + สลิป rejected 30 วัน) — owner สั่ง take note (24/09/26), ยังไม่ทำ
+4. **หมวด 3.8 ใบเสร็จรับเงิน (ต่อ booking, แบ่งราคา 1–3 คน / กรอกราคาเอง):** ชนกับ `receipts` FROZEN (2026-07-24) — ต้องตัดสิน unfreeze/ตารางใหม่ ตอน design เงินของแมป `booking-payment-types` จบ (มีจดใน "Not yet specified" ของแมปแล้ว — ตัวนี้ update ด้วย req เลข REQ-00x ของ SRS)
+5. **REQ-005 (NFR) — รองรับ 500 concurrent users:** ยังไม่เคย load test (throttle ต่อ route มีอยู่) — รอมีหลักฐานความจำเป็น
+6. **REQ-001.3 — password reset (admin ส่งลิงก์):** เพิ่มเป็น ticket ในแมป `google-integration` แล้ว (ticket 08 — blocked-by email use cases) — ดูสถานะที่แมป
+7. **REQ-039 — ประวัติสถานะห้องย้อนหลัง 1 ปี + REQ-015/016 ปัดเศษหลักสิบ/แพ็กเกจอาหารเช้า 100/200:** เพิ่ม ticket ในแมป `room-state-periods` (ticket 03) และ `booking-payment-types` (ticket 07) + excel-reports ticket 10 แล้ว — ดูที่แมป
+- ส่วนที่ **เคยจดเป็น gap แล้วจบในวันนี้:** REQ-001.4 (8 ชม.) · REQ-008 (15 นาที) · REQ-014/026/027 (long stay) · REQ-032/034 (cap 7 ชม.)

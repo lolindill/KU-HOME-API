@@ -167,7 +167,7 @@ final class RoomAllocator
 
             // โหลด reservation ที่ overlap ช่วง [min, max] (กินวงกว้างเพื่อความถูกต้อง)
             $overlaps = $room->bookingRooms()
-                ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                ->holdingSlot()
                 ->where('check_in', '<', $maxCheckOut)
                 ->where('check_out', '>', $minCheckIn)
                 ->get(['check_in', 'check_out']);

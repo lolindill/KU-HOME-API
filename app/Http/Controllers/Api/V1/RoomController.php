@@ -182,7 +182,7 @@ class RoomController extends Controller
                 // BR states ที่นับลด availability: draft, confirmed, checked_in
                 // (cancelled/no_show/checked_out ไม่นับลด)
                 // ✅ Consistency: ตรงกับ createBooking() ที่กรองแบบเดียวกัน
-                $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                $query->holdingSlot()
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             }])
@@ -205,7 +205,7 @@ class RoomController extends Controller
                         ->when(! $includeReserved, fn ($qq) => $qq->where('is_reserved', false));
                 }])
                     ->withCount(['bookingRooms as king_occupied_count' => function ($q) use ($checkIn, $checkOut) {
-                        $q->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        $q->holdingSlot()
                             ->where('check_in', '<', $checkOut)
                             ->where('check_out', '>', $checkIn)
                             ->where(function ($inner) {
@@ -317,7 +317,7 @@ class RoomController extends Controller
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availability/createBooking)
         $endExclusive = $end->copy()->addDay();
         $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
-            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->holdingSlot()
             ->where('check_in', '<', $endExclusive)
             ->where('check_out', '>', $start)
             ->get();
@@ -408,7 +408,7 @@ class RoomController extends Controller
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
         $endExclusive = $end->copy()->addDay();
         $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
-            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->holdingSlot()
             ->where('check_in', '<', $endExclusive)
             ->where('check_out', '>', $start)
             ->get();
@@ -515,7 +515,7 @@ class RoomController extends Controller
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityPerDay/createBooking)
         $endExclusive = $end->copy()->addDay();
         $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
-            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->holdingSlot()
             ->where('check_in', '<', $endExclusive)
             ->where('check_out', '>', $start)
             ->get();
@@ -583,7 +583,7 @@ class RoomController extends Controller
 
         // 🌟 max checkout จาก BR ที่ status นับลด availability (ชุดเดียวกับ availabilityRanges/createBooking)
         $maxCheckout = BookingRoom::select('check_out')
-            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->holdingSlot()
             ->max('check_out');
 
         // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
@@ -618,7 +618,7 @@ class RoomController extends Controller
         // BR states ที่นับลด availability: draft, confirmed, checked_in (ตรงกับ availabilityRanges/createBooking)
         $endExclusive = $end->copy()->addDay();
         $overlaps = BookingRoom::select(['room_type_id', 'check_in', 'check_out'])
-            ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->holdingSlot()
             ->where('check_in', '<', $endExclusive)
             ->where('check_out', '>', $start)
             ->get();

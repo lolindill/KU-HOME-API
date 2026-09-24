@@ -55,6 +55,12 @@ class BookingRoom extends Model
      */
     protected $hidden = ['roomType', 'room'];
 
+    /**
+     * 🗓️ (2026-09-24, SRS v2 REQ-026/027): derived fields — nights (จำนวนคืน) และ
+     * stay_type ('daily' | 'block' | 'monthly' — จองเหมา/รายเดือน ตาม config/booking.php)
+     */
+    protected $appends = ['nights', 'stay_type'];
+
     // =========================================================
     // 🚦 State Machine (BR-level)
     // =========================================================
@@ -118,6 +124,66 @@ class BookingRoom extends Model
     public function getPrimaryGuestAttribute(): ?array
     {
         return $this->guests[0] ?? null;
+    }
+
+    /**
+     * 🗓️ จำนวนคืนของห้องนี้ (mirror สูตรใน BookingController — ครึ่งวันนับเป็น 1 คืน)
+     */
+    public function getNightsAttribute(): int
+    {
+        if (empty($this->check_in) || empty($this->check_out)) {
+            return 0;
+        }
+
+        return $this->check_in->copy()->startOfDay()->diffInDays($this->check_out->copy()->startOfDay()) ?: 1;
+    }
+
+    /**
+     * 🗓️ ประเภทการเข้าพักตามจำนวนคืน (derived — SRS v2 REQ-026/027)
+     *    monthly = จองรายเดือน (>= monthly_min_nights), block = จองเหมา (>= block_min_nights)
+     */
+    public function getStayTypeAttribute(): string
+    {
+        $nights = $this->nights;
+
+        if ($nights >= (int) config('booking.monthly_min_nights', 30)) {
+            return 'monthly';
+        }
+
+        if ($nights >= (int) config('booking.block_min_nights', 21)) {
+            return 'block';
+        }
+
+        return 'daily';
+    }
+
+    // =========================================================
+    // 🛏️ Availability: ชุดสถานะที่ "กิน slot" (ทุก endpoint ใช้ scope เดียวกัน)
+    // =========================================================
+
+    /**
+     * Slot-holding set — สถานะ BR ที่นับลด availability: draft + confirmed + checked_in
+     *
+     * ⏱️ (2026-09-24, REQ-008 + owner decision "draft + payment_deadline รวม 15 นาที"):
+     * draft ที่ payment_deadline ผ่านไปแล้ว "ไม่กิน slot" อีก — ปลดล็อกเป็นห้องว่าง
+     * ทันทีตอน query (ไม่รอ CleanupExpiredDrafts มาลบ ซึ่งเป็นแค่ garbage-collect)
+     * draft ที่ deadline เป็น null (walk-in style) นับเป็นกิน slot ตามเดิม
+     * ห้ามใช้ whereIn('status', ['draft',...]) เองนอก scope นี้ — ไม่งั้น draft หมดอายุ
+     * จะยังล็อกห้องค้างจนกว่า sweep จะมาลบค่ะ
+     */
+    public function scopeHoldingSlot($query)
+    {
+        return $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where(function ($q) {
+                $q->whereIn('status', ['confirmed', 'checked_in'])
+                    ->orWhere(function ($draft) {
+                        $draft->where('status', 'draft')
+                            ->whereHas('booking', fn ($b) => $b->where(function ($w) {
+                                $w->whereNull('payment_deadline')
+                                    ->orWhere('payment_deadline', '>', now());
+                            }));
+                    });
+            });
     }
 
     public function getPrimaryGuestNameAttribute(): string
@@ -191,10 +257,10 @@ class BookingRoom extends Model
 
         $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
 
-        // ค้นหาห้องว่าง — เช็คจาก BR-level ทุกสถานะตั้งแต่ draft ขึ้นไป
+        // ค้นหาห้องว่าง — เช็คจาก BR-level ชุด slot-holding (draft ที่ยังไม่หมดเวลา + confirmed + checked_in)
         $availableRoom = Room::where('room_type_id', $this->room_type_id)
             ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
-                $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                $query->holdingSlot()
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             })

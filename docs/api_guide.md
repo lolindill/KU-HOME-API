@@ -41,6 +41,8 @@ Authorization: Bearer <access_token>
 
 Tokens are issued by `POST /api/v1/login` or `POST /api/v1/register` via Laravel Sanctum.
 
+> ⏱️ **Token lifetime = 8 ชั่วโมง** (SRS v2 REQ-001.4, 2026-09-24): token ที่ออกไปแล้วนานเกิน 8 ชม. (config: `sanctum.expiration`, env `SANCTUM_TOKEN_EXPIRATION_MINUTES`) จะถูกปฏิเสธด้วย `401` — client ต้องพาผู้ใช้ล็อกอินใหม่. เป็น hard expiry นับจากเวลาที่ออก token (ไม่ใช่ sliding inactivity) · token แต่ละ device หมดอายุอิสระจากกัน (multi-device semantics เดิม)
+
 ### Standard Response Format
 
 **Success** — always includes `status: "success"`:
@@ -1174,6 +1176,8 @@ curl -s -H "Accept: application/json" \
 > 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้  
 > 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)  
 > 🚪 **(16/09/26) Room Cap Rule**: การจองห้องจำกัดสูงสุด **4 ห้องต่อ 1 booking** (config: `booking.max_rooms_per_booking`) สำหรับผู้ใช้ non-admin (admin exempt — สามารถจองได้มากกว่า 4 ห้อง ตัดสินจาก Sanctum login role เท่านั้น). กฎนี้บังคับใช้ใน (a) การสร้างการจอง (`POST /bookings`) โดยนับจำนวนห้องในอาร์เรย์ `booking_rooms` (ตรวจที่ FormRequest layer) และ (b) การเพิ่มห้องเข้า draft (`POST /bookings/{id}/rooms`) โดยนับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (ตรวจที่ controller guard ก่อน `DB::beginTransaction()`). หากเกินเพดานจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
+> ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline)
+> 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
 
 **Validation Rules:**
 
@@ -2700,7 +2704,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `status`           | enum      | Container-level: `draft`, `paid`, `confirmed`, `complete` |
 | `total_amount`     | integer   | In baht (no decimals — integer since 2026-06-05)        |
 | `is_paid`          | boolean   | Default: false                                          |
-| `payment_deadline` | datetime  | For draft bookings (24h from creation)                  |
+| `payment_deadline` | datetime  | For draft bookings (15 min from creation — REQ-008, 2026-09-24) |
 | `created_at`       | timestamp |                                                         |
 | `updated_at`       | timestamp |                                                         |
 

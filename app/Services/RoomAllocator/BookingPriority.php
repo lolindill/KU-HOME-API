@@ -86,7 +86,7 @@ final class BookingPriority
             ->whereNotIn('status', ['maintenance'])
             ->where('is_reserved', false)
             ->whereDoesntHave('bookingRooms', function ($q) use ($br) {
-                $q->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                $q->holdingSlot()
                     ->where('check_in', '<', $br->checkOut)
                     ->where('check_out', '>', $br->checkIn);
             })

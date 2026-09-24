@@ -24,4 +24,22 @@ return [
     // =========================================================
     'max_rooms_per_booking' => (int) env('BOOKING_MAX_ROOMS_PER_BOOKING', 4),
 
+    // =========================================================
+    // ⏱️ Payment Deadline (ล็อกห้องรอชำระ — REQ-008, 2026-09-24)
+    //    draft booking ล็อกห้องไว้ได้ 15 นาทีนับจากสร้าง — หมดเวลาแล้ว
+    //    ห้องถูกปลดล็อกเป็นว่างทันที (scope holdingSlot) และถูกลบโดย
+    //    CleanupExpiredDrafts (schedule ทุก 5 นาที)
+    // =========================================================
+    'payment_deadline_minutes' => (int) env('BOOKING_PAYMENT_DEADLINE_MINUTES', 15),
+
+    // =========================================================
+    // 🗓️ Long stay (จองรายเดือน / จองเหมา — SRS v2 REQ-026/027, 2026-09-24)
+    //    stay_type ของ booking_room (derived — ไม่มี column):
+    //    nights >= monthly_min_nights (30) = 'monthly' (จองรายเดือน)
+    //    nights >= block_min_nights (21)  = 'block' (จองเหมา — กติกาตามรายเดือน)
+    //    อื่น ๆ = 'daily'
+    // =========================================================
+    'monthly_min_nights' => (int) env('BOOKING_MONTHLY_MIN_NIGHTS', 30),
+    'block_min_nights' => (int) env('BOOKING_BLOCK_MIN_NIGHTS', 21),
+
 ];

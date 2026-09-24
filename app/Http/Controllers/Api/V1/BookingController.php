@@ -300,7 +300,7 @@ class BookingController extends Controller
 
                     // 🌟 availability นับที่ BR-level (block ห้องตั้งแต่ draft ขึ้นไป)
                     $existingBooked = BookingRoom::where('room_type_id', $rtId)
-                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->holdingSlot()
                         ->where('check_in', '<', $checkOut)
                         ->where('check_out', '>', $checkIn)
                         ->count();
@@ -633,7 +633,7 @@ class BookingController extends Controller
                     $totalRooms = Room::where('room_type_id', $effectiveTypeId)->count();
 
                     $existingBooked = BookingRoom::where('room_type_id', $effectiveTypeId)
-                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->holdingSlot()
                         ->where('check_in', '<', $checkOut)
                         ->where('check_out', '>', $checkIn)
                         ->where('id', '!=', $bookingRoom->id)
@@ -880,7 +880,7 @@ class BookingController extends Controller
                     $checkOut = Carbon::parse($u['check_out']);
 
                     $existingBooked = BookingRoom::where('room_type_id', $u['type_id'])
-                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->holdingSlot()
                         ->where('check_in', '<', $checkOut)
                         ->where('check_out', '>', $checkIn)
                         ->whereNotIn('id', $batchIds)
@@ -1164,7 +1164,7 @@ class BookingController extends Controller
                     // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
                     // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
                     $existingBooked = BookingRoom::where('room_type_id', $rtId)
-                        ->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+                        ->holdingSlot()
                         ->where('check_in', '<', $checkOut)
                         ->where('check_out', '>', $checkIn)
                         ->count();
@@ -1197,7 +1197,8 @@ class BookingController extends Controller
                 // bookings เก็บแค่ container + payment info เท่านั้น
 
                 'total_amount' => 0,
-                'payment_deadline' => Carbon::now()->addHours(24),
+                // ⏱️ (2026-09-24, REQ-008): ล็อกห้อง 15 นาที (config booking.payment_deadline_minutes)
+                'payment_deadline' => Carbon::now()->addMinutes((int) config('booking.payment_deadline_minutes')),
             ]);
 
             // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ

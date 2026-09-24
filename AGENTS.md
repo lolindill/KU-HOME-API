@@ -105,7 +105,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 
 - **Auth model = stateless Bearer tokens (Sanctum token mode)** — ไม่ใช่ SPA cookie/stateful mode.
   - `config/cors.php`: `allowed_origins => ['*']`, `supports_credentials => false`, paths `['api/*', 'sanctum/csrf-cookie']`. ห้ามเปลี่ยนเป็น cookie mode โดยไม่รื้อทั้ง CORS + Sanctum stateful domains ก่อน
-  - `config/sanctum.php`: `'expiration' => null` → **token ไม่หมดอายุเอง** ทั้ง life
+  - `config/sanctum.php`: `'expiration' => 480` (**8 ชั่วโมง, SRS v2 REQ-001.4 — owner 2026-09-24**, env `SANCTUM_TOKEN_EXPIRATION_MINUTES`) — token เกิน 8 ชม. นับจาก `created_at` → 401 (hard expiry ไม่ใช่ sliding inactivity; test ที่ `SanctumTokenExpirationTest`)
   - Default guard คือ `web` (session) แต่ทุก protected route ใช้ `auth:sanctum` ตรงๆ ใน `routes/api.php` → ใช้ token route จริง
 - **Token per client/device:** ทุกครั้งที่ `login`/`register` เรียก `createToken('ku_home_auth_token')` → **สร้าง token ใหม่เสมอ ไม่ revoke ของเดิม** → ผู้ใช้คนเดียวสามารถมี token หลายตัวใช้งานพร้อมกันได้ (multi-device/multi-tab/multi-client).
   - `logout` ลบเฉพาะ `currentAccessToken()` เท่านั้น → token อื่นยังใช้ได้ (logout-on-one-device semantics). ห้ามเปลี่ยนเป็น `tokens()->delete()` โดยไม่ตั้งใจ ไม่งั้นถือว่า kick ออกจากทุก device
@@ -114,33 +114,27 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 - **Concurrency / locking (สำคัญมาก):**
   - **Atomic sequences:** `Booking::generateUniqueConfirmation()` ใช้ `booking_sequences` table + `SELECT ... FOR UPDATE` (`lockForUpdate()`) → collision-proof ต่อหลาย concurrent request. **อย่าใช้** `max()+1` หรือ `Str::random()` สุ่มทำเลข confirmation/receipt
   - **`RoomAllocator::allocate()`** เรียก `lockForUpdate()` บน room pool (skip ใน SQLite test env เพราะ SQLite ไม่ support row lock) → กัน double-assign ห้องเดียวให้ 2 booking พร้อมกัน
-  - **`createBooking()` availability check ทำภายใน `DB::beginTransaction()`** แต่ **availability count ยังไม่มี `lockForUpdate`** บน room/BR pool มี TOCTOU window เล็กน้อยระหว่าง count กับ insert (race ที่ 2 request พร้อมกันผ่าน check ทั้งคู่แต่จริงๆ ห้องไม่พอ). ถ้าเจอ overbooking ใน prod ให้พิจารณา `Room::where('room_type_id',$rtId)->lockForUpdate()->count()` ก่อน count overlap — และ document ใน `cline.md`
+  - **`createBooking()` availability check — TOCTOU ✅ ปิดแล้วด้วย design (owner decision 2026-09-23):** availability count นับ `booking_rooms` ตั้งแต่ status `draft` และ flow ปัจจุบัน **สร้าง draft booking แบบ real-time ทันทีที่ผู้ใช้เริ่มจอง** — draft กิน slot ทันที → คำขอถัดไปเห็น draft และถูกตัดจำนวนห้องทันที หน้าต่าง race เหลือเพียงจังหวะ create-draft พร้อมกันเป๊ะมิลลิวินาที — **owner ยอมรับ risk นี้แล้ว ถือว่าเคลียร์ · ห้ามเติม `lockForUpdate` เอง** จะกลับมาแก้ได้เมื่อมีหลักฐาน overbooking จริงใน prod (ทางแก้ที่จดไว้: `Room::where('room_type_id',$rtId)->lockForUpdate()->count()` ก่อน count overlap แล้ว document ใน `cline.md`)
+  - **⏱️ Slot-holding set = `BookingRoom::scopeHoldingSlot()` (2026-09-24, REQ-008 + owner decision "draft + payment_deadline รวม 15 นาที"):** `payment_deadline` = **15 นาที** นับจากสร้าง draft (config `booking.payment_deadline_minutes`) — **draft ที่ deadline ผ่านไปแล้วไม่กิน slot อีก** (ปลดล็อกห้องเป็นว่างทันทีตอน query; `CleanupExpiredDrafts` schedule **ทุก 5 นาที** เป็นแค่ garbage-collect ลบ row). ทุก query availability (BookingController 4 write paths + RoomController calendar ทั้งหมด + RoomAllocator/BookingPriority) ต้องใช้ `->holdingSlot()` — **ห้ามใช้ `whereIn('status', ['draft',...])` เอง** ไม่งั้นห้องที่หมดเวลายังล็อกค้าง
   - **never** write `->status = ...` ตรงๆ บน `Booking`/`BookingRoom` (audit trail พัง) และ never assign `room_id` โดยไม่ผ่าน `RoomAllocator` (double-book risk)
 - **Queue driver = `database`** → jobs ทำงาน sequential ใน worker เดียวถ้าไม่ scale worker. ถ้าจะ scale worker หลายตัว ต้องแน่ใจว่าทุก state change ผ่าน `transitionStatus()` + atomic sequence เท่านั้น
 
 ## State Machines (do not bypass)
 
-- **Booking (container):** `draft → pending → paid → confirmed → complete` (no `cancelled`; expired drafts are hard-deleted by `CleanupExpiredDrafts` at 02:00). `pending` **(2026-08-25)** = user ส่งสลิปแล้วรอ admin ตรวจ (mirror `BookingConfirmation`): submit → `draft → pending`; verify → `pending → paid → confirmed` (`is_paid=true` set ตอน verify เท่านั้น); reject → `pending → verify_error` (resubmit: `verify_error → pending`). `draft → paid` เหลือ admin/system เท่านั้น (เงินสดหน้าเคาน์เตอร์). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`. `verify_error` ไม่ถูกลบโดย `CleanupExpiredDrafts` (รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้).
+- **Booking (container):** `draft → pending → paid → confirmed → complete` (no `cancelled`; expired drafts — `payment_deadline` **15 นาที** — are hard-deleted by `CleanupExpiredDrafts` **every 5 minutes**; their slots are released instantly at query time via `BookingRoom::scopeHoldingSlot()`). `pending` **(2026-08-25)** = user ส่งสลิปแล้วรอ admin ตรวจ (mirror `BookingConfirmation`): submit → `draft → pending`; verify → `pending → paid → confirmed` (`is_paid=true` set ตอน verify เท่านั้น); reject → `pending → verify_error` (resubmit: `verify_error → pending`). `draft → paid` เหลือ admin/system เท่านั้น (เงินสดหน้าเคาน์เตอร์). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`. `verify_error` ไม่ถูกลบโดย `CleanupExpiredDrafts` (รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้).
 - **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `booking_rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422).
 - **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
 - **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
 - **DiscountRedemption:** `held → used` — apply บน draft / createBooking → `held` (คงค้างตลอด `pending` / `verify_error` / resubmit); เมื่อ booking เข้า `paid` หรือ `confirmed` (verify ผ่าน หรือ เงินสด) → `used` ถาวรผ่าน hook ใน `Booking::transitionStatus()`. การปล่อย slot คืนอัตโนมัติผ่าน FK cascade เมื่อลบ booking, ลบ booking_room หรือลบโค้ด (`removeFromDraft`).
 
-## Housekeeping Dashboard — WebSocket Decision
+## Housekeeping Dashboard — WebSocket CANCELLED (2026-09-23)
 
-> **Does the housekeeping dashboard need WebSocket?** — **No, not yet.**
-
-This is a **deliberately deferred decision** documented in [`house_keep_plan.md`](./house_keep_plan.md) and `cline.md`:
+> **Does the housekeeping dashboard need WebSocket?** — **No — final decision: WebSocket is removed from the roadmap entirely.**
 
 - **Phase A (DONE 2026-07-15):** task refactor + state machine + assign/accept + roles/routes + master stock — uses **polling**.
-- **Phase B (DEFERRED):** WebSocket realtime — stack is Laravel Reverb + Echo, but **only after polling is proven insufficient**.
-
-**Why deferred (do not re-litigate without new evidence):**
-1. **Auth gap (S-B5):** Echo/Reverb private channels need `/broadcasting/auth` (web guard/session), but this is an API-only + Sanctum project → private channels return 403. Workarounds (public channel, custom auth driver, token-in-channel-name) all add complexity.
-2. **YAGNI:** no evidence yet that polling is too slow for housekeeping workflow.
-3. **Cost:** Reverb server + queue worker (currently `database` driver) + Echo client wiring vs. benefit.
-
-If asked to add realtime: use a **public** `housekeeping` channel first (simplest, no auth gap), and confirm a queue worker is running before dispatching `ShouldBroadcast` events.
+- **Phase B: CANCELLED (owner decision 2026-09-23 — เดิมเป็น DEFERRED):** polling is the **final** design, not an interim one. ห้ามเสนอ Reverb/Echo/WebSocket ซ้ำ จะทำได้ต่อเมื่อ owner สั่งใหม่เท่านั้น.
+- Historical reasons (record, do not re-litigate): 1) **Auth gap (S-B5):** Echo/Reverb private channels need `/broadcasting/auth` (web guard/session), but this is an API-only + Sanctum project → private channels return 403. 2) **YAGNI:** no evidence polling is too slow. 3) **Cost:** Reverb server + queue worker + Echo client wiring.
+- Background detail lives in [`house_keep_plan.md`](./house_keep_plan.md).
 
 ## Room Allocation (read before touching allocation)
 
