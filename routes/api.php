@@ -177,6 +177,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 🛏️ Rooms — เปลี่ยนสถานะห้อง (admin only)
         Route::put('/rooms/{id}/status', [RoomController::class, 'updateRoomStatus']);
 
+        // 📝 Room status logs (audit, admin only) — ประวัติการเปลี่ยนสถานะห้อง (REQ-039)
+        Route::get('/rooms/{id}/status-logs', [RoomController::class, 'statusLogs'])
+            ->where('id', '[0-9a-f\-]{36}');
+
         // 🛎️ Front Desk Operations (admin only)
         Route::prefix('front-desk')->group(function () {
             Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);

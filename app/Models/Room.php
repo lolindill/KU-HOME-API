@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Auth;
 
 class Room extends Model
 {
@@ -117,6 +118,21 @@ class Room extends Model
         }
 
         $this->save();
+
+        // 📝 Audit log (24/09/26, REQ-039): เก็บประวัติการเปลี่ยนสถานะห้อง 1 ปีย้อนหลัง
+        //    เขียนที่นี่เพราะเป็น chokepoint เดียว — อย่า bypass ด้วย ->status = ตรงๆ
+        //    (สถานะ reserved/maintenance เป็น period ของ room_state_periods — ประวัติชั้นเอง
+        //    ไม่ได้ log ผ่านจุดนี้ · retention ตัดโดย app:cleanup-status-logs)
+        $causerId = $updatedByUserId ?? Auth::id();
+        StatusChangeLog::create([
+            'entity_type' => 'room',
+            'entity_id' => $this->id,
+            'from_status' => $currentStatus,
+            'to_status' => $newStatus,
+            'role' => $causerId ? (User::find($causerId)?->role ?? 'system') : 'system',
+            'causer_id' => $causerId,
+            'note' => null,
+        ]);
 
         return true;
     }

@@ -1979,6 +1979,44 @@ Each log row captures **who** changed **what** **when**:
 
 ---
 
+### GET `/rooms/{id}/status-logs` — Room state-change audit log (Admin)
+
+🔒 **Admin only** 📝 (24/09/26, REQ-039 — wayfinder `room-state-periods` ticket 03)
+
+Returns the audit trail of **room** status transitions (`entity_type='room'` on `status_change_logs`), ordered oldest → newest. Precedent: `GET /bookings/{id}/status-logs`.
+
+- Written inside `Room::transitionStatusTo()` (single chokepoint) — every transition via `PUT /rooms/{id}/status`, front-desk check-in/out, housekeeping task completion, walk-in, and `app:daily-room-maintenance` is captured automatically.
+- `role` = role of the acting user (looked up from `causer_id`); cron/system transitions log `role='system'` with **null** `causer_id`.
+- **Retention 1 ปีย้อนหลัง (REQ-039):** `app:cleanup-status-logs` (schedule รายวัน 02:45) ตัดเฉพาะ row `entity_type='room'` ที่เก่ากว่า `config/room_status_log.php` `retention_days` (env `ROOM_STATUS_LOG_RETENTION_DAYS`, default `365`) — **log ของ booking/booking_room ไม่ถูกแตะ** มี `--dry-run` ให้นับก่อน
+- 🏨 เมื่อ map `room-state-periods` ตรง spec: ห้องที่อยู่ใน period สำรอง/ซ่อม ไม่มี transition ให้ log — ประวัติของ reserved/maintenance อ่านจากตาราง `room_state_periods` โดยตรง (audit ชั้นเอง)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Room status logs retrieved",
+  "room_id": "room-uuid",
+  "room_number": "101",
+  "logs": [
+    {
+      "id": "log-uuid",
+      "entity_type": "room",
+      "entity_id": "room-uuid",
+      "from_status": "available",
+      "to_status": "dirty",
+      "role": "housekeeping",
+      "causer_id": "user-uuid",
+      "note": null,
+      "created_at": "2026-09-24T02:45:00.000000Z"
+    }
+  ]
+}
+```
+
+**Response `404`:** room id not found.
+
+---
+
 ### POST `/discounts/validate` — Validate discount code & preview quota 🎟️
 
 🔒 **Auth required** · Rate limit: `10,1`

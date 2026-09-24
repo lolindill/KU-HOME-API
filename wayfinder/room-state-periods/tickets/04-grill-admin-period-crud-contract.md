@@ -2,7 +2,7 @@
 label: wayfinder:grilling
 type: HITL
 status: open
-assignee:
+assignee: kevii (session 2026-09-24)
 blocked-by: ["02-grill-overlap-expiry-availability-rules"]
 ---
 

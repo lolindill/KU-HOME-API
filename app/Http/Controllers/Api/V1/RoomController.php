@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateRoomRequest;
 use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Models\StatusChangeLog;
 use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
@@ -731,6 +732,38 @@ class RoomController extends Controller
                 'status' => 'error',
                 'message' => $e->getMessage(),
             ], $statusCode);
+        }
+    }
+
+    // 📝 ประวัติการเปลี่ยนสถานะห้อง (REQ-039 — เก็บย้อนหลัง 1 ปี ตัดโดย app:cleanup-status-logs)
+    //    เทียบ precedent: GET /bookings/{id}/status-logs
+    public function statusLogs(string $id)
+    {
+        try {
+            $room = Room::findOrFail($id);
+
+            $logs = StatusChangeLog::where('entity_type', 'room')
+                ->where('entity_id', $room->id)
+                ->orderBy('created_at', 'asc')
+                ->get([
+                    'id', 'entity_type', 'entity_id',
+                    'from_status', 'to_status', 'role', 'causer_id',
+                    'note', 'created_at',
+                ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Room status logs retrieved',
+                'room_id' => $room->id,
+                'room_number' => $room->room_number,
+                'logs' => $logs,
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Room not found',
+            ], 404);
         }
     }
 }

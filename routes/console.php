@@ -15,3 +15,6 @@ Schedule::command('app:daily-room-maintenance')->daily();
 //    (slot ถูกปลดล็อกทันทีตอน query ผ่าน scope holdingSlot — command นี้เป็นการลบ row จริง)
 Schedule::command('app:cleanup-expired-drafts')->everyFiveMinutes();
 Schedule::command('app:cleanup-images')->dailyAt('02:30');
+// 📝 (2026-09-24, REQ-039): ประวัติสถานะห้องเก็บ 1 ปีย้อนหลัง — ตัดเกิน retention รายวัน
+//    (ลดเฉพาะ entity_type='room' — log ของ booking/booking_room ไม่ถูกแตะ)
+Schedule::command('app:cleanup-status-logs')->dailyAt('02:45');
