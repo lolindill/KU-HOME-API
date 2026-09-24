@@ -26,7 +26,7 @@ One **admin-only, request-scoped parameter** — `include_reserved` — accepted
 - When **nobody** sends it, every response stays byte-identical to today.
 - As part of the same change, booking capacity denominators are aligned to the sellable pool (the bug fix), so a booking can no longer be accepted past the rooms that can actually be assigned.
 
-No schema change, no migration, no change to the room state machine.
+~~No schema change, no migration, no change to the room state machine.~~ *(ยกเลิก 2026-09-24 ตาม amendment ใน Implementation Decisions — ticket 90 เลือกโมเดล flag: `rooms.is_reserved` + ถอดสถานะ `reserved_closed`)*
 
 ## User Stories
 
@@ -55,17 +55,20 @@ No schema change, no migration, no change to the room state machine.
 
 ## Implementation Decisions
 
+> **⚠️ Amendment (2026-09-24 — ticket `90-reserved-room-checkin-lifecycle` closed):** โมเดลเปลี่ยนจาก "reserved_closed เป็นสถานะ" เป็น **`rooms.is_reserved` boolean (PgBoolean) = pool membership ถาวร** — ถอดสถานะ `reserved_closed` ออกจาก state machine ทั้งหมด (migration แปลงข้อมูลเดิม `reserved_closed → available + is_reserved=true`) ผลคือ lifecycle ไม่ต้อง flip เลยทั้งตอน check-in (`available → occupied` legal อยู่แล้ว) และหลัง checkout (flag เดินตามห้อง กลับเข้า pool สำรองเอง) · ข้อความ "no schema change / no migration / no state-machine change" ด้านล่าง**ถือว่าถูกยกเลิก** — ที่เหลือคงเดิม: flag `include_reserved` (request param) ยัง request-scoped, maintenance ยังถูกตัดสมบูรณ์, HTTP contract หน้าบ้านไม่เปลี่ยน
+
 - **Param contract:** `include_reserved`, boolean, request-scoped (query on GET endpoints, body field on POST/PUT). Effective **only** when the authenticated user's role is `admin`, resolved in-controller — the availability routes are public and have no role middleware to lean on. Non-admin and anonymous requests: flag silently ignored (never a 403 — user decision #3).
+- **Pool definition (post-amendment):** "sellable pool" = `status != maintenance AND is_reserved = false` · "reserved pool" = `is_reserved = true` (และไม่เอา maintenance เสมอ) — ทุก surface ใช้นิยามเดียวกัน
 - **Surfaces touched (5):**
-  1. The three availability endpoints (summary, per-day calendar, ranges) — pool counts include `reserved_closed` under the flag, plus transparent fields.
+  1. The three availability endpoints (summary, per-day calendar, ranges) — pool counts include reserved-pool rooms under the flag, plus transparent fields.
   2. King-size counters inside the summary endpoint — `king_total_rooms` follows the same extended-pool rule so king numbers stay consistent with the total (precedent: the `bed_type=king_size` param work).
   3. Booking capacity checks in create-booking, add-rooms, and update-room — denominator aligned to the sellable pool by default (bug fix), extended to sellable + reserved under the flag.
   4. Auto room-assignment — the allocator entry point gains an optional `include_reserved` boolean (default `false`) threaded into the room-pool loading and the booking-priority sellable filter; the admin-only assign-rooms endpoint passes the flag through.
-  5. Walk-in — the room status guard accepts `reserved_closed` additionally when the flag is present (the route is already admin-only; the in-controller admin check still applies for symmetry).
+  5. Walk-in — the room status guard accepts reserved-pool rooms additionally when the flag is present (the route is already admin-only; the in-controller admin check still applies for symmetry).
 - **Response shape under the flag (user decision #4):** `available_rooms` is **replaced** by the extended-pool number (sellable + reserved − booked); new transparent fields `sellable_rooms` and `reserved_rooms` expose the breakdown; search criteria records that the flag applied. Without the flag, responses are byte-identical to today.
 - **Maintenance is absolute:** `maintenance` is excluded from every pool on every surface in every case — flag or no flag, admin or not.
-- **No persistence (user decision #2):** no new column, no migration; the flag lives and dies with each request. If an admin creates a booking with the flag but later calls assign-rooms without it, the allocator may fail when only reserved rooms remain — accepted as fail-safe direction.
-- **No state-machine change (user decision #6):** a room assigned to a booking keeps status `reserved_closed`. `reserved_closed → available` is already a legal transition for the manual flip before check-in; `reserved_closed → occupied` is illegal (locked by the existing room state tests). The auto-flip-vs-manual question is deferred to a separate wayfinder ticket (`90-reserved-room-checkin-lifecycle`).
+- **~~No persistence (user decision #2)~~ — ยังคงเดิมสำหรับ param `include_reserved`:** ไม่ persist ค่า param ลง bookings; the flag lives and dies with each request. If an admin creates a booking with the flag but later calls assign-rooms without it, the allocator may fail when only reserved rooms remain — accepted as fail-safe direction. *(ส่วน `rooms.is_reserved` เป็น property ของห้อง ต่างเรื่องกับ param นี้ — persist ตาม amendment)*
+- **~~No state-machine change (user decision #6)~~ — ถูกแทนด้วย amendment (ticket 90, 2026-09-24):** สถานะ `reserved_closed` ถอดออกจาก machine — ห้องสำรองถูก assign แล้ววิ่ง lifecycle ปกติ (`available → occupied → checkout_makeup → …`) โดย `is_reserved` ไม่เปลี่ยนตาม · การเปลี่ยน pool membership เป็น admin action ชัดเจน (toggle) ไม่ผูกกับ lifecycle ใด
 - **Conventions preserved:** all booking-side capacity work stays inside the existing transactional checks; assignment happens only via the allocator; the dead `assignAvailableRoom()` model method is left alone (out of scope).
 
 ## Testing Decisions

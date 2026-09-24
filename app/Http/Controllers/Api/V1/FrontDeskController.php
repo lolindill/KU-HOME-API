@@ -52,6 +52,11 @@ class FrontDeskController extends Controller
             if (! in_array($room->status, ['available', 'prep_checkin'])) {
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
+            // 🏨 (24/09/26) ticket 90: ห้องสำรอง (is_reserved) สถานะเป็น available ได้ — ห้าม walk-in
+            //    จนกว่า ticket 05 จะเปิดรับ include_reserved flag (ตอนนี้ reject กัน pool รั่ว)
+            if ($room->is_reserved) {
+                throw new \Exception("Room number {$room->room_number} is a reserved (สำรอง) room and cannot be used for walk-in yet.");
+            }
 
             $staffUser = User::findOrFail($validated['verified_by']);
 

@@ -82,12 +82,14 @@ class RoomType extends Model
     }
 
     /**
-     * 🌟 Local Scope: Eager-load rateRows และนับจำนวนห้องที่ขายได้ (status ไม่ใช่ maintenance/reserved_closed)
+     * 🌟 Local Scope: Eager-load rateRows และนับจำนวนห้องที่ขายได้
+     * 🏨 (24/09/26) ticket 90: sellable = status ไม่ใช่ maintenance และไม่ใช่ห้องสำรอง (is_reserved)
      */
     public function scopeWithSellableRoomsAndRates($query)
     {
         return $query->withCount(['rooms as total_rooms_count' => function ($q) {
-            $q->whereNotIn('status', ['maintenance', 'reserved_closed']);
+            $q->whereNotIn('status', ['maintenance'])
+                ->where('is_reserved', false);
         }])->with('rateRows');
     }
 

@@ -3,7 +3,7 @@ label: wayfinder:task
 type: AFK
 title: "Param gate helper + availability summary endpoint — tracer bullet"
 status: open
-assignee: antigravity (2026-09-16)
+assignee: zcode session (2026-09-24 — 🧊 FROZEN รอ map room-state-periods · งานลงแล้ว suite 446 เขียว แต่ไม่ปิด)
 blocked-by: []
 ---
 
@@ -32,6 +32,21 @@ blocked-by: []
 **Blocked by:** None (frontier — can start immediately)
 
 **Status:** ready-for-agent
+
+## 🧊 Progress (2026-09-24) — implementation landed, ticket FROZEN ไม่ปิด
+
+งานลง branch `agust-11` ครบแล้ว (suite เขียว 446 tests / 1553 assertions + pint) แต่ **ticket ยัง open** — map ถูก freeze รอ map `room-state-periods` (req ใหม่ 2026-09-24: ห้องสำรอง/ซ่อมแซมกำหนดระยะเวลาแบบ booking) ซึ่งอาจเปลี่ยน `is_reserved` flag เป็น period records แล้วกระทบ query ที่ลงไปนี้
+
+สิ่งที่ landed แล้ว (รวม model pivot จาก ticket 90 ที่โยกมาไว้ ticket นี้):
+- Migration `2026_09_24_091500_add_is_reserved_to_rooms` — เพิ่ม `rooms.is_reserved` + แปลงข้อมูล `reserved_closed → (available, is_reserved=true)`
+- `Room` model — fillable/cast PgBoolean + ถอดสถานะ `reserved_closed` ออกจาก `transitionStatusTo()` ทั้ง target/source
+- สลับ filter ทุกจุด `reserved_closed → is_reserved`: `RoomType::scopeWithSellableRoomsAndRates`, `RoomAllocator::loadRoomPool`, `BookingPriority::hasX09Free`, availability summary pool + king counters, walk-in guard (reject `is_reserved` รอ ticket 05 เปิด flag), `UpdateRoomRequest` enum
+- `app/Support/IncludeReservedGate.php` — shared gate (admin + boolean flag, silent-ignore, ไม่ validate กัน 422)
+- `RoomController::availability` — admin flag → `available_rooms` = sellable + reserved − booked + `sellable_rooms`/`reserved_rooms` + `search_criteria.include_reserved`; ไม่ส่ง flag = payload เดิมทุกไบต์
+- Room listings (`allRooms`/`getRoomById`/`roomStatus`) โชว์ `is_reserved` badge
+- Tests: `RoomStateTest` ปรับตาม machine ใหม่ · king test comment · (test file `RoomAvailabilityIncludeReservedTest` ยังไม่ได้เขียน — ถูกตัดจังหวะด้วย freeze)
+
+**สิ่งค้างเมื่อ unfreeze:** เขียน `tests/Feature/RoomAvailabilityIncludeReservedTest.php` ครบ contract ด้านล่าง + ตรวจกับผลของ map `room-state-periods` ว่า query set นี้ต้องปรับตามหรือไม่
 
 - [ ] สร้าง shared gate resolution helper ตัวเดียวใน support namespace เช็ค sanctum role `admin` + boolean `include_reserved`
 - [ ] Non-admin และ anonymous ส่ง `include_reserved=true` เข้า `GET /api/v1/availability` → คืน payload ปกติเหมือนไม่ส่ง flag ทุกไบต์ (ห้ามคืน 403)

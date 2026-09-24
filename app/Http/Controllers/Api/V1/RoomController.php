@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateRoomRequest;
 use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -29,6 +30,8 @@ class RoomController extends Controller
                     'room_type_id' => $room->room_type_id,
                     'room_type_name' => $room->roomType->name_en ?? 'Unknown',
                     'status' => $room->status,
+                    // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง — board ต้องมองเห็น pool membership ได้
+                    'is_reserved' => $room->is_reserved,
                     'status_updated_at' => $room->status_updated_at,
                 ];
             });
@@ -69,6 +72,8 @@ class RoomController extends Controller
                 'room_type_id' => $room->room_type_id,
                 'room_type_name' => $room->roomType->name_en ?? 'Unknown',
                 'status' => $room->status,
+                // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง
+                'is_reserved' => $room->is_reserved,
                 'status_updated_at' => $room->status_updated_at,
             ],
         ]);
@@ -90,6 +95,8 @@ class RoomController extends Controller
                     'room_number' => $room->room_number,
                     'room_type' => $room->roomType->name_en ?? 'Unknown',
                     'status' => $room->status,
+                    // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง
+                    'is_reserved' => $room->is_reserved,
                     'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-',
                 ];
             });
@@ -152,7 +159,13 @@ class RoomController extends Controller
             'max_guests' => 'nullable|integer|min:1',
             // 🌟 (09/09/26) bed_type=king_size → นับ availability เฉพาะห้อง king (ชั้น 8)
             'bed_type' => 'nullable|string|in:king_size',
+            // 🏨 (24/09/26) include_reserved ไม่ validate โดยตั้งใจ — non-admin/ค่าที่ไม่ใช่ boolean
+            //    ต้องถูกเมยายีเงียบ ๆ ไม่ใช่ 422 (สัญญา silent-ignore ของ spec)
         ]);
+
+        // 🏨 (24/09/26) ticket 01: gate รวมของ include_reserved — admin + flag เท่านั้น
+        //    (อื่น ๆ เมยายีเงียบ ๆ · ห้องสำรอง = is_reserved · maintenance ถูกตัดเสมอ)
+        $includeReserved = IncludeReservedGate::enabled($request);
 
         $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
         $checkOut = $request->check_out ? Carbon::parse($request->check_out) : Carbon::tomorrow();
@@ -160,7 +173,9 @@ class RoomController extends Controller
         $bedType = $request->query('bed_type');
 
         $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
-            $query->where('status', 'available');
+            // 🏨 (24/09/26) ticket 90: sellable pool = available + ไม่ใช่ห้องสำรอง (is_reserved)
+            $query->where('status', 'available')
+                ->where('is_reserved', false);
         }])
             ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
                 // 🌟 Refactor (29/06/26): filter ที่ BR-level ตรงๆ ตาม state machine
@@ -171,16 +186,23 @@ class RoomController extends Controller
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             }])
+            // 🏨 (24/09/26) ticket 01: admin flag → นับห้องสำรองแยกไว้โชว์ breakdown
+            ->when($includeReserved, fn ($query) => $query->withCount(['rooms as reserved_rooms_count' => function ($query) {
+                $query->where('status', 'available')
+                    ->where('is_reserved', true);
+            }]))
             // 🌟 (09/09/26) bed_type=king_size → เพิ่ม 2 counters สำหรับมิติห้อง king
-            //    king pool = sellable (status NOT IN maintenance/reserved_closed) — ตรงกับ createBooking
+            //    king pool = sellable (available + ไม่ใช่ห้องสำรอง) — ตรงกับ createBooking
             //    king occupied = hybrid ตาม lifecycle เพราะ room_id ถูก assign เฉพาะหลัง paid/confirmed:
             //      ก่อน assign: BR bed_preference=king_size ถูก allocator บังคับเข้าห้อง king แน่นอน (hard constraint)
             //      หลัง assign: นับตาม bed_type ของห้องจริงที่ถูก assign (BR no-preference อาจลง king ได้)
             //      เงื่อนไข 2 แขนกันหมด (room_id null ↔ not null) — ไม่นับซ้ำ
-            ->when($bedType === 'king_size', function ($query) use ($checkIn, $checkOut) {
-                $query->withCount(['rooms as king_total_rooms' => function ($q) {
+            ->when($bedType === 'king_size', function ($query) use ($checkIn, $checkOut, $includeReserved) {
+                $query->withCount(['rooms as king_total_rooms' => function ($q) use ($includeReserved) {
                     $q->where('bed_type', 'king_size')
-                        ->whereNotIn('status', ['maintenance', 'reserved_closed']);
+                        ->whereNotIn('status', ['maintenance'])
+                        // 🏨 ไม่ส่ง flag → pool king เฉพาะห้องขายปกติ · ส่ง flag → รวมห้อง king สำรอง
+                        ->when(! $includeReserved, fn ($qq) => $qq->where('is_reserved', false));
                 }])
                     ->withCount(['bookingRooms as king_occupied_count' => function ($q) use ($checkIn, $checkOut) {
                         $q->whereIn('status', ['draft', 'confirmed', 'checked_in'])
@@ -199,7 +221,7 @@ class RoomController extends Controller
             // 🌟 Filter room types ที่รองรับจำนวนแขกขั้นต่ำที่ต้องการ
             ->when($maxGuests, fn ($q) => $q->where('max_guests', '>=', $maxGuests))
             ->get()
-            ->map(function ($type) use ($checkIn, $checkOut, $maxGuests, $bedType) {
+            ->map(function ($type) use ($checkIn, $checkOut, $maxGuests, $bedType, $includeReserved) {
                 $availableRooms = max(0, $type->rooms_count - $type->booked_rooms_count);
 
                 $row = [
@@ -227,9 +249,20 @@ class RoomController extends Controller
                     ],
                 ];
 
+                // 🏨 (24/09/26) ticket 01: admin flag → available_rooms = sellable + reserved − booked
+                //    + ฟิลด์โปร่งใส sellable_rooms / reserved_rooms + search_criteria บันทึกว่า flag มีผล
+                //    (maintenance ไม่เคยเข้า pool ทั้งสอง — สถานะไม่ใช่ available)
+                if ($includeReserved) {
+                    $row['available_rooms'] = max(0, $type->rooms_count + $type->reserved_rooms_count - $type->booked_rooms_count);
+                    $row['sellable_rooms'] = $type->rooms_count;
+                    $row['reserved_rooms'] = $type->reserved_rooms_count;
+                    $row['search_criteria']['include_reserved'] = true;
+                }
+
                 // 🌟 (09/09/26) bed_type=king_size → available_rooms เปลี่ยนความหมายเป็น king-aware
                 //    + ฟิลด์โปร่งใส king_total_rooms / king_occupied (frontend โชว์ "3/5 ห้อง king ว่าง" ได้)
                 //    ไม่ส่ง bed_type → payload เหมือนเดิมทุกไบต์ (backward compatible)
+                //    (king_total สะท้อน extended pool แล้วเมื่อ admin ส่ง include_reserved)
                 if ($bedType === 'king_size') {
                     $row['available_rooms'] = max(0, $type->king_total_rooms - $type->king_occupied_count);
                     $row['king_total_rooms'] = $type->king_total_rooms;

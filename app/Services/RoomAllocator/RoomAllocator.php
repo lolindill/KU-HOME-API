@@ -142,7 +142,10 @@ final class RoomAllocator
 
         $query = Room::with('roomType')
             ->whereHas('roomType', fn ($q) => $q->whereIn('name_en', $neededTypes))
-            ->whereNotIn('status', ['maintenance', 'reserved_closed']);
+            // 🏨 (24/09/26) ticket 90: ห้องสำรอง = is_reserved=true — ออกจาก pool เริ่มต้น
+            //    (ticket 04 จะเพิ่ม include_reserved ให้ assign-rooms ขยาย pool ได้)
+            ->whereNotIn('status', ['maintenance'])
+            ->where('is_reserved', false);
 
         // lockForUpdate เพื่อกัน race (skip ใน SQLite ที่ไม่ support)
         if (config('database.default') !== 'sqlite' && DB::transactionLevel() > 0) {

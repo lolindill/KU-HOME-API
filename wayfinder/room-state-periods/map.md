@@ -1,0 +1,36 @@
+---
+label: wayfinder:map
+title: "room-state-periods — ห้องสำรอง/ซ่อมแซม กำหนดระยะเวลาแบบ booking"
+status: open
+---
+
+# Wayfinder Map — `room-state-periods` (ห้องสำรอง/ซ่อมแซม มีระยะเวลา)
+
+## Destination
+
+ตัดสิน + spec (`ready-for-agent`) ของโมเดล **กำหนดระยะเวลา (period)** ให้สถานะ "ห้องสำรอง" และ "ซ่อมแซม (maintenance)" ทำงานเหมือน booking — เป็นช่วงวันที่ ไม่ใช่สถานะตายตัว — รวมผลที่ตามมาทั้งหมด: ผลต่อ decision `is_reserved` flag (ticket 90 ของ map `reserved-room-pool`), state machine, การนับ availability ทุก endpoint, และงาน freeze ค้างของ map เดิม
+
+## Notes
+
+- **Domain:** KU HOME API — ปัจจุบัน (2026-09-24) "ห้องสำรอง" = `rooms.is_reserved` boolean ถาวร (pool membership — decision ticket 90), "ซ่อมแซม" = สถานะ `maintenance` ไม่มีวันสิ้นสุด — req ใหม่อยากให้ทั้งคู่เป็น **ช่วงเวลา** (เริ่ม–สิ้นสุด) แบบ `booking_rooms` (check_in/check_out)
+- **Map ที่เกี่ยว:** `wayfinder/reserved-room-pool/` 🧊 FROZEN รอ map นี้จบ — ticket 01 ของ map นั้น code landed แล้ว (migration `is_reserved` + ถอดสถานะ `reserved_closed` + gate helper + availability flag, suite 446 เขียว) — โมเดลที่ตัดสินที่นี่อาจให้ปรับ/ต่อยอดงานก้อนนั้น
+- **Prior art ต้องอ่านก่อน grill:** overlap query ของ `booking_rooms` (`check_in < X AND check_out > X`, BR states draft/confirmed/checked_in), `CleanupExpiredDrafts` (scheduled sweep 02:00 — pattern สำหรับ period หมดอายุ), `Room::transitionStatusTo()` state machine, availability endpoints ทั้ง 3
+- **Tracker = local-markdown:** map ที่ไฟล์นี้, tickets ใน `tickets/` · claim = เติม `assignee:` · blocking = `blocked-by` · ปิด = `status: closed` + `## Resolution`
+- ธรรมเนียมเดิมของโปรเจกต์: ตัดสินใจ lock ก่อนเขียนโค้ด — map นี้เริ่มด้วย grilling HITL สองรอบ (โมเดล → กฎ) ก่อนค่อย breakdown implementation
+
+## Decisions so far
+
+- (ยังไม่มี — map เพิ่ง chart)
+
+## Not yet specified
+
+- กฎเมื่อ period หมดอายุเอง: ห้องกลับสถานะอะไร ด้วย scheduled sweep หรือคำนวณสดตอน query (derived) — ยังไม่เปิด grill
+- ผลต่อ availability ระหว่าง period บางวัน (ช่วงสั้นกลางเดือน) — endpoints per-day/ranges อาจต้องนับรายวันจริง
+- ผลต่อ booking ที่ค้างอยู่บนห้องเดียวกันเมื่อ admin ประกาศ period ทับ (ย้ายห้อง? บล็อก?)
+- Admin endpoint/UX สร้าง-แก้-ยกเลิก period + audit trail
+- ผลต่อ housekeeping flow (maintenance period vs งานเก็บ/ซ่อมจริงของ HousekeepingTask)
+- Migration ข้อมูลเดิม (ห้อง is_reserved=true / maintenance ปัจจุบัน → period แรกยังไง)
+
+## Out of scope
+
+- (ยังไม่มี)

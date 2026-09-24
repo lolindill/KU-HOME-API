@@ -2,12 +2,12 @@
 
 namespace Tests\Unit;
 
-use Tests\TestCase;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class RoomStateTest extends TestCase
 {
@@ -31,16 +31,18 @@ class RoomStateTest extends TestCase
             'default_price' => 1500,
             'is_active' => true,
         ]);
+
         return $rt;
     }
 
     private function createRoom(string $status = 'available'): Room
     {
         $roomType = $this->createRoomType();
+
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.rand(1, 99),
             'status' => $status,
         ]);
     }
@@ -70,11 +72,13 @@ class RoomStateTest extends TestCase
         $this->assertEquals('maintenance', $room->fresh()->status);
     }
 
-    public function test_available_to_reserved_closed(): void
+    public function test_available_to_reserved_closed_is_invalid(): void
     {
+        // 🏨 (24/09/26) ticket 90: reserved_closed ถูกถอดออกจาก machine — "ห้องสำรอง"
+        //    เปลี่ยนผ่าน is_reserved (pool membership) ไม่ใช่สถานะแล้ว
+        $this->expectException(\Exception::class);
         $room = $this->createRoom('available');
         $room->transitionStatusTo('reserved_closed');
-        $this->assertEquals('reserved_closed', $room->fresh()->status);
     }
 
     public function test_occupied_to_checkout_makeup(): void
@@ -120,7 +124,7 @@ class RoomStateTest extends TestCase
     }
 
     // ============================================
-    // ✅ Wildcard Transitions (→ maintenance, reserved_closed = any source)
+    // ✅ Wildcard Transitions (→ maintenance = any source · 🏨 reserved_closed ถอดแล้ว 24/09/26)
     // ============================================
 
     public function test_any_to_maintenance(): void
@@ -136,21 +140,6 @@ class RoomStateTest extends TestCase
         $this->expectException(\Exception::class);
         $room = $this->createRoom('maintenance');
         $room->transitionStatusTo('occupied');
-    }
-
-    public function test_reserved_closed_to_available(): void
-    {
-        $room = $this->createRoom('reserved_closed');
-        $room->transitionStatusTo('available');
-        $this->assertEquals('available', $room->fresh()->status);
-    }
-
-    public function test_reserved_closed_to_dirty_is_invalid(): void
-    {
-        // dirty only allows from available, prep_checkin — not reserved_closed
-        $this->expectException(\Exception::class);
-        $room = $this->createRoom('reserved_closed');
-        $room->transitionStatusTo('dirty');
     }
 
     // ============================================
@@ -181,7 +170,7 @@ class RoomStateTest extends TestCase
 
     public function test_cannot_go_from_occupied_to_available(): void
     {
-        // occupied → available: allowedTransitions['available'] includes 'checkout_makeup', 'dirty', 'maintenance', 'reserved_closed', 'prep_checkin'
+        // occupied → available: allowedTransitions['available'] includes 'checkout_makeup', 'dirty', 'maintenance', 'prep_checkin'
         // NOT 'occupied'. So this should fail.
         $this->expectException(\Exception::class);
         $room = $this->createRoom('occupied');

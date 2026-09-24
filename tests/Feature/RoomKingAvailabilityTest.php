@@ -15,7 +15,8 @@ use Tests\TestCase;
  * 🛏️ bed_type=king_size availability (09/09/26)
  *
  * GET /api/v1/availability?bed_type=king_size — นับ availability เฉพาะห้อง king:
- *   - king pool = sellable (status NOT IN maintenance/reserved_closed) — ตรงกับ createBooking
+ *   - king pool = sellable (available + ไม่ใช่ห้องสำรอง is_reserved) — ตรงกับ createBooking
+ *     (🏨 24/09/26 ticket 90: เดิมกรองสถานะ reserved_closed — ถอดเป็น flag แล้ว)
  *   - king occupied = hybrid ตาม lifecycle:
  *       ก่อน assign (room_id null) → BR bed_preference=king_size กินห้อง king แน่นอน
  *       หลัง assign (room_id มี)    → นับตาม bed_type ของห้องที่ assign จริง

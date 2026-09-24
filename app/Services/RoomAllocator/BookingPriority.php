@@ -82,7 +82,9 @@ final class BookingPriority
     {
         return Room::whereHas('roomType', fn ($q) => $q->where('name_en', 'Deluxe'))
             ->where('builtin_extra_beds', '>=', $w->x09MinBuiltinBeds)
-            ->whereNotIn('status', ['maintenance', 'reserved_closed'])
+            // 🏨 (24/09/26) ticket 90: ห้องสำรอง = is_reserved=true — ไม่นับเป็นห้องขายปกติ
+            ->whereNotIn('status', ['maintenance'])
+            ->where('is_reserved', false)
             ->whereDoesntHave('bookingRooms', function ($q) use ($br) {
                 $q->whereIn('status', ['draft', 'confirmed', 'checked_in'])
                     ->where('check_in', '<', $br->checkOut)
