@@ -19,8 +19,10 @@ use Illuminate\Http\Request;
  *    - ค่าที่ไม่ใช่ boolean ถือว่าไม่ได้ส่ง (จึงไม่ validate ที่ endpoint — กัน 422 ละเมิดสัญญา silent)
  *
  *    Single source of truth — availability summary (+king), calendar 4 endpoints
- *    (availabilityPerDay/availabilityRanges/unavailableDates/unavailableRanges — ticket 02)
- *    และ walk-in ใช้ helper นี้ (createBooking/allocator ยังไม่รับ flag — tickets 03/04 ของ map reserved-room-pool)
+ *    (availabilityPerDay/availabilityRanges/unavailableDates/unavailableRanges — ticket 02),
+ *    booking capacity checks 4 จุด (createBooking/addRooms/updateRoom/updateRooms —
+ *    ticket 03: denominator = sellable pool, flag ขยายเฉพาะ admin) และ walk-in ใช้ helper นี้
+ *    (allocator ยังไม่รับ flag — ticket 04 ของ map reserved-room-pool)
  */
 class IncludeReservedGate
 {

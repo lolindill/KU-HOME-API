@@ -12,12 +12,14 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\StatusChangeLog;
 use App\Models\User;
 use App\Services\Discount\DiscountService;
 use App\Services\RoomAllocator\RoomAllocator;
 use App\Support\BookingRule;
+use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -291,12 +293,13 @@ class BookingController extends Controller
             }
 
             foreach ($requestedByType as $rtId => $requests) {
-                $totalRooms = Room::where('room_type_id', $rtId)->count();
-
                 // ตรวจทีละช่วงวันของห้องที่ขอเพิ่ม — นับ existing bookings + batch overlaps
                 foreach ($requests as $checkReq) {
                     $checkIn = Carbon::parse($checkReq['check_in']);
                     $checkOut = Carbon::parse($checkReq['check_out']);
+
+                    // 🎫 denominator = sellable pool ของช่วงนี้ (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($rtId, $checkIn, $checkOut, $request);
 
                     // 🌟 availability นับที่ BR-level (block ห้องตั้งแต่ draft ขึ้นไป)
                     $existingBooked = BookingRoom::where('room_type_id', $rtId)
@@ -630,7 +633,8 @@ class BookingController extends Controller
                 if ($shapeChanged) {
                     $checkIn = Carbon::parse($effectiveCheckIn);
                     $checkOut = Carbon::parse($effectiveCheckOut);
-                    $totalRooms = Room::where('room_type_id', $effectiveTypeId)->count();
+                    // 🎫 denominator = sellable pool ของช่วง effective (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($effectiveTypeId, $checkIn, $checkOut, $request);
 
                     $existingBooked = BookingRoom::where('room_type_id', $effectiveTypeId)
                         ->holdingSlot()
@@ -865,19 +869,18 @@ class BookingController extends Controller
                 //    - batch overlap นับจากค่า final ของทุกห้องใน batch รวมห้องที่ไม่ได้เปลี่ยน shape
                 //      (ไม่งั้นห้อง unchanged ที่ยังยึดพื้นที่อยู่จะหายไปจากการนับ → overbook)
                 $batchIds = array_keys($updates);
-                $totalByType = [];
 
                 foreach ($updates as $u) {
                     if (! $u['shape_changed']) {
                         continue;
                     }
 
-                    if (! isset($totalByType[$u['type_id']])) {
-                        $totalByType[$u['type_id']] = Room::where('room_type_id', $u['type_id'])->count();
-                    }
-
                     $checkIn = Carbon::parse($u['check_in']);
                     $checkOut = Carbon::parse($u['check_out']);
+
+                    // 🎫 denominator = sellable pool ของช่วง final ของแถวนั้น (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    //    คิดต่อ row เพราะแต่ละห้องมีช่วงวันของตัวเอง — cache เดิม keyed แค่ type ใช้ไม่ได้แล้ว
+                    $totalRooms = $this->sellableCapacity($u['type_id'], $checkIn, $checkOut, $request);
 
                     $existingBooked = BookingRoom::where('room_type_id', $u['type_id'])
                         ->holdingSlot()
@@ -898,7 +901,7 @@ class BookingController extends Controller
                         }
                     }
 
-                    if (($existingBooked + $batchOverlapping) > $totalByType[$u['type_id']]) {
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
                         throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
                     }
                 }
@@ -1153,13 +1156,14 @@ class BookingController extends Controller
             }
 
             foreach ($requestedByType as $rtId => $requests) {
-                $totalRooms = Room::where('room_type_id', $rtId)->count();
-
                 // ตรวจทีละช่วงวันของห้องที่ขอจอง — นับทั้ง existing bookings และ batch requests ที่ overlap
                 // (เพื่อกันกรณีห้อง 2 ห้องใน booking เดียวกันจองช่วงเวลาที่ทับซ้อนกัน)
                 foreach ($requests as $checkReq) {
                     $checkIn = Carbon::parse($checkReq['check_in']);
                     $checkOut = Carbon::parse($checkReq['check_out']);
+
+                    // 🎫 denominator = sellable pool ของช่วงนี้ (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($rtId, $checkIn, $checkOut, $request);
 
                     // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
                     // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
@@ -1697,6 +1701,25 @@ class BookingController extends Controller
         return (int) ($addonInput['extra_bed']
             ?? $roomRequest['extra_beds']
             ?? ($existing?->extra_bed ?? 0));
+    }
+
+    /**
+     * 🎫 (26/09/26) ticket 03 map reserved-room-pool — denominator ของ capacity checks
+     *    ทั้ง 4 จุด = **sellable pool** ตามช่วง [checkIn, checkOut) ของห้องนั้น ๆ
+     *    (เดิมนับห้องกายภาพเต็มของ type ทำให้จองเกิน pool ที่ assign ได้จริงแล้วจองค้าง — bug fix grill #5)
+     *    - maintenance period: ตัดเสมอ ทุกกรณี (กฎเหล็ก absolute — ไม่ว่าใครส่ง flag)
+     *    - reserved period: ตัดเสมอ — ยกเว้น admin ส่ง include_reserved=true (flag ขยาย pool)
+     *    ห้ามเขียนเงื่อนไข period เอง — ใช้ scope ของ Room ตามธรรมเนียม room-state-periods
+     */
+    private function sellableCapacity(string $typeId, $checkIn, $checkOut, Request $request): int
+    {
+        return Room::where('room_type_id', $typeId)
+            ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+            ->when(
+                ! IncludeReservedGate::enabled($request),
+                fn ($q) => $q->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
+            )
+            ->count();
     }
 
     /**

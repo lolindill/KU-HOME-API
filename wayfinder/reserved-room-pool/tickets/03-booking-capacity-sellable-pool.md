@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "Booking capacity checks — align เป็น sellable pool + flag extension (bug fix)"
-status: open
-assignee:
+status: closed
+assignee: zcode (session 2026-09-24)
 blocked-by: ["01-include-reserved-gate-and-availability"]
 ---
 
@@ -32,14 +32,14 @@ blocked-by: ["01-include-reserved-gate-and-availability"]
 
 **Status:** ready-for-agent
 
-- [ ] Regression Bug Fix: Non-admin จองห้องเกิน sellable capacity (ทั้งที่ physical rooms รวม maintenance/reserved ยังมี) → ต้องถูกปฏิเสธด้วย 422 ข้อความไทยห้องเต็ม (ครอบคลุม create, add-rooms, update-room, updateRooms)
-- [ ] Admin ส่ง `include_reserved=true` → denominator ขยายเป็น sellable + reserved_closed จองผ่านได้ตามจำนวนห้องสำรองที่มี
-- [ ] Admin ส่ง `include_reserved=true` จองเกิน sellable + reserved_closed (เช่น พยายามจองกินห้อง maintenance) → ต้องถูกปฏิเสธ 422
-- [ ] Non-admin ส่ง flag `include_reserved=true` → เมินเฉยเงียบ ๆ ใช้ sellable pool ปกติ (ไม่ขยาย pool และไม่เออเร่อ 403)
-- [ ] ห้องสถานะ `maintenance` ไม่ถูกนับรวมใน denominator ทุกกรณี
-- [ ] Transactional boundary และ audit trail ของการจองเดิมทำงานถูกต้อง ไม่ผิดเพี้ยน
-- [ ] Single HTTP feature seam tests ครอบคลุมทั้งกรณี bug fix และ flag extension
-- [ ] `php artisan test` เขียวทั้ง suite + `vendor/bin/pint --dirty`
+- [x] Regression Bug Fix: Non-admin จองห้องเกิน sellable capacity (ทั้งที่ physical rooms รวม maintenance/reserved ยังมี) → ต้องถูกปฏิเสธด้วย 422 ข้อความไทยห้องเต็ม (ครอบคลุม create, add-rooms, update-room, updateRooms)
+- [x] Admin ส่ง `include_reserved=true` → denominator ขยายเป็น sellable + reserved_closed จองผ่านได้ตามจำนวนห้องสำรองที่มี
+- [x] Admin ส่ง `include_reserved=true` จองเกิน sellable + reserved_closed (เช่น พยายามจองกินห้อง maintenance) → ต้องถูกปฏิเสธ 422
+- [x] Non-admin ส่ง flag `include_reserved=true` → เมินเฉยเงียบ ๆ ใช้ sellable pool ปกติ (ไม่ขยาย pool และไม่เออเร่อ 403)
+- [x] ห้องสถานะ `maintenance` ไม่ถูกนับรวมใน denominator ทุกกรณี
+- [x] Transactional boundary และ audit trail ของการจองเดิมทำงานถูกต้อง ไม่ผิดเพี้ยน
+- [x] Single HTTP feature seam tests ครอบคลุมทั้งกรณี bug fix และ flag extension
+- [x] `php artisan test` เขียวทั้ง suite + `vendor/bin/pint --dirty`
 
 **Spec Reference:**
 - [spec.md § Problem Statement](../spec.md#problem-statement)
@@ -60,3 +60,14 @@ owner ประกาศ non-goal นี้ทีหลัง grill #5 → น�
 
 - ใช้ `IncludeReservedGate::enabled($request)` เสมอ — reserved pool ตอนนี้คือห้องติด reserved period ช่วง `[check_in, check_out)` ของแต่ละ BR (overlap half-open เดียกับ booking_rooms) ไม่ใช่ property ถาวรของห้อง — query ต้องต่อช่วง BR ผ่าน scope ของ `RoomStatePeriod` ห้ามเขียนเงื่อนไขเอง
 - maintenance absolute = ช่วงทับ maintenance period ไม่เคยนับ แม้ส่ง flag
+
+## ✅ Resolution (2026-09-24 — session หนูเมด, wayfinder zcode)
+
+**Grill ตัดสิน conflict (HITL กับ owner):** เลือก **(b) คง bug fix ตาม grill #5 เดิม** — denominator ทั้ง 4 จุด align เป็น **sellable pool ต่อช่วงเข้าพัก** (ตัดทั้ง maintenance และ reserved period), flag admin ขยายเป็น sellable + reserved · non-goal "คงนับห้องกายภาพ" ของ map `room-state-periods` **ถูกยกเลิก** และอัปเดต spec ทั้งสอง map ให้สอดคล้องแล้ว (เหตุผล: กัน user จองเกิน pool ที่ assign ได้จริงตั้งแต่หน้าจอง — ดีกว่าปล่อยจองผ่านแล้วไปสะดุดที่ assign · maintenance absolute ได้ครบทุก pool ด้วย)
+
+**Implementation (`app/Http/Controllers/Api/V1/BookingController.php`):**
+- private helper `sellableCapacity($typeId, $checkIn, $checkOut, $request)` — `Room::where(room_type_id)` + `freeOfPeriod(…, KIND_MAINTENANCE)` เสมอ + `when(! IncludeReservedGate::enabled($request), freeOfPeriod(…, KIND_RESERVED))` — ใช้ scope ของ room-state-periods ห้ามเขียนเงื่อนไขเอง
+- 4 จุดเรียก helper: `createBooking`, `addRooms`, `updateRoom` (effective window ตอน shapeChanged), `updateRooms` — ทั้งหมดย้ายการนับ denominator **เข้าไปใน loop ต่อช่วงวันจริงของแต่ละ BR** (denominator ขึ้นกับช่วงแล้ว) · ใน `updateRooms` เลิก cache `$totalByType` (keyed แค่ type ใช้ไม่ได้อีก — แต่ละแถวมีช่วงของตัวเอง)
+- `IncludeReservedGate` docblock อัปเดต: booking capacity checks 4 จุดใช้ gate แล้ว (เหลือ allocator — ticket 04)
+
+**Tests:** `tests/Feature/BookingCapacitySellablePoolTest.php` 8 tests บน HTTP seam เดียว — regression non-admin 422 ทั้ง 4 paths (create/add/update/batch + sequential) · admin flag ขยาย create/add/update/batch · admin flag ไม่กิน maintenance เด็ดขาด · non-admin ส่ง flag เมยายีเงียบ ๆ · transaction rollback ไม่ทิ้ง booking ค้าง — **suite 520 เขียว (เดิม 512) + pint ผ่าน**

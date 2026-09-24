@@ -110,9 +110,9 @@ Indexes: `room_id` (จาก FK) + composite `[room_id, start_date, end_date]` 
     - ไม่มี display ไหนอ่านสถานะ `maintenance` ตรง ๆ ใน repo นี้ (ค้นแล้ว — DashboardController เป็น housekeeping-task-only) จุดเดียวคือ room JSON ด้านบน
 
 ## ไม่แตะ (explicit non-goals)
-- **`BookingController` capacity denominators 4 จุด** (`Room::where(room_type_id)->count()`) — คงนับห้องกายภาพเต็ม เหมือนที่วันนี้นับ maintenance-status/is_reserved รวมอยู่แล้ว (fail-safe = allocator ตัด period ที่ข้อ 6 + checkIn gate ที่ข้อ 11) — การจองเกิน pool จริงจบที่ assign ไม่ได้ เหมือนพฤติกรรมปัจจุบัน
+- ~~**`BookingController` capacity denominators 4 จุด** (`Room::where(room_type_id)->count()`) — คงนับห้องกายภาพเต็ม~~ — **ยกเลิก non-goal นี้ (owner grill ยืนยัน 2026-09-24, ticket 03 ของ map `reserved-room-pool`):** denominator ทั้ง 4 จุด align เป็น **sellable pool ต่อช่วงเข้าพัก** (ตัด maintenance period เสมอ + reserved period ใต้ flag admin) — landed เป็น `sellableCapacity()` ใน BookingController · fail-safe เดิม (allocator ตัด period + checkIn gate) ยังคงอยู่เป็นชั้นสอง
 - **HousekeepingTask ทั้งระบบ** — ไม่มี FK/field อ้าง period · สร้าง/รับ/ทำ task บนห้องติด period ได้ทุก kind · done → `available` คงเดิม (**ห้ามเพิ่ม period-check เอง**)
-- **include_reserved ใน calendar 4 endpoints / createBooking / allocator** — วันนี้ flag มีผลแค่ summary (+king) และ (ต่อจากนี้) walk-in — การขยาย flag เหลือ surface อื่นเป็นของ map `reserved-room-pool` (frozen)
+- ~~**include_reserved ใน calendar 4 endpoints / createBooking / allocator** — วันนี้ flag มีผลแค่ summary (+king) และ (ต่อจากนี้) walk-in — การขยาย flag เหลือ surface อื่นเป็นของ map `reserved-room-pool` (frozen)~~ — *(หมายเหตุ: "(frozen)" หมดอายุ — map นั้น UNFROZEN 2026-09-24)* · สถานะจริงวันนี้: calendar 4 endpoints + booking capacity checks 4 จุด รับ flag แล้ว (tickets 02–03 ของ `reserved-room-pool`) — เหลือ allocator (ticket 04 ของ map นั้น)
 - **WebSocket / sweep / cron สำหรับ period** — derived ตอน query เท่านั้น (ticket 01)
 - `assignAvailableRoom()` — dead code คงไว้ (แค่เก็บกวาด string สถานะค้าง)
 
