@@ -1,12 +1,14 @@
 ---
 label: wayfinder:map
 title: "room-state-periods — ห้องสำรอง/ซ่อมแซม กำหนดระยะเวลาแบบ booking"
-status: open
+status: closed
 ---
 
 # Wayfinder Map — `room-state-periods` (ห้องสำรอง/ซ่อมแซม มีระยะเวลา)
 
 ## Destination
+
+✅ COMPLETED (2026-09-24)
 
 ตัดสิน + spec (`ready-for-agent`) ของโมเดล **กำหนดระยะเวลา (period)** ให้สถานะ "ห้องสำรอง" และ "ซ่อมแซม (maintenance)" ทำงานเหมือน booking — เป็นช่วงวันที่ ไม่ใช่สถานะตายตัว — รวมผลที่ตามมาทั้งหมด: ผลต่อ decision `is_reserved` flag (ticket 90 ของ map `reserved-room-pool`), state machine, การนับ availability ทุก endpoint, และงาน freeze ค้างของ map เดิม
 
@@ -25,11 +27,12 @@ status: open
 - [ticket 02 — Grill กฎ overlap/expiry/availability](tickets/02-grill-overlap-expiry-availability-rules.md): **CLOSED 2026-09-24** — สร้าง period ทับ booking ค้างได้**เสมอ** (ลบ draft ที่ overlap ทันที + audit `draft → deleted` · confirmed/checked_in ไม่แตะ แต่ response รายงาน `affected_bookings`) · overlap query = half-open เดียวกับ booking_rooms บน `holdingSlot()` · availability นับ**รายวันจริง** (per-day matrix) และ range endpoint ตัดรายห้องเมื่อ period overlap ช่วงที่ขอ (stay-semantics เดียวกับ createBooking) · check-in reject เฉพาะ maintenance period (reserved ผ่าน — ฟรอนต์ย้ายด้วย `assigned_rooms`) · HousekeepingTask **ไม่ผูกกับ period เลย**
 - [ticket 03 — ประวัติสถานะห้อง 1 ปี (REQ-039)](tickets/03-room-status-history-log.md): **CLOSED 2026-09-24 (build landed)** — audit log entity_type `room` บน `status_change_logs` เขียนใน `Room::transitionStatusTo()` · retention 1 ปี ผ่าน `app:cleanup-status-logs` (02:45, env `ROOM_STATUS_LOG_RETENTION_DAYS` — log booking ไม่แตะ) · endpoint `GET /rooms/{id}/status-logs` (admin) · ประวัติ reserved/maintenance = ตาราง `room_state_periods` เอง
 - [ticket 04 — Grill contract admin endpoint จัดการ period](tickets/04-grill-admin-period-crud-contract.md): **CLOSED 2026-09-24** — route ซ้อน `GET/POST /rooms/{roomId}/periods` + `PATCH/DELETE .../{periodId}` (kind = body field) · same-kind overlap **auto-merge** (row เดิมถูกขยายครอบ union, POST/PATCH กฎเดียวกัน cascade) · ต่าง kind ร่วมอยู่ได้ ช่วงทับ maintenance ชนะทุก semantics · `start_date` ย้อนอดีตได้แต่ห้าม period หมดทั้งช่วง · PATCH แก้ start+end (kind immutable) · DELETE = hard delete + audit log · audit = `created_by` column + `status_change_logs` (`entity_type = room_state_period`) · สิทธิ์: maintenance staff เทียบเท่า admin ทุก verb, reserved admin เท่านั้น (owner override)
-- [ticket 05 — Grill migration ข้อมูลเดิม](tickets/05-grill-migrate-legacy-pool-maintenance.md): **CLOSED 2026-09-24** — ห้อง `is_reserved=true` → reserved period **เปิดปลาย** (`end_date = NULL`, start = วัน deploy) · ห้อง `status=maintenance` → maintenance period เปิดปลาย + lifecycle status flip เป็น **`available`** (owner override สวน dirty) + migration เขียน audit log ให้ flip · **`end_date` nullable ได้ทั้งสอง kind** (amendment ของ ticket 04 — active = `start <= today AND (end IS NULL OR end > today)`, merge กับ row เปิดปลาย = ยังเปิดปลาย) · **drop `is_reserved` พร้อม release เดียว** ไม่มี dual source · ⚠️ ให้ ticket 06 ตัดสินต่อ: expose ค่า derived ใน room JSON ให้ frontend หรือไม่
+- [ticket 05 — Grill migration ข้อมูลเดิม](tickets/05-grill-migrate-legacy-pool-maintenance.md): **CLOSED 2026-09-24** — ห้อง `is_reserved=true` → reserved period **เปิดปลาย** (`end_date = NULL`, start = วัน deploy) · ห้อง `status=maintenance` → maintenance period เปิดปลาย + lifecycle status flip เป็น **`available`** (owner override สวน dirty) + migration เขียน audit log ให้ flip · **`end_date` nullable ได้ทั้งสอง kind** (amendment ของ ticket 04 — active = `start <= today AND (end IS NULL OR end > today)`, merge กับ row เปิดปลาย = ยังเปิดปลาย) · **drop `is_reserved` พร้อม release เดียว** ไม่มี dual source (คำถาม expose derived → ปิดที่ ticket 06)
+- [ticket 06 — รวม spec ready-for-agent](tickets/06-spec-assembly-ready-for-agent.md): **CLOSED 2026-09-24** — [`spec.md`](./spec.md) รวม 16 touchpoints จาก decision ทุก ticket + codebase audit · decision ที่ได้รับมอบหมาย: room JSON ถอด `is_reserved` เป็น **`active_periods`** (derived active-วันนี้) บน 3 display endpoints · fog display เคลียร์ (ไม่มีจุดอ่านสถานะ maintenance ตรงค้าง) · non-goals ชัด: capacity denominator คงนับห้องกายภาพ, HousekeepingTask ไม่แตะ, ไม่มี sweep · **build ลงตาม spec ใน commit `feat(rooms)` ถัดไปของ session เดียวกัน**
 
 ## Not yet specified
 
-- (ว่าง — ไม่มี fog ค้าง · display ที่อ่านสถานะ `maintenance` เป็น touchpoint ของ ticket 06)
+- (ว่าง — ไม่มี fog ค้าง · display touchpoint เคลียร์แล้วที่ ticket 06 → spec §E)
 
 ## Out of scope
 

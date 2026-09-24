@@ -1,8 +1,8 @@
 ---
 label: wayfinder:task
 type: AFK
-status: open
-assignee:
+status: closed
+assignee: kevii (session 2026-09-24 — spec assembly + implement)
 blocked-by: ["02-grill-overlap-expiry-availability-rules", "04-grill-admin-period-crud-contract", "05-grill-migrate-legacy-pool-maintenance"]
 ---
 
@@ -32,6 +32,17 @@ blocked-by: ["02-grill-overlap-expiry-availability-rules", "04-grill-admin-perio
 > - `DailyRoomMaintenance` command: ตรวจ logic ที่อ้างสถานะ maintenance/ห้องว่างว่าต้องสลับเป็น period-check จุดไหนบ้าง
 > - Display ที่อ่านสถานะ `maintenance` ตรง ๆ (dashboard/room board) — ดึงจาก fog เดิมของ map มาไว้ที่หัวข้อนี้แล้ว
 
-- [ ] เขียน `spec.md` + ผูก Decisions so far ของ map ให้ครบ
-- [ ] ถ้าเขียนแล้วเจอคำถามค้าง — เปิด ticket grill ใหม่ อย่าตอบแทน owner
-- [ ] ปิด ticket + อัปเดต map → map พร้อมปิด (destination บรรลุ) เมื่อ ticket 03 (งาน build REQ-039) ก็จบด้วย
+- [x] เขียน `spec.md` + ผูก Decisions so far ของ map ให้ครบ
+- [x] ถ้าเขียนแล้วเจอคำถามค้าง — เปิด ticket grill ใหม่ อย่าตอบแทน owner
+- [x] ปิด ticket + อัปเดต map → map พร้อมปิด (destination บรรลุ) เมื่อ ticket 03 (งาน build REQ-039) ก็จบด้วย
+
+## Resolution
+
+**CLOSED 2026-09-24 (AFK) — [`spec.md`](../spec.md) ready-for-agent แล้ว · ไม่มีคำถามค้าง (ไม่ต้องเปิด grill ใหม่):**
+
+1. **spec รวม decision ครบทุก ticket 01–05** เป็น 16 touchpoints (schema, shared scopes, จุดถอด is_reserved/maintenance, period-check ทุก endpoint, CRUD contract, migration ข้อมูลเดิม, display) — ผ่าน codebase audit จริงครบทุกจุดอ้าง (ไฟล์/บรรทัดตรวจแล้วว่ามีอยู่จริง)
+2. **คำถามที่ ticket 05 ส่งมาให้ตัดสิน — expose derived ใน room JSON: ตัดสินแล้ว = ถอด `is_reserved` เป็น `active_periods`** (array period active วันนี้: id/kind/start/end, eager-load กัน N+1) บน `allRooms`/`roomStatus`/`getRoomById` — board badge ได้ใน call เดียว + drill-in ต่อที่ endpoint รายห้อง · จดเป็น breaking change ให้ frontend · *(ตัดสินในขอบเขต AFK — owner มอบ ticket 06 ให้ session นี้; ต่าง kind ใน active_periods ทำให้ board แยก badge สำรอง/ซ่อมได้เอง)*
+3. **fog "display อ่านสถานะ maintenance ตรง ๆ" เคลียร์:** ค้น repo แล้วไม่มี display อื่นอ่านสถานะนี้ตรง ๆ (DashboardController เป็น housekeeping-task-only) — จุดเดียวคือ room JSON ข้อ 2 · `DailyRoomMaintenance` มีจุดเดียวที่ควรสลับ = Phase 3 stale→dirty ข้ามห้องติด maintenance period active (จดใน spec ข้อ touchpoint + งาน build)
+4. **สิ่งที่ spec ตัดออกชัดเจน (non-goals):** BookingController capacity denominators คงนับห้องกายภาพ (parity กับพฤติกรรมปัจจุบันที่นับ maintenance/is_reserved รวมอยู่แล้ว — fail-safe อยู่ที่ allocator + checkIn gate) · include_reserved ไม่ขยาย surface ใหม่นอกจาก walk-in (ที่เหลือเป็นของ map frozen)
+5. map ปิดตามใน session เดียวกัน — งาน build ตาม spec ทำต่อทันที (commit ถัดไปบน `agust-11`)
+
