@@ -6,7 +6,7 @@ status: open
 
 # Wayfinder Map — `include_reserved` (ห้องสำรอง reserved_closed)
 
-> **🧊 FROZEN (2026-09-24):** หยุดงานทุก ticket ของ map นี้ — req ใหม่ "ห้องสำรอง/ซ่อมแซมกำหนดระยะเวลาแบบ booking" ถูก chart เป็น map **`wayfinder/room-state-periods/`** แล้ว และอาจเปลี่ยนโมเดล `is_reserved` flag (decision ticket 90) เป็น period records · ticket 01 code landed แล้วบน `agust-11` (suite 446 เขียว) แต่**ไม่ปิด** — รอ map ใหม่จบแล้ว unfreeze ค่อยตรวจ/ปิด
+> **🧊 FROZEN (2026-09-24):** หยุดงานทุก ticket ของ map นี้ — req ใหม่ "ห้องสำรอง/ซ่อมแซมกำหนดระยะเวลาแบบ booking" ถูก chart เป็น map **[`room-state-periods`](../room-state-periods/map.md)** แล้ว และอาจเปลี่ยนโมเดล `is_reserved` flag (decision ticket 90) เป็น period records · ticket 01 code landed แล้วบน `agust-11` (suite 446 เขียว) แต่**ไม่ปิด** — รอ map ใหม่จบแล้ว unfreeze ค่อยตรวจ/ปิด
 
 ## Destination
 

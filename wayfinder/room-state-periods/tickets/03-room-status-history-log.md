@@ -16,4 +16,5 @@ REQ-039: "ระบบสามารถเก็บสถานะห้อง�
 - เพิ่มการบันทึกการเปลี่ยนสถานะห้องทุกครั้ง (entity_type `room` บน `status_change_logs` หรือตารางเอง — ตัดสินตอนทำ)
 - retention 1 ปีย้อนหลัง — เก็บมากกว่าได้ไหมหรือตัดจริงที่ 1 ปี (sweep ตอนไหน — จับคู่ `app:cleanup-images` pattern)
 - **ต้องรอ grill 01/02 ก่อน:** ถ้าโมเดล period (ห้องสำรอง/ซ่อมแซมเป็นช่วงวันที่) ผ่าน สถานะบางอย่างอาจ derived จาก period แทนการ log ตรง — รูปร่างของ "ประวัติ" เปลี่ยนตามผล grill
+- **📌 Amend 2026-09-24 (ผล ticket 01):** โมเดล period **ผ่านแล้ว** — reserved/maintenance กลายเป็น period-derived (ไม่มี status transition ให้ log 2 สถานะนี้อีก) · scope ของ audit log จึงเหลือสถานะ lifecycle อื่น (available/dirty/occupied/prep_checkin/checkout_makeup) · ตาราง `room_state_periods` เองก็คือประวัติชั้นหนึ่งของ 2 เหตุนี้ (มี created_by/วันที่) · blocked-by 01 ปิดแล้ว — รอเหลือแค่ 02
 - API อ่านย้อนหลัง (admin) — endpoint ใหม่หรือต่อ `GET /rooms/{id}` ก็ได้ · เทียบ precedent `GET /bookings/{id}/status-logs`
