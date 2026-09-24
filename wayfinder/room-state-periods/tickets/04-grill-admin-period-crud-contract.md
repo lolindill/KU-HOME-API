@@ -60,3 +60,5 @@ blocked-by: ["02-grill-overlap-expiry-availability-rules"]
    - GET รายห้องเปิดทั้งสอง role เห็นทุก kind (ข้อมูลห้อง public อยู่แล้ว — `GET /rooms*` pre-auth)
 
 **Response 201/200 ของ POST/PATCH (proposal ให้ ticket 06 จัดรูป):** period ผลลัพธ์หลัง merge (ตาม convention repo — model ตรง ๆ ไม่มี data wrapper) + `merged: bool` (มีเมื่อ auto-merge เกิด) + `deleted_drafts: [booking_id...]` + `affected_bookings: [{booking_id, confirmation_number, status, check_in, check_out}]` (เฉพาะ confirmed/checked_in ที่ overlap union window) · throttle ตาม precedent กลุ่ม admin (`/discounts`) ไม่ใส่เพิ่ม
+
+> 📝 **Amendment (ticket 05, owner grill 2026-09-24):** `end_date` เป็น **nullable ได้ทั้งสอง kind** (เปิดปลาย — "มี start ไม่มี end") — ขัดข้อบังคับเดิมในข้อ 2 ที่ว่า "ห้าม period หมดทั้งช่วง (end_date ต้อง >= วันนี้)" ใช้เฉพาะเมื่อใส่ค่า · นิยาม active = `start_date <= today AND (end_date IS NULL OR end_date > today)` · same-kind merge กับ row เปิดปลาย → ยังเปิดปลาย · รายละเอียดครบที่ ticket 05 Resolution
