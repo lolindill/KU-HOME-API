@@ -18,8 +18,9 @@ use Illuminate\Http\Request;
  *      ประพฤติเหมือนไม่ส่ง flag: response ต้องเหมือนเดิมทุกไบต์
  *    - ค่าที่ไม่ใช่ boolean ถือว่าไม่ได้ส่ง (จึงไม่ validate ที่ endpoint — กัน 422 ละเมิดสัญญา silent)
  *
- *    Single source of truth — availability summary (+king) และ walk-in ใช้ helper นี้
- *    (calendar/createBooking/allocator ยังไม่รับ flag — การขยายเป็นของ map reserved-room-pool ตอน unfreeze)
+ *    Single source of truth — availability summary (+king), calendar 4 endpoints
+ *    (availabilityPerDay/availabilityRanges/unavailableDates/unavailableRanges — ticket 02)
+ *    และ walk-in ใช้ helper นี้ (createBooking/allocator ยังไม่รับ flag — tickets 03/04 ของ map reserved-room-pool)
  */
 class IncludeReservedGate
 {

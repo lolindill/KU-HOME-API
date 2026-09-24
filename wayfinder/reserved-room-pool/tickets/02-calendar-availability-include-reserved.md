@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "Calendar availability (per-day + ranges) รับ include_reserved"
-status: open
-assignee:
+status: closed
+assignee: zcode-session (2026-09-24)
 blocked-by: ["01-include-reserved-gate-and-availability"]
 ---
 
@@ -53,3 +53,17 @@ blocked-by: ["01-include-reserved-gate-and-availability"]
 - ใช้ `IncludeReservedGate::enabled($request)` เสมอ (ห้ามเขียน admin-check เอง)
 - `RoomType::scopeWithSellableRoomsAndRates` ไม่ต้องรับ `$includeReserved` แล้ว — denominator ตอนนี้ = ทุกห้องของ type (จาก map ใหม่ ข้อ 8) การตัดเกิดที่ matrix
 - ห้อง "ติด reserved period" นับ per-room ต่อช่วง (overlap half-open เดียกับ booking) — ห้องเดียวอาจติดเฉพาะบางวันของช่วงสแกน
+
+## ✅ Resolution (2026-09-24)
+
+**ทำครบตาม amendment — landed บน period model ทั้งหมด:**
+
+- **จุดตัดเดียว:** `RoomController::addPeriodsToOccupied()` รับ `bool $includeReserved = false` — เมื่อ flag → `RoomStatePeriod::overlapping(..., KIND_MAINTENANCE)` (matrix นับเฉพาะ maintenance period · reserved period ไม่บล็อกวัน ห้องสำรองกลับเข้า pool รายวัน) · ไม่ส่ง flag → `kind = null` ทุก kind บล็อกเหมือนเดิม (byte-identical) · maintenance absolute คงอยู่ทั้งสองโหมด (กฎเหล็ก)
+- **4 endpoints ผ่าน gate กลาง:** `IncludeReservedGate::enabled($request)` ทั้ง `availabilityPerDay` / `availabilityRanges` / `unavailableDates` / `unavailableRanges` — ไม่มีการเขียน admin-check เอง · `unavailableRanges` ใส่ flag ทั้ง branch หลักและ early-return (ไม่มี booking/period เลย) ให้สม่ำเสมอ
+- **`search_criteria.include_reserved` = top-level บน response** (โผล่เฉพาะเมื่อ flag มีผล) — calendar endpoints ไม่มี per-row `search_criteria` เหมือน summary เลยวางกลาง คู่กับ `start_date`/`end_date`
+- **`RoomType::scopeWithSellableRoomsAndRates` ไม่แตะ** ตาม amendment — denominator = ทุกห้องของ type อยู่แล้ว การตัดเกิดที่ matrix
+- **ห้องติด period นับ per-day จริง:** period [D5, D8) บล็อกเฉพาะ D5–D7 — วันนอกช่วงห้องกลับมาทั้ง flag และไม่ flag (test ยืนยัน)
+
+**Tests:** `tests/Feature/RoomCalendarIncludeReservedTest.php` 11 tests — admin flag ขยาย per-day + interval หายบน ranges + unavailable-dates/ranges · maintenance คงบล็อกทุก endpoint · flag ผสม booking (BR ยังถูกนับ, reserved ปล่อยวัน) · บันทึก search_criteria · user/anonymous silent-ignore **byte-identical ทั้ง 4 endpoints** · regression ไม่ส่ง flag — **suite เต็ม 512 passed (1840 assertions) + pint เขียว**
+
+**เหลือใน map:** ticket 03 (booking capacity — grill กับ owner ก่อน), 04 (allocator), 06 (docs closeout)

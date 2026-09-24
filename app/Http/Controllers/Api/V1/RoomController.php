@@ -313,6 +313,11 @@ class RoomController extends Controller
             'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
+        // 🏨 (24/09/26) ticket 02: gate รวมของ include_reserved (admin + flag เท่านั้น — อื่น ๆ เมยายีเงียบ ๆ)
+        //    ส่ง flag → occupied matrix ตัดเฉพาะ maintenance period (reserved period ไม่บล็อกวัน —
+        //    ห้องสำรองกลับเข้า pool รายวัน) · ไม่ส่ง → ทุก kind บล็อกเหมือนเดิม (byte-identical)
+        $includeReserved = IncludeReservedGate::enabled($request);
+
         $start = Carbon::parse($validated['start_date'])->startOfDay();
         $end = Carbon::parse($validated['end_date'])->startOfDay();
 
@@ -355,7 +360,7 @@ class RoomController extends Controller
 
         // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
         //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
-        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive, $includeReserved);
 
         // 🌟 Build per-day availability per room type
         $period = CarbonPeriod::create($start, $end);
@@ -379,13 +384,22 @@ class RoomController extends Controller
             return $row;
         });
 
-        return response()->json([
+        $payload = [
             'status' => 'success',
             'message' => 'Per-day availability fetched successfully',
             'start_date' => $start->toDateString(),
             'end_date' => $end->toDateString(),
-            'room_types' => $result,
-        ]);
+        ];
+
+        // 🏨 (24/09/26) ticket 02: บันทึกว่า flag มีผล (เลขมาจาก pool ที่รวมห้องสำรอง)
+        //    key นี้โผล่เฉพาะเมื่อ pool ถูกขยาย — ไม่งั้น response เหมือนเดิมทุกไบต์
+        if ($includeReserved) {
+            $payload['search_criteria'] = ['include_reserved' => true];
+        }
+
+        $payload['room_types'] = $result;
+
+        return response()->json($payload);
     }
 
     // 📅 ตรวจห้องว่างเป็นช่วง (range) — คืน intervals ของวันที่ห้องเต็ม (available=0) ราย room_type
@@ -407,6 +421,10 @@ class RoomController extends Controller
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
         ]);
+
+        // 🏨 (24/09/26) ticket 02: gate รวมของ include_reserved (เหมือน availabilityPerDay)
+        //    ส่ง flag → sold-out นับจาก maintenance period เท่านั้น (reserved period ปล่อยวันเป็นว่าง)
+        $includeReserved = IncludeReservedGate::enabled($request);
 
         $start = Carbon::parse($validated['start_date'])->startOfDay();
         $end = Carbon::parse($validated['end_date'])->startOfDay();
@@ -450,7 +468,7 @@ class RoomController extends Controller
 
         // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
         //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
-        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive, $includeReserved);
 
         // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
         $dateKeys = [];
@@ -489,13 +507,21 @@ class RoomController extends Controller
             ];
         });
 
-        return response()->json([
+        $payload = [
             'status' => 'success',
             'message' => 'Availability ranges fetched successfully',
             'start_date' => $start->toDateString(),
             'end_date' => $end->toDateString(),
-            'room_types' => $result,
-        ]);
+        ];
+
+        // 🏨 (24/09/26) ticket 02: บันทึกว่า flag มีผล — ไม่ส่ง flag → byte-identical
+        if ($includeReserved) {
+            $payload['search_criteria'] = ['include_reserved' => true];
+        }
+
+        $payload['room_types'] = $result;
+
+        return response()->json($payload);
     }
 
     // 📅 ดึงวันที่จองไม่ได้ราย room type (flat list ต่อ type) — คลอนจาก availabilityRanges
@@ -518,6 +544,9 @@ class RoomController extends Controller
             'start_date' => 'required|date|after_or_equal:today',
             'end_date' => 'required|date|after_or_equal:start_date',
         ]);
+
+        // 🏨 (24/09/26) ticket 02: gate รวมของ include_reserved (เหมือน availabilityPerDay/Ranges)
+        $includeReserved = IncludeReservedGate::enabled($request);
 
         $start = Carbon::parse($validated['start_date'])->startOfDay();
         $end = Carbon::parse($validated['end_date'])->startOfDay();
@@ -561,7 +590,7 @@ class RoomController extends Controller
 
         // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
         //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
-        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive, $includeReserved);
 
         // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
         $dateKeys = [];
@@ -589,13 +618,21 @@ class RoomController extends Controller
             ];
         });
 
-        return response()->json([
+        $payload = [
             'status' => 'success',
             'message' => 'Unavailable dates fetched successfully',
             'start_date' => $start->toDateString(),
             'end_date' => $end->toDateString(),
-            'room_types' => $result,
-        ]);
+        ];
+
+        // 🏨 (24/09/26) ticket 02: บันทึกว่า flag มีผล — ไม่ส่ง flag → byte-identical
+        if ($includeReserved) {
+            $payload['search_criteria'] = ['include_reserved' => true];
+        }
+
+        $payload['room_types'] = $result;
+
+        return response()->json($payload);
     }
 
     // 📅 ดึงช่วงวันที่จองไม่ได้ราย room type (sold-out intervals) — คลอนจาก availabilityRanges
@@ -605,6 +642,9 @@ class RoomController extends Controller
     //    ใช้สำหรับ frontend แสดงวันที่จองไม่ได้เลยโดยไม่ต้องส่งช่วงวันมาเอง
     public function unavailableRanges(Request $request)
     {
+        // 🏨 (24/09/26) ticket 02: gate รวมของ include_reserved (เหมือน calendar endpoints พี่น้อง)
+        $includeReserved = IncludeReservedGate::enabled($request);
+
         // 🌟 ไม่รับ input — ช่วงสแกนคำนวณอัตโนมัติ: [today+3, max checkout ของ booking ที่ยัง active]
         $start = Carbon::today()->addDays(3)->startOfDay();
 
@@ -628,19 +668,27 @@ class RoomController extends Controller
             ->max();
 
         if ($end === null) {
-            return response()->json([
+            $emptyPayload = [
                 'status' => 'success',
                 'message' => 'Unavailable ranges fetched successfully',
                 'start' => null,
                 'end' => null,
-                'room_types' => $roomTypes->map(fn ($t) => [
-                    'room_type_id' => $t->id,
-                    'name_en' => $t->name_en,
-                    'name_th' => $t->name_th,
-                    'rates' => $t->rates,
-                    'intervals' => [],
-                ])->values(),
-            ]);
+            ];
+
+            // 🏨 (24/09/26) ticket 02: บันทึกว่า flag มีผล (สม่ำเสมอกับ branch หลัก — แม้ไม่มีอะไรบล็อก)
+            if ($includeReserved) {
+                $emptyPayload['search_criteria'] = ['include_reserved' => true];
+            }
+
+            $emptyPayload['room_types'] = $roomTypes->map(fn ($t) => [
+                'room_type_id' => $t->id,
+                'name_en' => $t->name_en,
+                'name_th' => $t->name_th,
+                'rates' => $t->rates,
+                'intervals' => [],
+            ])->values();
+
+            return response()->json($emptyPayload);
         }
 
         // 🌟 DoS guard (public route): ป้องกัน booking ไกลๆ ทำให้ลูปสแกนยาวเกินไป (cap 365 คืน เทียบเท่า sibling)
@@ -675,7 +723,7 @@ class RoomController extends Controller
 
         // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
         //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
-        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive, $includeReserved);
 
         // 🌟 list ของทุกคืนในช่วง [start, end] (ว่างอัตโนมัติถ้า end < start — ทุก booking checkout ก่อน today+3)
         $dateKeys = [];
@@ -713,13 +761,21 @@ class RoomController extends Controller
             ];
         });
 
-        return response()->json([
+        $payload = [
             'status' => 'success',
             'message' => 'Unavailable ranges fetched successfully',
             'start' => $start->toDateString(),
             'end' => $end->toDateString(),
-            'room_types' => $result,
-        ]);
+        ];
+
+        // 🏨 (24/09/26) ticket 02: บันทึกว่า flag มีผล — ไม่ส่ง flag → byte-identical
+        if ($includeReserved) {
+            $payload['search_criteria'] = ['include_reserved' => true];
+        }
+
+        $payload['room_types'] = $result;
+
+        return response()->json($payload);
     }
 
     // 🗓️ (24/09/26) room-state-periods: payload ของ period active วันนี้ สำหรับ room JSON
@@ -737,10 +793,13 @@ class RoomController extends Controller
 
     // 🗓️ (24/09/26) room-state-periods: ยัด period (reserved/maintenance) เข้า occupied matrix
     //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02 · per-day จริง)
-    private function addPeriodsToOccupied(array &$occupied, Carbon $start, Carbon $endExclusive): void
+    //    🏨 (24/09/26) ticket 02: admin ส่ง include_reserved → matrix ตัดเฉพาะ maintenance period
+    //    (reserved period ไม่บล็อกวัน — ห้องสำรองกลับเข้า pool) · ไม่ส่ง → ทุก kind บล็อกเหมือนเดิม
+    //    maintenance absolute (กฎเหล็ก) — ถูกนับทุกกรณี ไม่ว่าส่ง flag หรือไม่
+    private function addPeriodsToOccupied(array &$occupied, Carbon $start, Carbon $endExclusive, bool $includeReserved = false): void
     {
         $periods = RoomStatePeriod::with('room:id,room_type_id')
-            ->overlapping($start, $endExclusive)
+            ->overlapping($start, $endExclusive, $includeReserved ? RoomStatePeriod::KIND_MAINTENANCE : null)
             ->get();
 
         foreach ($periods as $period) {

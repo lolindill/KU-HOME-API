@@ -10,7 +10,7 @@ status: open
 
 ## Destination
 
-[spec.md](spec.md) (label `ready-for-agent`) — admin-only param `include_reserved` ครบ 5 surfaces (availability ×3, booking capacity checks ×3 จุด, assign-rooms → allocator, walk-in) + แก้ bug denominator (booking check นับ physical rooms เกิน capacity ขายได้) — implement ผ่าน **HTTP feature seam เดียว** (user-confirmed) — *(re-base 2026-09-24: พื้นฐานเป็น period model ของ `room-state-periods` แล้ว · summary+king+walk-in landed เสร็จ — เหลือ calendar, booking capacity, allocator และ docs closeout)*
+[spec.md](spec.md) (label `ready-for-agent`) — admin-only param `include_reserved` ครบ 5 surfaces (availability ×3, booking capacity checks ×3 จุด, assign-rooms → allocator, walk-in) + แก้ bug denominator (booking check นับ physical rooms เกิน capacity ขายได้) — implement ผ่าน **HTTP feature seam เดียว** (user-confirmed) — *(re-base 2026-09-24: พื้นฐานเป็น period model ของ `room-state-periods` แล้ว · summary+king+walk-in+calendar landed เสร็จ — เหลือ booking capacity, allocator และ docs closeout)*
 
 ## Notes
 
@@ -28,13 +28,14 @@ status: open
 - [Audit — assignAvailableRoom() เป็น dead code](spec.md): assignment จริงมี path เดียวคือ assign-rooms → allocator, flag จึงต้องถึงแค่ allocator + capacity checks
 - [ticket 01](tickets/01-include-reserved-gate-and-availability.md): **CLOSED 2026-09-24** — tracer bullet จบบน period model: โค้ด rebase โดย build ของ map `room-state-periods` (gate + summary availability + king counters ผ่าน `freeOfPeriod`/`blockedByPeriod`) + session unfreeze เขียน `RoomAvailabilityIncludeReservedTest` 4 tests — suite 501 เขียว + pint
 - [ticket 05](tickets/05-walk-in-include-reserved.md): **CLOSED 2026-09-24** — walk-in landed ครบผ่าน build ของ map `room-state-periods` (touchpoint 11): reserved period ผ่านเฉพาะ admin flag / maintenance period reject เสมอ / bonus checkIn gate — tests ใน `RoomStatePeriodTest` ครบ
+- [ticket 02](tickets/02-calendar-availability-include-reserved.md): **CLOSED 2026-09-24** — calendar 4 endpoints รับ flag: `addPeriodsToOccupied()` กรอง kind (flag → matrix นับเฉพาะ maintenance period, reserved ปล่อยวันเป็นว่าง) + `search_criteria.include_reserved` top-level เฉพาะเมื่อ flag มีผล · `RoomCalendarIncludeReservedTest` 11 tests — suite 512 เขียว + pint
 
 ## Tickets
 
 implementation tickets (breakdown จาก spec ด้วย to-tickets ครบ 6 tasks + 1 grilling ticket — 2026-09-16 · **re-base 2026-09-24:** บน period model — tickets 02–04 มี amendment ในตัว, 01/05 ปิดแล้ว):
 
 - `tickets/01-include-reserved-gate-and-availability.md` — ✅ closed (2026-09-24 — rebase period model + test ครบ suite 501)
-- `tickets/02-calendar-availability-include-reserved.md` — ⚪ open — ปฏิทิน per-day + ranges รับ flag (matrix นับเฉพาะ maintenance เมื่อ admin ส่ง flag) · blocked-by: [] ← frontier
+- `tickets/02-calendar-availability-include-reserved.md` — ✅ closed (2026-09-24 — calendar 4 endpoints รับ flag บน period matrix + tests 11)
 - `tickets/03-booking-capacity-sellable-pool.md` — ⚪ open — ⚠️ conflict spec เดิม (grill #5 align denominator) กับ non-goal ของ map `room-state-periods` (คงนับห้องกายภาพ) — **เริ่มด้วย grill ยืนยันกับ owner ก่อน** แล้วค่อย flag-extension · blocked-by: [] ← frontier
 - `tickets/04-allocator-assign-rooms-include-reserved.md` — ⚪ open — allocator + assign-rooms รับ flag บน period-check scopes + full-chain E2E · blocked-by: ["03-booking-capacity-sellable-pool"]
 - `tickets/06-docs-and-memory-closeout.md` — ⚪ open — docs (api_guide) + memory (cline.md) + tracker closeout (บางส่วน landed จาก map ใหม่ — เหลือเอกสาร flag) · blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-sellable-pool", "04-allocator-assign-rooms-include-reserved"]
