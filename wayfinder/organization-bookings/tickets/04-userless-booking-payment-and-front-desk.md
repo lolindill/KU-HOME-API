@@ -8,6 +8,8 @@
 
 ## Question
 
+**⚠️ Cross-map blocked (2026-09-24):** design ประเภทการชำระเงิน (เต็มจำนวน/มัดจำ/ค้างชำระ + ยอดเงิน) ถูก chart เป็นแมปใหม่ [`booking-payment-types`](../../booking-payment-types/map.md) — ticket นี้รอ design ของแมปนั้นปิดก่อน (ค้างชำระ = payment type ที่ org booking ใช้เสมอ — owner) แล้วค่อยกลับมาตัดสินส่วนของ org ตรงนี้
+
 Booking องค์กรไม่มี user account — ทุก flow หลังจองที่มาผูกกับ "user เป็นคนทำ" ต้องตัดสินเจ้าของใหม่:
 
 - **สลิป:** `POST /bookings/{id}/confirm` (ส่งสลิป `draft → pending`) เป็นของเจ้าของ booking — org booking ไม่มีเจ้าของ → **admin อัปโหลดสลิปแทนได้ไหม** หรือ org จ่ายผ่านช่องทางอื่นเท่านั้น (เงินสด `draft → paid`, walk-in `draft → confirmed`)?

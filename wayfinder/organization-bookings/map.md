@@ -19,7 +19,7 @@ Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` �
   - `BookingController::createBooking` ล็อก `user_id = คนล็อกอิน (sanctum)` เสมอ + เช็ค **1 draft ต่อ user** + ตั้ง `payment_deadline` 24 ชม.
   - ⚠️ **ราคา daily_ku ดูจาก role ของ "คนล็อกอิน"** (`GlobalRate::getEffectiveDailyRate`) — admin จองแทนจะโดนเรทตาม role admin ไม่ใช่ user ปลายทาง = จุดเสี่ยงหลักของโหมดจองแทน
   - ownership ทุกจุดเป็น "เจ้าของ booking หรือ admin" — booking ไร้ user (`user_id = null`) เหลือแต่ admin
-- Related maps: `booking-create-rules` (✅ COMPLETED — 4 write paths ของ createBooking), `excel-reports` (open), `reserved-room-pool` (open)
+- Related maps: `booking-create-rules` (✅ COMPLETED — 4 write paths ของ createBooking), `excel-reports` (open), `reserved-room-pool` (open), `booking-payment-types` (open 2026-09-24 — payment_type เต็มจำนวน/มัดจำ/ค้างชำระ — **ticket 04 ของแมปนี้รอ design แมปนั้นปิดก่อน**)
 - **Standing decision ระดับ effort (จาก owner, 2026-09-24):** ตาราง `organizations` เป็น **stopgap** — ทุก design ที่เสนอต้องตอบได้ว่า "ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API แทน booking เดิมยังอ่านความหมายถูกไหม"
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee)
