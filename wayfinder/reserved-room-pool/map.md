@@ -1,14 +1,14 @@
 ---
 label: wayfinder:map
 title: "include_reserved — ห้องสำรอง (reserved period) เข้า pool ฝั่ง admin"
-status: open
+status: closed
 ---
 
 # Wayfinder Map — `include_reserved` (ห้องสำรอง reserved period)
 
 > **✅ UNFROZEN (2026-09-24):** เดิมถูก freeze รอ map `room-state-periods` — map นั้น **จบแล้ว (COMPLETED 2026-09-24)** และ build ลงแล้ว (commit `feat(rooms)`): โมเดลสุดท้ายคือ **period records** แทน `is_reserved` flag (decision ticket 90 ของ map นี้ถูก override — ดู Decisions so far) · งาน landed เดิมถูก rebase เป็น period model ครบ · session unfreeze ปิด tickets 01, 05 และ re-base tickets 02–04 + spec ให้คงเหลือเฉพาะงานจริง
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-24)
 
 [spec.md](spec.md) (label `ready-for-agent`) — admin-only param `include_reserved` ครบ 5 surfaces (availability ×3, booking capacity checks ×3 จุด, assign-rooms → allocator, walk-in) + แก้ bug denominator (booking check นับ physical rooms เกิน capacity ขายได้) — implement ผ่าน **HTTP feature seam เดียว** (user-confirmed) — *(re-base 2026-09-24: พื้นฐานเป็น period model ของ `room-state-periods` แล้ว · summary+king+walk-in+calendar+booking capacity landed เสร็จ — เหลือ allocator และ docs closeout)*
 
@@ -31,16 +31,17 @@ status: open
 - [ticket 02](tickets/02-calendar-availability-include-reserved.md): **CLOSED 2026-09-24** — calendar 4 endpoints รับ flag: `addPeriodsToOccupied()` กรอง kind (flag → matrix นับเฉพาะ maintenance period, reserved ปล่อยวันเป็นว่าง) + `search_criteria.include_reserved` top-level เฉพาะเมื่อ flag มีผล · `RoomCalendarIncludeReservedTest` 11 tests — suite 512 เขียว + pint
 - [ticket 03](tickets/03-booking-capacity-sellable-pool.md): **CLOSED 2026-09-24** — grill ยืนยันกับ owner: **คง bug fix ตาม grill #5** (non-goal "คงนับ physical" ของ map `room-state-periods` ถูกยกเลิก — spec ทั้งสอง sync แล้ว) · denominator 4 จุด = `sellableCapacity()` ต่อช่วงเข้าพัก (freeOfPeriod maintenance เสมอ + reserved ใต้ flag admin) · `BookingCapacitySellablePoolTest` 8 tests — suite 520 เขียว + pint
 - [ticket 04](tickets/04-allocator-assign-rooms-include-reserved.md): **CLOSED 2026-09-24** — allocator flag threading จบวง: `allocate(brs, includeReserved=false)` → `loadRoomPool` ตัดเฉพาะ maintenance เมื่อ flag true (reserved period เข้า pool) · `BookingPriority::hasX09Free` กฎเดียวกัน · assign-rooms ส่ง flag ผ่าน `IncludeReservedGate` · ไม่ persist (fail-safe 422 สุภาพ) · assign แตะแค่ `room_id` — `AssignRoomsIncludeReservedTest` 6 tests (full-chain E2E ครบ) — suite 526 เขียว + pint
+- [ticket 06](tickets/06-docs-and-memory-closeout.md): **CLOSED 2026-09-24** — docs closeout: `docs/api_guide.md` หัวข้อกลาง "Flag `include_reserved`" (สัญญา param + ตาราง 5 surfaces + ตัวอย่าง payload + 🐛 bug fix denominator + 🎟️ runbook ห้องสำรอง 2 ทางเลือก) + จุดย่อยครบทุก endpoint (availability/calendar 4/booking 4 paths/assign-rooms/walk-in) · `cline.md` บันทึก grill 7 ข้อ + changelog · map ปิด (tickets 01–06 ครบ + Resolution ทุกใบ)
 
 ## Tickets
 
-implementation tickets (breakdown จาก spec ด้วย to-tickets ครบ 6 tasks + 1 grilling ticket — 2026-09-16 · **re-base 2026-09-24:** บน period model — tickets 02–04 มี amendment ในตัว, 01/05 ปิดแล้ว):
+implementation tickets (breakdown จาก spec ด้วย to-tickets ครบ 6 tasks + 1 grilling ticket — 2026-09-16 · **re-base 2026-09-24:** บน period model — tickets 02–04 มี amendment ในตัว · **ทุกใบปิดแล้ว — map COMPLETED 2026-09-24**):
 
 - `tickets/01-include-reserved-gate-and-availability.md` — ✅ closed (2026-09-24 — rebase period model + test ครบ suite 501)
 - `tickets/02-calendar-availability-include-reserved.md` — ✅ closed (2026-09-24 — calendar 4 endpoints รับ flag บน period matrix + tests 11)
 - `tickets/03-booking-capacity-sellable-pool.md` — ✅ closed (2026-09-24 — grill ยืนยันคง bug fix; denominator 4 จุด = sellableCapacity + tests 8, suite 520)
 - `tickets/04-allocator-assign-rooms-include-reserved.md` — ✅ closed (2026-09-24 — allocator + assign-rooms รับ flag บน period scopes + full-chain E2E 6 tests, suite 526)
-- `tickets/06-docs-and-memory-closeout.md` — ⚪ open — docs (api_guide) + memory (cline.md) + tracker closeout (บางส่วน landed จาก map ใหม่ — เหลือเอกสาร flag) · blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-sellable-pool", "04-allocator-assign-rooms-include-reserved"] ← **frontier** (บล็อกปลดครบแล้ว)
+- `tickets/06-docs-and-memory-closeout.md` — ✅ closed (2026-09-24 — docs: api_guide หัวข้อกลาง flag + runbook · cline.md grill 7 ข้อ + changelog · map ปิดเป็นใบสุดท้าย)
 - `tickets/90-reserved-room-checkin-lifecycle.md` — ✅ closed (2026-09-24 — โมเดล flag ผ่าน HITL grill · **ถูก override โดย period model ของ map `room-state-periods`**)
 
 ## Not yet specified

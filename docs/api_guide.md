@@ -550,6 +550,40 @@ Revokes the current access token.
 
 ---
 
+### 🏨 Flag `include_reserved` — ใช้ห้องสำรอง (reserved period) ครบ 5 surfaces (2026-09-24)
+
+Admin ส่ง flag `include_reserved=true` เพื่อให้ pool ต่าง ๆ รวม **ห้องติด reserved period** (นิยามดูหัวข้อ Room state periods ด้านบน) — กฎหัวใจ: **maintenance period ถูกตัดเสมอทุกกรณี** flag ขยาย pool เฉพาะกลุ่ม reserved · spec ครบที่ `wayfinder/reserved-room-pool/spec.md`
+
+**สัญญาของ param (ทุก surface กฎเดียวกัน — single source of truth ที่ `App\Support\IncludeReservedGate`):**
+- boolean, **request-scoped** — query param บน GET / body field บน POST/PUT · **ไม่ persist ลง booking ใด ๆ** (flag มีชีวิตเท่า request เดียว)
+- มีผล **เฉพาะ role `admin`** (ตรวจใน controller — routes availability เป็น public ไม่มี role middleware ให้ยืม)
+- **Non-admin / anonymous ส่งมา → เมยายีเงียบ ๆ ไม่ 403** — response เหมือนไม่ส่ง flag ทุกไบต์ · ค่าที่ไม่ใช่ boolean ถือว่าไม่ได้ส่ง (จึงไม่เคยได้ 422 จาก flag นี้)
+- ไม่มีใครส่ง flag → ทุก response **byte-identical** กับเดิม (backward compatible)
+
+**5 surfaces:**
+
+| # | Surface | พฤติกรรมใต้ flag (admin) |
+|---|---|---|
+| 1 | `GET /availability` (summary + king) | `available_rooms` **ถูกแทนที่** ด้วย extended pool (sellable + reserved − booked) + ฟิลด์โปร่งใส `sellable_rooms` / `reserved_rooms` + `search_criteria.include_reserved: true` · king counters กฎเดียวกัน |
+| 2 | Calendar 4 endpoints (`/availability-per-day`, `/availability-ranges`, `/unavailable-dates`, `/unavailable-ranges`) | occupied matrix รายวันนับ **เฉพาะ maintenance period** — วันที่ reserved period ครอบ ห้องกลับมาขายได้ · response เพิ่ม `search_criteria.include_reserved: true` (top-level คู่ `start_date`/`end_date`) |
+| 3 | Booking capacity checks 4 จุด (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`) | denominator = **sellable pool ต่อช่วงเข้าพักของแต่ละ BR** — flag ขยายเป็น sellable + reserved (และคือ bug fix ด้านล่าง) |
+| 4 | `PUT /bookings/{bookingId}/assign-rooms` (auto-assign → allocator) | allocator โหลด pool ตัดเฉพาะ maintenance — ห้องติด reserved period ถูก assign เข้า booking ได้ |
+| 5 | `POST /front-desk/walk-in` | ห้องที่มี reserved period ทับช่วงเข้าพัก → ผ่านได้ (route admin-only อยู่แล้ว — maintenance period ยัง reject เสมอ) |
+
+**🐛 Bug fix denominator (มาพร้อมกัน — ไม่ต้องส่ง flag ก็ได้ผล):** เดิม booking capacity checks นับ **ห้องกายภาพทั้ง type** เป็น denominator — รวมห้องที่ติด period ซึ่งจองแล้วจะ assign ห้องไม่ได้ → user จองทะลุ capacity ที่ขายได้จริงแล้วไปตันตอน assign วันนี้ทั้ง 4 จุดนับจาก **sellable pool ต่อช่วงเข้าพักจริงของแต่ละ BR** (ตัด maintenance เสมอ + ตัด reserved เว้นแต่ admin ส่ง flag · draft ที่หมดเวลาไม่ถูกนับ — `holdingSlot()`) — ปิดช่อง overbooking-past-sellable ตั้งแต่หน้าจอง
+
+**พฤติกรรมที่ตั้งใจไว้:**
+- assign / walk-in แตะแค่ `booking_rooms.room_id` — สถานะกายภาพของห้อง + period row **ไม่ถูกแตะ** (ห้องสำรองวิ่ง lifecycle ปกติ ไม่มี auto-flip)
+- ไม่ persist: create ด้วย flag แต่ assign-rooms ภายหลังไม่ส่ง flag → อาจ 422 เมื่อเหลือแต่ห้องสำรอง (**fail-safe** — ระบบไม่ดึงห้องสำรองเอง)
+- การเพิ่ม/ถอดห้องเข้า pool สำรองทำผ่าน CRUD `/rooms/{roomId}/periods` เท่านั้น — flag ไม่เปลี่ยน pool membership ถาวร
+
+**🎟️ Runbook ห้องสำรอง (Operations — front desk / admin):**
+- **ทางเลือก 1 — กันห้องไว้เป็นช่วง (pool membership):** สร้าง reserved period ด้วย `POST /rooms/{roomId}/periods` (`kind: "reserved"` — admin เท่านั้น) แล้วถอดด้วย `PATCH` / `DELETE .../periods/{periodId}` เมื่อจะปล่อยขาย — auto-merge ถ้าช่วงทับกันเอง ดูรายละเอียดหัวข้อ Room state periods ด้านบน
+- **ทางเลือก 2 — ใช้ห้องสำรองทันที (ภายใต้ period ที่มีอยู่):** ส่ง `include_reserved=true` บน walk-in หรือ assign-rooms (ดูเลข mobilizable ก่อนได้จาก `GET /availability` ใต้ flag)
+- อย่าแก้สถานะกายภาพห้องเพื่อ "หลอก" pool — period เป็น single source of truth ของห้องสำรอง (โมเดลเต็ม: `wayfinder/room-state-periods/`)
+
+---
+
 ### PUT `/rooms/{id}/status` — Update room status
 
 🔒 **Admin only**
@@ -667,6 +701,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 - `check_out` (optional, date, > check_in) — default: tomorrow
 - `max_guests` (optional, integer, ≥ 1) — กรองเอาเฉพาะ room type ที่รองรับจำนวนแขก >= ค่าที่ส่ง (เทียบกับคอลัมน์ `max_guests` ของ room type)
 - `bed_type` (optional, in: `king_size`) — 🌟 (09/09/26) ส่ง `bed_type=king_size` เพื่อนับ availability เฉพาะ**ห้องเตียง king** (ชั้น 8) — ส่งค่าอื่น → `422`. ไม่ส่ง → พฤติกรรมเดิมทุกอย่าง
+- 🏨 `include_reserved` (optional, boolean) — (24/09/26) admin เท่านั้น — pool รวมห้องติด reserved period ของช่วง (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" ด้านบน): `available_rooms` ถูกแทนด้วย extended pool + ฟิลด์ `sellable_rooms`/`reserved_rooms` + `search_criteria.include_reserved: true` · non-admin/anonymous ส่ง = เมยายีเงียบ ๆ (ไม่ 422) · maintenance period ถูกตัดเสมอ
 
 **Semantics:**
 - `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
@@ -753,6 +788,24 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 ```
 > 💡 ไม่ส่ง `bed_type` → ไม่มี `king_total_rooms`/`king_occupied` และ `search_criteria` ไม่มี `bed_type` (payload เหมือนเดิมทุกไบต์). Endpoints availability อื่นๆ (`/availability-per-day`, `/availability-ranges`, `/unavailable-*`) ยัง**ไม่รองรับ** `bed_type` — ขยายภายหลังถ้า frontend ต้องการ
 
+**Response `200` (admin ส่ง `include_reserved=true` — ฟิลด์ที่ต่างจากปกติ, 🏨 24/09/26):**
+```json
+{
+  "room_type_id": "uuid",
+  "name_en": "Superior",
+  "available_rooms": 9,
+  "sellable_rooms": 8,
+  "reserved_rooms": 2,
+  "search_criteria": {
+    "check_in": "2026-09-24",
+    "check_out": "2026-09-26",
+    "max_guests": null,
+    "include_reserved": true
+  }
+}
+```
+> 💡 `available_rooms` = `sellable_rooms + reserved_rooms − booked` (extended pool) — ไม่ใช่ `max(0, sellable − booked)` แบบปกติ · `reserved_rooms` = ห้อง `status='available'` ที่มี reserved period ทับช่วง (ห้องที่ทับ maintenance period ด้วย **ไม่ถูกนับ** — กฎเหล็ก) · ไม่ส่ง flag → ไม่มี `sellable_rooms`/`reserved_rooms` และ `search_criteria` ไม่มี `include_reserved` (byte-identical) · non-admin ส่ง flag → payload เท่าไม่ส่ง · ใช้คู่ `bed_type=king_size` ได้ (king_total สะท้อน extended pool ให้)
+
 ---
 
 ### GET `/availability-per-day` — Per-day availability calendar
@@ -765,6 +818,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 - `start_date` (optional, date, ≥ today) — default: `today`
 - `end_date` (optional, date, ≥ start_date) — default: `start_date + 6 เดือน` (~183 วัน)
 - 🛡️ Cap: `(end_date − start_date) ≤ 365 คืน` (สูงสุด 366 วัน) — เกินปฏิเสธด้วย `422`
+- 🏨 `include_reserved` (optional, boolean) — (24/09/26) admin เท่านั้น (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" ด้านบน) — occupied matrix รายวันนับเฉพาะ **maintenance period** (ห้องติด reserved period กลับมาขายในวันที่ period ครอบ) · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level · non-admin ส่ง = เมยายีเงียบ ๆ · ไม่ส่ง flag → byte-identical
 
 **Semantics:**
 - แต่ละค่า = `max(0, total_rooms − occupied)` ของคืนนั้น
@@ -854,7 +908,7 @@ curl -s -H "Accept: application/json" \
 
 คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start_date, end_date}`. เบากว่า `/availability-per-day` เพราะไม่คืนจำนวนห้องว่างรายวัน — ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
 
-**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน)
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน · 🏨 รวม `include_reserved` — admin เท่านั้น: interval sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period ห้องสำรองจึงไม่ทำวันเป็น sold-out · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level)
 
 **Response `200`:**
 ```json
@@ -898,7 +952,7 @@ curl -s -H "Accept: application/json" \
 
 > ⚠️ **BREAKING (2026-08-23):** เดิมคืน flat list `unavailable_dates` วันที่ **ทุก room type เต็มพร้อมกัน** (รวมทุกประเภทเป็น list เดียว) — ตอนนี้แยกราย room type ผ่าน `room_types[]` แทน ถ้า frontend อยากได้พฤติกรรมเดิม (วันที่จองไม่ได้เลย) ให้ intersect `unavailable_dates` ของทุก type ที่มีห้องขายฝั่ง client เอง
 
-**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน)
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน · 🏨 รวม `include_reserved` — admin เท่านั้น: วัน sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period ห้องสำรองจึงไม่ถูกนับเป็นวันจองไม่ได้ · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level)
 
 **Semantics:**
 - วัน "จองไม่ได้" ของ type = `total_rooms > 0 && occupied >= total_rooms` (sold-out logic เหมือน `/availability-ranges` เป๊ะ)
@@ -950,7 +1004,7 @@ curl -s -H "Accept: application/json" \
 
 คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start, end}` — เหมือน `/availability-ranges` แต่ **ไม่รับ query param**: endpoint คำนวณช่วงสแกนเอง ใช้สำหรับ frontend โหลด "วันที่จองไม่ได้" ทั้งระบบโดยไม่ต้องรู้ช่วงล่วงหน้า.
 
-**Query Params:** ❌ ไม่รับ — ช่วงสแกนคำนวณอัตโนมัติ
+**Query Params:** ❌ ไม่รับ param ช่วงวัน — ช่วงสแกนคำนวณอัตโนมัติ · 🏨 (24/09/26) รับได้เพียง `include_reserved` (boolean, admin เท่านั้น — วัน sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level ทั้ง branch มีผลและ early-return ว่าง · non-admin = เมยายีเงียบ ๆ)
 - `start` = `today + 3 วัน`
 - `end` = `max(check_out)` จาก `booking_rooms` ที่ `status IN (draft, confirmed, checked_in)` (booking ที่ยัง active — ชุดเดียวกับที่นับลด availability)
 - **DoS guard:** ถ้า `end` ไกลเกินไป จะถูก clamp ที่ `start + 365 วัน` (กัน booking ปีหน้าทำให้ลูปสแกนยาว)
@@ -1220,6 +1274,7 @@ curl -s -H "Accept: application/json" \
 > 🚪 **(16/09/26) Room Cap Rule**: การจองห้องจำกัดสูงสุด **4 ห้องต่อ 1 booking** (config: `booking.max_rooms_per_booking`) สำหรับผู้ใช้ non-admin (admin exempt — สามารถจองได้มากกว่า 4 ห้อง ตัดสินจาก Sanctum login role เท่านั้น). กฎนี้บังคับใช้ใน (a) การสร้างการจอง (`POST /bookings`) โดยนับจำนวนห้องในอาร์เรย์ `booking_rooms` (ตรวจที่ FormRequest layer) และ (b) การเพิ่มห้องเข้า draft (`POST /bookings/{id}/rooms`) โดยนับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (ตรวจที่ controller guard ก่อน `DB::beginTransaction()`). หากเกินเพดานจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
 > ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline)
 > 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
+> 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
 
 **Validation Rules:**
 
@@ -1334,7 +1389,7 @@ curl -s -H "Accept: application/json" \
 
 **Constraints:**
 - Booking `status` ต้องเป็น `draft` เท่านั้น (จ่ายเงิน/confirm ไปแล้วเพิ่มไม่ได้) → `422`
-- Availability check นับที่ BR-level (`draft`/`confirmed`/`checked_in` ที่ overlap) — **รวมห้องที่อยู่ใน booking นี้แล้วด้วย** กันจองเกิน capacity ตอนเพิ่มซ้ำ
+- Availability check นับที่ BR-level (`draft`/`confirmed`/`checked_in` ที่ overlap) — **รวมห้องที่อยู่ใน booking นี้แล้วด้วย** กันจองเกิน capacity ตอนเพิ่มซ้ำ · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** (ตัดห้องติด period — maintenance เสมอ, reserved เว้นแต่ admin ส่ง `include_reserved=true` — ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - ไม่เรียก `RoomAllocator` — ห้องใหม่ถูกสร้างด้วย `room_id = null`, `status = 'draft'` (initial state รอจ่ายห้องตอน assign/check-in)
 - `payment_deadline` **ไม่เปลี่ยน** (คง deadline เดิมของ booking) · `total_amount` **accumulate** (ยอดเดิม + ราคาห้องใหม่)
 
@@ -1441,7 +1496,7 @@ curl -s -H "Accept: application/json" \
 **Constraints:**
 - Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
 - แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
-- ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422`
+- ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
 - ⚡ **Smart Diffing**: ตรวจสอบ field ที่เปลี่ยนจริง (รวมถึง date casts/boolean casts) — ถ้าวันที่และประเภทห้องเหมือนเดิมในฐานข้อมูล จะข้ามการเช็ค availability อันหนักหน่วง และจะสั่ง Execute SQL เฉพาะเมื่อมีข้อมูลเปลี่ยนแปลงจริง (ลดภาระ DB)
 - `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
@@ -1549,7 +1604,7 @@ curl -s -H "Accept: application/json" \
 - Booking `status = 'draft'` + **ทุก** BookingRoom ใน batch เป็น `draft` เท่านั้น → `422`
 - แก้ได้ทุก field เหมือนรายห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` / `status`
 - `booking_room_id` ซ้ำใน batch เดียวกันไม่ได้ (validation `distinct`) → `422`
-- ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด
+- ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (top-level body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - วันที่ตรวจจาก **effective values** (ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม) — ส่งแต่ `check_in` ทับ `check_out` เดิม (หรือกลับกัน) ก็ถูกจับ → `422`
 - **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว)
 - ⚡ **Smart Diffing**: เทียบข้อมูลใหม่กับ DB จริง (รวม cast วันที่/boolean) — ห้องที่ข้อมูลไม่ต่างจากเดิมจะไม่เรียก SQL Update เลย, และถ้าไม่มีการเปลี่ยน shape (วันที่/ห้อง) ในทั้งชุด ก็จะข้ามการเช็ค availability
@@ -1937,6 +1992,15 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 
 Assigns actual room numbers to booking_rooms that don't have one yet. Booking must be `paid` or `confirmed`.
 
+**Request Body (optional):**
+```json
+{
+  "include_reserved": true
+}
+```
+
+> 🏨 **(24/09/26) `include_reserved`** — admin เท่านั้น: allocator โหลด pool ตัดเฉพาะห้องติด **maintenance period** — ห้องติด **reserved period** ทับช่วงเข้าพักถูก assign ได้ (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" หมวด Rooms) · **ไม่ persist** — booking ที่สร้างด้วย flag แต่ assign ไม่ส่ง flag อาจ 422 เมื่อเหลือแต่ห้องสำรอง (fail-safe — ระบบไม่ดึงห้องสำรองเอง) · assignment แตะแค่ `booking_rooms.room_id` — สถานะกายภาพห้อง + period row ไม่ถูกแตะ · non-admin (booking owner ทั่วไป) ส่ง flag = เมยายีเงียบ ๆ
+
 **Response `200`:**
 ```json
 {
@@ -1960,7 +2024,7 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
 
 **Response `422`:**
 - Booking not in `paid`/`confirmed` status
-- No rooms available for the requested type
+- No rooms available for the requested type — รวมกรณี admin **ไม่**ส่ง flag แล้วเหลือแต่ห้องติด reserved period (ส่ง `include_reserved=true` ใหม่เพื่อใช้ห้องสำรอง)
 
 ---
 
@@ -2273,6 +2337,7 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
   "verified_by": "admin-uuid",
   "nights": 2,
   "room_id": "room-uuid",
+  "include_reserved": false,
   "guests": [
     {
       "title": "Mr.",
@@ -2300,6 +2365,7 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 | `billing_comment`        | nullable, string, max 255           |
 
 > Room must be in `available` or `prep_checkin` status.
+> 🏨 **(24/09/26) Period guard + `include_reserved`**: ห้องที่มี **maintenance period** ทับช่วง `[now, now+nights)` → reject เสมอ (`400` — กฎเหล็ก ส่ง flag ก็ไม่ผ่าน) · ห้องที่มี **reserved period** ทับช่วง → ผ่านได้เมื่อ admin ส่ง `include_reserved=true` (body field — ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" หมวด Rooms) ไม่งั้น reject `400`: `"Room number X is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน"`
 
 **Response `201`:**
 ```json
@@ -2315,7 +2381,23 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 ```json
 {
   "status": "error",
-  "message": "Room number 101 is not ready for walk-in. Current status: maintenance"
+  "message": "Room number 101 is not ready for walk-in. Current status: dirty"
+}
+```
+
+```json
+// 🗓️ ห้องติด maintenance period ทับช่วง — reject เสมอ (ส่ง include_reserved ก็ไม่ผ่าน)
+{
+  "status": "error",
+  "message": "Room number 101 is under a maintenance period for those dates and cannot be used for walk-in."
+}
+```
+
+```json
+// 🏨 ห้องติด reserved period ทับช่วง แต่ไม่ได้ส่ง include_reserved
+{
+  "status": "error",
+  "message": "Room number 101 is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน"
 }
 ```
 
