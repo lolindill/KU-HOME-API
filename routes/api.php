@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\MockController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\RoomStatePeriodController;
 use App\Http\Controllers\Api\V1\SsoController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Middleware\RequireJsonAccept;
@@ -210,6 +211,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::put('/tasks/{id}/assign', [DashboardController::class, 'assignTask'])
                 ->where('id', '[0-9a-f\-]{36}');
         });
+    });
+
+    // 🗓️ Room state periods (24/09/26 — wayfinder/room-state-periods): "ห้องสำรอง/ซ่อมแซม"
+    //    เป็นช่วงเวลาแบบ booking · route = role:admin,staff (OR) · guard แยก kind ใน controller:
+    //    kind=maintenance → admin+staff ครบทุก verb / kind=reserved → admin เท่านั้น (staff 403)
+    //    ไม่เพิ่ม throttle — precedent กลุ่ม admin (/discounts)
+    Route::middleware('role:admin,staff')->group(function () {
+        Route::get('/rooms/{roomId}/periods', [RoomStatePeriodController::class, 'index'])
+            ->where('roomId', '[0-9a-f\-]{36}');
+        Route::post('/rooms/{roomId}/periods', [RoomStatePeriodController::class, 'store'])
+            ->where('roomId', '[0-9a-f\-]{36}');
+        Route::patch('/rooms/{roomId}/periods/{periodId}', [RoomStatePeriodController::class, 'update'])
+            ->where(['roomId' => '[0-9a-f\-]{36}', 'periodId' => '[0-9a-f\-]{36}']);
+        Route::delete('/rooms/{roomId}/periods/{periodId}', [RoomStatePeriodController::class, 'destroy'])
+            ->where(['roomId' => '[0-9a-f\-]{36}', 'periodId' => '[0-9a-f\-]{36}']);
     });
 
     // 🧹 Dashboard / Housekeeping — Shared endpoints (admin OR housekeeping)

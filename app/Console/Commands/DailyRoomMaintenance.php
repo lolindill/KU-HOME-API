@@ -6,6 +6,7 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\HousekeepingTask;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Services\RoomAllocator\BookingPriority;
 use App\Services\RoomAllocator\Dto\BookingRequestDto;
 use App\Services\RoomAllocator\RoomAllocator;
@@ -166,7 +167,14 @@ class DailyRoomMaintenance extends Command
         if (! empty($preppedRoomIds)) {
             $staleQuery->whereNotIn('id', $preppedRoomIds);
         }
-        $staleRooms = $staleQuery->get();
+        // 🗓️ (24/09/26) room-state-periods: ข้ามห้องติด maintenance period active —
+        //    lifecycle เป็นอิสระจาก period (ticket 01) ห้องที่ซ่อมอยู่ไม่ควรถูก churn เป็น
+        //    dirty + งาน daily ของแม่บ้าน (HousekeepingTask ไม่ผูกกับ period โดยตั้งใจ)
+        $staleRooms = $staleQuery->get()
+            ->reject(fn (Room $room) => RoomStatePeriod::where('room_id', $room->id)
+                ->activeOn()
+                ->where('kind', RoomStatePeriod::KIND_MAINTENANCE)
+                ->exists());
 
         $flaggedDirty = 0;
         $dirtyTasksCreated = 0;

@@ -140,12 +140,19 @@ final class RoomAllocator
     {
         $neededTypes = array_values(array_unique(array_map(fn ($br) => $br->type, $brs)));
 
+        // เก็บช่วงวันที่ที่ต้องเช็ค overlap (union ของทุก BR) — ใช้ทั้ง period-check และ reservations
+        $checkIns = array_map(fn ($br) => $br->checkIn, $brs);
+        $checkOuts = array_map(fn ($br) => $br->checkOut, $brs);
+        $minCheckIn = min($checkIns);
+        $maxCheckOut = max($checkOuts);
+
         $query = Room::with('roomType')
             ->whereHas('roomType', fn ($q) => $q->whereIn('name_en', $neededTypes))
-            // 🏨 (24/09/26) ticket 90: ห้องสำรอง = is_reserved=true — ออกจาก pool เริ่มต้น
-            //    (ticket 04 จะเพิ่ม include_reserved ให้ assign-rooms ขยาย pool ได้)
-            ->whereNotIn('status', ['maintenance'])
-            ->where('is_reserved', false);
+            // 🗓️ (24/09/26) room-state-periods: ห้องติด period (reserved/maintenance) ช่วงไหน
+            //    ของการเข้าพัก = ออกจาก pool ช่วงนั้น (สถานะ maintenance/is_reserved ถูกถอดแล้ว —
+            //    shared scope เดียวกับ availability ทุก endpoint · การ override reserved ด้วย
+            //    include_reserved เป็นงานของ map reserved-room-pool ตอน unfreeze)
+            ->freeOfPeriod($minCheckIn, $maxCheckOut);
 
         // lockForUpdate เพื่อกัน race (skip ใน SQLite ที่ไม่ support)
         if (config('database.default') !== 'sqlite' && DB::transactionLevel() > 0) {
@@ -153,12 +160,6 @@ final class RoomAllocator
         }
 
         $rooms = $query->get();
-
-        // เก็บช่วงวันที่ที่ต้องเช็ค overlap (union ของทุก BR)
-        $checkIns = array_map(fn ($br) => $br->checkIn, $brs);
-        $checkOuts = array_map(fn ($br) => $br->checkOut, $brs);
-        $minCheckIn = min($checkIns);
-        $maxCheckOut = max($checkOuts);
 
         // แปลงเป็น RoomDto + โหลด reservations ที่ overlap
         $dtos = [];

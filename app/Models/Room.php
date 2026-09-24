@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Casts\PgBoolean;
 use Exception;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -25,8 +24,8 @@ class Room extends Model
         'room_type_id',
         'room_number',
         'status',
-        // 🏨 (24/09/26) ticket 90: ห้องสำรอง = pool membership (property ถาวร) ไม่ใช่ lifecycle state
-        'is_reserved',
+        // 🗓️ (24/09/26) room-state-periods: ถอด is_reserved ออกแล้ว — "ห้องสำรอง" =
+        //    ห้องที่มี period kind=reserved active (ตาราง room_state_periods — ดู periods())
         'builtin_extra_beds',
         'status_updated_at',
         'status_updated_by',
@@ -41,7 +40,6 @@ class Room extends Model
     protected $casts = [
         'status_updated_at' => 'datetime',
         'builtin_extra_beds' => 'integer',
-        'is_reserved' => PgBoolean::class,
     ];
 
     public function roomType(): BelongsTo
@@ -61,17 +59,43 @@ class Room extends Model
     }
 
     /**
+     * 🗓️ (24/09/26) room-state-periods: ช่วง "ห้องสำรอง"/"ซ่อมแซม" ของห้องนี้
+     *    (ประวัติชั้นเองของ 2 เหตุการณ์นี้ — แทน is_reserved flag + สถานะ maintenance เดิม)
+     */
+    public function periods(): HasMany
+    {
+        return $this->hasMany(RoomStatePeriod::class, 'room_id');
+    }
+
+    /**
+     * 🗓️ Shared period-check (ธรรมเนียมเดียวกับ holdingSlot() — ห้ามเขียนเงื่อนไข period เอง):
+     *    ห้องที่**ไม่มี** period ของ kind ที่กำหนด (null = ทุก kind) overlap ช่วง [from, to)
+     */
+    public function scopeFreeOfPeriod($query, $from, $to, ?string $kind = null)
+    {
+        return $query->whereDoesntHave('periods', fn ($q) => $q->overlapping($from, $to, $kind));
+    }
+
+    /**
+     * ฝาแฝกของ scopeFreeOfPeriod — ห้องที่**มี** period overlap ช่วง [from, to)
+     */
+    public function scopeBlockedByPeriod($query, $from, $to, ?string $kind = null)
+    {
+        return $query->whereHas('periods', fn ($q) => $q->overlapping($from, $to, $kind));
+    }
+
+    /**
      * Room Status State Machine (all lowercase)
      *
-     * 🏨 (24/09/26) ticket 90: สถานะ `reserved_closed` ถูกถอดออก — "ห้องสำรอง" กลายเป็น
-     *    pool membership ผ่าน column `is_reserved` (property ถาวร ไม่ผูก lifecycle)
+     * 🗓️ (24/09/26) room-state-periods: สถานะ `reserved_closed` (ticket 90) **และ** `maintenance`
+     *    ถูกถอดออกทั้งคู่ — "ห้องสำรอง" และ "ซ่อมแซม" เป็นช่วงเวลาบน room_state_periods
+     *    (derived ตอน query) ไม่ใช่สถานะ — lifecycle ของห้องวิ่งแค่ 5 สถานะนี้
      *
-     * available → checkout_makeup, dirty, maintenance, prep_checkin
+     * available → checkout_makeup, dirty, prep_checkin
      * occupied → available, prep_checkin
      * checkout_makeup → occupied
      * dirty → available, checkout_makeup
      * prep_checkin → available, dirty
-     * maintenance → * (any status)
      */
     public function transitionStatusTo(string $newStatus, ?string $updatedByUserId = null)
     {
@@ -86,14 +110,13 @@ class Room extends Model
         // 🛡️ กฎการเปลี่ยนสถานะ (key = target status, value = allowed source statuses)
         //    🧹 Phase A (15/07/26): prep_checkin เพิ่ม 'checkout_makeup' เป็น source
         //       (DailyRoomMaintenance prep ห้อง checkout_makeup ที่แขกเข้าพรุ่งนี้ได้)
-        //    🏨 (24/09/26): ถอด reserved_closed ออกทั้ง target และ source — ดู ticket 90
+        //    🗓️ (24/09/26): ถอด reserved_closed + maintenance ออก — ดู room-state-periods
         $allowedTransitions = [
             'occupied' => ['available', 'prep_checkin'],
             'checkout_makeup' => ['occupied'],
-            'available' => ['checkout_makeup', 'dirty', 'maintenance', 'prep_checkin'],
+            'available' => ['checkout_makeup', 'dirty', 'prep_checkin'],
             'dirty' => ['available', 'prep_checkin'],
             'prep_checkin' => ['available', 'dirty', 'occupied', 'checkout_makeup'],
-            'maintenance' => ['*'],
         ];
 
         $canTransition = false;

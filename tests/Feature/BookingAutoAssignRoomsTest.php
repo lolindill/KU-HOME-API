@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -460,8 +461,16 @@ final class BookingAutoAssignRoomsTest extends TestCase
     {
         $this->actingAsAdmin();
 
-        // ปรับห้อง Suite ทั้งหมดให้เป็น maintenance ทำให้ไม่มีห้องว่างใน pool
-        Room::where('room_type_id', $this->typeIds['Suite'])->update(['status' => 'maintenance']);
+        // 🗓️ (24/09/26) room-state-periods: ปิดห้องด้วย maintenance period เปิดปลาย (แทน
+        //    สถานะ maintenance ที่ถูกถอด) — Suite ทั้งหมดออกจาก pool ของ allocator
+        Room::where('room_type_id', $this->typeIds['Suite'])->get()->each(
+            fn (Room $room) => RoomStatePeriod::create([
+                'room_id' => $room->id,
+                'kind' => 'maintenance',
+                'start_date' => '2026-01-01',
+                'end_date' => null,
+            ])
+        );
 
         $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
         $br = $this->createBookingRoom($booking, 'Suite');
@@ -488,13 +497,20 @@ final class BookingAutoAssignRoomsTest extends TestCase
         $this->actingAsAdmin();
 
         // Suite มี 10 ห้องใน topology (ชั้น 5-9 ละ 2 ห้อง: 07, 18)
-        // เก็บห้อง 507 (Room A) และ 518 (Room B) ไว้ นอกนั้นปิด maintenance
+        // เก็บห้อง 507 (Room A) และ 518 (Room B) ไว้ นอกนั้นปิดด้วย maintenance period
+        // 🗓️ (24/09/26) room-state-periods: แทนสถานะ maintenance ที่ถูกถอด
         $roomA = Room::where('room_type_id', $this->typeIds['Suite'])->where('room_number', '507')->firstOrFail();
         $roomB = Room::where('room_type_id', $this->typeIds['Suite'])->where('room_number', '518')->firstOrFail();
 
         Room::where('room_type_id', $this->typeIds['Suite'])
             ->whereNotIn('id', [$roomA->id, $roomB->id])
-            ->update(['status' => 'maintenance']);
+            ->get()
+            ->each(fn (Room $room) => RoomStatePeriod::create([
+                'room_id' => $room->id,
+                'kind' => 'maintenance',
+                'start_date' => '2026-01-01',
+                'end_date' => null,
+            ]));
 
         // บุ๊กกิ้งอื่นจอง Room A ไว้แล้วในช่วงวันที่ 2026-11-10 ถึง 2026-11-14
         $otherBooking = $this->createBooking(['status' => 'confirmed', 'is_paid' => true]);

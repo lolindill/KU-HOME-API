@@ -258,13 +258,15 @@ class BookingRoom extends Model
         $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
 
         // ค้นหาห้องว่าง — เช็คจาก BR-level ชุด slot-holding (draft ที่ยังไม่หมดเวลา + confirmed + checked_in)
+        // 🗓️ (24/09/26) room-state-periods: ตัด whereNotIn(status maintenance/reserved_closed) ออก —
+        //    สองสถานะนี้ถูกถอดจาก machine แล้ว (period-check อยู่ที่ allocator/availability)
+        //    ⚠️ method นี้เป็น dead code (assignment จริงไหลผ่าน RoomAllocator) — คงไว้ตาม spec เดิม
         $availableRoom = Room::where('room_type_id', $this->room_type_id)
             ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
                 $query->holdingSlot()
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             })
-            ->whereNotIn('status', ['maintenance', 'reserved_closed'])
             ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
             ->orderBy('builtin_extra_beds', 'ASC')
             ->lockForUpdate()

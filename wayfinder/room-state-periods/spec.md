@@ -136,4 +136,4 @@ Indexes: `room_id` (จาก FK) + composite `[room_id, start_date, end_date]` 
 - ticket 04 ของ map นั้น (allocator flag threading ให้ assign-rooms/auto-assign ขยาย pool ด้วย reserved period) ยังไม่เกิด — เมื่อ unfreeze ต้องเขียนใหม่บน period-check scopes ของ spec นี้
 
 ## Build status
-- (ยังไม่ build — spec นี้คือ deliverable ของ ticket 06 · เมื่อ build ลงแล้วให้ append วันที่ + ชี้ commit ที่นี่)
+- **BUILD แล้ว (2026-09-24 — session เดียวกับ spec, ticket 06):** commit `feat(rooms): room_state_periods` บน branch `agust-11` — touchpoints ข้อ 1–16 ครบ · suite **497 เขียว** (เดิม 472 + `RoomStatePeriodTest` 25 ใหม่) · pint ผ่าน · docs: `docs/api_guide.md` (หัวข้อ Room state periods + state machine 5 สถานะ) + `cline.md` (หัวข้อ room_state_periods) · ⚠️ breaking change ที่จดไว้: room JSON ถอด `is_reserved` → `active_periods`

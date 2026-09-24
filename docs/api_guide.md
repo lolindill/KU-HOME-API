@@ -450,11 +450,16 @@ Revokes the current access token.
       "room_type_id": "uuid",
       "room_type_name": "Standard",
       "status": "available",
+      "active_periods": [
+        { "id": "uuid", "kind": "maintenance", "start_date": "2026-09-24", "end_date": null }
+      ],
       "status_updated_at": "2026-06-19T08:00:00.000000Z"
     }
   ]
 }
 ```
+
+> 🗓️ **(2026-09-24 — room-state-periods):** ⚠️ key `is_reserved` ถูกถอดพร้อม column — badge "ห้องสำรอง/ซ่อมแซม" ใช้ **`active_periods`** (period active **วันนี้** เท่านั้น · อ่านรายทั้งหมดได้ที่ `GET /rooms/{id}/periods`)
 
 ---
 
@@ -463,7 +468,7 @@ Revokes the current access token.
 🔒 **Public**
 
 **Query Params:**
-- `status` (optional) — Filter by status: `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+- `status` (optional) — Filter by status: `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty` *(🗓️ 2026-09-24: `maintenance`/`reserved_closed` ถูกถอดออกจาก state machine — จัดการผ่าน periods)*
 
 **Response `200`:**
 ```json
@@ -499,12 +504,49 @@ Revokes the current access token.
     "room_type_id": "uuid",
     "room_type_name": "Standard",
     "status": "available",
+    "active_periods": [],
     "status_updated_at": "2026-06-19T08:00:00.000000Z"
   }
 }
 ```
 
 **Response `404`:** Room not found
+
+---
+
+### 🗓️ Room state periods — ห้องสำรอง/ซ่อมแซม เป็นช่วงเวลา (2026-09-24)
+
+"ห้องสำรอง" (kind=`reserved`) และ "ซ่อมแซม" (kind=`maintenance`) เป็น **ช่วงวันที่** บนตาราง `room_state_periods` — ไม่ใช่สถานะ (สถานะ `maintenance`/`reserved_closed` ถูกถอดจาก machine แล้ว) · derived ตอน query ไม่มี sweep · `end_date` **nullable** (เปิดปลาย) และ **exclusive** เหมือน `check_out` · กฎเหล็ก: maintenance period ตัดเด็ดขาดทุก path · reserved period override ได้ด้วย flag `include_reserved` (admin) · spec ครบที่ `wayfinder/room-state-periods/spec.md`
+
+| Endpoint | สิทธิ์ |
+|---|---|
+| `GET /rooms/{roomId}/periods` | admin + staff (เห็นทุก kind) |
+| `POST /rooms/{roomId}/periods` | kind=`maintenance`: admin+staff · kind=`reserved`: **admin เท่านั้น** (staff → 403) |
+| `PATCH /rooms/{roomId}/periods/{periodId}` | เช่นเดียวกัน (แก้ได้เฉพาะ `start_date`/`end_date` — **kind immutable**) |
+| `DELETE /rooms/{roomId}/periods/{periodId}` | เช่นเดียวกัน — hard delete + audit log |
+
+**Body (POST):** `{ "kind": "reserved|maintenance", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD|null" }` — `start_date` ย้อนอดีตได้ · เมื่อใส่ `end_date` ต้อง `>= วันนี้` และ `> start_date` (ห้าม period หมดทั้งช่วง)
+
+**กฎหลัก:**
+- **same-kind overlap → auto-merge:** row เดิมถูกขยายครอบ union (id/created_by คงเดิม) · ซ้อนข้างในไม่ขยาย = ตอบ row เดิมตามสภาพ · ชน row เปิดปลาย = ยังเปิดปลาย · PATCH ใช้กฎเดียวกัน
+- **ต่าง kind ร่วมอยู่ได้** — ช่วงทับ maintenance ชนะทุก semantics (availability/check-in/include_reserved)
+- **ผลต่อ booking (POST และ PATCH — เฉพาะวันที่ครอบใหม่):** draft booking ที่ BR ของห้องนี้ overlap → **ลบทันที** + audit `draft → deleted` · confirmed/checked_in → ไม่แตะ แค่รายงาน · PATCH หดวัน = ไม่แตะ booking ในช่วงเดิม
+- **Audit:** ทุกเหตุการณ์เขียน `status_change_logs` entity_type `room_state_period` (from/to = ช่วงวันที่ `YYYY-MM-DD..YYYY-MM-DD|NULL`, note = created/merged/extended/shortened/deleted)
+- **ผลต่อ availability:** summary ตัดห้องที่ period ทับช่วงที่ขอ · per-day calendar ยัด period เข้า occupied matrix รายวัน · allocator ไม่ assign ห้องติด period ในช่วง · check-in reject ห้องติด **maintenance** period ทับช่วงพัก (reserved ผ่าน) · walk-in: maintenance → reject เสมอ, reserved → ผ่านเมื่อ admin ส่ง `include_reserved`
+
+**Response `201` (POST) / `200` (PATCH):**
+```json
+{
+  "status": "success",
+  "message": "Room state period created successfully",
+  "period": { "id": "uuid", "room_id": "uuid", "kind": "maintenance", "start_date": "2026-09-24", "end_date": null, "created_by": "uuid", "created_at": "...", "updated_at": "..." },
+  "merged": false,
+  "deleted_drafts": ["booking-uuid"],
+  "affected_bookings": [
+    { "booking_id": "uuid", "confirmation_number": "KU-2026-000123", "status": "confirmed", "check_in": "2026-09-25", "check_out": "2026-09-27" }
+  ]
+}
+```
 
 ---
 
@@ -517,21 +559,21 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 **Request Body:**
 ```json
 {
-  "status": "maintenance"
+  "status": "prep_checkin"
 }
 ```
 
-**Allowed `status` values:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+**Allowed `status` values:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty` *(🗓️ 2026-09-24: `maintenance`/`reserved_closed` ถูกถอด — "ซ่อมแซม/ห้องสำรอง" จัดการผ่าน `/rooms/{id}/periods` แทน)*
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "Room status updated to 'maintenance' successfully!",
+  "message": "Room status updated to 'prep_checkin' successfully!",
   "room_id": "uuid",
   "room_number": "101",
   "old_status": "available",
-  "new_status": "maintenance",
+  "new_status": "prep_checkin",
   "status_updated_at": "2026-06-19T10:30:00.000000Z",
   "status_updated_by": "admin-uuid"
 }
@@ -631,7 +673,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
   - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
   - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
 - 🌟 **`bed_type=king_size` mode (09/09/26):** `available_rooms` เปลี่ยนความหมายเป็น `max(0, king_total_rooms − king_occupied)` และ response เพิ่ม 2 ฟิลด์โปร่งใส:
-  - `king_total_rooms` = ห้อง `bed_type='king_size'` ที่ **sellable** (`status NOT IN (maintenance, reserved_closed)`) — ตรงกับเงื่อนไขที่ `createBooking` ใช้ตัดสิน (ไม่ใช่ `status='available'` แบบ `rooms_count` รวม)
+  - `king_total_rooms` = ห้อง `bed_type='king_size'` ที่ **ไม่ติด period** (maintenance period ตัดเสมอ · reserved period ตัดเว้นแต่ admin ส่ง `include_reserved` — 🗓️ 2026-09-24 room-state-periods; เดิมกรอง `status NOT IN (maintenance, reserved_closed)`) — lifecycle status ไม่ถูกกรอง (คง semantics เดิม)
   - `king_occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) + overlap ช่วงค้น โดย **hybrid ตาม lifecycle** (เพราะ `room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
     - ก่อน assign: BR `bed_preference='king_size'` และ `room_id` ยัง null → นับ (allocator บังคับห้อง king — hard constraint)
     - หลัง assign: BR ที่ห้องที่ assign จริงมี `bed_type='king_size'` → นับ (BR no-preference อาจลง king ได้)
@@ -691,7 +733,7 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 }
 ```
 > 💡 `max_guests` ใน `search_criteria` เป็น `null` ถ้าไม่ได้ส่งมา
-> ⚠️ `rooms_count` ใช้ `status='available'` (ต่างจาก `/availability-per-day` ที่ใช้ `status NOT IN (maintenance, reserved_closed)` — inconsistency ที่รู้กันอยู่)
+> 🗓️ **(2026-09-24 room-state-periods):** `rooms_count` = ห้อง `status='available'` **ที่ไม่ติด period** (maintenance/reserved) ทับช่วง `[check_in, check_out)` ที่ขอ — pool เป็นช่วงวันที่แล้ว ไม่ใช่ snapshot ถาวรอีกต่อไป
 
 **Response `200` (โหมด `bed_type=king_size` — ฟิลด์ที่ต่างจากปกติ):**
 ```json
@@ -726,8 +768,8 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 
 **Semantics:**
 - แต่ละค่า = `max(0, total_rooms − occupied)` ของคืนนั้น
-- `total_rooms` = ห้องที่ `status NOT IN (maintenance, reserved_closed)` (ตรงกับ `/bookings` createBooking)
-- `occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap คืนนั้น — half-open `check_in ≤ D < check_out` (วัน check-out ว่างเสมอ)
+- `total_rooms` = **ห้องกายภาพทั้งหมดของ type** (🗓️ 2026-09-24: เดิมกรอง `status NOT IN (maintenance, reserved_closed)` — วันนี้ห้องที่ติด period ถูกตัดที่ `occupied` รายวันแทน)
+- `occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap คืนนั้น — half-open `check_in ≤ D < check_out` (วัน check-out ว่างเสมอ) **+ room_state_periods ที่ครอบคืนนั้น (ทุก kind)** — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ
 
 **Response `200`:**
 ```json
@@ -802,7 +844,7 @@ curl -s -H "Accept: application/json" \
   "http://localhost:8000/api/v1/availability-per-day?start_date=2026-08-10&end_date=2026-08-12"
 ```
 
-> ⚠️ **ข้อจำกัด (consistent กับ booking-time):** `total_rooms` คือ snapshot ณ วันนี้ของห้องที่ขายได้ (ไม่ใช่ future-aware maintenance schedule). ถ้าวันนี้ห้อง status=`maintenance` แต่อนาคตซ่อมเสร็อ calendar ก็ยังตัดห้องนั้นออก → ตรงกับการกดจองจริง ป้องกัน over-promise.
+> 🌟 **อัปเดต 2026-09-24 (room-state-periods):** ข้อจำกัดเดิมเรื่อง maintenance schedule หายไปแล้ว — วันนี้ calendar **future-aware จริง** เพราะ period (reserved/maintenance) เข้า occupied matrix รายวัน: วันไหน period ครอบ วันนั้นห้องหาย วันที่หลัง period จบขายปกติ → ตรงกับการกดจองจริง ป้องกัน over-promise
 
 ---
 
@@ -3106,7 +3148,9 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Room State Machine
 
-**Allowed statuses:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+**Allowed statuses:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty`
+
+> 🗓️ **(2026-09-24 — room-state-periods):** `maintenance` และ `reserved_closed` **ถูกถอดออกจาก machine แล้ว** — "ซ่อมแซม/ห้องสำรอง" เป็นช่วงวันที่บน `room_state_periods` (ดู [Room state periods](#️-room-state-periods--ห้องสำรองซ่อมแซม-เป็นช่วงเวลา-2026-09-24)) ไม่ใช่สถานะ · lifecycle ของห้องวิ่งแค่ 5 สถานะนี้
 
 **Common transitions (driven by `Room::transitionStatusTo()`):**
 
@@ -3115,7 +3159,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Walk-in / Check-in         | available/prep    | `occupied`          |
 | Check-out                  | occupied          | `checkout_makeup`   |
 | Housekeeping done          | checkout_makeup   | `available`         |
-| Admin manual update        | any → any         | (validated)         |
+| Admin manual update        | validated pairs   | (see `Room::transitionStatusTo()`) |
 
 > The `transitionStatusTo()` method enforces valid transitions and logs who changed the status.
 

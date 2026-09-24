@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateRoomRequest;
 use App\Models\BookingRoom;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\StatusChangeLog;
 use App\Support\IncludeReservedGate;
@@ -21,7 +22,9 @@ class RoomController extends Controller
     // 🛏️ ดึงข้อมูลห้องพักทั้งหมด
     public function allRooms()
     {
-        $rooms = Room::with('roomType:id,name_en')
+        // 🗓️ (24/09/26) room-state-periods: eager-load period active วันนี้ กัน N+1
+        //    (badge "สำรอง/ซ่อมแซม" ของ board — แทน is_reserved ที่ถูกถอด)
+        $rooms = Room::with(['roomType:id,name_en', 'periods' => fn ($q) => $q->activeOn()])
             ->orderBy('room_number', 'asc')
             ->get()
             ->map(function ($room) {
@@ -31,8 +34,9 @@ class RoomController extends Controller
                     'room_type_id' => $room->room_type_id,
                     'room_type_name' => $room->roomType->name_en ?? 'Unknown',
                     'status' => $room->status,
-                    // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง — board ต้องมองเห็น pool membership ได้
-                    'is_reserved' => $room->is_reserved,
+                    // 🗓️ (24/09/26) room-state-periods: period active วันนี้ (reserved/maintenance)
+                    //    — ⚠️ breaking change: key is_reserved ถูกถอดพร้อม column
+                    'active_periods' => $this->activePeriodsPayload($room),
                     'status_updated_at' => $room->status_updated_at,
                 ];
             });
@@ -55,7 +59,8 @@ class RoomController extends Controller
             ], 404);
         }
 
-        $room = Room::with('roomType:id,name_en')->find($id);
+        // 🗓️ (24/09/26) room-state-periods: eager-load period active วันนี้ (แทน is_reserved)
+        $room = Room::with(['roomType:id,name_en', 'periods' => fn ($q) => $q->activeOn()])->find($id);
 
         if (! $room) {
             return response()->json([
@@ -73,8 +78,8 @@ class RoomController extends Controller
                 'room_type_id' => $room->room_type_id,
                 'room_type_name' => $room->roomType->name_en ?? 'Unknown',
                 'status' => $room->status,
-                // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง
-                'is_reserved' => $room->is_reserved,
+                // 🗓️ (24/09/26) room-state-periods: period active วันนี้ — ⚠️ แทน is_reserved
+                'active_periods' => $this->activePeriodsPayload($room),
                 'status_updated_at' => $room->status_updated_at,
             ],
         ]);
@@ -85,7 +90,8 @@ class RoomController extends Controller
     {
         $statusFilter = $request->query('status');
 
-        $rooms = Room::with('roomType')
+        // 🗓️ (24/09/26) room-state-periods: eager-load period active วันนี้ (แทน is_reserved)
+        $rooms = Room::with(['roomType', 'periods' => fn ($q) => $q->activeOn()])
             ->when($statusFilter, function ($query, $statusFilter) {
                 return $query->where('status', strtolower($statusFilter));
             })
@@ -96,8 +102,8 @@ class RoomController extends Controller
                     'room_number' => $room->room_number,
                     'room_type' => $room->roomType->name_en ?? 'Unknown',
                     'status' => $room->status,
-                    // 🏨 (24/09/26) ticket 90: badge ห้องสำรอง
-                    'is_reserved' => $room->is_reserved,
+                    // 🗓️ (24/09/26) room-state-periods: period active วันนี้ — ⚠️ แทน is_reserved
+                    'active_periods' => $this->activePeriodsPayload($room),
                     'last_updated' => $room->status_updated_at ? Carbon::parse($room->status_updated_at)->diffForHumans() : '-',
                 ];
             });
@@ -165,7 +171,9 @@ class RoomController extends Controller
         ]);
 
         // 🏨 (24/09/26) ticket 01: gate รวมของ include_reserved — admin + flag เท่านั้น
-        //    (อื่น ๆ เมยายีเงียบ ๆ · ห้องสำรอง = is_reserved · maintenance ถูกตัดเสมอ)
+        //    (อื่น ๆ เมยายีเงียบ ๆ)
+        //    🗓️ (24/09/26) room-state-periods: "ห้องสำรอง" = ห้องที่มี reserved period
+        //    overlap ช่วงที่ขอ · maintenance period ถูกตัดเสมอ (กฎเหล็ก)
         $includeReserved = IncludeReservedGate::enabled($request);
 
         $checkIn = $request->check_in ? Carbon::parse($request->check_in) : Carbon::today();
@@ -173,10 +181,12 @@ class RoomController extends Controller
         $maxGuests = $request->query('max_guests');
         $bedType = $request->query('bed_type');
 
-        $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) {
-            // 🏨 (24/09/26) ticket 90: sellable pool = available + ไม่ใช่ห้องสำรอง (is_reserved)
+        $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) use ($checkIn, $checkOut) {
+            // 🗓️ (24/09/26) room-state-periods: sellable pool = status available +
+            //    ไม่มี period (reserved/maintenance) ทับช่วง [checkIn, checkOut)
             $query->where('status', 'available')
-                ->where('is_reserved', false);
+                ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+                ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED);
         }])
             ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
                 // 🌟 Refactor (29/06/26): filter ที่ BR-level ตรงๆ ตาม state machine
@@ -187,23 +197,26 @@ class RoomController extends Controller
                     ->where('check_in', '<', $checkOut)
                     ->where('check_out', '>', $checkIn);
             }])
-            // 🏨 (24/09/26) ticket 01: admin flag → นับห้องสำรองแยกไว้โชว์ breakdown
-            ->when($includeReserved, fn ($query) => $query->withCount(['rooms as reserved_rooms_count' => function ($query) {
+            // 🏨 (24/09/26) ticket 01: admin flag → นับห้องสำรอง (reserved period ช่วงทับ) แยกไว้โชว์ breakdown
+            //    🗓️ maintenance period absolute — ห้องที่ทับ maintenance ไม่กลับมาแม้ส่ง flag
+            ->when($includeReserved, fn ($query) => $query->withCount(['rooms as reserved_rooms_count' => function ($query) use ($checkIn, $checkOut) {
                 $query->where('status', 'available')
-                    ->where('is_reserved', true);
+                    ->blockedByPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
+                    ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE);
             }]))
             // 🌟 (09/09/26) bed_type=king_size → เพิ่ม 2 counters สำหรับมิติห้อง king
-            //    king pool = sellable (available + ไม่ใช่ห้องสำรอง) — ตรงกับ createBooking
+            //    king pool = ห้อง king ที่ไม่ติด period (คง semantics เดิมที่ไม่กรอง lifecycle status —
+            //    🗓️ สลับ whereNotIn maintenance เป็น period-check ตาม room-state-periods)
             //    king occupied = hybrid ตาม lifecycle เพราะ room_id ถูก assign เฉพาะหลัง paid/confirmed:
             //      ก่อน assign: BR bed_preference=king_size ถูก allocator บังคับเข้าห้อง king แน่นอน (hard constraint)
             //      หลัง assign: นับตาม bed_type ของห้องจริงที่ถูก assign (BR no-preference อาจลง king ได้)
             //      เงื่อนไข 2 แขนกันหมด (room_id null ↔ not null) — ไม่นับซ้ำ
             ->when($bedType === 'king_size', function ($query) use ($checkIn, $checkOut, $includeReserved) {
-                $query->withCount(['rooms as king_total_rooms' => function ($q) use ($includeReserved) {
+                $query->withCount(['rooms as king_total_rooms' => function ($q) use ($checkIn, $checkOut, $includeReserved) {
                     $q->where('bed_type', 'king_size')
-                        ->whereNotIn('status', ['maintenance'])
-                        // 🏨 ไม่ส่ง flag → pool king เฉพาะห้องขายปกติ · ส่ง flag → รวมห้อง king สำรอง
-                        ->when(! $includeReserved, fn ($qq) => $qq->where('is_reserved', false));
+                        ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+                        // 🏨 ไม่ส่ง flag → pool king เฉพาะห้องขายปกติ · ส่ง flag → รวม king ติด reserved period
+                        ->when(! $includeReserved, fn ($qq) => $qq->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED));
                 }])
                     ->withCount(['bookingRooms as king_occupied_count' => function ($q) use ($checkIn, $checkOut) {
                         $q->holdingSlot()
@@ -252,7 +265,8 @@ class RoomController extends Controller
 
                 // 🏨 (24/09/26) ticket 01: admin flag → available_rooms = sellable + reserved − booked
                 //    + ฟิลด์โปร่งใส sellable_rooms / reserved_rooms + search_criteria บันทึกว่า flag มีผล
-                //    (maintenance ไม่เคยเข้า pool ทั้งสอง — สถานะไม่ใช่ available)
+                //    🗓️ (24/09/26) room-state-periods: maintenance period ไม่เคยกลับมาแม้ส่ง flag
+                //    (กรองที่ reserved_rooms_count แล้ว — ด้านบน)
                 if ($includeReserved) {
                     $row['available_rooms'] = max(0, $type->rooms_count + $type->reserved_rooms_count - $type->booked_rooms_count);
                     $row['sellable_rooms'] = $type->rooms_count;
@@ -338,6 +352,10 @@ class RoomController extends Controller
                 $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
             }
         }
+
+        // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
+        //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
 
         // 🌟 Build per-day availability per room type
         $period = CarbonPeriod::create($start, $end);
@@ -429,6 +447,10 @@ class RoomController extends Controller
                 $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
             }
         }
+
+        // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
+        //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
 
         // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
         $dateKeys = [];
@@ -537,6 +559,10 @@ class RoomController extends Controller
             }
         }
 
+        // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
+        //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
+
         // 🌟 List ของทุกคืนในช่วง [start, end] (รวม end — end_date คือคืนสุดท้ายที่ตรวจ)
         $dateKeys = [];
         foreach (CarbonPeriod::create($start, $end) as $date) {
@@ -587,12 +613,21 @@ class RoomController extends Controller
             ->holdingSlot()
             ->max('check_out');
 
-        // 🌟 โหลด room types พร้อมจำนวนห้อง "ขายได้จริง" และ rateRows (กัน N+1)
-        // (status NOT IN maintenance, reserved_closed) → ตรงกับ availabilityRanges/createBooking
+        // 🗓️ (24/09/26) room-state-periods: period ก็ทำให้ห้องหายรายวันได้ — ใช้ bound ล่าสุดของ
+        //    period ช่วย lock end ของช่วงสแกน (ปิดปลาย = end_date · เปิดปลาย = สแกนเต็ม cap 365 คืน)
+        $periodBound = RoomStatePeriod::whereNull('end_date')->exists()
+            ? Carbon::today()->addDays(365)
+            : RoomStatePeriod::max('end_date');
+
         $roomTypes = RoomType::withSellableRoomsAndRates()->get();
 
-        // 🌟 กรณีไม่มี booking เลย → ไม่สามารถ lock end ของช่วงได้ → คืน list ว่าง
-        if ($maxCheckout === null) {
+        // 🌟 กรณีไม่มี booking และไม่มี period เลย → ไม่สามารถ lock end ของช่วงได้ → คืน list ว่าง
+        $end = collect([$maxCheckout, $periodBound])
+            ->filter()
+            ->map(fn ($v) => Carbon::parse($v)->startOfDay())
+            ->max();
+
+        if ($end === null) {
             return response()->json([
                 'status' => 'success',
                 'message' => 'Unavailable ranges fetched successfully',
@@ -607,8 +642,6 @@ class RoomController extends Controller
                 ])->values(),
             ]);
         }
-
-        $end = Carbon::parse($maxCheckout)->startOfDay();
 
         // 🌟 DoS guard (public route): ป้องกัน booking ไกลๆ ทำให้ลูปสแกนยาวเกินไป (cap 365 คืน เทียบเท่า sibling)
         if ($end->gt($start->copy()->addDays(365))) {
@@ -639,6 +672,10 @@ class RoomController extends Controller
                 $occupied[$br->room_type_id][$dateKey] = ($occupied[$br->room_type_id][$dateKey] ?? 0) + 1;
             }
         }
+
+        // 🗓️ (24/09/26) room-state-periods: period (reserved/maintenance) เข้า occupied matrix
+        //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02)
+        $this->addPeriodsToOccupied($occupied, $start, $endExclusive);
 
         // 🌟 list ของทุกคืนในช่วง [start, end] (ว่างอัตโนมัติถ้า end < start — ทุก booking checkout ก่อน today+3)
         $dateKeys = [];
@@ -683,6 +720,45 @@ class RoomController extends Controller
             'end' => $end->toDateString(),
             'room_types' => $result,
         ]);
+    }
+
+    // 🗓️ (24/09/26) room-state-periods: payload ของ period active วันนี้ สำหรับ room JSON
+    //    (badge สำรอง/ซ่อมแซมของ board — แทน key is_reserved ที่ถูกถอดพร้อม column)
+    //    ต้องเรียกจาก room ที่ eager-load 'periods' ด้วย scope activeOn() แล้วเท่านั้น (กัน N+1)
+    private function activePeriodsPayload(Room $room): array
+    {
+        return $room->periods->map(fn (RoomStatePeriod $period) => [
+            'id' => $period->id,
+            'kind' => $period->kind,
+            'start_date' => $period->start_date->toDateString(),
+            'end_date' => $period->end_date?->toDateString(),
+        ])->values()->all();
+    }
+
+    // 🗓️ (24/09/26) room-state-periods: ยัด period (reserved/maintenance) เข้า occupied matrix
+    //    เดียวกับ BR — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ (ticket 02 · per-day จริง)
+    private function addPeriodsToOccupied(array &$occupied, Carbon $start, Carbon $endExclusive): void
+    {
+        $periods = RoomStatePeriod::with('room:id,room_type_id')
+            ->overlapping($start, $endExclusive)
+            ->get();
+
+        foreach ($periods as $period) {
+            $typeId = $period->room->room_type_id ?? null;
+            if ($typeId === null) {
+                continue;
+            }
+
+            $from = $period->start_date->lt($start) ? $start : $period->start_date->copy()->startOfDay();
+            $to = $period->end_date === null
+                ? $endExclusive
+                : ($period->end_date->gt($endExclusive) ? $endExclusive : $period->end_date->copy()->startOfDay());
+
+            for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+                $dateKey = $d->toDateString();
+                $occupied[$typeId][$dateKey] = ($occupied[$typeId][$dateKey] ?? 0) + 1;
+            }
+        }
     }
 
     // 🧹 เปลี่ยนสถานะห้องพัก (ใช้ state machine)

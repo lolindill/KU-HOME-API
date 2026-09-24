@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -112,12 +113,20 @@ class RoomKingAvailabilityTest extends TestCase
         $roomType = $this->createRoomType();
         $this->createRoom($roomType, 'king_size', '801');
         $this->createRoom($roomType, 'king_size', '802');
-        $this->createRoom($roomType, 'king_size', '803', 'maintenance'); // ไม่นับใน pool
+        // 🗓️ (24/09/26) room-state-periods: ห้อง king ติด maintenance period (แทนสถานะ
+        //    maintenance ที่ถูกถอด) — ไม่นับใน pool
+        $maintRoom = $this->createRoom($roomType, 'king_size', '803');
+        RoomStatePeriod::create([
+            'room_id' => $maintRoom->id,
+            'kind' => 'maintenance',
+            'start_date' => '2026-01-01',
+            'end_date' => null,
+        ]);
         $this->createRoom($roomType, 'twin', '101'); // ไม่ใช่ king
 
         $row = $this->fetchRow($roomType, ['bed_type' => 'king_size']);
 
-        // pool = king sellable = 2 (maintenance โดนเขี่ย, twin ไม่นับ)
+        // pool = king sellable = 2 (king ติด maintenance period โดนเขี่ย, twin ไม่นับ)
         // occupied ยังเป็น 0 → available = 2 (จำนวนห้อง status ปกติ = 3 ไม่เกี่ยวกับ king view)
         $this->assertEquals(2, $row['king_total_rooms']);
         $this->assertEquals(0, $row['king_occupied']);

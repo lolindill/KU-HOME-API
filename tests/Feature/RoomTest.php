@@ -6,6 +6,7 @@ use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -558,11 +559,10 @@ class RoomTest extends TestCase
         $this->assertSame([], $rowByType[(string) $roomType->id]['unavailable_dates']);
     }
 
-    public function test_unavailable_dates_type_with_no_sellable_rooms_is_never_sold_out(): void
+    public function test_unavailable_dates_type_with_zero_rooms_is_never_sold_out(): void
     {
-        // type ที่ห้อง maintenance ทั้งหมด (total=0) → ไม่ถือว่า sold-out ทุกวัน → คืน []
-        $roomType = $this->createRoomType();
-        Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'maintenance']);
+        // type ที่ไม่มีห้องเลย (total=0) → ไม่ถือว่า sold-out ทุกวัน → คืน []
+        $roomType = $this->createRoomType(); // ไม่สร้างห้อง
 
         $response = $this->getJson('/api/v1/unavailable-dates?'.http_build_query([
             'start_date' => now()->toDateString(),
@@ -572,6 +572,34 @@ class RoomTest extends TestCase
         $response->assertStatus(200);
         $rowByType = collect($response->json('room_types'))->keyBy('room_type_id');
         $this->assertSame([], $rowByType[(string) $roomType->id]['unavailable_dates']);
+    }
+
+    public function test_unavailable_dates_room_under_maintenance_period_is_sold_out_daily(): void
+    {
+        // 🗓️ (24/09/26) room-state-periods: ห้องติด maintenance period เปิดปลาย →
+        //    หายจาก inventory ทุกวันในช่วง (total=1, occupied=1 ทุกวัน) → sold-out ทุกวัน
+        $roomType = $this->createRoomType();
+        $room = Room::create(['id' => Str::uuid(), 'room_type_id' => $roomType->id, 'room_number' => '101', 'status' => 'available']);
+        RoomStatePeriod::create([
+            'room_id' => $room->id,
+            'kind' => 'maintenance',
+            'start_date' => now()->toDateString(),
+            'end_date' => null,
+        ]);
+
+        $response = $this->getJson('/api/v1/unavailable-dates?'.http_build_query([
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(3)->toDateString(),
+        ]));
+
+        $response->assertStatus(200);
+        $rowByType = collect($response->json('room_types'))->keyBy('room_type_id');
+        $this->assertSame([
+            now()->toDateString(),
+            now()->addDays(1)->toDateString(),
+            now()->addDays(2)->toDateString(),
+            now()->addDays(3)->toDateString(),
+        ], $rowByType[(string) $roomType->id]['unavailable_dates']);
     }
 
     public function test_unavailable_dates_defaults_to_today_plus_six_months_when_no_dates_provided(): void

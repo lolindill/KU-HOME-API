@@ -82,9 +82,9 @@ final class BookingPriority
     {
         return Room::whereHas('roomType', fn ($q) => $q->where('name_en', 'Deluxe'))
             ->where('builtin_extra_beds', '>=', $w->x09MinBuiltinBeds)
-            // 🏨 (24/09/26) ticket 90: ห้องสำรอง = is_reserved=true — ไม่นับเป็นห้องขายปกติ
-            ->whereNotIn('status', ['maintenance'])
-            ->where('is_reserved', false)
+            // 🗓️ (24/09/26) room-state-periods: ห้องติด period (reserved/maintenance)
+            //    ช่วงทับการเข้าพัก = ไม่นับเป็นห้องขายปกติ (shared scope เดียวกับ allocator)
+            ->freeOfPeriod($br->checkIn, $br->checkOut)
             ->whereDoesntHave('bookingRooms', function ($q) use ($br) {
                 $q->holdingSlot()
                     ->where('check_in', '<', $br->checkOut)

@@ -65,11 +65,13 @@ class RoomStateTest extends TestCase
         $this->assertEquals('dirty', $room->fresh()->status);
     }
 
-    public function test_available_to_maintenance(): void
+    public function test_available_to_maintenance_is_invalid(): void
     {
+        // 🗓️ (24/09/26) room-state-periods: maintenance ถูกถอดออกจาก machine — "ซ่อมแซม"
+        //    จัดการผ่าน room_state_periods (kind=maintenance, ช่วงเวลา) ไม่ใช่สถานะแล้ว
+        $this->expectException(\Exception::class);
         $room = $this->createRoom('available');
         $room->transitionStatusTo('maintenance');
-        $this->assertEquals('maintenance', $room->fresh()->status);
     }
 
     public function test_available_to_reserved_closed_is_invalid(): void
@@ -124,22 +126,16 @@ class RoomStateTest extends TestCase
     }
 
     // ============================================
-    // ✅ Wildcard Transitions (→ maintenance = any source · 🏨 reserved_closed ถอดแล้ว 24/09/26)
+    // ❌ สถานะที่ถอดออกแล้ว (reserved_closed — ticket 90 · maintenance — room-state-periods 24/09/26)
     // ============================================
 
-    public function test_any_to_maintenance(): void
+    public function test_maintenance_as_source_is_invalid(): void
     {
-        $room = $this->createRoom('maintenance');
-        $room->transitionStatusTo('available');
-        $this->assertEquals('available', $room->fresh()->status);
-    }
-
-    public function test_maintenance_to_occupied_is_invalid(): void
-    {
-        // occupied only allows from available, prep_checkin — not maintenance
+        // 🗓️ (24/09/26) room-state-periods: maintenance ไม่ใช่สถานะอีกต่อไป —
+        //    ไม่มี transition ออกจาก/เข้าสู่ maintenance ทั้งทิศ (wildcard `maintenance => *` ถูกถอด)
         $this->expectException(\Exception::class);
-        $room = $this->createRoom('maintenance');
-        $room->transitionStatusTo('occupied');
+        $room = $this->createRoom('available');
+        $room->transitionStatusTo('maintenance');
     }
 
     // ============================================
@@ -170,7 +166,7 @@ class RoomStateTest extends TestCase
 
     public function test_cannot_go_from_occupied_to_available(): void
     {
-        // occupied → available: allowedTransitions['available'] includes 'checkout_makeup', 'dirty', 'maintenance', 'prep_checkin'
+        // occupied → available: allowedTransitions['available'] includes 'checkout_makeup', 'dirty', 'prep_checkin'
         // NOT 'occupied'. So this should fail.
         $this->expectException(\Exception::class);
         $room = $this->createRoom('occupied');

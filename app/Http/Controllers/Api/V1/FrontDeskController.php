@@ -9,8 +9,10 @@ use App\Models\BookingRoom;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\User;
 use App\Services\Discount\DiscountService;
+use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -52,16 +54,27 @@ class FrontDeskController extends Controller
             if (! in_array($room->status, ['available', 'prep_checkin'])) {
                 throw new \Exception("Room number {$room->room_number} is not ready for walk-in. Current status: {$room->status}");
             }
-            // 🏨 (24/09/26) ticket 90: ห้องสำรอง (is_reserved) สถานะเป็น available ได้ — ห้าม walk-in
-            //    จนกว่า ticket 05 จะเปิดรับ include_reserved flag (ตอนนี้ reject กัน pool รั่ว)
-            if ($room->is_reserved) {
-                throw new \Exception("Room number {$room->room_number} is a reserved (สำรอง) room and cannot be used for walk-in yet.");
-            }
 
             $staffUser = User::findOrFail($validated['verified_by']);
 
             $checkIn = Carbon::now();
             $checkOut = Carbon::now()->addDays($validated['nights']);
+
+            // 🗓️ (24/09/26) room-state-periods: period-check แทนเงื่อนไข is_reserved เดิม —
+            //    maintenance period ตัดเด็ดขาดทุกกรณี · reserved period ผ่านเฉพาะ admin ส่ง
+            //    include_reserved (route admin-only อยู่แล้ว — gate re-check ให้เอง)
+            if (RoomStatePeriod::where('room_id', $room->id)
+                ->overlapping($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+                ->exists()) {
+                throw new \Exception("Room number {$room->room_number} is under a maintenance period for those dates and cannot be used for walk-in.");
+            }
+            $hasReservedPeriod = RoomStatePeriod::where('room_id', $room->id)
+                ->overlapping($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
+                ->exists();
+            if ($hasReservedPeriod && ! IncludeReservedGate::enabled($request)) {
+                throw new \Exception("Room number {$room->room_number} is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน");
+            }
+
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
@@ -184,6 +197,20 @@ class FrontDeskController extends Controller
                 }
 
                 $room = Room::lockForUpdate()->findOrFail($bRoom->room_id);
+
+                // 🗓️ (24/09/26) room-state-periods: ห้องปลายทางมี maintenance period ทับช่วงพัก
+                //    ของ BR → reject (reserved period **ไม่บล็อก** — booking include_reserved ของ
+                //    admin ถูกต้องแล้ว · ฟรอนต์ย้ายแขกด้วย assigned_rooms ที่มีอยู่)
+                //    (ปิดช่องเก่า "เช็คอินห้องสถานะ maintenance หลุดผ่าน" ด้วย — สถานะถูกถอดไปแล้ว)
+                if (RoomStatePeriod::where('room_id', $room->id)
+                    ->overlapping($bRoom->check_in, $bRoom->check_out, RoomStatePeriod::KIND_MAINTENANCE)
+                    ->exists()) {
+                    throw new \Exception(
+                        "ห้อง {$room->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
+                        "({$bRoom->check_in->toDateString()} – {$bRoom->check_out->toDateString()}) ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาย้ายห้องด้วย assigned_rooms นะคะ",
+                        422
+                    );
+                }
 
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
                 $room->transitionStatusTo('occupied', $userId);
