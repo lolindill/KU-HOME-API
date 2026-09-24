@@ -16,6 +16,7 @@ status: open
 - **Map ที่เกี่ยว:** `wayfinder/reserved-room-pool/` 🧊 FROZEN รอ map นี้จบ — ticket 01 ของ map นั้น code landed แล้ว (migration `is_reserved` + ถอดสถานะ `reserved_closed` + gate helper + availability flag, suite 446 เขียว) — โมเดลที่ตัดสินที่นี่อาจให้ปรับ/ต่อยอดงานก้อนนั้น
 - **Prior art ต้องอ่านก่อน grill:** overlap query ของ `booking_rooms` (`check_in < X AND check_out > X`, BR states draft/confirmed/checked_in), `CleanupExpiredDrafts` (scheduled sweep 02:00 — pattern สำหรับ period หมดอายุ), `Room::transitionStatusTo()` state machine, availability endpoints ทั้ง 3
 - **Tracker = local-markdown:** map ที่ไฟล์นี้, tickets ใน `tickets/` · claim = เติม `assignee:` · blocking = `blocked-by` · ปิด = `status: closed` + `## Resolution`
+- 🆕 **(2026-09-24) ticket 03 เพิ่มจาก gap ตรวจ SRS v2:** [ประวัติสถานะห้องย้อนหลัง 1 ปี — REQ-039](./tickets/03-room-status-history-log.md) (`Room::transitionStatusTo()` ปัจจุบันไม่มี audit log) — blocked-by grill 01/02 เพราะโมเดล period อาจเปลี่ยนรูปร่างของ "ประวัติ"
 - ธรรมเนียมเดิมของโปรเจกต์: ตัดสินใจ lock ก่อนเขียนโค้ด — map นี้เริ่มด้วย grilling HITL สองรอบ (โมเดล → กฎ) ก่อนค่อย breakdown implementation
 
 ## Decisions so far

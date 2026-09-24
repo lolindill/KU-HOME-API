@@ -24,6 +24,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
   3. **`payment_type` อยู่ระดับ booking** — owner ยืนยันโครงเดิมถูกต้อง: confirmation เป็นแค่ log ของการส่งสลิป ไม่ใช่ที่เก็บประเภทการชำระ
   4. **แมป `organization-bookings` ticket 04 รอ design ของแมปนี้ก่อน** (ค้างชำระ = payment type ที่ org booking ใช้เสมอ — owner)
   5. Default ของ booking ออนไลน์ทั่วไป = **เต็มจำนวน (full)** — flow เดิมต้อง regression เป็น 0%
+- 🆕 **(2026-09-24) ticket 07 เพิ่มจาก gap ตรวจ SRS v2:** [ปัดเศษขึ้นหลักสิบ — REQ-015/016](./tickets/07-round-up-to-tens.md) (ปัดยอดไหน ตอนไหน เศษมาจากไหน) — blocked-by ticket 04 (ยอดเงิน 2 ชั้น) · ระบบปัจจุบันไม่มี rounding ที่ไหนเลย
 - Related maps: `organization-bookings` (open — ticket 04 blocked cross-map รอแมปนี้), `excel-reports` (open — ticket 08 paused ปลดล็อกเมื่อ design แมปนี้ปิด)
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md

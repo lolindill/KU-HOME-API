@@ -15,8 +15,9 @@ Spec ที่ **decision-lock ครบ 2 ชิ้น** ต่อยอดจ�
   - **Split-user rule** (req change 2026-09-01): แต่ละ provider (password / KU SSO / Google) = user แยกกัน ไม่มีการ link identity — schema ดีไซน์ไว้แล้ว: `auth_provider` รับค่า `google` + composite unique `(email, auth_provider)`
   - **Hand-rolled `Http` facade + Service class (0 package)** — precedent ticket 05 ของ ku-sso (Socialite / JWT lib ไม่จำเป็น เพราะ identity ยืนยันผ่าน userinfo บน TLS)
   - Sanctum token policy เหมือน password login ทุกประการ · `RequireJsonAccept` → SSO callback อยู่ฝั่ง React เสมอ
-- ⚠️ **โค้ด KU SSO ทั้งหมดยังไม่ merge** — อยู่ใน worktree `.worktree/ku-sso-login` (branch `feature/ku-sso-login`: `SsoController` + `app/Services/Sso/KuSsoService.php` + route `POST /auth/sso/exchange`) ต้น tree ปัจจุบัน (`agust-11`) ยังไม่มีโค้ด SSO เลย → implementation ของ Google login ต้องทับฐาน feature branch นั้น (merge/rebase ก่อนเขียน)
+- ✅ **โค้ด KU SSO merge เข้า `agust-11` แล้ว (2026-09-23 — suite 433 passed)** — เดิมจดไว้ว่าอยู่ใน worktree `.worktree/ku-sso-login` (`SsoController` + `app/Services/Sso/KuSsoService.php` + route `POST /auth/sso/exchange`) → implementation ของ Google login ต่อยอดบนฐาน merged ได้เลย ไม่ต้อง merge/rebase ก่อนแล้ว
 - ธรรมเนียมเดิม: error shape `{"status":"error","message":...}` · message ไทย + emoji · throttle exchange-level = `5,1`
+- 🆕 **(2026-09-24) ticket 08 เพิ่มจาก gap ตรวจ SRS v2:** [password reset — admin ส่งลิงก์เปลี่ยนรหัส (REQ-001.3)](./tickets/08-password-reset-admin-link.md) — เดิมถูกตัดจาก v1 (ku-sso ticket 09) กลับมาเปิดใหม่เพราะ SRS ระบุชัด · blocked-by ticket 04 (ต้องมี email transport ก่อน)
 - ทำงาน ticket ละ session — เริ่มจาก frontier (open, blocked-by ปลดครบ, ไม่มี assignee)
 
 ## Decisions so far
