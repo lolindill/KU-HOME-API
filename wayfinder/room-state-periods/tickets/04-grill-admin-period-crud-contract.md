@@ -18,7 +18,12 @@ blocked-by: ["02-grill-overlap-expiry-availability-rules"]
 4. **Audit trail:** ใครสร้าง/แก้/ยกเลิก period — columns `created_by/updated_by` บน row พอ หรือเขียน `status_change_logs` ต่อ (entity ใหม่)?
 5. **สิทธิ์:** admin เท่านั้น (role:admin) หรือ staff ตั้ง maintenance period เองได้?
 
-**Blocked by:** ticket 02 (กฎ overlap กับ booking ต้องปิดก่อน — validation ข้อ 2 ต้องมาบนกฎเดียวกัน)
+**Blocked by:** ~~ticket 02~~ ✅ ปิดแล้ว (2026-09-24) — **frontier** (validation ข้อ 2 อยู่บนกฎจาก ticket 02 แล้ว)
+
+> 📌 **ผลจาก ticket 02 ที่ contract นี้ต้องครอบ:** POST period ทับ BR ค้างได้เสมอ → รูปร่าง response 201 + `affected_bookings` และกลไกลบ draft ที่ overlap ทันที (`draft → deleted`) อยู่ใน contract ที่ grill ที่นี่ด้วย
+
+- [ ] grill 5 คำถามกับ owner
+- [ ] เขียน resolution + ปิด ticket + อัปเดต map Decisions so far
 
 - [ ] grill 5 คำถามกับ owner
 - [ ] เขียน resolution + ปิด ticket + อัปเดต map Decisions so far

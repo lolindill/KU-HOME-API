@@ -22,11 +22,11 @@ status: open
 ## Decisions so far
 
 - [ticket 01 — Grill โมเดล period](tickets/01-grill-period-model-vs-flag.md): **CLOSED 2026-09-24** — **period แทน flag ทั้งก้อน:** ตารางเดียว `room_state_periods` (kind `reserved`|`maintenance`, start/end) + **derived ตอน query** ไม่มี sweep (philosophy `holdingSlot()`) · ถอด `is_reserved` **และ** สถานะ `maintenance` ออกจาก machine (single source of truth = period) · reserved period admin override ผ่าน `include_reserved` ได้ / maintenance period ตัดเด็ดขาด — decision ticket 90 ของ map `reserved-room-pool` ถูก override (map นั้นยัง FROZEN รอ map นี้จบ)
+- [ticket 02 — Grill กฎ overlap/expiry/availability](tickets/02-grill-overlap-expiry-availability-rules.md): **CLOSED 2026-09-24** — สร้าง period ทับ booking ค้างได้**เสมอ** (ลบ draft ที่ overlap ทันที + audit `draft → deleted` · confirmed/checked_in ไม่แตะ แต่ response รายงาน `affected_bookings`) · overlap query = half-open เดียวกับ booking_rooms บน `holdingSlot()` · availability นับ**รายวันจริง** (per-day matrix) และ range endpoint ตัดรายห้องเมื่อ period overlap ช่วงที่ขอ (stay-semantics เดียวกับ createBooking) · check-in reject เฉพาะ maintenance period (reserved ผ่าน — ฟรอนต์ย้ายด้วย `assigned_rooms`) · HousekeepingTask **ไม่ผูกกับ period เลย**
 
 ## Not yet specified
 
-- Dashboard/display ที่อ่านสถานะ `maintenance` ตรง ๆ (room status board, มุมมอง housekeeping) — จะเข้า spec assembly หลังกฎ (ticket 02) ปิด
-- กฎ overlap ระหว่าง period กับ period (สอง period ซ้อนกันได้ไหม ต่าง kind ล่ะ) — จะยกขึ้นใน ticket 04 (CRUD contract) หรือ spec
+- (fog เดิม graduate หมดเมื่อ ticket 02 ปิด — กฎ overlap period↔period อยู่ในข้อ 2 ของ ticket 04 แล้ว · display ที่อ่านสถานะ `maintenance` ย้ายเป็น touchpoint ของ ticket 06)
 
 ## Out of scope
 
