@@ -46,3 +46,17 @@ blocked-by: ["01-include-reserved-gate-and-availability"]
 - [spec.md § Solution](../spec.md#solution)
 - [spec.md § Implementation Decisions](../spec.md#implementation-decisions) (Surfaces touched #3, Maintenance is absolute, Grill #5)
 - [spec.md § Testing Decisions](../spec.md#testing-decisions)
+
+## ⚠️ Amendment (2026-09-24 — unfreeze, re-base ตาม period model + conflict ต้องเคลียร์ก่อน)
+
+โมเดลพื้นฐานเปลี่ยน — "ห้องสำรอง" = ห้องติด **reserved period** (`room_state_periods` kind `reserved`) ไม่ใช่สถานะ `reserved_closed` / column `is_reserved` (ถูก drop แล้ว — map `room-state-periods`) · ข้อความเดิมด้านบนอ้างสถานะ = historical
+
+**🥊 conflict ที่ต้อง grill กับ owner ก่อนลงมือ (HITL ขั้นแรกของ ticket นี้):**
+
+- **spec เดิม (grill #5 ของ map นี้, 2026-09-11):** align denominator ทั้ง 4 จุดเป็น sellable pool = **bug fix** (กันจองเกินแล้ว assign ไม่ได้)
+- **spec ของ map `room-state-periods` § non-goals (owner, 2026-09-24):** capacity denominators 4 จุด **คงนับห้องกายภาพเต็ม** — fail-safe อยู่ที่ allocator ตัด period + checkIn gate — "การจองเกิน pool จริงจบที่ assign ไม่ได้ เหมือนพฤติกรรมปัจจุบัน"
+
+owner ประกาศ non-goal นี้ทีหลัง grill #5 → น่าจะ override แล้ว แต่เป็นการย้อน user-confirmed decision เดิม **ต้องยืนยันครั้งเดียวก่อนเขียนโค้ด:** (a) ยกเลิก bug fix — ticket นี้เหลือเพียง "flag ขยาย denominator เป็น physical + reserved period ใต้ `include_reserved` (admin)" หรือ (b) คง bug fix ตาม grill #5 เดิม — แล้วเขียน resolution ลง ticket นี้ + อัปเดต spec.md ทั้งสอง map ให้สอดคล้อง
+
+- ใช้ `IncludeReservedGate::enabled($request)` เสมอ — reserved pool ตอนนี้คือห้องติด reserved period ช่วง `[check_in, check_out)` ของแต่ละ BR (overlap half-open เดียกับ booking_rooms) ไม่ใช่ property ถาวรของห้อง — query ต้องต่อช่วง BR ผ่าน scope ของ `RoomStatePeriod` ห้ามเขียนเงื่อนไขเอง
+- maintenance absolute = ช่วงทับ maintenance period ไม่เคยนับ แม้ส่ง flag

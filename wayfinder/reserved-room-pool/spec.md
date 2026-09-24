@@ -1,6 +1,6 @@
 ---
 label: ready-for-agent
-title: "Admin include_reserved — sell/see reserved rooms (reserved_closed) via availability, booking, allocator, walk-in"
+title: "Admin include_reserved — sell/see reserved rooms (reserved period) via availability, booking, allocator, walk-in"
 status: open
 assignee:
 blocked-by:
@@ -52,6 +52,8 @@ One **admin-only, request-scoped parameter** — `include_reserved` — accepted
 20. As a developer, I want regression tests locking the aligned capacity denominator, so that the overbooking-past-sellable bug can never silently return.
 21. As a developer, I want tests proving non-admin flag requests return the exact same payload as no-flag requests, so that the "silently ignore" contract is enforced.
 22. As an operations person, I want the walk-in runbook documented for reserved rooms (flip first, or pass the flag), so that front desk knows both paths.
+
+> **⚠️ Amendment 2 (2026-09-24 — unfreeze, re-base บน period model ของ `room-state-periods`):** map `room-state-periods` จบแล้ว (COMPLETED 2026-09-24) และ build landed — **decision ticket 90 ของ spec นี้ถูก override ทั้งก้อน:** "ห้องสำรอง" = ห้องติด **reserved period** ของตาราง `room_state_periods` (kind `reserved`, start/end + เปิดปลายได้, overlap half-open เดียกับ booking_rooms) · column `rooms.is_reserved` + สถานะ `reserved_closed`/`maintenance` **ถูก drop หมด** (migration `2026_09_24_170000_create_room_state_periods_drop_is_reserved`) — migration `add_is_reserved` ที่เคยจดใน amendment แรกถูกถอดต่อใน migration เดียวกัน (release เดียว ไม่มี dual source) · query ทุกจุดใช้ shared scopes `freeOfPeriod`/`blockedByPeriod`/`overlapping` ของ `RoomStatePeriod` — ห้ามเขียนเงื่อนไขเอง · **สถานะ surfaces วันนี้:** #1 summary (+king) ✅ landed, #2 king ✅ รวมใน landed, #5 walk-in ✅ landed (+bonus checkIn gate), #3 booking capacity ⚠️ conflict กับ non-goal ของ map ใหม่ — ticket 03 ต้อง grill ยืนยันกับ owner ก่อน, #4 allocator ❌ ยังไม่เกิด — ticket 04 เขียนใหม่บน period scopes · **ที่คงเดิมทั้งหมด:** param contract (admin-only, request-scoped, silent-ignore, ไม่ persist), maintenance absolute, HTTP contract หน้าบ้าน, response shape ใต้ flag
 
 ## Implementation Decisions
 

@@ -50,3 +50,13 @@ blocked-by: ["03-booking-capacity-sellable-pool"]
 - [spec.md § Solution](../spec.md#solution)
 - [spec.md § Implementation Decisions](../spec.md#implementation-decisions) (Surfaces touched #4, No persistence, No state-machine change)
 - [spec.md § Testing Decisions](../spec.md#testing-decisions)
+
+## 🗓️ Amendment (2026-09-24 — unfreeze, เขียนใหม่บน period-check scopes ตามคำจดของ map `room-state-periods`)
+
+โมเดลพื้นฐานเปลี่ยน — "ห้องสำรอง" = ห้องติด **reserved period** (`room_state_periods` kind `reserved`) ไม่ใช่สถานะ `reserved_closed` / column `is_reserved` (ถูก drop แล้ว — map `room-state-periods`) · spec ใหม่จดไว้ชัด: *"ticket 04 ของ map นั้น (allocator flag threading) ยังไม่เกิด — เมื่อ unfreeze ต้องเขียนใหม่บน period-check scopes ของ spec นี้"*:
+
+- สถานะปัจจุบัน: `RoomAllocator::loadRoomPool()` ใช้ `freeOfPeriod($minCheckIn, $maxCheckOut)` **ตัดทุก kind อยู่แล้ว** — งาน = เพิ่ม `bool $includeReserved` เข้า `allocate()`/`loadRoomPool()` เมื่อ flag เป็น true → ตัดเฉพาะ `freeOfPeriod(..., KIND_MAINTENANCE)` (reserved period ห้องเข้า pool ได้) · `BookingPriority::hasX09Free()` กฎเดียวกัน ต่อช่วง BR
+- flag รับที่ endpoint `PUT /bookings/{bookingId}/assign-rooms` → ผ่าน `IncludeReservedGate::enabled($request)` (admin + flag เท่านั้น — silent-ignore)
+- **ข้อ "No Auto-Flip" เดิมหมดความหมาย:** สถานะ `reserved_closed` ถูกถอด — ห้องสำรองวิ่ง lifecycle ปกติ (`available → occupied`) ตาม decision ticket 90 ที่ถูก override ด้วย period model; ข้อ "No Persistence" ยังคงเดิม (param ไม่ persist)
+- E2E: admin create-booking ให้ช่วงที่ห้องปกติเต็มแต่มี reserved period → assign-rooms พร้อม flag → ได้ `room_id` เป็นห้องติด reserved period · ไม่ส่ง flag → fail สุภาพ
+- ⚠️ ถ้า ticket 03 (capacity) ยังไม่ยอมรับ flag ฝั่ง create — E2E สร้าง booking แบบ admin override ผ่าน `source=admin` + status ตรง ๆ ตาม prior art `BookingAutoAssignRoomsTest` ได้ (cap เข้งวง scope แค่ allocator) — ระบุแนวทางให้ชัดตอนทำ

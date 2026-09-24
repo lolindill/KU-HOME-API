@@ -4,7 +4,7 @@ type: AFK
 title: "Docs + memory closeout (api_guide / cline.md / tracker)"
 status: open
 assignee:
-blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-sellable-pool", "04-allocator-assign-rooms-include-reserved", "05-walk-in-include-reserved"]
+blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-sellable-pool", "04-allocator-assign-rooms-include-reserved"]
 ---
 
 # 06: Docs + memory closeout (api_guide / cline.md / tracker)
@@ -48,3 +48,10 @@ blocked-by: ["02-calendar-availability-include-reserved", "03-booking-capacity-s
 - [spec.md § Further Notes](../spec.md#further-notes)
 - [spec.md § Implementation Decisions](../spec.md#implementation-decisions)
 - [spec.md § Out of Scope](../spec.md#out-of-scope)
+
+## 🗓️ Amendment (2026-09-24 — unfreeze, re-base ตาม period model)
+
+- **blocked-by ถอด ticket 05 ออก** — walk-in landed ครบแล้วผ่าน build ของ map `room-state-periods` (ปิดแล้ว)
+- **บางส่วนของ docs landed ไปแล้ว:** `docs/api_guide.md` + `cline.md` มีหัวข้อ `room_state_periods` (state machine 5 สถานะ, CRUD periods, breaking change `is_reserved → active_periods`) จาก build ของ map ใหม่ — งานที่เหลือของ ticket นี้คือ **เอกสาร flag `include_reserved` เท่านั้น**: summary (+king) ที่ landed, calendar / booking-capacity / allocator ที่กำลังทำใน tickets 02–04 · ระวังข้อความเดิมด้านบนอ้าง `reserved_closed`/is_reserved = historical — ในเอกสารจริงต้องอ้าง reserved period
+- Runbook ห้องสำรอง: ปรับเป็นโมเดล period — ทางเลือก 1 = สร้าง reserved period (POST /rooms/{roomId}/periods) ถอดด้วย PATCH/DELETE ทางเลือก 2 = `include_reserved` ใน walk-in / assign-rooms · อ้าง map `room-state-periods` แทน ticket 90 (ticket 90 ถูก override — จดใน Decisions so far ของ map แล้ว)
+- tracker closeout: tickets 01, 05 ปิดแล้ว (2026-09-24) — เหลือ 02, 03, 04 และปิด 06 ท้ายสุด

@@ -44,3 +44,12 @@ blocked-by: ["01-include-reserved-gate-and-availability"]
 - [spec.md § Solution](../spec.md#solution)
 - [spec.md § Implementation Decisions](../spec.md#implementation-decisions) (Surfaces touched #1, Maintenance is absolute)
 - [spec.md § Testing Decisions](../spec.md#testing-decisions)
+
+## 🗓️ Amendment (2026-09-24 — unfreeze, re-base ตาม period model)
+
+โมเดลพื้นฐานเปลี่ยน — "ห้องสำรอง" = ห้องติด **reserved period** (`room_state_periods` kind `reserved`) ไม่ใช่สถานะ `reserved_closed` / column `is_reserved` (ถูก drop แล้ว — map `room-state-periods`):
+
+- Calendar 4 endpoints ปัจจุบัน (จาก build ของ map ใหม่ touchpoint 10) **ยัด period ทุก kind เข้า occupied matrix แล้ว** — งานที่เหลือจึงไม่ใช่ "รวม reserved เข้า pool" ใหม่จากศูนย์ แต่คือให้ matrix **นับเฉพาะ maintenance period เมื่อ admin ส่ง flag** (reserved period ไม่ไปบล็อกวัน) + บันทึก `search_criteria.include_reserved`
+- ใช้ `IncludeReservedGate::enabled($request)` เสมอ (ห้ามเขียน admin-check เอง)
+- `RoomType::scopeWithSellableRoomsAndRates` ไม่ต้องรับ `$includeReserved` แล้ว — denominator ตอนนี้ = ทุกห้องของ type (จาก map ใหม่ ข้อ 8) การตัดเกิดที่ matrix
+- ห้อง "ติด reserved period" นับ per-room ต่อช่วง (overlap half-open เดียกับ booking) — ห้องเดียวอาจติดเฉพาะบางวันของช่วงสแกน

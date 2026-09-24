@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "Walk-in รับ include_reserved"
-status: open
-assignee:
+status: closed
+assignee: zcode session (2026-09-24 — ปิดหลัง unfreeze · งาน landed ครบผ่าน build ของ map room-state-periods)
 blocked-by: ["01-include-reserved-gate-and-availability"]
 ---
 
@@ -43,3 +43,12 @@ blocked-by: ["01-include-reserved-gate-and-availability"]
 - [spec.md § Solution](../spec.md#solution)
 - [spec.md § Implementation Decisions](../spec.md#implementation-decisions) (Surfaces touched #5, Maintenance is absolute, Grill #7)
 - [spec.md § Testing Decisions](../spec.md#testing-decisions)
+
+## ✅ Resolution (2026-09-24 — ปิดหลัง unfreeze)
+
+**งาน landed ครบโดย build ของ map `room-state-periods`** (spec touchpoint 11, commit `feat(rooms)` 2026-09-24 — รวมอยู่ใน suite 501 เขียว) · โมเดลสุดท้ายเป็น **period** ไม่ใช่สถานะ:
+
+- `FrontDeskController::walkIn` — guard บนช่วง `[today, today+nights)`: มี **maintenance** period overlap → reject เสมอ (ทุกกรณี flag/ไม่ flag) · มี **reserved** period overlap → ผ่าน**เฉพาะ** `IncludeReservedGate::enabled($request)` (admin + flag) · ไม่ส่ง/ไม่ใช่ admin → reject 422 เหมือนเดิม · เงื่อนไขสถานะ available/prep_checkin คงเดิม
+- **State machine compliance — ประเด็นเดิมหมดไปเอง:** สถานะ `reserved_closed` ถูกถอดจาก machine (ticket 90 overridden โดย period model) — walk-in ใต้ flag ทำ transition ปกติเส้นเดียว `available → occupied` ผ่าน `transitionStatusTo()` พร้อม audit log
+- **Bonus จาก spec ใหม่:** `checkIn` ได้ gate เพิ่ม — ห้องปลายทางมี maintenance period overlap ช่วงพัก → 422 / reserved period ไม่บล็อก
+- Tests (ใน `RoomStatePeriodTest`): `test_walkin_rejects_maintenance_period_and_reserved_without_flag` · `test_walkin_into_reserved_period_passes_with_admin_flag` · `test_checkin_rejects_room_with_maintenance_period_overlap` · `test_checkin_into_reserved_period_passes` — checklist ด้านบนครบทุกข้อ (ไฟล์ `FrontDeskWalkInIncludeReservedTest.php` ตามที่ ticket ระบุไม่จำเป็น — coverage อยู่ใน RoomStatePeriodTest แล้ว)

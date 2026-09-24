@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "Param gate helper + availability summary endpoint — tracer bullet"
-status: open
-assignee: zcode session (2026-09-24 — 🧊 FROZEN รอ map room-state-periods · งานลงแล้ว suite 446 เขียว แต่ไม่ปิด)
+status: closed
+assignee: zcode session (2026-09-24 — ปิดหลัง unfreeze · โค้ด rebase เป็น period model แล้ว + test ครบ suite 501 เขียว)
 blocked-by: []
 ---
 
@@ -46,7 +46,15 @@ blocked-by: []
 - Room listings (`allRooms`/`getRoomById`/`roomStatus`) โชว์ `is_reserved` badge
 - Tests: `RoomStateTest` ปรับตาม machine ใหม่ · king test comment · (test file `RoomAvailabilityIncludeReservedTest` ยังไม่ได้เขียน — ถูกตัดจังหวะด้วย freeze)
 
-**สิ่งค้างเมื่อ unfreeze:** เขียน `tests/Feature/RoomAvailabilityIncludeReservedTest.php` ครบ contract ด้านล่าง + ตรวจกับผลของ map `room-state-periods` ว่า query set นี้ต้องปรับตามหรือไม่
+## ✅ Resolution (2026-09-24 — ปิดหลัง unfreeze)
+
+**โค้ดถูก rebase เป็น period model ครบแล้วโดย build ของ map `room-state-periods`** (spec touchpoint 9 + 12, commit `feat(rooms)` 2026-09-24) — งานที่ landed บนโมเดล `is_reserved` เดิมถูกแทนที่ทั้งก้อนตามคำเตือนใน Progress ด้านบน ผลสุดท้ายบน period model:
+
+- `IncludeReservedGate` — คง helper เดิมทุกอย่าง (admin + boolean flag, silent-ignore, ไม่ validate กัน 422) · ความหมายใหม่ = gate ห้องติด **reserved period** overlap ช่วงที่ขอ (`rooms.is_reserved` drop แล้ว)
+- `RoomController::availability` — admin flag → `available_rooms` = sellable + reserved − booked (reserved = `blockedByPeriod(reserved)` ∩ `freeOfPeriod(maintenance)`) + `sellable_rooms`/`reserved_rooms` + `search_criteria.include_reserved`; maintenance period absolute; ไม่ส่ง flag = payload เดิมทุกไบต์
+- King counters — `king_total_rooms` ตัด maintenance period เสมอ + ตัด reserved period เมื่อไม่ส่ง flag (extended pool ใต้ flag)
+
+**Test วันนี้ (session unfreeze):** สร้าง `tests/Feature/RoomAvailabilityIncludeReservedTest.php` 4 tests — king counters extended pool ใต้ flag · king maintenance absolute · anonymous silent-ignore · no-flag ไม่มีฟิลด์ reserved — **suite 501 เขียว (1755 assertions) + pint ผ่าน** · contract พื้นฐาน (admin breakdown / non-admin silent / maintenance absolute / summary ตัดเฉพาะวัน period ครอบ) ครอบแล้วใน `RoomStatePeriodTest` ของ map ใหม่ — checklist ด้านล่างครบทุกข้อ ไม่มีงานค้าง
 
 - [ ] สร้าง shared gate resolution helper ตัวเดียวใน support namespace เช็ค sanctum role `admin` + boolean `include_reserved`
 - [ ] Non-admin และ anonymous ส่ง `include_reserved=true` เข้า `GET /api/v1/availability` → คืน payload ปกติเหมือนไม่ส่ง flag ทุกไบต์ (ห้ามคืน 403)
