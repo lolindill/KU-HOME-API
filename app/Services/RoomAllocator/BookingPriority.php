@@ -4,6 +4,7 @@ namespace App\Services\RoomAllocator;
 
 use App\Models\Booking;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Services\RoomAllocator\Dto\BookingRequestDto;
 
 /**
@@ -22,10 +23,14 @@ final class BookingPriority
     /**
      * คำนวณ trait ของ booking สำหรับใช้ใน comparator
      *
+     * 🎫 (26/09/26) ticket 04 map reserved-room-pool: `includeReserved = true` ใช้กฎเดียวกับ
+     *    allocator — ตัดเฉพาะ maintenance period (reserved period นับเป็นห้องว่างได้)
+     *
      * @param  array<BookingRequestDto>  $brs  BR DTO ของ booking นี้ (loaded + eager)
+     * @param  bool  $includeReserved  admin flag `include_reserved` (default false = ตัดทุก kind)
      * @return array{hasSuite: bool, hasX09Free: bool, hasBedPref: bool, roomCount: int, checkOutTs: int}
      */
-    public static function traits(Booking $booking, array $brs, Weights $w): array
+    public static function traits(Booking $booking, array $brs, Weights $w, bool $includeReserved = false): array
     {
         $hasExtraBed = false;
         $hasBedPref = false;
@@ -49,7 +54,7 @@ final class BookingPriority
         if ($hasExtraBed) {
             foreach ($brs as $br) {
                 if ($br->type === 'Deluxe' && $br->extraBeds > 0) {
-                    if (self::hasX09Free($br, $w)) {
+                    if (self::hasX09Free($br, $w, $includeReserved)) {
                         $hasX09Free = true;
                         break;
                     }
@@ -78,13 +83,19 @@ final class BookingPriority
     /**
      * ตรวจว่ามีห้อง X09 (Deluxe 3-bed builtin) ว่างสำหรับ BR นี้หรือไม่
      */
-    private static function hasX09Free(BookingRequestDto $br, Weights $w): bool
+    private static function hasX09Free(BookingRequestDto $br, Weights $w, bool $includeReserved = false): bool
     {
         return Room::whereHas('roomType', fn ($q) => $q->where('name_en', 'Deluxe'))
             ->where('builtin_extra_beds', '>=', $w->x09MinBuiltinBeds)
             // 🗓️ (24/09/26) room-state-periods: ห้องติด period (reserved/maintenance)
             //    ช่วงทับการเข้าพัก = ไม่นับเป็นห้องขายปกติ (shared scope เดียวกับ allocator)
-            ->freeOfPeriod($br->checkIn, $br->checkOut)
+            // 🎫 (26/09/26) ticket 04: flag `include_reserved` กฎเดียวกับ allocator pool —
+            //    ตัดเฉพาะ maintenance period เสมอ (กฎเหล็ก absolute), reserved นับเป็นว่างได้
+            ->freeOfPeriod(
+                $br->checkIn,
+                $br->checkOut,
+                $includeReserved ? RoomStatePeriod::KIND_MAINTENANCE : null
+            )
             ->whereDoesntHave('bookingRooms', function ($q) use ($br) {
                 $q->holdingSlot()
                     ->where('check_in', '<', $br->checkOut)

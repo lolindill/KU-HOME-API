@@ -21,8 +21,8 @@ use Illuminate\Http\Request;
  *    Single source of truth — availability summary (+king), calendar 4 endpoints
  *    (availabilityPerDay/availabilityRanges/unavailableDates/unavailableRanges — ticket 02),
  *    booking capacity checks 4 จุด (createBooking/addRooms/updateRoom/updateRooms —
- *    ticket 03: denominator = sellable pool, flag ขยายเฉพาะ admin) และ walk-in ใช้ helper นี้
- *    (allocator ยังไม่รับ flag — ticket 04 ของ map reserved-room-pool)
+ *    ticket 03: denominator = sellable pool, flag ขยายเฉพาะ admin), walk-in และ
+ *    assign-rooms → RoomAllocator (ticket 04 — flag ขยาย allocator pool) ใช้ helper นี้
  */
 class IncludeReservedGate
 {

@@ -1603,9 +1603,15 @@ class BookingController extends Controller
             // 🌟 Refactor (25/06/26): BR-level dates แล้ว — assignAvailableRoom() ใช้ $this->check_in/check_out เอง
             // 🏨 Phase 5: เปลี่ยนจาก first-available greedy แบบเดิม → RoomAllocator (Hybrid+ v3 cluster algorithm)
             //    เหตุผล: algorithm ใหม่จัดห้องเป็น cluster (ระยะเดินใกล้กันที่สุด) แทนที่จะ assign ทีละ BR แยกกัน
+            // 🎫 (26/09/26) ticket 04 map reserved-room-pool: flag `include_reserved` (admin เท่านั้น —
+            //    silent-ignore) ส่งต่อให้ allocator ขยาย pool ให้ห้องติด reserved period เข้า cluster ได้
+            //    (maintenance ถูกตัดเสมอ) · ไม่ persist ค่า flag — แต่ละ request ตัดสินใจเอง (grill #2)
             $assignedCount = 0;
 
-            $result = app(RoomAllocator::class)->allocate($unassignedRooms);
+            $result = app(RoomAllocator::class)->allocate(
+                $unassignedRooms,
+                IncludeReservedGate::enabled($request)
+            );
 
             if (! $result->ok) {
                 $failedTypes = $unassignedRooms->map(fn ($br) => $br->room_type_id)->unique()->implode(', ');

@@ -4,6 +4,7 @@ namespace App\Services\RoomAllocator;
 
 use App\Models\BookingRoom;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Services\RoomAllocator\Algorithms\HybridPlus;
 use App\Services\RoomAllocator\Dto\AllocationResult;
 use App\Services\RoomAllocator\Dto\BookingRequestDto;
@@ -37,10 +38,15 @@ final class RoomAllocator
     /**
      * จัดห้อง cluster ให้ BookingRoom collection ของ booking เดียว
      *
+     * 🎫 (26/09/26) ticket 04 map reserved-room-pool: `includeReserved = true` ขยาย pool
+     *    ให้ห้องติด **reserved period** เข้า cluster ได้ (maintenance ยังถูกตัดเสมอ — กฎเหล็ก
+     *    absolute) · default false = พฤติกรรมเดิม 100% (ตัดทุก kind)
+     *
      * @param  Collection<int, BookingRoom>  $bookingRooms  BR ที่ยังไม่มี room_id
+     * @param  bool  $includeReserved  admin flag `include_reserved` (request-scoped — ไม่ persist)
      * @return AllocationResult {assignments: [brId => roomId], ok, cost, winner}
      */
-    public function allocate(Collection $bookingRooms): AllocationResult
+    public function allocate(Collection $bookingRooms, bool $includeReserved = false): AllocationResult
     {
         if ($bookingRooms->isEmpty()) {
             return AllocationResult::failed(0);
@@ -53,7 +59,7 @@ final class RoomAllocator
         $brs = $bookingRooms->map(fn ($br) => BookingRequestDto::fromModel($br))->values()->all();
 
         // ---- 2. โหลด room pool + reservations ที่ overlap ----
-        $rooms = $this->loadRoomPool($brs);
+        $rooms = $this->loadRoomPool($brs, $includeReserved);
 
         // ---- 3. X09 priority seed ----
         $x09Seeder = new X09Seeder($this->weights);
@@ -134,9 +140,10 @@ final class RoomAllocator
      * โหลด room pool ที่ type ตรงกับที่ BRs ต้องการ + reservations ที่ overlap ทุกช่วงวันที่
      *
      * @param  BookingRequestDto[]  $brs
+     * @param  bool  $includeReserved  true = ตัดเฉพาะ maintenance period (reserved เข้า pool ได้)
      * @return RoomDto[]
      */
-    private function loadRoomPool(array $brs): array
+    private function loadRoomPool(array $brs, bool $includeReserved = false): array
     {
         $neededTypes = array_values(array_unique(array_map(fn ($br) => $br->type, $brs)));
 
@@ -148,11 +155,16 @@ final class RoomAllocator
 
         $query = Room::with('roomType')
             ->whereHas('roomType', fn ($q) => $q->whereIn('name_en', $neededTypes))
-            // 🗓️ (24/09/26) room-state-periods: ห้องติด period (reserved/maintenance) ช่วงไหน
-            //    ของการเข้าพัก = ออกจาก pool ช่วงนั้น (สถานะ maintenance/is_reserved ถูกถอดแล้ว —
-            //    shared scope เดียวกับ availability ทุก endpoint · การ override reserved ด้วย
-            //    include_reserved เป็นงานของ map reserved-room-pool ตอน unfreeze)
-            ->freeOfPeriod($minCheckIn, $maxCheckOut);
+            // 🗓️ (24/09/26) room-state-periods: ห้องติด period ช่วงไหนของการเข้าพัก = ออกจาก
+            //    pool ช่วงนั้น (shared scope เดียวกับ availability ทุก endpoint)
+            // 🎫 (26/09/26) ticket 04 map reserved-room-pool: flag `include_reserved` (admin)
+            //    ขยาย pool — ตัดเฉพาะ maintenance period, reserved period เข้า cluster ได้ ·
+            //    default (ไม่ส่ง flag) ยังตัดทุก kind เหมือนเดิม 100%
+            ->freeOfPeriod(
+                $minCheckIn,
+                $maxCheckOut,
+                $includeReserved ? RoomStatePeriod::KIND_MAINTENANCE : null
+            );
 
         // lockForUpdate เพื่อกัน race (skip ใน SQLite ที่ไม่ support)
         if (config('database.default') !== 'sqlite' && DB::transactionLevel() > 0) {
