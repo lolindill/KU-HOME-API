@@ -95,6 +95,12 @@ class StoreBookingRequest extends FormRequest
 
             // 🎟️ Discount (27/08/26)
             'discount_code' => 'nullable|string|max:50',
+
+            // 💳 booking-payment-types (25/09/26): ตั้งได้ admin/system เท่านั้น —
+            //    ตรวจสิทธิ์ใน controller (input มี field ใดตัวหนึ่ง → non-admin 403)
+            //    deposit_amount มีความหมายเฉพาะ deposit — cross-field ตรวจใน controller
+            'payment_type' => 'nullable|in:full,deposit,deferred',
+            'deposit_amount' => 'nullable|integer|min:1',
         ];
     }
 
@@ -107,6 +113,9 @@ class StoreBookingRequest extends FormRequest
             'source.required' => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
             'source.in' => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
             'discount_code.max' => 'รหัสส่วนลดต้องไม่เกิน 50 ตัวอักษร',
+            'payment_type.in' => 'ประเภทการชำระเงินต้องเป็น full, deposit หรือ deferred เท่านั้นค่ะ 💳',
+            'deposit_amount.integer' => 'ยอดมัดจำต้องเป็นตัวเลขจำนวนเต็ม (บาท) ค่ะ 💳',
+            'deposit_amount.min' => 'ยอดมัดจำต้องมากกว่า 0 บาทค่ะ 💳',
             'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
             'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
             'booking_rooms.max' => BookingRule::roomCapMessage($this->user('sanctum')),

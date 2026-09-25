@@ -14,12 +14,13 @@
 4. [Rooms & Room Types](#rooms--room-types)
 5. [Bookings](#bookings-core)
 6. [Front Desk Operations](#front-desk-operations)
-7. [Payments & Webhooks](#payments--webhooks)
-8. [Global Rates](#global-rates)
-9. [Dashboard / Housekeeping](#dashboard--housekeeping)
-10. [DB Models Reference](#db-models-reference)
-11. [State Machines](#state-machines)
-12. [Appendix](#appendix)
+7. [💳 Payment types (เต็มจำนวน/มัดจำ/ค้างชำระ)](#-payment-types-เต็มจำนวน--มัดจำ--ค้างชำระ--250926)
+8. [Payments & Webhooks](#payments--webhooks)
+9. [Global Rates](#global-rates)
+10. [Dashboard / Housekeeping](#dashboard--housekeeping)
+11. [DB Models Reference](#db-models-reference)
+12. [State Machines](#state-machines)
+13. [Appendix](#appendix)
 
 ---
 
@@ -1275,12 +1276,15 @@ curl -s -H "Accept: application/json" \
 > ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline)
 > 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
 > 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
+> 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้น) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
 
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
+| `payment_type` 💳                           | nullable, in: `full`, `deposit`, `deferred` — admin/system เท่านั้น (non-admin 403) |
+| `deposit_amount` 💳                         | nullable, integer, min 1 — คู่กับ `payment_type=deposit` เท่านั้น (422 ถ้า type อื่น) |
 | `booking_rooms`                             | required, array, สูงสุด 4 ห้องสำหรับทั่วไป (admin exempt: ไม่จำกัด) |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
 | `booking_rooms.*.check_in`                  | required, date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
@@ -1316,6 +1320,10 @@ curl -s -H "Accept: application/json" \
   "booking_id": "booking-uuid",
   "confirmation": "202608-00001",
   "total_amount": 2600,
+  "payment_type": "full",
+  "deposit_amount": null,
+  "paid_amount": 0,
+  "outstanding_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
   "user_id": "user-uuid",
   "booking_rooms": [
@@ -1806,6 +1814,7 @@ curl -s -H "Accept: application/json" \
 🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
+💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, required ≥ 1)** — สลิปใหม่ต้องแจ้งยอดเสมอ · ⚠️ **breaking change ตั้งแต่ deploy นี้: frontend ต้องส่ง `amount` มาด้วย** · booking `deferred` **บล็อกสลิป 422** (มีช่องเดียวคือ admin อนุมัติ)
 
 🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
 
@@ -1817,13 +1826,15 @@ curl -s -H "Accept: application/json" \
 |-------------------|-----------|----------|-----------------------------------------------|
 | `slip_image`      | file      | ✅       | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — บังคับเสมอ |
 | `transfer_time`   | datetime  | ❌       | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
+| `amount`          | integer   | ✅       | 💳 ยอดที่ชำระตามสลิป (บาท, ≥ 1) — เก็บเป็น `booking_confirmations.amount` (ชั้น A) |
 
 **Example**:
 ```bash
 curl -X POST /api/v1/bookings/{id}/confirm \
   -H "Authorization: Bearer <token>" \
   -F "slip_image=@slip.jpg" \
-  -F "transfer_time=2026-07-24T10:30:00Z"
+  -F "transfer_time=2026-07-24T10:30:00Z" \
+  -F "amount=750"
 ```
 
 **Response 201**:
@@ -1833,28 +1844,41 @@ curl -X POST /api/v1/bookings/{id}/confirm \
   "message": "ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน",
   "confirmation_id": "confirmation-uuid",
   "confirmation_status": "pending",
+  "amount": 750,
+  "expected_amount": 750,
   "booking_status": "pending",
+  "payment_type": "deposit",
+  "deposit_amount": 750,
+  "paid_amount": 0,
+  "outstanding_amount": 1500,
   "slip_image_url": "http://localhost/api/v1/images/<image-uuid>/file?expires=...&signature=..."
 }
 ```
 
 > 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — frontend ใช้ `<img src>` ตรงๆ ได้ทันที หมดอายุต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
+> 💳 `expected_amount` = ยอดที่ระบบคาดว่าต้องชำระ ณ ตอนนี้ (deposit งวดแรก = ยอดมัดจำ, กรณีอื่น = `outstanding_amount`) · 4 field `payment_type/deposit_amount/paid_amount/outstanding_amount` ส่งทุก response ของ booking ทุก role
 
 **Guards** (422 on failure):
+- ❌ **payment_type = `deferred`** — booking ค้างชำระ รอแอดมินอนุมัติ ไม่รับสลิป (ตรวจก่อน guard อื่น)
 - ❌ Booking ไม่ใช่ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่)
 - ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft`, `verify_error` ส่งใหม่ได้แม้หมด deadline)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
 - ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
+- ❌ ไม่ส่ง `amount` / amount < 1 (💳 ใหม่ 25/09/26)
 
 ---
 
 ### PUT `/booking-confirmations/{id}/verify` — Admin verify slip
 
-🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed` (+ `is_paid=true`)
+🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed`
+
+💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount` (full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · สลิปเก่าก่อน deploy (amount = null) คง flow เดิม ไม่เขียน ledger
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "path": "slips/...", "url": "<signed URL 15 นาที>", ... } }, "booking_status": "confirmed" }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "path": "slips/...", "url": "<signed URL 15 นาที>", ... } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
+
+> 💳 `expected_amount` (ระบบคำนวณ) vs `claimed_amount` (ยอด user แจ้ง) = คู่เทียบแบบ **soft** — ระบบไม่ hard-reject ยอดไม่ตรง (เผื่อค่าโอน) admin ตัดสินเอง
 
 ---
 
@@ -1864,13 +1888,17 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "slip ไม่ชัด" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "verify_error" }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "verify_error", "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ... }`
+
+> 💳 reject **ไม่เขียน payments row** (ยังไม่รับเงิน) — ยอด 4 field ส่งกลับเพื่อ consistency (ค่าไม่เปลี่ยน)
 
 ---
 
 ### GET `/booking-confirmations/pending` — Admin dashboard list
 
 🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`, `slipImage`
+
+💳 **(25/09/26)**: แต่ละ row มี `amount` (ยอด user แจ้ง — claimed) + `expected_amount` (ระบบคำนวณจาก booking: deposit งวดแรก = ยอดมัดจำ / กรณีอื่น = outstanding) — admin เห็นคู่เทียบตั้งแต่หน้า list
 
 **Response 200**: `{ "status": "success", "confirmations": { paginated data } }`
 
@@ -1965,6 +1993,7 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 `draft`, `paid`, `confirmed`, `complete`
 
 > 🌟 **Refactor (25/06/26)**: `checked_in`/`checked_out`/`no_show` moved to **BookingRoom-level**. The booking container only tracks `draft` → `paid` → `confirmed` → `complete`.
+> 💳 **(25/09/26) deferred approval**: booking `deferred` อนุมัติผ่าน endpoint **นี้เท่านั้น** (ตั้ง `status=confirmed` — transition `draft → confirmed` walk-in path เดิม) — ไม่มี endpoint/state ใหม่ · response เพิ่ม `payment_type`, `deposit_amount`, `paid_amount`, `outstanding_amount`
 
 **Response `200`:**
 ```json
@@ -1972,7 +2001,11 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
   "status": "success",
   "message": "อัปเดตสถานะเป็น confirmed โดยคุณ admin เรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
-  "booking_status": "confirmed"
+  "booking_status": "confirmed",
+  "payment_type": "deferred",
+  "deposit_amount": null,
+  "paid_amount": 0,
+  "outstanding_amount": 1500
 }
 ```
 
@@ -2540,7 +2573,9 @@ Marks one or more rooms as `no_show` (BookingRoom-level). Supports **partial no-
 
 🔒 **Admin only**
 
-Records a completed payment. Auto-marks booking `is_paid=true` and transitions `draft → paid` if applicable. Creates a receipt when fully paid.
+Records a completed payment (เงินสดหน้าเคาน์เตอร์ / เก็บยอดค้างของมัดจำ·ค้างชำระ). Auto-marks booking `is_paid=true` เมื่อยอดรวม (SUM ทุก row) ≥ `total_amount` และ transitions `draft → paid` ถ้า booking ยัง draft.
+
+💳 **(25/09/26)**: `amount` **min 1** (เดิม 0 — 0 ไม่ใช่เหตุการณ์เงิน) · **overpay ยอมรับ** (เขียน row ตามจริง — `outstanding_amount` clamp 0, ไม่มี reject) · **เรียกซ้ำได้** (1 ครั้ง = 1 ledger row — มัดจำ/ค้างชำระเก็บหลายงวดได้) · เก็บยอดค้างหลัง `confirmed` → **สถานะคง `confirmed`** ไม่มี transition ใหม่ · ⚠️ draft ที่มี payments row ไม่ถูก `CleanupExpiredDrafts` ลบ และลบด้วย `DELETE /bookings/{id}` ไม่ได้ (422 — กัน ledger หาย)
 
 **Request Body:**
 ```json
@@ -2556,7 +2591,7 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 | Field              | Rule                                                |
 |--------------------|-----------------------------------------------------|
 | `booking_id`       | required, uuid, exists in bookings                  |
-| `amount`           | required, integer, min 0                            |
+| `amount`           | required, integer, **min 1** 💳                     |
 | `reference_number` | nullable, string                                    |
 | `received_by`      | nullable, uuid, exists in users                     |
 
@@ -2574,9 +2609,66 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
     "received_by": "admin-uuid"
   },
   "booking_is_paid": true,
-  "booking_status": "paid"
+  "booking_status": "confirmed",
+  "payment_type": "deposit",
+  "deposit_amount": 1200,
+  "paid_amount": 2400,
+  "outstanding_amount": 0
 }
 ```
+
+---
+
+## 💳 Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ) — 25/09/26
+
+> wayfinder map `booking-payment-types` (tickets 01–05) — booking มีประเภทการชำระ 3 แบบบน column `bookings.payment_type`
+
+### สัญญา (contract) รวม
+
+| ประเภท | ค่า | สรุป |
+|---|---|---|
+| เต็มจำนวน | `full` (**default**) | flow เดิมทุกอย่าง — สลิปเต็ม → verify → `is_paid=true` |
+| มัดจำ | `deposit` | จ่ายงวดแรก = ยอดมัดจำ (`deposit_amount` ตายตัว, null = **50%** ของ `total_amount` — config `booking.deposit_percent`) → verify → confirmed + `is_paid=false` → เก็บส่วนเหลือที่เคาน์เตอร์ (`recordPayment`) จน `is_paid=true` |
+| ค้างชำระ | `deferred` | ไม่รับสลิป — admin อนุมัติ `draft → confirmed` (ผ่าน `PUT /bookings/update/{id}`) → เก็บเงินปลายทางผ่าน `recordPayment` จนครบ |
+
+**กติกาสิทธิ์:** ตั้ง/แก้ `payment_type` / `deposit_amount` ได้ **admin/system เท่านั้น** — ช่องทาง 2 ทาง: `POST /bookings` (ครั้งเดียวตอนสร้าง) และ `PUT /bookings/{id}` (draft only) · non-admin ส่ง field เงินมา = **403**
+
+**Response envelope (4 field — ทุก response ของ booking ทุก role):**
+
+```json
+{
+  "payment_type": "deposit",
+  "deposit_amount": 750,          // effective — type=deposit: column ?? ceil(total × 50%); type อื่น = null
+  "paid_amount": 750,             // SUM(payments.amount) เฉพาะ completed — ledger เดียว
+  "outstanding_amount": 750       // max(0, total_amount − paid_amount) — clamp 0 รองรับ overpay
+}
+```
+
+- **ชั้น A** — `booking_confirmations.amount` (บาท, required ≥ 1 สลิปใหม่): ยอดที่ user แจ้งต่อครั้งส่งสลิป · สลิปเก่าก่อน deploy = null (คง flow เดิม)
+- **ชั้น B** — ภาพรวมจ่ายแล้ว/ค้าง **derive จาก ledger ล้วน ไม่มี column** — `payments` = ledger เดียวของ "เงินที่เข้าจริง" · **เขียนได้ 3 จุดเท่านั้น:** ① `PUT /booking-confirmations/{id}/verify` (สลิปผ่าน) ② `POST /front-desk/{id}/payment` (เงินสด) ③ `POST /payments` (mock QR)
+- **`is_paid`** = `SUM(payments) ≥ total_amount` — "จ่ายครบ" เท่านั้น (deposit งวดแรกผ่าน ≠ is_paid) · ตั้งจริงตอน verify / recordPayment / QR
+- **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`
+- **Check-in/out ไม่มี hard guard เรื่องเงิน** — เข้าพัก/ปิด booking ได้แม้ยอดค้าง (การตามเก็บเป็นกระบวนการ ไม่ใช่ระบบบล็อก)
+- **deadline / cleanup:** ทุก type ใช้ `payment_deadline` 15 นาทีเหมือนกัน — แต่ draft `deferred` **ยกเว้น `CleanupExpiredDrafts`** และ **ยึด slot ต่อ** จน admin อนุมัติหรือลบ (จุดประสงค์ของ deferred = การันตีห้องให้องค์กรก่อนชำระ)
+
+### PUT `/bookings/{id}` — Update booking payment fields (Admin) 🆕
+
+🔒 **Admin only (role:admin) · Throttle `5,1`** · booking ต้อง **draft** เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+
+**Request Body:**
+
+| Field | Rule | หมายเหตุ |
+|---|---|---|
+| `payment_type` | nullable in: `full,deposit,deferred` | ไม่ส่ง = ไม่แตะค่าเดิม |
+| `deposit_amount` | nullable integer ≥ 1 | ส่ง `null` ชัด ๆ = revert ไป effective 50% · 422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit |
+| `discount_code` | nullable string max 50 | reuse กลไก `DiscountService` — reconcile `total_amount` ให้ครบ · ค่าว่าง = ลบโค้ด |
+| `payment_deadline` | nullable date after:now | ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม |
+
+> `total_amount` **ไม่รับ**จาก input — reprice โดยระบบเสมอ
+
+**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ... }`
+
+**Errors**: `403` non-admin · `404` booking ไม่พบ · `422` ไม่ใช่ draft / deposit_amount กับ type ที่ไม่ใช่ deposit
 
 ---
 
@@ -3166,6 +3258,7 @@ Returns tasks with status `pending` or `in_progress`.
 > 🧹 `pending` และ `verify_error` ที่หมด deadline **ไม่ถูกลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่)
 > 🗑️ **(17/08/26)** เจ้าของ/admin ลบ draft เองได้ผ่าน `DELETE /bookings/{bookingId}` (hard delete cascade + audit log `draft → deleted` ใน status_change_logs)
 > ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
+> 💳 **(25/09/26) หมายเหตุ payment types:** `paid` ของ booking `deposit` = "งวดปัจจุบันผ่านแล้ว" — `is_paid` ยัง false จนจ่ายครบ (is_paid = SUM(payments) ≥ total) · `deferred` อนุมัติด้วย transition `draft → confirmed` (walk-in path เดิม — ไม่เพิ่ม state) · draft `deferred` **ยกเว้น CleanupExpiredDrafts + ยึด slot ต่อ** จน admin อนุมัติหรือลบ · draft ที่มี payments row ไม่ถูก cleanup ลบ (กัน ledger หาย)
 
 ---
 

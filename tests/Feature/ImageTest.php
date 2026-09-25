@@ -46,6 +46,7 @@ class ImageTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
                 'slip_image' => UploadedFile::fake()->image('slip.jpg', 800, 600),
+                'amount' => 4500, // 💳 (25/09/26) confirm บังคับ amount แล้ว
             ]);
 
         $response->assertStatus(201);

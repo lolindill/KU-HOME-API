@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AddBookingRoomsRequest;
 use App\Http\Requests\StoreBookingRequest;
+use App\Http\Requests\UpdateBookingPaymentRequest;
 use App\Http\Requests\UpdateBookingRoomRequest;
 use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
@@ -471,6 +472,13 @@ class BookingController extends Controller
             // 🔒 Draft guard — ลบได้เฉพาะ draft เท่านั้น
             if ($booking->status !== 'draft') {
                 throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+            }
+
+            // 💳 (25/09/26, booking-payment-types): draft ที่มี payments row = มีเงินเข้าจริงแล้ว
+            //    (เช่น เก็บมัดจำสดหน้าเคาน์เตอร์ระหว่างยัง draft) — hard-delete จะทำ ledger หาย
+            //    เหตุผลเดียวกับ guard ของ CleanupExpiredDrafts (ticket 05 หัวข้อ 10)
+            if ($booking->payments()->exists()) {
+                throw new \Exception('ไม่สามารถลบได้ — การจองนี้มีรายการชำระเงินบันทึกไว้แล้วค่ะ (ให้แอดมินตัดสินใจที่ front-desk) 💳', 422);
             }
 
             DB::beginTransaction();
@@ -1131,6 +1139,21 @@ class BookingController extends Controller
                 throw new \Exception('กรุณาล็อกอินก่อนทำการจองค่ะนายท่าน! 🔒', 401);
             }
 
+            // 💳 (25/09/26, booking-payment-types ticket 01/05): ตั้ง payment_type/deposit_amount
+            //    ได้ admin/system เท่านั้น — user ทั่วไปไม่ส่ง field ได้ full เสมอ (403 ถ้าส่ง)
+            $user = $request->user('sanctum');
+            $paymentType = $validated['payment_type'] ?? null;
+            $depositAmount = $validated['deposit_amount'] ?? null;
+            if ($paymentType !== null || $depositAmount !== null) {
+                if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                    throw new \Exception('การตั้งประเภทการชำระเงิน / ยอดมัดจำ สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+                }
+            }
+            // ยอดมัดจำมีความหมายเฉพาะ deposit — กันความหมายคลุมเครือ
+            if ($depositAmount !== null && $paymentType !== 'deposit') {
+                throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
+            }
+
             $hasDraft = Booking::where('user_id', $userId)
                 ->where('status', 'draft')
                 ->where('payment_deadline', '>', Carbon::now())
@@ -1201,6 +1224,9 @@ class BookingController extends Controller
                 // bookings เก็บแค่ container + payment info เท่านั้น
 
                 'total_amount' => 0,
+                // 💳 (25/09/26, booking-payment-types): default 'full' — admin ส่งมาเป็น deposit/deferred ได้
+                'payment_type' => $paymentType ?? 'full',
+                'deposit_amount' => $depositAmount,
                 // ⏱️ (2026-09-24, REQ-008): ล็อกห้อง 15 นาที (config booking.payment_deadline_minutes)
                 'payment_deadline' => Carbon::now()->addMinutes((int) config('booking.payment_deadline_minutes')),
             ]);
@@ -1287,6 +1313,11 @@ class BookingController extends Controller
                 'booking_id' => $booking->id,
                 'confirmation' => $booking->confirmation,
                 'total_amount' => $booking->fresh()->total_amount,
+                // 💳 (25/09/26, booking-payment-types): envelope 4 field — accessors derive จาก ledger
+                'payment_type' => $booking->fresh()->payment_type,
+                'deposit_amount' => $booking->fresh()->deposit_amount,
+                'paid_amount' => $booking->fresh()->paid_amount,
+                'outstanding_amount' => $booking->fresh()->outstanding_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
                 'user_id' => $userId,
                 'booking_rooms' => $bookingRoomsResponse,
@@ -1300,8 +1331,9 @@ class BookingController extends Controller
             }
 
             // 🛡️ #40 Fixed: Business logic errors (422) ส่ง message ได้, unexpected errors ซ่อน
+            // 💳 (25/09/26) +403 — guard สิทธิ์ payment fields (booking-payment-types ticket 01)
             $code = $e->getCode();
-            if (in_array($code, [401, 422])) {
+            if (in_array($code, [401, 403, 422])) {
                 return response()->json([
                     'status' => 'error',
                     'message' => $e->getMessage(),
@@ -1313,6 +1345,128 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 💳 (25/09/26, booking-payment-types ticket 01/05) — PUT /bookings/{id} (admin แก้ draft)
+     *
+     * Endpoint แรกระดับ booking container สำหรับแก้ payment fields:
+     *   payment_type · deposit_amount (ส่ง null = revert effective 50%) · discount_code (reuse
+     *   DiscountService — ค่าว่าง = ลบโค้ด, แก้แล้ว reconcile total_amount) · payment_deadline
+     *
+     * Guards:
+     * - role admin/system (route role:admin + re-check ตาม defense-in-depth)
+     * - booking ต้อง draft เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+     * - deposit_amount มีความหมายเฉพาะ type deposit (422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit)
+     * - total_amount ไม่รับจาก input — reprice โดยระบบเสมอ
+     */
+    public function updateBookingPayment(UpdateBookingPaymentRequest $request, string $id)
+    {
+        try {
+            $user = $request->user('sanctum');
+            if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                throw new \Exception('ต้องเป็นแอดมินเท่านั้นถึงจะแก้ประเภทการชำระเงินได้ค่ะนายท่าน 🔒', 403);
+            }
+
+            $booking = Booking::findOrFail($id);
+
+            if ($booking->status !== 'draft') {
+                throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
+            }
+
+            $validated = $request->validated();
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
+                }
+
+                // type ใหม่ที่ effective = ค่าที่ส่งมา ไม่งั้นค่าเดิม
+                $effectiveType = $validated['payment_type'] ?? $locked->payment_type;
+
+                // cross-field: deposit_amount มีความหมายเฉพาะ deposit
+                if ($request->has('deposit_amount') && $validated['deposit_amount'] !== null && $effectiveType !== 'deposit') {
+                    throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
+                }
+
+                // 💳 payment_type — ไม่ส่ง = ไม่แตะค่าเดิม
+                if ($validated['payment_type'] ?? null) {
+                    $locked->payment_type = $validated['payment_type'];
+                }
+
+                // 💳 deposit_amount — ส่ง null ชัด ๆ = revert ไป effective 50% (column → null)
+                //    (อ่านจาก input ตรง ๆ เพื่อแยก "ไม่ส่ง" ออกจาก "ส่ง null")
+                if ($request->has('deposit_amount')) {
+                    $locked->deposit_amount = $validated['deposit_amount'];
+                }
+
+                // ⏱️ payment_deadline — ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม
+                if ($validated['payment_deadline'] ?? null) {
+                    $locked->payment_deadline = Carbon::parse($validated['payment_deadline']);
+                }
+
+                $locked->save();
+
+                // 🎟️ discount_code — reuse กลไก DiscountService เดิม (reconcile total_amount ครบ)
+                //    ส่งค่าว่าง/null = ลบโค้ด · ไม่ส่ง field = คงโค้ดเดิม
+                if (array_key_exists('discount_code', $validated)) {
+                    if (empty($validated['discount_code'])) {
+                        if ($locked->discount_code) {
+                            app(DiscountService::class)->removeFromDraft($locked);
+                        }
+                    } else {
+                        app(DiscountService::class)->applyToDraft($locked, $validated['discount_code']);
+                    }
+                }
+                // (field อื่น — payment_type/deposit_amount/payment_deadline — ไม่กระทบ total_amount)
+
+                DB::commit();
+
+                $fresh = $locked->fresh(['bookingRooms.addon']);
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'แก้ไขข้อมูลการชำระเงินเรียบร้อยแล้วค่ะ 💳',
+                    'booking' => $fresh,
+                    'total_amount' => $fresh->total_amount,
+                    'payment_type' => $fresh->payment_type,
+                    'deposit_amount' => $fresh->deposit_amount,
+                    'paid_amount' => $fresh->paid_amount,
+                    'outstanding_amount' => $fresh->outstanding_amount,
+                    'payment_deadline' => $fresh->payment_deadline?->toDateTimeString(),
+                ], 200);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 403, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to update booking payment fields: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขข้อมูลการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
@@ -1419,11 +1573,18 @@ class BookingController extends Controller
 
             $booking->transitionStatus($newStatus, $userRole);
 
+            $fresh = $booking->fresh();
+
             return response()->json([
                 'status' => 'success',
                 'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
                 'booking_id' => $booking->id,
-                'booking_status' => $booking->status,
+                'booking_status' => $fresh->status,
+                // 💳 (25/09/26) envelope 4 field — deferred อนุมัติผ่าน endpoint นี้ (draft → confirmed)
+                'payment_type' => $fresh->payment_type,
+                'deposit_amount' => $fresh->deposit_amount,
+                'paid_amount' => $fresh->paid_amount,
+                'outstanding_amount' => $fresh->outstanding_amount,
             ], 200);
 
         } catch (ModelNotFoundException $e) {

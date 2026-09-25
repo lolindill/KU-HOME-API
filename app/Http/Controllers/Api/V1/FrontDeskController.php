@@ -527,12 +527,20 @@ class FrontDeskController extends Controller
 
             DB::commit();
 
+            $freshBooking = $booking->fresh();
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Payment recorded successfully!',
                 'payment' => $payment,
-                'booking_is_paid' => $booking->fresh()->is_paid,
-                'booking_status' => $booking->fresh()->status,
+                'booking_is_paid' => $freshBooking->is_paid,
+                'booking_status' => $freshBooking->status,
+                // 💳 (25/09/26, ticket 05 หัวข้อ 7): overpay ยอมรับ (เขียน row ตามจริง —
+                //    outstanding clamp 0) · multiple calls ได้ (1 ครั้ง = 1 row ใน ledger)
+                'payment_type' => $freshBooking->payment_type,
+                'deposit_amount' => $freshBooking->deposit_amount,
+                'paid_amount' => $freshBooking->paid_amount,
+                'outstanding_amount' => $freshBooking->outstanding_amount,
             ], 201);
 
         } catch (\Exception $e) {

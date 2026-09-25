@@ -33,6 +33,14 @@ return [
     'payment_deadline_minutes' => (int) env('BOOKING_PAYMENT_DEADLINE_MINUTES', 15),
 
     // =========================================================
+    // 💳 Deposit Percent (มัดจำเริ่มต้น — booking-payment-types ticket 04, 2026-09-25)
+    //    booking payment_type='deposit' ที่ admin ไม่ได้ตั้ง deposit_amount
+    //    ระบบคิดยอดมัดจำ = ceil(total_amount × deposit_percent / 100)
+    //    (admin ตั้งยอดตายตัวต่อ booking ได้ — column bookings.deposit_amount)
+    // =========================================================
+    'deposit_percent' => (int) env('BOOKING_DEPOSIT_PERCENT', 50),
+
+    // =========================================================
     // 🗓️ Long stay (จองรายเดือน / จองเหมา — SRS v2 REQ-026/027, 2026-09-24)
     //    stay_type ของ booking_room (derived — ไม่มี column):
     //    nights >= monthly_min_nights (30) = 'monthly' (จองรายเดือน)

@@ -170,6 +170,11 @@ class BookingRoom extends Model
      * draft ที่ deadline เป็น null (walk-in style) นับเป็นกิน slot ตามเดิม
      * ห้ามใช้ whereIn('status', ['draft',...]) เองนอก scope นี้ — ไม่งั้น draft หมดอายุ
      * จะยังล็อกห้องค้างจนกว่า sweep จะมาลบค่ะ
+     *
+     * 💳 (25/09/26, booking-payment-types ticket 03): draft **deferred** ยึด slot ต่อ
+     * แม้ payment_deadline ผ่านไปแล้ว — จุดประสงค์ของ deferred คือการันตีห้องให้องค์กร
+     * ก่อนชำระ (ถ้าปล่อย slot การยกเว้น CleanupExpiredDrafts ก็ไร้ความหมาย) —
+     * draft deferred สร้าง/ดูแลโดย admin เท่านั้น จึงมีคนรับผิดชอบเก็บกวาดเสมอ
      */
     public function scopeHoldingSlot($query)
     {
@@ -180,7 +185,9 @@ class BookingRoom extends Model
                         $draft->where('status', 'draft')
                             ->whereHas('booking', fn ($b) => $b->where(function ($w) {
                                 $w->whereNull('payment_deadline')
-                                    ->orWhere('payment_deadline', '>', now());
+                                    ->orWhere('payment_deadline', '>', now())
+                                    // 💳 draft deferred — ยึด slot จน admin confirm หรือลบ
+                                    ->orWhere('payment_type', 'deferred');
                             }));
                     });
             });

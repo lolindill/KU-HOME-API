@@ -35,6 +35,9 @@ class Booking extends Model
         'total_amount',
         'is_paid',
         'payment_deadline',
+        // 💳 (25/09/26) booking-payment-types — ประเภทการชำระ + ยอดมัดจำ (admin/system ตั้งเท่านั้น)
+        'payment_type',
+        'deposit_amount',
     ];
 
     protected $casts = [
@@ -43,7 +46,16 @@ class Booking extends Model
         // (PDO ส่ง PHP bool → integer 0/1 → PostgreSQL ปฏิเสธ)
         'is_paid' => PgBoolean::class,
         'payment_deadline' => 'datetime',
+        // 💳 (25/09/26) booking-payment-types
+        'deposit_amount' => 'integer',
     ];
+
+    /**
+     * 💳 (25/09/26) booking-payment-types — ยอดเงิน 2 ชั้น (ticket 04): ชั้น B derive จาก ledger ล้วน
+     * payments = ledger เดียวของ "เงินที่เข้าจริง" (verify / recordPayment / QR — 3 จุดเขียนเท่านั้น)
+     * ส่งทุก response ทุก role — ไม่มี column เก็บ จึงไม่มีทาง drift
+     */
+    protected $appends = ['paid_amount', 'outstanding_amount'];
 
     // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
     // ใช้สำหรับ Receipt billing_name และแสดงผล — สำรองด้วย user.name
@@ -81,6 +93,60 @@ class Booking extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    // =========================================================
+    // 💳 ยอดเงิน derive จาก ledger (booking-payment-types ticket 04/05 — 25/09/26)
+    // =========================================================
+
+    /**
+     * 💰 paid_amount = SUM(payments.amount) เฉพาะ completed (เงินที่เข้าจริง)
+     *    (pending row ของ mock QR ยังไม่นับ — รอเหตุการณ์เงินจริง)
+     */
+    public function getPaidAmountAttribute(): int
+    {
+        return (int) $this->payments()
+            ->where('status', 'completed')
+            ->sum('amount');
+    }
+
+    /**
+     * 💰 outstanding_amount = total − paid (clamp 0 รองรับ overpay)
+     */
+    public function getOutstandingAmountAttribute(): int
+    {
+        return max(0, $this->total_amount - $this->paid_amount);
+    }
+
+    /**
+     * 💳 deposit_amount (effective) — frontend อ่านตัวเดียวจบ:
+     *    type ≠ deposit → null · type = deposit → column ?? ceil(total × deposit_percent)
+     *    (accessor ทับ column เดิม — เขียนผ่าน $booking->deposit_amount = X ยังเข้า column ตามปกติ)
+     */
+    public function getDepositAmountAttribute(): ?int
+    {
+        if ($this->payment_type !== 'deposit') {
+            return null;
+        }
+
+        if ($this->attributes['deposit_amount'] !== null) {
+            return (int) $this->attributes['deposit_amount'];
+        }
+
+        return (int) ceil($this->total_amount * ((int) config('booking.deposit_percent', 50)) / 100);
+    }
+
+    /**
+     * 💳 ยอดที่ต้องชำระ "ณ ตอนนี้" (ticket 05 หัวข้อ 9 — ใช้ร่วม confirm/verify/pending list):
+     *    deposit งวดแรก (ยังไม่มีเงินเข้า) = ยอดมัดจำ · กรณีอื่น = ยอดคงเหลือ
+     */
+    public function getExpectedAmountAttribute(): int
+    {
+        if ($this->paid_amount === 0 && $this->payment_type === 'deposit') {
+            return $this->deposit_amount;
+        }
+
+        return $this->outstanding_amount;
     }
 
     public function receipts(): HasMany

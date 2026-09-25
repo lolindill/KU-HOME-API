@@ -72,9 +72,11 @@ class BookingConfirmationTest extends TestCase
 
     private function confirmPayload(array $overrides = []): array
     {
+        // 💳 (25/09/26) confirm บังคับ amount ≥ 1 แล้ว (booking-payment-types ticket 04/05)
         return array_merge([
             'slip_image' => $this->slipFile(),
             'transfer_time' => now()->subHour()->toDateTimeString(),
+            'amount' => 4500,
         ], $overrides);
     }
 
@@ -226,6 +228,7 @@ class BookingConfirmationTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
                 'slip_image' => $this->slipFile(),
+                'amount' => 4500,
                 // ❌ ไม่ส่ง transfer_time (optional)
             ]);
 

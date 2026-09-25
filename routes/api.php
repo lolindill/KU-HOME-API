@@ -163,6 +163,13 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
         Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
 
+        // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
+        //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
+        //    ⚠️ วางก่อน route /bookings/update/{id} จับคู่ {id} ไม่ชน — where uuid เท่านั้น
+        Route::put('/bookings/{id}', [BookingController::class, 'updateBookingPayment'])
+            ->where('id', '[0-9a-f\-]{36}')
+            ->middleware('throttle:5,1');
+
         // 📝 Status change logs (audit) — ประวัติการเปลี่ยนสถานะของ booking + booking_rooms
         Route::get('/bookings/{id}/status-logs', [BookingController::class, 'statusLogs'])
             ->where('id', '[0-9a-f\-]{36}');

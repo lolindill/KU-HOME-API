@@ -19,8 +19,14 @@ class CleanupExpiredDrafts extends Command
         $this->info('🧹 Starting cleanup of expired draft bookings...');
         $now = Carbon::now();
 
+        // 💳 (25/09/26, booking-payment-types ticket 03 + contract ticket 05 หัวข้อ 10):
+        // - payment_type = 'deferred' → ยกเว้นตลอด (รอ admin confirm หรือลบเอง — org รอเอกสารได้ไม่จำกัดเวลา)
+        // - draft ที่มี payments row → ห้ามลบเงียบ ๆ (เงินเข้าจริงแล้ว เช่น เก็บมัดจำสดหน้าเคาน์เตอร์
+        //   ระหว่างยัง draft — hard-delete จะทำ ledger หาย)
         $expiredDrafts = Booking::where('status', 'draft')
             ->where('payment_deadline', '<', $now)
+            ->where('payment_type', '!=', 'deferred')
+            ->whereDoesntHave('payments')
             ->get();
 
         if ($expiredDrafts->isEmpty()) {

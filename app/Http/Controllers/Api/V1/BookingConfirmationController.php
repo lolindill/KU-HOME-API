@@ -7,6 +7,7 @@ use App\Http\Requests\ConfirmBookingRequest;
 use App\Http\Requests\ReviewConfirmationRequest;
 use App\Models\Booking;
 use App\Models\BookingConfirmation;
+use App\Models\Payment;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
@@ -43,6 +44,13 @@ class BookingConfirmationController extends Controller
         }
 
         $booking = Booking::findOrFail($bookingId);
+
+        // 💳 (25/09/26, ticket 05 หัวข้อ 3 — owner ตัดสิน): deferred บล็อกสลิป ก่อน state guard เดิม —
+        //    deferred มีช่องเดียวคือ admin confirm (PUT /bookings/update/{id}) หรือลบ draft
+        //    (verify_error เกิดจาก deferred ไม่ได้อยู่แล้ว — draft ก็ block)
+        if ($booking->payment_type === 'deferred') {
+            return $this->error('booking ค้างชำระ — รอแอดมินอนุมัติ ไม่รับสลิปค่ะนายท่าน 💳', 422);
+        }
 
         // ownership check (เจ้าของหรือ admin เท่านั้น)
         if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
@@ -89,6 +97,8 @@ class BookingConfirmationController extends Controller
             $confirmation = BookingConfirmation::create([
                 'booking_id' => $booking->id,
                 'transfer_time' => $validated['transfer_time'] ?? null,
+                // 💳 (25/09/26, ticket 04 ชั้น A): ยอดที่ user แจ้งต่อครั้งส่งสลิป (required ≥ 1)
+                'amount' => $validated['amount'],
                 'status' => 'pending',
             ]);
 
@@ -108,12 +118,22 @@ class BookingConfirmationController extends Controller
 
             DB::commit();
 
+            $freshBooking = $booking->fresh();
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
                 'confirmation_id' => $confirmation->id,
                 'confirmation_status' => $confirmation->status,
-                'booking_status' => $booking->fresh()->status,
+                // 💳 (25/09/26, ticket 05 หัวข้อ 3): echo ยอดที่แจ้ง + ยอดที่ระบบคาด + สถานะ
+                'amount' => $confirmation->amount,
+                'expected_amount' => $freshBooking->expected_amount,
+                'booking_status' => $freshBooking->status,
+                // 💳 envelope 4 field ของ booking
+                'payment_type' => $freshBooking->payment_type,
+                'deposit_amount' => $freshBooking->deposit_amount,
+                'paid_amount' => $freshBooking->paid_amount,
+                'outstanding_amount' => $freshBooking->outstanding_amount,
                 'slip_image_url' => $image->url,
             ], 201);
 
@@ -154,11 +174,34 @@ class BookingConfirmationController extends Controller
 
             $booking = $confirmation->booking;
 
-            // 🌟 Refactor (25/08/26): pending → paid (ตอนนี้ 'paid' = admin ตรวจแล้ว + set is_paid)
-            //    branch 'paid' เก็บไว้รองรับ legacy data ก่อน refactor (submit แล้วค้าง paid)
-            if ($booking->status === 'pending') {
+            // 💳 (25/09/26, ticket 04/05): เขียน payments ledger — เงินเข้าจริงเมื่อ verify ผ่าน
+            //    1 row = 1 เหตุการณ์เงิน · reference_number = confirmation UUID (จุดเขียน payments
+            //    = 3 จุดเท่านั้น: verify / recordPayment / mock QR)
+            //
+            //    ⚠️ สลิปเก่าก่อน deploy (amount = null — ไม่มีการแจ้งยอด) คง flow เดิม:
+            //    ไม่เขียน ledger (0 บาท ไม่ใช่เหตุการณ์เงิน) + is_paid = true ตาม pre-deploy
+            //    — row แบบนี้เกิดไม่ได้อีกตั้งแต่ confirm บังคับ amount แล้ว
+            $payment = null;
+            if ($confirmation->amount !== null) {
+                $payment = Payment::create([
+                    'booking_id' => $booking->id,
+                    'amount' => $confirmation->amount,
+                    'status' => 'completed',
+                    'reference_number' => $confirmation->id,
+                    'received_by' => $user->id,
+                ]);
+
+                // 💳 is_paid = SUM(payments) ≥ total (จ่ายครบจุดไหนจุดนั้น — deposit งวดแรกยัง false)
+                //    full จ่ายเต็ม → true เหมือน flow เดิม (regression 0%)
+                $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount]);
+            } else {
                 // 🌟 Fix 03/07/26: ใช้ PHP true + PgBoolean cast (ห้ามใช้ DB::raw('TRUE'))
                 $booking->update(['is_paid' => true]);
+            }
+
+            // 🌟 Refactor (25/08/26): pending → paid (ตอนนี้ 'paid' = admin ตรวจแล้ว + is_paid ตาม ledger)
+            //    branch 'paid' เก็บไว้รองรับ legacy data ก่อน refactor (submit แล้วค้าง paid)
+            if ($booking->status === 'pending') {
                 $booking->transitionStatus('paid', 'admin');
             }
 
@@ -169,11 +212,24 @@ class BookingConfirmationController extends Controller
 
             DB::commit();
 
+            $freshBooking = $confirmation->booking->fresh();
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'ยืนยันการชำระเงินเรียบร้อย — booking confirmed',
                 'confirmation' => $confirmation->fresh(['slipImage']),
-                'booking_status' => $confirmation->booking->fresh()->status,
+                // 💳 (25/09/26, ticket 05 หัวข้อ 4): expected vs claimed (soft — admin ตัดสินเอง)
+                'expected_amount' => $freshBooking->expected_amount,
+                'claimed_amount' => $confirmation->amount,
+                // 💳 ledger row ที่เพิ่งเขียน (null สำหรับสลิปเก่าก่อน deploy — ไม่มียอดแจ้ง)
+                'payment_recorded' => $payment?->fresh(),
+                'booking_status' => $freshBooking->status,
+                'booking_is_paid' => $freshBooking->is_paid,
+                // 💳 envelope 4 field ของ booking
+                'payment_type' => $freshBooking->payment_type,
+                'deposit_amount' => $freshBooking->deposit_amount,
+                'paid_amount' => $freshBooking->paid_amount,
+                'outstanding_amount' => $freshBooking->outstanding_amount,
             ], 200);
 
         } catch (Exception $e) {
@@ -213,11 +269,19 @@ class BookingConfirmationController extends Controller
 
             DB::commit();
 
+            $freshBooking = $confirmation->booking->fresh();
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'ปฏิเสธสลิป — booking เปลี่ยนสถานะเป็น verify_error รอผู้จองแจ้งใหม่',
                 'confirmation' => $confirmation->fresh(['slipImage']),
-                'booking_status' => $confirmation->booking->fresh()->status,
+                'booking_status' => $freshBooking->status,
+                // 💳 (25/09/26, ticket 05 หัวข้อ 5): envelope 4 field — ค่าไม่เปลี่ยน (ไม่มี payments row)
+                //    ส่งเพื่อ consistency กับ verify/response อื่น
+                'payment_type' => $freshBooking->payment_type,
+                'deposit_amount' => $freshBooking->deposit_amount,
+                'paid_amount' => $freshBooking->paid_amount,
+                'outstanding_amount' => $freshBooking->outstanding_amount,
             ], 200);
 
         } catch (Exception $e) {
@@ -237,6 +301,9 @@ class BookingConfirmationController extends Controller
             return $this->error('ต้องเป็นแอดมินเท่านั้นค่ะนายท่าน', 403);
         }
 
+        // 💳 (25/09/26, ticket 05 หัวข้อ 6): booking ถูก eager load แล้ว → accessor expected_amount
+        //    (appends ของ BookingConfirmation) ทำงานโดยไม่เพิ่ม query — admin เห็นคู่
+        //    expected (ระบบคำนวณ) vs amount (claimed ที่ user แจ้ง) ตั้งแต่หน้า dashboard
         $confirmations = BookingConfirmation::with(['booking.user', 'reviewer', 'slipImage'])
             ->where('status', 'pending')
             ->orderBy('created_at', 'asc') // เก่าก่อน (FIFO)
