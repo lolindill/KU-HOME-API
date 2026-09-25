@@ -23,17 +23,16 @@ Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` �
 - **Standing decision ระดับ effort (จาก owner, 2026-09-24):** ตาราง `organizations` เป็น **stopgap** — ทุก design ที่เสนอต้องตอบได้ว่า "ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API แทน booking เดิมยังอ่านความหมายถูกไหม"
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน:** ticket 01 (contract ของ organizations) + ticket 02 (admin จองแทน user) — grilling คู่กับ owner ได้ทันที
+- 🎯 **Frontier ปัจจุบัน:** ticket 02 (admin จองแทน user) — grilling คู่กับ owner ได้ทันที · ticket 03 ยัง open แต่ใช้ decision ของ ticket 01 (FK + snapshot) เป็นฐาน
 
 ## Decisions so far
 
-- *(ยังว่าง — แมปเพิ่ง charted 2026-09-24)*
+- [ตาราง organizations — contract ของ erp, CRUD และกติกา replaceability](tickets/01-organization-table-erp-and-replaceability.md): `erp` = string unique nullable (logical FK ภายนอก ไม่มี DB constraint) · booking อ้าง org ด้วย nullable FK `organization_id` (restrict) + snapshot name/phone/email บน booking เป็นชั้น replaceability แรก (erp = key map ไป API ตอนเปลี่ยน) · CRUD เต็มใต้ `role:admin` ไม่มี DELETE · เลิกใช้ = `is_active` + toggle (PgBoolean) ปิดแล้ว booking ใหม่โดน 422, เก่าไม่กระทบ
 
 ## Not yet specified
 
-- **ดู/รายงาน booking ตามองค์กร** — filter ใน admin booking index, การซ้อนทับกับแมป `excel-reports` — รอ schema ล็อกก่อน (ticket 01/03) จึง spec ไม่ได้ตอนนี้
-- **ข้อมูลชุดแรกของ `organizations` มาจากไหน** (seed มือ / import / sync จาก ERP) — รอ ticket 01 ตัดสินเรื่อง CRUD ก่อน
-- **รูปร่างจริงของ organization-data API ของรุ่นพี่** — ยังไม่เกิด จึงผิดที่จะ ticket; map นี้เตรียมแค่ replaceability contract (ticket 01)
+- **ดู/รายงาน booking ตามองค์กร** — filter ใน admin booking index, การซ้อนทับกับแมป `excel-reports` — รอ schema ล็อกก่อน (ticket 03) จึง spec ไม่ได้ตอนนี้
+- **รูปร่างจริงของ organization-data API ของรุ่นพี่** — ยังไม่เกิด จึงผิดที่จะ ticket; map นี้เตรียมแค่ replaceability contract (ticket 01 ✅ ปิดแล้ว)
 - **การจองแทนคนนอก / `source='line'`** — มี flow ไลน์อยู่ใน validation แต่ยังไม่มีใครถามว่าโหมดจองแทนของ admin ครอบ flow นั้นไหม — รอหน้าที่ใช้จริง
 
 ## Out of scope
