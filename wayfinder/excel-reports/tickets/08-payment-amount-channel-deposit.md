@@ -30,3 +30,13 @@ Grilling เริ่มไปครึ่งทางแล้ว owner สั�
 - ธงที่ยังค้าง: ยอดสลิป · payment_channel · มัดจำ 50% · receipt_ref (= เลขที่ใบเสร็จ — receipts FROZEN ไม่มีข้อมูลให้เติมแล้ว)
 
 → ถอน assignee ให้กลับไปเป็น frontier (can pick) — ใคร pick ใบนี้ครั้งหน้า ให้คุย **design payment type ให้จบก่อน** แล้วค่อยกลับมาตัดสิน column รายงาน (อาจแตก ticket design ใหม่ก็ได้)
+
+## 🔓 Unblock note (2026-09-25 — เงื่อนไขใน pause note ครบแล้ว)
+
+แมป [`booking-payment-types`](../../booking-payment-types/map.md) **ปิดสมบูรณ์แล้ว** (design + implement, suite 554 เขียว) — design payment ที่ใบนี้รอมีคำตอบใช้ได้แล้ว:
+
+- **ยอดสลิป:** ชั้น A = `booking_confirmations.amount` (integer baht, required สลิปใหม่ / สลิปเก่า null) · ชั้น B derive ล้วนจาก `payments` ledger เดียว — `paid_amount` = SUM(payments), `outstanding` = total − paid
+- **มัดจำ 50%:** `bookings.payment_type` = `full|deposit|deferred` + `deposit_amount` nullable (null = 50% จาก config)
+- **ธงที่ยังเปิดให้ใบนี้ตัดสินเอง:** `payment_channel` — แมป payment-types ตัดสินว่า ledger แยกที่มาเงินได้จากจุดเขียน (verify=สลิป / recordPayment=เงินสด / QR) โดยไม่ต้องกลับ column แต่ "จะมี column channel ชัด ๆ ไหมในรายงาน" ยังเป็นคำถามของใบนี้ · `receipt_ref` ยังติด `receipts` FROZEN เหมือนเดิม
+
+pick ใบนี้ได้ตามปกติ — grilling ต่อจากจุด pause โดยเทียบ design ข้างบนเป็น base ค่ะนะ ✨
