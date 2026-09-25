@@ -30,7 +30,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 05](./tickets/05-api-contract-all-flows.md) (API contract รวมทุก flow) — tickets 01–04 ปิดครบ (2026-09-25) · ตัวถัดไป ticket 06 (implement) รอ ticket 05 · ticket 07/08 รออยู่แล้วเพราะ ticket 04 ปิด → ปลดตาม
+- 🎯 **Frontier ปัจจุบัน:** [ticket 06](./tickets/06-implement-payment-types.md) (implement — AFK ลงมือได้เลย) · [ticket 07](./tickets/07-round-up-to-tens.md) + [ticket 08](./tickets/08-cancellation-and-deposit-refund.md) (grilling — ปลดล็อกครบแล้วเพราะ tickets 01–05 ปิดหมด 2026-09-25)
 
 ## Decisions so far
 
@@ -38,6 +38,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - [02: มัดจำ (deposit) semantics](./tickets/02-deposit-semantics.md): ยอดมัดจำ admin กำหนดต่อ booking (default 50% — field shape รอ ticket 04) · `paid` = งวดปัจจุบันผ่านแล้ว (สลิปมัดจำ verify → paid → confirmed เหมือนเดิม แต่ is_paid ไม่ set — is_paid สงวนให้จ่ายครบ) · เก็บยอดค้างตั้งใจตอน check-in ผ่าน recordPayment แต่**ไม่มี hard guard** — check-in/out ได้แม้ยอดไม่ครบ (org เบิกหลังเข้าพักได้ถึง 1 เดือน) · payment_deadline เดียวกัน 15 นาทีทุก type
 - [03: ค้างชำระ (deferred) + สิทธิ์](./tickets/03-deferred-payment-and-permissions.md): สิทธิ์ admin เท่านั้น (ตาม ticket 01 — org booking เป็น deferred เสมอ) · state path `draft → confirmed` ข้าม paid (transition เดิมของ walk-in — ไม่แตะ machine) · **deferred ยกเว้น CleanupExpiredDrafts** + ยึด slot จน admin ตัดสินใจ (sub-decision ปิดตาม recommendation — owner flip ได้ก่อน implement) · เก็บปลายทางผ่าน recordPayment → ครบยอด is_paid=true · complete ได้ทั้งที่ยังค้าง
 - [04: ยอดเงิน 2 ชั้น](./tickets/04-amounts-layer-a-and-b.md): ชั้น A `booking_confirmations.amount` integer baht nullable (สลิปเก่า null) + required สลิปใหม่ · verify เทียบ expected/claimed แบบ soft admin ตัดสิน · **`payments` = ledger เดียวเงินที่เข้าจริง** (สลิป verify → เขียน payments row เพิ่ม · ห้ามเขียนนอก 3 จุด) · ชั้น B derive ล้วน: `paid_amount` = SUM(payments), `outstanding` = total − paid ไม่เก็บ column · `deposit_amount` baht ตายตัว nullable บน bookings (null = 50% จาก config) · `is_paid` = SUM ≥ total · backfill booking เดิม paid/confirmed = row เต็ม · ยอดทุกตัวส่งทุก response ทุก role · **excel-reports ticket 08 ปลดล็อก** (field ครบใน resolution)
+- [05: API contract รวมทุก flow](./tickets/05-api-contract-all-flows.md): contract ฉบับใช้ implement ครบ 13 หัวข้อ — response envelope 4 field ทุก response (`deposit_amount` = **effective 50%**) · `PUT /bookings/{id}` 🆕 admin/draft รับ `payment_type`+`deposit_amount`+`discount_code`+`payment_deadline` · confirm + `amount` required และ **deferred บล็อกสลิป 422** · verify เขียน payments row + response expected/claimed · recordPayment **overpay ยอมรับ** + min:1 · `CleanupExpiredDrafts` ข้าม draft ที่มี payments row (กัน ledger หาย) · regression "ห้ามเปลี่ยน" 7 ข้อ + สารบัญ docs ที่ต้องอัปเดต · ส่งมอบ org-bookings (watch ต่อ)
 
 ## Not yet specified
 
