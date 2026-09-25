@@ -2186,3 +2186,21 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   - **flow เดิม regression 0%:** non-admin = `user_id` ตัวเอง + dedup ตัวเอง + cap ตัวเอง เหมือนเดิมทุกอย่าง
 - **การเก็บ payment_deadline ของเฮดเปล่า** ยังใช้กลไกเดิม 15 นาที + admin ต่อได้ผ่าน `PUT /bookings/{id}` (payment_deadline) — flow จ่ายของ userless booking = ticket 04 (ยัง open)
 - Tests: `tests/Feature/OrganizationTest.php` (CRUD + toggle + 403 + dup erp + ไม่มี DELETE) · `tests/Feature/AdminBookingForUserTest.php` (โหมด A/B + dedup ที่ target + cap ตาม role target + daily_ku ตาม target + 403 ของ non-admin + 422 UUID มั่ว + เฮดเปล่าจองซ้อนได้)
+
+## 🏛️ Org booking fields — `organize` + snapshot บน bookings (2026-09-25, wayfinder/organization-bookings — ticket 06)
+
+> implement ตาม resolution ticket 03 (org booking shape) + ticket 04 (userless payment/front-desk — บางส่วนตัดสินไปกับแมป `booking-payment-types` แล้ว) — ต่อจากหัวข้อ "🏛️ Organizations + Admin จองแทน user" ด้านบน
+
+- **Migration `2026_09_25_120000_add_org_booking_fields_to_bookings_table`:** บน `bookings` — `organization_id` uuid **nullable + FK restrict** (organizations ไม่มี DELETE by design — ticket 01) + snapshot 3 columns `customer_name` / `customer_phone` / `customer_email` (nullable — บิลโหมดอื่นไม่มี)
+- **โหมด org บน `POST /bookings` เดิม** (ตัดสินโหมดจาก sanctum role เท่านั้น — ธรรมเนียมเดิม):
+  - ส่ง `organize` = **erp code string** → server lookup `organizations` (`where('erp', $organize)`) เก็บเป็น FK `organization_id` — **ไม่เก็บ erp string บน bookings** (replaceability contract ของ ticket 01: ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API, snapshot 3 columns ยังอ่านความหมายถูกด้วยตัวเอง) · lookup ไม่เจอ **หรือ** `is_active = false` → `422`
+  - `user` × `organize` **mutually exclusive** → `422` เสมอ (ไม่มีลำดับชนะ)
+  - ส่ง `organize` → **บังคับ `customer_name`** (phone/email nullable) → `422` ถ้าไม่มี
+  - `organize` ต้องใช้ `source='admin'` → `422` ถ้า source อื่น (ขยายกฎ marker ของ ticket 02)
+  - `organize`/`customer_name`/`customer_phone`/`customer_email` = field โหมด admin — non-admin ส่งอะไรสักอย่าง → `403`
+  - `customer_name` โดยไม่มี `organize` = โหมด B เฮดเปล่าระบุผู้ติดต่อ (ticket 02) — เก็บ snapshot ได้เหมือนกัน (ไม่มี FK)
+- **กฎผลพวง `user_id = null`** (สืบทอดโหมด B — ถูก implement ไว้แล้วใน ticket 05, ยืนยันอีกชั้น): ไม่มี draft-dedup · ราคา `daily` เสมอ (`getEffectiveDailyRate(?, $booking->user)` กับ null) · ไม่โดน room cap · ownership เหลือแต่ admin
+- **ชื่อ default ใช้ `customer_name` (ticket 03 ข้อ 5):** `Booking::getPrimaryGuestNameAttribute` ยืด fallback chain เป็น `user?->name` → `customer_name` → `'Customer'` — ครอบทั้ง booking-level และ booking_rooms ที่ไม่ส่ง guests (BR-level accessor คืน 'Customer' แล้ว Booking-level resolve ต่อ)
+- **ส่วน flow หลังจองของ userless booking (ticket 04) ไม่ต้องเขียนโค้ดใหม่:** org booking = `deferred` เสมอ (สลิป block · อนุมัติ `draft → confirmed` · เก็บเงิน `recordPayment` — design ของแมป `booking-payment-types`) · admin ส่งสลิปแทนบิลไร้ user (non-deferred) ได้ผ่าน ownership guard เดิม · เฮดเปล่าโดน cleanup 15 นาทีตามเดิม — ขยายผ่าน `payment_deadline` บน `PUT /bookings/{id}` · front desk ค้นผ่าน term search เดิม (filter ตามองค์กร = ticket 08 ที่เดียว) · `customer_phone`/`email` เก็บติดต่อล้วน ไม่ผูก flow
+- **Response ของ `POST /bookings`** เพิ่ม 4 field: `organization_id` + `customer_name`/`customer_phone`/`customer_email` (null เมื่อไม่ใช่ org/โหมด B)
+- Tests: `tests/Feature/OrgBookingTest.php` (12 เคส — FK+snapshot · erp มั่ว 422 · inactive 422 · user×organize 422 · ไม่มี customer_name 422 · source ผิด 422 · non-admin 403 · ไม่มี dedup · ราคา daily · fallback ชื่อ · โหมด B snapshot · regression บิลปกติ) — **suite เต็ม 588 passed (2190 assertions)** · Pint ผ่าน

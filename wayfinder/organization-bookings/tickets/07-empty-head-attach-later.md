@@ -4,7 +4,7 @@
 - **type:** HITL
 - **status:** open
 - **blocked-by:** [03-org-booking-shape-on-post-bookings](./03-org-booking-shape-on-post-bookings.md)
-- **assignee:** (ว่าง)
+- **assignee:** kevii (grilled 2026-09-25)
 
 ## Question
 

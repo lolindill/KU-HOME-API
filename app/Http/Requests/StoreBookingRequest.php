@@ -34,6 +34,16 @@ class StoreBookingRequest extends FormRequest
             //    ระบุ user ปลายทางด้วย UUID · ส่งได้เฉพาะ admin (ตรวจสิทธิ์ 403 ใน controller)
             'user' => 'nullable|uuid|exists:users,id',
 
+            // 🏛️ (25/09/26, organization-bookings ticket 03): โหมด org — จองให้องค์กรโดยไม่ผูก account
+            //    `organize` = erp code string → server lookup เป็น FK organization_id (ไม่เก็บ erp บน bookings
+            //    ตาม replaceability contract ของ ticket 01) · lookup ไม่เจอ/inactive → 422 (ใน controller)
+            //    cross-field: user×organize mutually exclusive + organize บังคับ customer_name — ตรวจใน controller
+            //    customer_name โดยไม่มี organize = โหมด B เฮดเปล่าระบุคนเข้าพัก (ticket 02)
+            'organize' => 'nullable|string|max:100',
+            'customer_name' => 'nullable|string|max:255',
+            'customer_phone' => 'nullable|string|max:50',
+            'customer_email' => 'nullable|string|email|max:255',
+
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไปอยู่ใน booking_rooms (รองรับหลายคน/ห้อง)
             // bookings ไม่รับ guest fields แล้ว
 
@@ -124,6 +134,11 @@ class StoreBookingRequest extends FormRequest
         return [
             'source.required' => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
             'source.in' => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
+            'organize.max' => 'รหัสองค์กร (organize) ต้องไม่เกิน 100 ตัวอักษรค่ะ 🏛️',
+            'customer_name.max' => 'ชื่อผู้ติดต่อ/ผู้เข้าพัก (customer_name) ต้องไม่เกิน 255 ตัวอักษรค่ะ 🏛️',
+            'customer_phone.max' => 'เบอร์โทรศัพท์ต้องไม่เกิน 50 ตัวอักษรค่ะ 🏛️',
+            'customer_email.email' => 'รูปแบบอีเมลไม่ถูกต้องค่ะ 🏛️',
+            'customer_email.max' => 'อีเมลต้องไม่เกิน 255 ตัวอักษรค่ะ 🏛️',
             'discount_code.max' => 'รหัสส่วนลดต้องไม่เกิน 50 ตัวอักษร',
             'payment_type.in' => 'ประเภทการชำระเงินต้องเป็น full, deposit หรือ deferred เท่านั้นค่ะ 💳',
             'deposit_amount.integer' => 'ยอดมัดจำต้องเป็นตัวเลขจำนวนเต็ม (บาท) ค่ะ 💳',

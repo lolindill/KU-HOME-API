@@ -10,6 +10,7 @@
 ```mermaid
 erDiagram
     USERS ||--o{ BOOKINGS : "user_id (who booked)"
+    ORGANIZATIONS ||--o{ BOOKINGS : "organization_id (org booking, 25/09/26)"
     USERS ||--o{ HOUSEKEEPING_TASKS : "assigned_to"
     USERS ||--o{ PAYMENTS : "received_by"
     USERS ||--o{ PERSONAL_ACCESS_TOKENS : "tokenable_id"
@@ -77,14 +78,30 @@ erDiagram
     BOOKINGS {
         uuid id PK
         string confirmation UK "unique, nullable, format: YYYYMM-XXXXX"
-        uuid user_id FK "nullable, who booked"
+        uuid user_id FK "nullable, who booked — null = เฮดเปล่า/องค์กร (organization-bookings 25/09/26)"
+        uuid organization_id FK "nullable, restrict — org booking ผ่าน erp lookup (25/09/26)"
+        string customer_name "nullable — snapshot ผู้ติดต่อ/ผู้เข้าพัก (บังคับเมื่อ organize, 25/09/26)"
+        string customer_phone "nullable — snapshot เก็บติดต่อล้วน (25/09/26)"
+        string customer_email "nullable — snapshot เก็บติดต่อล้วน (25/09/26)"
         string source "default: online"
         date check_in
         date check_out
         integer total_amount "integer baht (was satang, changed 2026-09-11)"
-        boolean is_paid "default: false"
+        string discount_code "nullable — โค้ดส่วนลดที่ใช้ (27/08/26)"
+        string payment_type "default: full — full | deposit | deferred (25/09/26)"
+        integer deposit_amount "nullable — ยอดมัดจำตั้งเอง, null = effective 50% เฉพาะ deposit (25/09/26)"
+        boolean is_paid "default: false — true เมื่อ SUM(payments) >= total_amount (25/09/26)"
         timestamp payment_deadline "nullable"
         string status "default: draft"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ORGANIZATIONS {
+        uuid id PK
+        string erp "unique, nullable — logical FK ไป ERP ภายนอก (ไม่มี DB constraint)"
+        string name
+        boolean is_active "default: true — toggle แทน DELETE (PgBoolean)"
         timestamp created_at
         timestamp updated_at
     }

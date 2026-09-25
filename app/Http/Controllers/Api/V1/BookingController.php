@@ -12,6 +12,7 @@ use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
+use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
@@ -1249,6 +1250,39 @@ class BookingController extends Controller
                 $bookingUserId = $request->filled('user') ? $validated['user'] : null;
             }
 
+            // 🏛️ (25/09/26, organization-bookings ticket 03): โหมด org — `organize` = erp code string
+            //    → server lookup เป็น FK organization_id (ไม่เก็บ erp บน bookings — replaceability contract
+            //    ของ ticket 01) · `customer_name` โดยไม่มี organize = โหมด B เฮดเปล่าระบุคนเข้าพัก (ticket 02)
+            //    กฎผลพวง user_id = null สืบทอดโหมด B ครบ (ไม่ dedup · ราคา daily · ownership admin)
+            $organize = trim((string) ($validated['organize'] ?? ''));
+            $customerName = $validated['customer_name'] ?? null;
+            $customerPhone = $validated['customer_phone'] ?? null;
+            $customerEmail = $validated['customer_email'] ?? null;
+
+            if (($organize !== '' || $customerName !== null || $customerPhone !== null || $customerEmail !== null) && ! $isAdmin) {
+                throw new \Exception('การจองให้องค์กร / ระบุผู้ติดต่อ (organize, customer_name) สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+            }
+
+            $organizationId = null;
+            if ($organize !== '') {
+                if ($request->filled('user')) {
+                    throw new \Exception('ส่ง user และ organize พร้อมกันไม่ได้ — เลือกจองแทน user หรือจองให้องค์กรอย่างใดอย่างหนึ่งค่ะ 🏛️', 422);
+                }
+                if (($validated['source'] ?? null) !== 'admin') {
+                    throw new \Exception('จองให้องค์กรต้องใช้ source = admin เท่านั้นค่ะ 🏛️', 422);
+                }
+                if ($customerName === null || trim((string) $customerName) === '') {
+                    throw new \Exception('จองให้องค์กรต้องระบุ customer_name (ผู้ติดต่อ/ผู้เข้าพัก) ด้วยค่ะ 🏛️', 422);
+                }
+
+                $organization = Organization::where('erp', $organize)->first();
+                if (! $organization || ! $organization->is_active) {
+                    throw new \Exception('ไม่พบองค์กรตามรหัสที่ระบุ หรือองค์กรนี้ปิดใช้งานอยู่ค่ะ 🏛️', 422);
+                }
+
+                $organizationId = $organization->id;
+            }
+
             // 🛑 draft-dedup — โหมด A นับที่ target user (admin มี draft ของตัวเองไม่ขวางการจองแทน)
             //    · โหมด B (userless) ไม่มี dedup — org จองซ้อนหลายบิลได้ (group booking ปกติ)
             if ($bookingUserId !== null) {
@@ -1318,6 +1352,12 @@ class BookingController extends Controller
                 // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A = target user ·
                 //    โหมด B = null (เฮดเปล่า) · non-admin = ตัวเอง (flow เดิม)
                 'user_id' => $bookingUserId,
+                // 🏛️ (25/09/26, organization-bookings ticket 03): org booking — FK + snapshot
+                //    (โหมด B ที่ระบุ customer_name ก็เก็บ snapshot ได้ · บิลโหมดอื่น = null ทั้งชุด)
+                'organization_id' => $organizationId,
+                'customer_name' => $customerName,
+                'customer_phone' => $customerPhone,
+                'customer_email' => $customerEmail,
                 'source' => $validated['source'],
                 'status' => 'draft',
 
@@ -1426,6 +1466,11 @@ class BookingController extends Controller
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
                 // 🏛️ (25/09/26, organization-bookings ticket 02): user_id = target (โหมด A) / null (โหมด B)
                 'user_id' => $bookingUserId,
+                // 🏛️ (25/09/26, organization-bookings ticket 03): org fields (null เมื่อไม่ใช่ org/โหมด B)
+                'organization_id' => $booking->organization_id,
+                'customer_name' => $booking->customer_name,
+                'customer_phone' => $booking->customer_phone,
+                'customer_email' => $booking->customer_email,
                 'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 

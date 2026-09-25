@@ -1278,11 +1278,22 @@ curl -s -H "Accept: application/json" \
 > 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
 > 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้นหลักสิบ) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
 
+> 🏛️ **(25/09/26) Admin booking 3 โหมด (organization-bookings)**: admin ใช้ `POST /bookings` เดิมจองได้ 3 แบบ —
+> **(A) จองแทน user**: ส่ง `user` = UUID ปลายทาง → `user_id` = target (draft-dedup / room cap / ราคา daily_ku ใช้ role ของ target — UUID ไม่เจอ 422) ·
+> **(B) เฮดเปล่า**: ไม่ส่ง `user`/`organize` → `user_id = null` (ส่ง `customer_name` เพิ่มได้ = ระบุผู้ติดต่อ/ผู้เข้าพัก) ·
+> **(C) จองให้องค์กร**: ส่ง `organize` = **erp code** → server lookup ตาราง `organizations` เป็น FK `organization_id` (ไม่เจอ/inactive → 422) + **บังคับ `customer_name`** (phone/email nullable) → `user_id = null` + snapshot `customer_name`/`customer_phone`/`customer_email` บน bookings ·
+> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · response เพิ่ม `organization_id` + `customer_name`/`customer_phone`/`customer_email`
+
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
+| `user` 🏛️                                   | nullable, uuid, exists in users — จองแทน user (โหมด A) — admin เท่านั้น (non-admin 403) |
+| `organize` 🏛️                               | nullable, string, max 100 — erp code ขององค์กร (โหมด C) — admin + `source='admin'` เท่านั้น · lookup ไม่เจอ/inactive 422 · ห้ามส่งคู่กับ `user` |
+| `customer_name` 🏛️                          | nullable, string, max 255 — บังคับเมื่อส่ง `organize` · โดยลำพัง = เฮดเปล่าระบุผู้ติดต่อ (โหมด B) |
+| `customer_phone` 🏛️                         | nullable, string, max 50                      |
+| `customer_email` 🏛️                         | nullable, string, email, max 255              |
 | `payment_type` 💳                           | nullable, in: `full`, `deposit`, `deferred` — admin/system เท่านั้น (non-admin 403) |
 | `deposit_amount` 💳                         | nullable, integer, min 1 — คู่กับ `payment_type=deposit` เท่านั้น (422 ถ้า type อื่น) |
 | `booking_rooms`                             | required, array, สูงสุด 4 ห้องสำหรับทั่วไป (admin exempt: ไม่จำกัด) |
@@ -1326,6 +1337,10 @@ curl -s -H "Accept: application/json" \
   "outstanding_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
   "user_id": "user-uuid",
+  "organization_id": null,
+  "customer_name": null,
+  "customer_phone": null,
+  "customer_email": null,
   "booking_rooms": [
     {
       "id": "br-uuid",

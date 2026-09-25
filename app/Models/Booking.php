@@ -39,6 +39,11 @@ class Booking extends Model
         // 💳 (25/09/26) booking-payment-types — ประเภทการชำระ + ยอดมัดจำ (admin/system ตั้งเท่านั้น)
         'payment_type',
         'deposit_amount',
+        // 🏛️ (25/09/26) organization-bookings ticket 03 — org booking (user_id = null)
+        'organization_id',
+        'customer_name',
+        'customer_phone',
+        'customer_email',
     ];
 
     protected $casts = [
@@ -71,7 +76,9 @@ class Booking extends Model
             return $bookingRoom->primary_guest_name;
         }
 
-        return $this->user?->name ?? 'Customer';
+        // 🏛️ (25/09/26, organization-bookings ticket 03): ยืด fallback chain —
+        //    `user?->name` → `customer_name` (org booking / เฮดเปล่าระบุคนเข้าพัก) → 'Customer'
+        return $this->user?->name ?? $this->customer_name ?? 'Customer';
     }
 
     // 🌟 Helper: นับจำนวนผู้เข้าพักรวมทุกห้อง (สำหรับ dashboard / summary)
@@ -83,6 +90,13 @@ class Booking extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    // 🏛️ (25/09/26, organization-bookings ticket 03): org booking — FK ชั้น replaceability
+    //    (snapshot customer_name/phone/email อ่านความหมายได้แม้เทตาราง organizations ทิ้ง)
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     public function bookingRooms(): HasMany
