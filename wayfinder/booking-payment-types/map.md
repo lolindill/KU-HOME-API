@@ -24,13 +24,13 @@ Booking มีระบบ **ประเภทการชำระเงิน
   3. **`payment_type` อยู่ระดับ booking** — owner ยืนยันโครงเดิมถูกต้อง: confirmation เป็นแค่ log ของการส่งสลิป ไม่ใช่ที่เก็บประเภทการชำระ
   4. **แมป `organization-bookings` ticket 04 รอ design ของแมปนี้ก่อน** (ค้างชำระ = payment type ที่ org booking ใช้เสมอ — owner)
   5. Default ของ booking ออนไลน์ทั่วไป = **เต็มจำนวน (full)** — flow เดิมต้อง regression เป็น 0%
-- 🆕 **(2026-09-25) ticket 08 graduate จาก fog:** [ยกเลิก / no_show ของ booking มัดจำ·ค้างชำระ](./tickets/08-cancellation-and-deposit-refund.md) — flow หลักล็อกแล้ว (ticket 02) จึงถามได้ชัด · blocked-by ticket 04 (ต้องตัดสินบนโครงยอด 2 ชั้น)
+- 🆕 **(2026-09-25) ticket 08 graduate จาก fog:** [ยกเลิก / no_show ของ booking มัดจำ·ค้างชำระ](./tickets/08-cancellation-and-deposit-refund.md) — ✅ **ปิดแล้ว (2026-09-25)** — ไม่มี cancel/ไม่มีคืนเงิน · graduate ต่อเป็น [ticket 10 — surcharge หลังจ่าย](./tickets/10-implement-surcharge-after-payment.md) (กรณีเปลี่ยน room type ราคาเพิ่ม เก็บส่วนต่างต่อ)
 - 🆕 **(2026-09-24) ticket 07 เพิ่มจาก gap ตรวจ SRS v2:** [ปัดเศษขึ้นหลักสิบ — REQ-015/016](./tickets/07-round-up-to-tens.md) (ปัดยอดไหน ตอนไหน เศษมาจากไหน) — blocked-by ticket 04 (ยอดเงิน 2 ชั้น) · ระบบปัจจุบันไม่มี rounding ที่ไหนเลย
 - Related maps: `organization-bookings` (open — ticket 04 blocked cross-map รอแมปนี้), `excel-reports` (open — ticket 08 paused ปลดล็อกเมื่อ design แมปนี้ปิด)
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 08](./tickets/08-cancellation-and-deposit-refund.md) (grilling — ปลดล็อกแล้ว) · ✅ **ticket 09 ปิดแล้ว (2026-09-25)** — implement ปัดเศษจบ suite 544 เขียว
+- 🎯 **Frontier ปัจจุบัน:** [ticket 10](./tickets/10-implement-surcharge-after-payment.md) (implement surcharge หลังจ่าย — ปลดล็อกแล้ว) · ✅ **ticket 08 ปิดแล้ว (2026-09-25)** — ไม่มี cancel ในระบบ · ✅ ticket 09 ปิดแล้ว (2026-09-25) — implement ปัดเศษจบ suite 544 เขียว
 
 ## Decisions so far
 
@@ -42,6 +42,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - [07: ปัดเศษขึ้นหลักสิบ (REQ-015/016)](./tickets/07-round-up-to-tens.md): **กติกาเดียวทุก booking** — ยอดลูกค้าไม่มีทศนิยม มีเศษปัดขึ้นหลักสิบ (owner: "no decimal ปัดเศษขึ้น") · ปัดที่ `booking_rooms.amount` ใน `reprice()` **หลังลด** (ลดก่อน ปัดท้ายครั้งเดียว) ยอดรวมไหลตาม (invariant Σ คงอยู่) · normalize คืนเต็มเสมอ (`startOfDay` ก่อน `diffInDays` — ปิดช่อง Carbon 3 float) · มัดจำ default 50% ปัดสิบต่อ · ชั้น A ยอดแจ้งไม่บังคับปัด (soft admin) · implement → [ticket 09](./tickets/09-implement-round-up-to-tens.md) (blocked-by 06 — แตะ `reprice()` จุดเดียวกัน)
 - [06: Implement — migration + code + tests, suite เขียว](./tickets/06-implement-payment-types.md): migration `2026_09_25_100000` (+backfill ledger ผ่าน `App\Support\LegacyPaymentBackfill` — named class เพราะ migration anonymous) · ledger 3 จุดเขียน + envelope 4 field เป็น accessors/appends บน Booking · **PUT /bookings/{id} ใหม่** (admin/draft รับ payment_type/deposit_amount/discount_code/payment_deadline) · confirm `amount` required (**⚠️ breaking change — frontend ต้องอัปเดต**) + deferred block ก่อน state guard · cleanup + destroyBooking กันลบ draft ที่มี payments (422) · **suite 540 เขียว** (BookingPaymentTypeTest 14 ใหม่) · docs api_guide หัวข้อ "💳 Payment types" + cline.md จดครบ
 - [09: Implement — ปัดเศษขึ้นหลักสิบ + normalize คืนเต็ม](./tickets/09-implement-round-up-to-tens.md): helper `App\Support\RoundToTen::round()` ใช้ 2 จุด — `reprice()` ปัดที่ `booking_rooms.amount` หลังลด+addon (total = Σ ยอดที่ปัดแล้ว) + มัดจำ default ปัดสิบต่อ · admin-set deposit และชั้น A ไม่ force ปัด · `startOfDay()` ก่อน `diffInDays()` ครบ 5 จุด (reprice + BookingController 4) · `BookingRoundingTest` 4 ใหม่ · **suite 544 เขียว** · docs api_guide "💵 กติกาปัดเศษขึ้นหลักสิบ" + cline.md จดครบ
+- [08: ยกเลิก / no_show ของ booking มัดจำ·ค้างชำระ](./tickets/08-cancellation-and-deposit-refund.md): **ไม่มี "ยกเลิก" ในระบบเลย** — ห้ามยกเลิกหลังจ่าย (ไม่เพิ่มสถานะ cancelled) · ก่อนจ่ายใช้กลไกเดิม (draft ลบ/หมดอายุ · verify_error ค้าง · guard "มี payments ห้ามลบ" คือเส้นแบ่ง) · no_show = ยึดมัดจำเป็นค่าปรับตาย (ledger ไม่เขียนย้อน) · ยอดค้างที่เหลือ admin ตัดสินรายกรณี (ระบบไม่ enforce) · **ไม่มีการคืนเงินในระบบทุกรูปแบบ** · ชั้น B ไม่ต้องแตะ · กรณีเปลี่ยน room type ราคาเพิ่มหลังจ่าย = [ticket 10](./tickets/10-implement-surcharge-after-payment.md) (graduate ใหม่)
 
 ## Not yet specified
 
