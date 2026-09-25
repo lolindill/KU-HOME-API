@@ -30,12 +30,13 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 03](./tickets/03-deferred-payment-and-permissions.md) (deferred + สิทธิ์) — tickets 01/02 ปิดแล้ว (2026-09-25) · ticket 04 ยังรอ ticket 03
+- 🎯 **Frontier ปัจจุบัน:** [ticket 04](./tickets/04-amounts-layer-a-and-b.md) (ยอดเงิน 2 ชั้น) — blocked-by 02/03 ปลดครบแล้ว (2026-09-25) · ตัวถัดไป ticket 05 (รวม contract) รอ ticket 04; ticket 07/08 ก็รอ ticket 04 เช่นกัน
 
 ## Decisions so far
 
 - [01: payment_type enum + schema บน bookings](./tickets/01-payment-type-enum-and-schema.md): column ใหม่บน `bookings` = `full|deposit|deferred` string · `NOT NULL DEFAULT 'full'` + backfill หมด (flow เดิม regression 0%) · ตั้งได้ admin เท่านั้น (POST /bookings มี field นี้ใน input → ต้อง admin, ไม่งั้น 403) · แก้ได้เฉพาะ draft ผ่าน endpoint ใหม่ `PUT /bookings/{id}` (admin-only) · ส่ง `payment_type` กลับทุก response ของ booking
 - [02: มัดจำ (deposit) semantics](./tickets/02-deposit-semantics.md): ยอดมัดจำ admin กำหนดต่อ booking (default 50% — field shape รอ ticket 04) · `paid` = งวดปัจจุบันผ่านแล้ว (สลิปมัดจำ verify → paid → confirmed เหมือนเดิม แต่ is_paid ไม่ set — is_paid สงวนให้จ่ายครบ) · เก็บยอดค้างตั้งใจตอน check-in ผ่าน recordPayment แต่**ไม่มี hard guard** — check-in/out ได้แม้ยอดไม่ครบ (org เบิกหลังเข้าพักได้ถึง 1 เดือน) · payment_deadline เดียวกัน 15 นาทีทุก type
+- [03: ค้างชำระ (deferred) + สิทธิ์](./tickets/03-deferred-payment-and-permissions.md): สิทธิ์ admin เท่านั้น (ตาม ticket 01 — org booking เป็น deferred เสมอ) · state path `draft → confirmed` ข้าม paid (transition เดิมของ walk-in — ไม่แตะ machine) · **deferred ยกเว้น CleanupExpiredDrafts** + ยึด slot จน admin ตัดสินใจ (sub-decision ปิดตาม recommendation — owner flip ได้ก่อน implement) · เก็บปลายทางผ่าน recordPayment → ครบยอด is_paid=true · complete ได้ทั้งที่ยังค้าง
 
 ## Not yet specified
 
