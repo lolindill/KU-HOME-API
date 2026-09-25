@@ -23,16 +23,16 @@ Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` �
 - **Standing decision ระดับ effort (จาก owner, 2026-09-24):** ตาราง `organizations` เป็น **stopgap** — ทุก design ที่เสนอต้องตอบได้ว่า "ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API แทน booking เดิมยังอ่านความหมายถูกไหม"
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน:** ticket 03 (org booking shape — blocked-by 01 ปลดแล้ว, ใช้ decision FK+snapshot ของ ticket 01 เป็นฐาน) · ticket 05 (implement ของ 01+02 — เข้า frontier แล้ว แต่แนะนำรอ ticket 03/04 ปิดเพื่อ implement ครั้งเดียวจบ) · ticket 07 ใหม่ (attach ทีหลัง — รอ 03)
+- 🎯 **Frontier ปัจจุบัน (อัปเดต 2026-09-25 หลัง ticket 03 ปิด):** ticket 04 (userless payment/front-desk — รอ design แมป `booking-payment-types` ปิดก่อน) · ticket 05 (implement ของ 01+02 — เข้า frontier แล้ว แต่แนะนำรอ ticket 04/06 ปิดเพื่อ implement ครั้งเดียวจบ) · ticket 07 (attach ทีหลัง — blocked-by 03 ปลดแล้ว) · ticket 08 ใหม่ (ดู/รายงาน booking ตามองค์กร — graduate จาก fog แล้ว) · ticket 06 (implement ของ 03+04 — ยังรอ 04)
 
 ## Decisions so far
 
 - [ตาราง organizations — contract ของ erp, CRUD และกติกา replaceability](tickets/01-organization-table-erp-and-replaceability.md): `erp` = string unique nullable (logical FK ภายนอก ไม่มี DB constraint) · booking อ้าง org ด้วย nullable FK `organization_id` (restrict) + snapshot name/phone/email บน booking เป็นชั้น replaceability แรก (erp = key map ไป API ตอนเปลี่ยน) · CRUD เต็มใต้ `role:admin` ไม่มี DELETE · เลิกใช้ = `is_active` + toggle (PgBoolean) ปิดแล้ว booking ใหม่โดน 422, เก่าไม่กระทบ
 - [Admin จองแทน user — identity ของ user ปลายทาง และ audit ฝั่งผู้สร้าง](tickets/02-admin-booking-for-user-target-identity.md): 2 โหมด + เฮดเปล่า — โหมด A link user account ด้วย **UUID** (`user` field) · โหมด B เฮดเปล่า/องค์กรไม่ link account ใช้ string `customer_name` · สร้างเฮดเปล่าได้เต็มรูป (attach ทีหลัง = ticket 07 ใหม่) · **ไม่เพิ่ม `created_by`** · กฎผลพวงแยกโหมด (dedup/cap/ราคา/ownership) · เฉพาะ `role:admin` + `source='admin'` marker
+- [Booking ให้องค์กรบน POST /bookings เดิม — field set และ consumer ของ user_id = null](tickets/03-org-booking-shape-on-post-bookings.md): `organize` = **erp code string** → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · `user` กับ `organize` **mutually exclusive** (422) · ส่ง `organize` ต้องมี `customer_name` (phone/email nullable) · snapshot = **3 columns ใหม่บน bookings** · กฎผลพวง user_id=null สืบทอดโหมด B ของ ticket 02 ครบ (ไม่ dedup · ราคา daily · ownership admin) · ชื่อ default ใช้ `customer_name` ทั้ง `getPrimaryGuestName` fallback และ default guests ของห้อง
 
 ## Not yet specified
 
-- **ดู/รายงาน booking ตามองค์กร** — filter ใน admin booking index, การซ้อนทับกับแมป `excel-reports` — รอ schema ล็อกก่อน (ticket 03) จึง spec ไม่ได้ตอนนี้
 - **รูปร่างจริงของ organization-data API ของรุ่นพี่** — ยังไม่เกิด จึงผิดที่จะ ticket; map นี้เตรียมแค่ replaceability contract (ticket 01 ✅ ปิดแล้ว)
 - **การจองแทนคนนอก / `source='line'`** — มี flow ไลน์อยู่ใน validation แต่ยังไม่มีใครถามว่าโหมดจองแทนของ admin ครอบ flow นั้นไหม — รอหน้าที่ใช้จริง
 
