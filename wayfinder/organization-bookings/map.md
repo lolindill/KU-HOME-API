@@ -23,11 +23,12 @@ Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` �
 - **Standing decision ระดับ effort (จาก owner, 2026-09-24):** ตาราง `organizations` เป็น **stopgap** — ทุก design ที่เสนอต้องตอบได้ว่า "ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API แทน booking เดิมยังอ่านความหมายถูกไหม"
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน:** ticket 02 (admin จองแทน user) — grilling คู่กับ owner ได้ทันที · ticket 03 ยัง open แต่ใช้ decision ของ ticket 01 (FK + snapshot) เป็นฐาน
+- 🎯 **Frontier ปัจจุบัน:** ticket 03 (org booking shape — blocked-by 01 ปลดแล้ว, ใช้ decision FK+snapshot ของ ticket 01 เป็นฐาน) · ticket 05 (implement ของ 01+02 — เข้า frontier แล้ว แต่แนะนำรอ ticket 03/04 ปิดเพื่อ implement ครั้งเดียวจบ) · ticket 07 ใหม่ (attach ทีหลัง — รอ 03)
 
 ## Decisions so far
 
 - [ตาราง organizations — contract ของ erp, CRUD และกติกา replaceability](tickets/01-organization-table-erp-and-replaceability.md): `erp` = string unique nullable (logical FK ภายนอก ไม่มี DB constraint) · booking อ้าง org ด้วย nullable FK `organization_id` (restrict) + snapshot name/phone/email บน booking เป็นชั้น replaceability แรก (erp = key map ไป API ตอนเปลี่ยน) · CRUD เต็มใต้ `role:admin` ไม่มี DELETE · เลิกใช้ = `is_active` + toggle (PgBoolean) ปิดแล้ว booking ใหม่โดน 422, เก่าไม่กระทบ
+- [Admin จองแทน user — identity ของ user ปลายทาง และ audit ฝั่งผู้สร้าง](tickets/02-admin-booking-for-user-target-identity.md): 2 โหมด + เฮดเปล่า — โหมด A link user account ด้วย **UUID** (`user` field) · โหมด B เฮดเปล่า/องค์กรไม่ link account ใช้ string `customer_name` · สร้างเฮดเปล่าได้เต็มรูป (attach ทีหลัง = ticket 07 ใหม่) · **ไม่เพิ่ม `created_by`** · กฎผลพวงแยกโหมด (dedup/cap/ราคา/ownership) · เฉพาะ `role:admin` + `source='admin'` marker
 
 ## Not yet specified
 
