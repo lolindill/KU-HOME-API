@@ -29,11 +29,11 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** ticket 01 (payment_type enum + schema) — grilling คู่กับ owner ได้ทันที
+- 🎯 **Frontier ปัจจุบัน:** [ticket 02](./tickets/02-deposit-semantics.md) (deposit semantics) + [ticket 03](./tickets/03-deferred-payment-and-permissions.md) (deferred + สิทธิ์) — ปลดบล็อกพร้อมกันหลัง ticket 01 ปิด (2026-09-25) ทำคนละ session ได้
 
 ## Decisions so far
 
-- *(ยังว่าง — แมปเพิ่ง charted 2026-09-24)*
+- [01: payment_type enum + schema บน bookings](./tickets/01-payment-type-enum-and-schema.md): column ใหม่บน `bookings` = `full|deposit|deferred` string · `NOT NULL DEFAULT 'full'` + backfill หมด (flow เดิม regression 0%) · ตั้งได้ admin เท่านั้น (POST /bookings มี field นี้ใน input → ต้อง admin, ไม่งั้น 403) · แก้ได้เฉพาะ draft ผ่าน endpoint ใหม่ `PUT /bookings/{id}` (admin-only) · ส่ง `payment_type` กลับทุก response ของ booking
 
 ## Not yet specified
 
