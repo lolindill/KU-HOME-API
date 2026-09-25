@@ -2204,3 +2204,12 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **ส่วน flow หลังจองของ userless booking (ticket 04) ไม่ต้องเขียนโค้ดใหม่:** org booking = `deferred` เสมอ (สลิป block · อนุมัติ `draft → confirmed` · เก็บเงิน `recordPayment` — design ของแมป `booking-payment-types`) · admin ส่งสลิปแทนบิลไร้ user (non-deferred) ได้ผ่าน ownership guard เดิม · เฮดเปล่าโดน cleanup 15 นาทีตามเดิม — ขยายผ่าน `payment_deadline` บน `PUT /bookings/{id}` · front desk ค้นผ่าน term search เดิม (filter ตามองค์กร = ticket 08 ที่เดียว) · `customer_phone`/`email` เก็บติดต่อล้วน ไม่ผูก flow
 - **Response ของ `POST /bookings`** เพิ่ม 4 field: `organization_id` + `customer_name`/`customer_phone`/`customer_email` (null เมื่อไม่ใช่ org/โหมด B)
 - Tests: `tests/Feature/OrgBookingTest.php` (12 เคส — FK+snapshot · erp มั่ว 422 · inactive 422 · user×organize 422 · ไม่มี customer_name 422 · source ผิด 422 · non-admin 403 · ไม่มี dedup · ราคา daily · fallback ชื่อ · โหมด B snapshot · regression บิลปกติ) — **suite เต็ม 588 passed (2190 assertions)** · Pint ผ่าน
+
+## 🏛️ ดู/รายงาน booking ตามองค์กร — filter ใน admin index (2026-09-25, wayfinder/organization-bookings — ticket 08)
+
+> grilled กับ owner ครบ 3 คำถาม (AskUserQuestion) ทุกข้อตามคำแนะนำ — ปิด wayfinder map `organization-bookings` (ticket ครบทุกใบ)
+
+- **Filter = ขยาย `GET /bookings` เดิม ไม่เพิ่ม endpoint:** query param `organization_id` (UUID ตรงตาม FK — ค่าที่ไม่ใช่ UUID → `422`) **เฉพาะ admin** (non-admin ถูก scope `user_id` ตัวเองอยู่แล้ว ไม่รับ param นี้) · และขยาย `term` เดิมให้ค้น snapshot `customer_name` ด้วย (`whereRaw LOWER ... LIKE` — LIKE บน pgsql case-sensitive, ครอบ org booking/เฮดเปล่าที่ไม่มี user ให้ `whereHas` จับ) · `search_criteria` เพิ่ม `organization_id`
+- **ขอบเขต "รายงาน" = แค่ filter + response fields ไม่มี aggregation** — ยอดจอง/ยอดเงินต่อองค์กรเป็นของแมป `excel-reports` (เจ้าของเดียว ไม่ซ้อนทับ)
+- **Response shape:** admin เห็น object `organization` (id, erp, name, is_active) eager-load คู่ `user` ทั้ง `GET /bookings` และ `GET /bookings/{id}` (showById) เมื่อ booking ผูกองค์กร — `organization_id` + snapshot 3 fields serialize ตาม fillable เดิม · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user ดูได้เฉพาะ admin อยู่แล้ว)
+- Tests: `OrgBookingTest` เพิ่ม 4 เคส (filter ตาม org + เห็น object organization · non-UUID 422 · term ค้น customer_name · showById เห็น organization) — suite รวม **602 passed** (2 failed เป็นของงาน implement ticket 07 ที่กำลังทำค้างใน working tree อีก session — ไม่เกี่ยวกับ ticket 08)

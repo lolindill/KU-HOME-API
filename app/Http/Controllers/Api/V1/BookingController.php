@@ -48,14 +48,27 @@ class BookingController extends Controller
             $roomTypeId = $request->query('room_type', 'all');
             $checkIn = $request->query('check_in');
             $checkOut = $request->query('check_out');
+            // 🏛️ organization-bookings ticket 08 — admin filter ตามองค์กร (UUID ตรงตาม FK)
+            $organizationId = $request->query('organization_id');
 
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
             $query = Booking::with('bookingRooms.addon')
                 ->when($user && $user->role === 'admin', function ($q) {
-                    $q->with('user');
+                    // 🏛️ ticket 08 — admin เห็น object organization คู่กับ user (org booking ไม่มีเจ้าของ user)
+                    $q->with('user')->with('organization');
                 });
 
             if ($user && $user->role === 'admin') {
+                if ($organizationId !== null) {
+                    if (! Str::isUuid($organizationId)) {
+                        return response()->json([
+                            'status' => 'error',
+                            'message' => 'organization_id ต้องเป็น UUID ขององค์กรค่ะ 🏛️',
+                        ], 422);
+                    }
+
+                    $query->where('organization_id', $organizationId);
+                }
             } elseif ($user) {
                 $query->where('user_id', $user->id);
             }
@@ -82,6 +95,7 @@ class BookingController extends Controller
                     'check_in' => $checkIn,
                     'check_out' => $checkOut,
                     'room_type' => $roomTypeId,
+                    'organization_id' => $organizationId,
                 ],
                 'bookings' => $bookings->items(),
                 'pagination' => [
@@ -1662,17 +1676,26 @@ class BookingController extends Controller
             }
         };
 
-        return $query->where(function ($q) use ($escaped, $term, $guestNameFilter) {
+        // 🏛️ organization-bookings ticket 08 — term ค้น snapshot customer_name (org booking / เฮดเปล่า
+        //    ไม่มี user ให้ whereHas จับ) · LOWER ตรง ๆ เพราะ LIKE บน pgsql เป็น case-sensitive
+        $customerNameFilter = function ($q) use ($lowerEscaped) {
+            $q->whereNotNull('customer_name')
+                ->whereRaw('LOWER(customer_name) LIKE ?', [$lowerEscaped]);
+        };
+
+        return $query->where(function ($q) use ($escaped, $term, $guestNameFilter, $customerNameFilter) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
                     ->orWhereHas('user', function ($userQuery) use ($escaped) {
                         $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                     })
+                    ->orWhere($customerNameFilter)
                     ->orWhereHas('bookingRooms', $guestNameFilter);
             } else {
                 $q->whereHas('user', function ($userQuery) use ($escaped) {
                     $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                 })
+                    ->orWhere($customerNameFilter)
                     ->orWhereHas('bookingRooms', $guestNameFilter);
             }
         });
@@ -1816,7 +1839,11 @@ class BookingController extends Controller
                 ], 401);
             }
 
+            // 🏛️ ticket 08 — admin เห็น object organization (org booking ดูได้เฉพาะ admin อยู่แล้ว)
             $booking = Booking::with(['user', 'bookingRooms.addon'])
+                ->when($user->role === 'admin', function ($q) {
+                    $q->with('organization');
+                })
                 ->where('id', $id)
                 ->firstOrFail();
 

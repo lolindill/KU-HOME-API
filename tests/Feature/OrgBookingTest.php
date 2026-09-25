@@ -362,4 +362,99 @@ class OrgBookingTest extends TestCase
         $this->assertNull($booking->customer_phone);
         $this->assertNull($booking->customer_email);
     }
+
+    // ============================================
+    // 🏛️ ticket 08 — ดู/รายงาน booking ตามองค์กร (filter ใน GET /bookings + response shape)
+    // ============================================
+
+    private function createOrgBooking(Organization $org, RoomType $roomType, string $customerName): string
+    {
+        $checkIn = Carbon::now()->addDays(5)->toDateString();
+        $checkOut = Carbon::now()->addDays(7)->toDateString();
+
+        $response = $this->actingAs(User::factory()->create(['role' => 'admin']), 'sanctum')
+            ->postJson('/api/v1/bookings', array_merge([
+                'source' => 'admin',
+                'organize' => $org->erp,
+                'customer_name' => $customerName,
+            ], $this->bookingPayload($roomType->id, $checkIn, $checkOut)));
+
+        $response->assertStatus(201);
+
+        return $response->json('booking_id');
+    }
+
+    public function test_admin_can_filter_bookings_by_organization_id(): void
+    {
+        $orgA = Organization::create(['erp' => 'ORGA', 'name' => 'องค์กรเอ', 'is_active' => true]);
+        $orgB = Organization::create(['erp' => 'ORGB', 'name' => 'องค์กรบี', 'is_active' => true]);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType); // 2 ห้อง กัน availability ชนกันระหว่าง 2 บิล
+
+        $bookingA = $this->createOrgBooking($orgA, $roomType, 'สมชาย ใจดี');
+        $this->createOrgBooking($orgB, $roomType, 'สมหญิง รักเรียน');
+
+        $response = $this->actingAs(User::factory()->create(['role' => 'admin']), 'sanctum')
+            ->getJson("/api/v1/bookings?organization_id={$orgA->id}");
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('search_criteria.organization_id', $orgA->id)
+            ->assertJsonCount(1, 'bookings')
+            ->assertJsonPath('bookings.0.id', $bookingA)
+            ->assertJsonPath('bookings.0.organization_id', $orgA->id)
+            // 🏛️ admin เห็น object organization (erp, name) eager-load
+            ->assertJsonPath('bookings.0.organization.id', $orgA->id)
+            ->assertJsonPath('bookings.0.organization.erp', 'ORGA')
+            ->assertJsonPath('bookings.0.organization.name', 'องค์กรเอ');
+    }
+
+    public function test_organization_id_filter_rejects_non_uuid(): void
+    {
+        $response = $this->actingAs(User::factory()->create(['role' => 'admin']), 'sanctum')
+            ->getJson('/api/v1/bookings?organization_id=not-a-uuid');
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+    }
+
+    public function test_admin_term_search_finds_org_booking_by_customer_name(): void
+    {
+        $org = Organization::create(['erp' => 'ORGC', 'name' => 'องค์กรซี', 'is_active' => true]);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+
+        $this->createOrgBooking($org, $roomType, 'สมชาย ใจดี');
+
+        // 🏛️ term ค้น snapshot customer_name ได้ (org booking ไม่มี user ให้ whereHas จับ)
+        $response = $this->actingAs(User::factory()->create(['role' => 'admin']), 'sanctum')
+            ->getJson('/api/v1/bookings?term='.urlencode('สมชาย'));
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonCount(1, 'bookings')
+            ->assertJsonPath('bookings.0.customer_name', 'สมชาย ใจดี');
+    }
+
+    public function test_admin_sees_organization_object_on_show(): void
+    {
+        $org = Organization::create(['erp' => 'ORGD', 'name' => 'องค์กรดี', 'is_active' => true]);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+
+        $bookingId = $this->createOrgBooking($org, $roomType, 'สมศรี มีสุข');
+
+        $response = $this->actingAs(User::factory()->create(['role' => 'admin']), 'sanctum')
+            ->getJson("/api/v1/bookings/{$bookingId}");
+
+        $response->assertStatus(200)
+            ->assertJsonPath('booking.organization_id', $org->id)
+            ->assertJsonPath('booking.organization.erp', 'ORGD')
+            ->assertJsonPath('booking.organization.name', 'องค์กรดี')
+            ->assertJsonPath('booking.customer_name', 'สมศรี มีสุข');
+    }
 }
