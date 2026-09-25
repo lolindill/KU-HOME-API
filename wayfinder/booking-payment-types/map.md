@@ -30,19 +30,19 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 04](./tickets/04-amounts-layer-a-and-b.md) (ยอดเงิน 2 ชั้น) — blocked-by 02/03 ปลดครบแล้ว (2026-09-25) · ตัวถัดไป ticket 05 (รวม contract) รอ ticket 04; ticket 07/08 ก็รอ ticket 04 เช่นกัน
+- 🎯 **Frontier ปัจจุบัน:** [ticket 05](./tickets/05-api-contract-all-flows.md) (API contract รวมทุก flow) — tickets 01–04 ปิดครบ (2026-09-25) · ตัวถัดไป ticket 06 (implement) รอ ticket 05 · ticket 07/08 รออยู่แล้วเพราะ ticket 04 ปิด → ปลดตาม
 
 ## Decisions so far
 
 - [01: payment_type enum + schema บน bookings](./tickets/01-payment-type-enum-and-schema.md): column ใหม่บน `bookings` = `full|deposit|deferred` string · `NOT NULL DEFAULT 'full'` + backfill หมด (flow เดิม regression 0%) · ตั้งได้ admin เท่านั้น (POST /bookings มี field นี้ใน input → ต้อง admin, ไม่งั้น 403) · แก้ได้เฉพาะ draft ผ่าน endpoint ใหม่ `PUT /bookings/{id}` (admin-only) · ส่ง `payment_type` กลับทุก response ของ booking
 - [02: มัดจำ (deposit) semantics](./tickets/02-deposit-semantics.md): ยอดมัดจำ admin กำหนดต่อ booking (default 50% — field shape รอ ticket 04) · `paid` = งวดปัจจุบันผ่านแล้ว (สลิปมัดจำ verify → paid → confirmed เหมือนเดิม แต่ is_paid ไม่ set — is_paid สงวนให้จ่ายครบ) · เก็บยอดค้างตั้งใจตอน check-in ผ่าน recordPayment แต่**ไม่มี hard guard** — check-in/out ได้แม้ยอดไม่ครบ (org เบิกหลังเข้าพักได้ถึง 1 เดือน) · payment_deadline เดียวกัน 15 นาทีทุก type
 - [03: ค้างชำระ (deferred) + สิทธิ์](./tickets/03-deferred-payment-and-permissions.md): สิทธิ์ admin เท่านั้น (ตาม ticket 01 — org booking เป็น deferred เสมอ) · state path `draft → confirmed` ข้าม paid (transition เดิมของ walk-in — ไม่แตะ machine) · **deferred ยกเว้น CleanupExpiredDrafts** + ยึด slot จน admin ตัดสินใจ (sub-decision ปิดตาม recommendation — owner flip ได้ก่อน implement) · เก็บปลายทางผ่าน recordPayment → ครบยอด is_paid=true · complete ได้ทั้งที่ยังค้าง
+- [04: ยอดเงิน 2 ชั้น](./tickets/04-amounts-layer-a-and-b.md): ชั้น A `booking_confirmations.amount` integer baht nullable (สลิปเก่า null) + required สลิปใหม่ · verify เทียบ expected/claimed แบบ soft admin ตัดสิน · **`payments` = ledger เดียวเงินที่เข้าจริง** (สลิป verify → เขียน payments row เพิ่ม · ห้ามเขียนนอก 3 จุด) · ชั้น B derive ล้วน: `paid_amount` = SUM(payments), `outstanding` = total − paid ไม่เก็บ column · `deposit_amount` baht ตายตัว nullable บน bookings (null = 50% จาก config) · `is_paid` = SUM ≥ total · backfill booking เดิม paid/confirmed = row เต็ม · ยอดทุกตัวส่งทุก response ทุก role · **excel-reports ticket 08 ปลดล็อก** (field ครบใน resolution)
 
 ## Not yet specified
 
-- **payment_channel (QR/เงินสด/บัตร) จะกลับมาไหม** — โดน drop ไปแล้ว (`2026_08_19_100000`) พร้อมกันทั้ง confirmations/payments — ยังไม่มีใครตัดสิน; [ticket 08 ของ excel-reports](../excel-reports/tickets/08-payment-amount-channel-deposit.md) ถามข้ามแมป — อาจโผล่มาระหว่าง grill เรื่องยอดเงิน
-- **เอกสารหลังชำระ (ใบเสร็จ/ใบแจ้งหนี้)** — `receipts` FROZEN — การออกเอกสารของมัดจำ/ค้างชำระยุ่งกับ roadmap "report templates + digital signature" — รอ design เงินจบจึง spec ได้
-- **เก็บเงินหลายงวด** — ถ้ายอดชั้น B ออกแบบแล้วรองรับงวดย่อยตามธรรมชาติ จะดูว่า spec ขยายต่อหรือตัดทิ้ง
+- **payment_channel (QR/เงินสด/บัตร) จะกลับมาไหม** — โดน drop ไปแล้ว (`2026_08_19_100000`) · design ยอดเงินปิดแล้ว (ticket 04): ledger แยกที่มาของเงินได้จากจุดเขียน (verify=สลิป / recordPayment=เงินสด / QR) โดยไม่ต้องกลับ column channel — คำถามที่เหลือ (จะมี column channel ชัด ๆ ไหม) ยกให้ [ticket 08 ของ excel-reports](../excel-reports/tickets/08-payment-amount-channel-deposit.md) ตัดสินในแมปของตัวเอง (ปลดล็อกแล้ว)
+- **เอกสารหลังชำระ (ใบเสร็จ/ใบแจ้งหนี้)** — `receipts` FROZEN — design เงินปิดแล้ว (ticket 04) แต่การออกเอกสารยังผูกกับ roadmap "report templates + digital signature" ที่ยังไม่มีแมป/decision — ยัง spec ไม่ได้จนกว่า roadmap เอกสารจะชัด
 
 ## Out of scope
 
