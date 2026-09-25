@@ -2213,3 +2213,20 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **ขอบเขต "รายงาน" = แค่ filter + response fields ไม่มี aggregation** — ยอดจอง/ยอดเงินต่อองค์กรเป็นของแมป `excel-reports` (เจ้าของเดียว ไม่ซ้อนทับ)
 - **Response shape:** admin เห็น object `organization` (id, erp, name, is_active) eager-load คู่ `user` ทั้ง `GET /bookings` และ `GET /bookings/{id}` (showById) เมื่อ booking ผูกองค์กร — `organization_id` + snapshot 3 fields serialize ตาม fillable เดิม · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user ดูได้เฉพาะ admin อยู่แล้ว)
 - Tests: `OrgBookingTest` เพิ่ม 4 เคส (filter ตาม org + เห็น object organization · non-UUID 422 · term ค้น customer_name · showById เห็น organization) — suite รวม **602 passed** (2 failed เป็นของงาน implement ticket 07 ที่กำลังทำค้างใน working tree อีก session — ไม่เกี่ยวกับ ticket 08)
+
+## 🏛️ Empty-head booking — attach user/organization ทีหลัง (2026-09-25, wayfinder/organization-bookings — ticket 07)
+
+> grilled กับ owner ครบ 4 คำถาม (endpoint / timing / repricing / ถอด-เปลี่ยน) — implement รวมใน session เดียวกับ grilling · ข้อ "สลิปก่อน attach" ถูกตัดสินไปแล้วใน ticket 04 ข้อ 1
+
+- **Endpoint = ขยาย `PUT /bookings/{id}` (`updateBookingPayment`) เดิม** — ไม่มี endpoint ใหม่ · เพิ่ม field `user` (UUID) / `organize` (erp) / `customer_name` / `customer_phone` / `customer_email` · validation ชุดเดียวกับ `POST /bookings` (ticket 03): user×organize mutually exclusive 422 · organize บังคับ customer_name 422 · erp lookup ไม่เจอ/inactive 422
+- **⚠️ Guard ของ endpoint เปลี่ยนจาก "draft-only ทั้ง endpoint" เป็นแยกตาม field-group** (`assertUpdatePaymentGroupGuards` — ตรวจทั้งก่อน lock และหลัง lock):
+  - 💳 payment fields (`payment_type`/`deposit_amount`/`discount_code`/`payment_deadline`) = **draft-only เดิม**
+  - 🏛️ customer identity fields = **ได้ตั้งแต่ draft จนถึง checked_in** — ⛔ `complete`/`no_show` (422) — รองรับ front desk ที่เจอลูกค้าถึงเคาน์เตอร์แล้วค่อยรู้ว่าเป็นขององค์กรไหน
+- **attach/switch/detach กติกาเดียวบน endpoint เดียว:**
+  - ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิมก่อน แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null)
+  - ส่ง `user: null` / `organize: null` ชัด ๆ = **ถอดกลับเฮดเปล่า** (เคลียร์ `user_id`/`organization_id`/`customer_*` ครบ)
+  - ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง (ไม่แตะ FK)
+  - ไม่ re-run draft-dedup ตอน attach user (ผู้ตัดสินคือ admin — ต่างจาก POST โหมด A) · ไม่ผูก `source='admin'` ของ booking ตอน attach (ผู้เรียกคือ admin อยู่แล้ว)
+- **Reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` ทันที (chokepoint อ่าน `$booking->user` — ku_member ได้ `daily_ku` อัตโนมัติ, ถอดกลับเป็น `daily` สมมาตร) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** (ไม่ยุ่งยอดที่สลิป/การชำระ lock ไว้)
+- **Response ของ `PUT /bookings/{id}`** เพิ่ม 5 field: `user_id` / `organization_id` / `customer_name` / `customer_phone` / `customer_email`
+- Tests: `tests/Feature/BookingAttachCustomerTest.php` (12 เคส — attach user/org บนเฮดเปล่า · switch org→org→user แทนที่ทั้งชุด · detach null · contact-only patch · mutually exclusive · organize ไม่มี name · erp มั่ว/inactive · non-admin 403 · attach หลัง draft ได้แต่ payment fields 422 · complete/no_show 422 · reprice daily_ku↔daily สมมาตร)

@@ -2704,9 +2704,11 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 - **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว) · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset `false` (ตามนิยาม `SUM(payments) ≥ total`)
 - **Response เพิ่ม 6 field เสมอ:** `previous_total_amount` · `surcharge_amount` (ติดลบได้) · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
 
-### PUT `/bookings/{id}` — Update booking payment fields (Admin) 🆕
+### PUT `/bookings/{id}` — Update booking payment + customer identity fields (Admin) 🆕
 
-🔒 **Admin only (role:admin) · Throttle `5,1`** · booking ต้อง **draft** เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+🔒 **Admin only (role:admin) · Throttle `5,1`** · guard state **แยกตาม field-group**:
+- 💳 **payment group** — booking ต้อง **draft** เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+- 🏛️ **customer identity group** (25/09/26, organization-bookings ticket 07) — ได้ตั้งแต่ draft จนถึง **checked_in** (จนก่อน `complete`/`no_show` — รองรับ front desk ที่รู้ภายหลังว่าเป็นขององค์กรไหน)
 
 **Request Body:**
 
@@ -2716,12 +2718,19 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 | `deposit_amount` | nullable integer ≥ 1 | ส่ง `null` ชัด ๆ = revert ไป effective 50% · 422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit |
 | `discount_code` | nullable string max 50 | reuse กลไก `DiscountService` — reconcile `total_amount` ให้ครบ · ค่าว่าง = ลบโค้ด |
 | `payment_deadline` | nullable date after:now | ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม |
+| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · ส่ง `null` ชัด ๆ = ถอด identity กลับเฮดเปล่า |
+| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · ส่ง `null` ชัด ๆ = ถอด identity |
+| `customer_name` 🏛️ | nullable string max 255 | **บังคับ** เมื่อส่ง `organize` · snapshot ผู้ติดต่อ/ผู้เข้าพัก |
+| `customer_phone` 🏛️ | nullable string max 50 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
+| `customer_email` 🏛️ | nullable string email max 255 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
 
 > `total_amount` **ไม่รับ**จาก input — reprice โดยระบบเสมอ
+>
+> 🏛️ **กติกา attach/switch/detach (ticket 07):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · ส่ง `user: null` / `organize: null` ชัด ๆ = ถอดกลับเฮดเปล่า (เคลียร์ครบ) · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
 
-**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ... }`
+**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "user_id": ..., "organization_id": ..., "customer_name": ..., "customer_phone": ..., "customer_email": ... }`
 
-**Errors**: `403` non-admin · `404` booking ไม่พบ · `422` ไม่ใช่ draft / deposit_amount กับ type ที่ไม่ใช่ deposit
+**Errors**: `403` non-admin · `404` booking ไม่พบ · `422` payment fields บน non-draft / identity fields บน `complete`/`no_show` / `user`+`organize` พร้อมกัน / `organize` ไม่มี `customer_name` / erp ไม่เจอหรือ inactive / deposit_amount กับ type ที่ไม่ใช่ deposit
 
 ---
 

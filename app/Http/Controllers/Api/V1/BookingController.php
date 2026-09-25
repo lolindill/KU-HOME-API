@@ -1515,17 +1515,24 @@ class BookingController extends Controller
     }
 
     /**
-     * 💳 (25/09/26, booking-payment-types ticket 01/05) — PUT /bookings/{id} (admin แก้ draft)
+     * 💳🏛️ (25/09/26, booking-payment-types ticket 01/05 + organization-bookings ticket 07) — PUT /bookings/{id}
      *
-     * Endpoint แรกระดับ booking container สำหรับแก้ payment fields:
-     *   payment_type · deposit_amount (ส่ง null = revert effective 50%) · discount_code (reuse
+     * Endpoint ระดับ booking container สำหรับแก้ payment fields + customer identity fields:
+     *   💳 payment_type · deposit_amount (ส่ง null = revert effective 50%) · discount_code (reuse
      *   DiscountService — ค่าว่าง = ลบโค้ด, แก้แล้ว reconcile total_amount) · payment_deadline
+     *   🏛️ user (UUID) · organize (erp code → FK) · customer_name/phone/email (snapshot ผู้ติดต่อ)
      *
-     * Guards:
+     * Guards (ticket 07 — แยกตาม field-group):
      * - role admin/system (route role:admin + re-check ตาม defense-in-depth)
-     * - booking ต้อง draft เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+     * - 💳 payment group — booking ต้อง draft เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+     * - 🏛️ customer identity group — ได้ตั้งแต่ draft จนถึง checked_in (จนก่อน complete/no_show)
      * - deposit_amount มีความหมายเฉพาะ type deposit (422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit)
-     * - total_amount ไม่รับจาก input — reprice โดยระบบเสมอ
+     * - identity: user×organize mutually exclusive · organize บังคับ customer_name · erp lookup
+     *   ไม่เจอ/inactive → 422 (ชุดเดียวกับ POST /bookings, ticket 03) · ส่ง identity ใหม่ = แทนที่
+     *   ทั้งชุด · ส่ง user/organize = null ชัด ๆ = ถอดกลับเฮดเปล่า · ไม่ re-run draft-dedup ตอน attach
+     * - total_amount ไม่รับจาก input — reprice เฉพาะตอน draft ผ่าน DiscountService::reprice()
+     *   (attach/ถอด user เปลี่ยนเรท daily_ku/daily ผ่าน chokepoint $booking->user · หลัง draft ขึ้นไป
+     *   = เขียน identity เท่านั้น ราคาคงเดิม)
      */
     public function updateBookingPayment(UpdateBookingPaymentRequest $request, string $id)
     {
@@ -1537,19 +1544,20 @@ class BookingController extends Controller
 
             $booking = Booking::findOrFail($id);
 
-            if ($booking->status !== 'draft') {
-                throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
-            }
-
             $validated = $request->validated();
+
+            // 🏛️ ticket 07 — guard แยก field-group (ตรวจทั้งก่อน lock และหลัง lock กัน race)
+            $touchesPayment = collect(['payment_type', 'deposit_amount', 'discount_code', 'payment_deadline'])
+                ->contains(fn ($field) => $request->has($field));
+            $touchesCustomer = collect(['user', 'organize', 'customer_name', 'customer_phone', 'customer_email'])
+                ->contains(fn ($field) => $request->has($field));
+            $this->assertUpdatePaymentGroupGuards($booking->status, $touchesPayment, $touchesCustomer);
 
             DB::beginTransaction();
             try {
                 // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
                 $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
-                if ($locked->status !== 'draft') {
-                    throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
-                }
+                $this->assertUpdatePaymentGroupGuards($locked->status, $touchesPayment, $touchesCustomer);
 
                 // type ใหม่ที่ effective = ค่าที่ส่งมา ไม่งั้นค่าเดิม
                 $effectiveType = $validated['payment_type'] ?? $locked->payment_type;
@@ -1557,6 +1565,60 @@ class BookingController extends Controller
                 // cross-field: deposit_amount มีความหมายเฉพาะ deposit
                 if ($request->has('deposit_amount') && $validated['deposit_amount'] !== null && $effectiveType !== 'deposit') {
                     throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
+                }
+
+                // 🏛️ ticket 07 — attach/switch/detach identity (validation ชุดเดียวกับ POST /bookings, ticket 03)
+                //    "แทนที่" = เคลียร์ identity เดิมทั้งชุดก่อน แล้วเขียนด้วย field ที่ส่งมา (ไม่ส่ง phone/email = null)
+                $attachUserId = $validated['user'] ?? null;
+                $organizeCode = trim((string) ($validated['organize'] ?? ''));
+                $identityChanged = false;
+
+                if ($attachUserId !== null && $organizeCode !== '') {
+                    throw new \Exception('ส่ง user และ organize พร้อมกันไม่ได้ — เลือกจองแทน user หรือจองให้องค์กรอย่างใดอย่างหนึ่งค่ะ 🏛️', 422);
+                }
+
+                if ($attachUserId !== null) {
+                    // 🏛️ attach/switch จองแทน — link target user · org เดิม (ถ้ามี) ถูกแทนที่
+                    $locked->user_id = $attachUserId;
+                    $locked->organization_id = null;
+                    $locked->customer_name = $validated['customer_name'] ?? null;
+                    $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    $locked->customer_email = $validated['customer_email'] ?? null;
+                    $identityChanged = true;
+                } elseif ($organizeCode !== '') {
+                    // 🏛️ attach/switch org — erp lookup เป็น FK (replaceability contract, ticket 01)
+                    if (($validated['customer_name'] ?? null) === null || trim((string) $validated['customer_name']) === '') {
+                        throw new \Exception('จองให้องค์กรต้องระบุ customer_name (ผู้ติดต่อ/ผู้เข้าพัก) ด้วยค่ะ 🏛️', 422);
+                    }
+                    $organization = Organization::where('erp', $organizeCode)->first();
+                    if (! $organization || ! $organization->is_active) {
+                        throw new \Exception('ไม่พบองค์กรตามรหัสที่ระบุ หรือองค์กรนี้ปิดใช้งานอยู่ค่ะ 🏛️', 422);
+                    }
+                    $locked->user_id = null;
+                    $locked->organization_id = $organization->id;
+                    $locked->customer_name = $validated['customer_name'];
+                    $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    $locked->customer_email = $validated['customer_email'] ?? null;
+                    $identityChanged = true;
+                } elseif ($request->has('user') || $request->has('organize')) {
+                    // 🏛️ ส่ง user/organize = null ชัด ๆ — ถอด identity กลับเฮดเปล่า (เคลียร์ snapshot ครบ)
+                    $locked->user_id = null;
+                    $locked->organization_id = null;
+                    $locked->customer_name = null;
+                    $locked->customer_phone = null;
+                    $locked->customer_email = null;
+                    $identityChanged = true;
+                } else {
+                    // แก้ snapshot ผู้ติดต่อล้วน (ไม่ส่ง user/organize) — แก้เฉพาะ field ที่ส่ง
+                    if ($request->has('customer_name')) {
+                        $locked->customer_name = $validated['customer_name'] ?? null;
+                    }
+                    if ($request->has('customer_phone')) {
+                        $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    }
+                    if ($request->has('customer_email')) {
+                        $locked->customer_email = $validated['customer_email'] ?? null;
+                    }
                 }
 
                 // 💳 payment_type — ไม่ส่ง = ไม่แตะค่าเดิม
@@ -1588,7 +1650,13 @@ class BookingController extends Controller
                         app(DiscountService::class)->applyToDraft($locked, $validated['discount_code']);
                     }
                 }
-                // (field อื่น — payment_type/deposit_amount/payment_deadline — ไม่กระทบ total_amount)
+
+                // 🏛️ ticket 07 — reprice เฉพาะตอน draft: attach/ถอด user เปลี่ยนเรท daily_ku/daily
+                //    ผ่าน chokepoint $booking->user ใน DiscountService::reprice() · หลัง draft ขึ้นไป
+                //    = เขียน identity เท่านั้น ราคาคงเดิม (ไม่ไปยุ่งยอดที่สลิป/การชำระ lock ไว้)
+                if ($identityChanged && $locked->status === 'draft') {
+                    app(DiscountService::class)->reprice($locked);
+                }
 
                 DB::commit();
 
@@ -1596,7 +1664,9 @@ class BookingController extends Controller
 
                 return response()->json([
                     'status' => 'success',
-                    'message' => 'แก้ไขข้อมูลการชำระเงินเรียบร้อยแล้วค่ะ 💳',
+                    'message' => $touchesCustomer
+                        ? 'อัปเดตข้อมูลการชำระเงิน/ผู้เข้าพักเรียบร้อยแล้วค่ะ 💳🏛️'
+                        : 'แก้ไขข้อมูลการชำระเงินเรียบร้อยแล้วค่ะ 💳',
                     'booking' => $fresh,
                     'total_amount' => $fresh->total_amount,
                     'payment_type' => $fresh->payment_type,
@@ -1604,6 +1674,12 @@ class BookingController extends Controller
                     'paid_amount' => $fresh->paid_amount,
                     'outstanding_amount' => $fresh->outstanding_amount,
                     'payment_deadline' => $fresh->payment_deadline?->toDateTimeString(),
+                    // 🏛️ ticket 07 — identity หลัง attach/switch/detach
+                    'user_id' => $fresh->user_id,
+                    'organization_id' => $fresh->organization_id,
+                    'customer_name' => $fresh->customer_name,
+                    'customer_phone' => $fresh->customer_phone,
+                    'customer_email' => $fresh->customer_email,
                 ], 200);
 
             } catch (\Exception $e) {
@@ -1633,6 +1709,24 @@ class BookingController extends Controller
                 'status' => 'error',
                 'message' => 'เกิดข้อผิดพลาดในการแก้ไขข้อมูลการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
+        }
+    }
+
+    /**
+     * 🏛️ (25/09/26, organization-bookings ticket 07) — guard แยก field-group ของ PUT /bookings/{id}
+     *
+     * 💳 payment group — draft เท่านั้น (หลังส่งสลิป/verify แล้ว frozen)
+     * 🏛️ customer identity group — ได้ตั้งแต่ draft จนถึง checked_in (จนก่อน complete/no_show)
+     *    — รองรับ front desk ที่เจอลูกค้าถึงเคาน์เตอร์แล้วค่อยรู้ว่าเป็นขององค์กรไหน
+     */
+    private function assertUpdatePaymentGroupGuards(string $status, bool $touchesPayment, bool $touchesCustomer): void
+    {
+        if ($touchesPayment && $status !== 'draft') {
+            throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
+        }
+
+        if ($touchesCustomer && in_array($status, ['complete', 'no_show'], true)) {
+            throw new \Exception('แก้ไขข้อมูลผู้เข้าพัก/องค์กรได้จนถึง checked_in เท่านั้น — การจองสถานะ complete/no_show แก้ไม่ได้แล้วค่ะ 🏛️', 422);
         }
     }
 
