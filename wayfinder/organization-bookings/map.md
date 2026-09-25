@@ -1,11 +1,11 @@
 # 🗺️ Wayfinder Map — Organization Bookings (admin จองแทน user / จองให้องค์กร)
 
 - **label:** `wayfinder:map`
-- **status:** open
+- **status:** closed
 - **tracker:** local-markdown — tickets อยู่ใน `tickets/` ของ directory นี้ (blocking ระบุใน field `blocked-by` ของแต่ละ ticket)
 - **charted:** 2026-09-24
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-25)
 
 Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` เดิม: **(1) จองแทน user ที่มี account** — booking ผูกกับ user ปลายทางที่ระบุ ไม่ใช่ admin ผู้สร้าง และ **(2) จองให้องค์กร** — booking ผูกกับตาราง `organizations` ใหม่ (`erp` + `name`) แทนการผูก user พร้อม snapshot `customer_name` / `customer_phone` / `customer_email` — โดยตาราง `organizations` เป็น **stopgap ที่ออกแบบให้เปลี่ยนไปใช้ organization-data API ได้ทีหลัง** ถ้ารุ่นพี่หาทางดึงข้อมูลองค์กรได้ · จบเมื่อ decision ล็อกครบ + implement จบ + suite เขียว
 
@@ -23,7 +23,7 @@ Admin สร้าง booking ได้ 2 โหมดบน `POST /bookings` �
 - **Standing decision ระดับ effort (จาก owner, 2026-09-24):** ตาราง `organizations` เป็น **stopgap** — ทุก design ที่เสนอต้องตอบได้ว่า "ถ้าเทตารางนี้ทิ้งไปใช้ organization-data API แทน booking เดิมยังอ่านความหมายถูกไหม"
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee)
-- 🎯 **Frontier ปัจจุบัน (อัปเดต 2026-09-25 หลัง ticket 08 ปิด):** ticket ทั้งหมดปิดหมดแล้ว — เหลือเพียง **commit implement ของ ticket 07** ที่ค้างอยู่ใน working tree ของอีก session (`PUT /bookings/{id}` identity attach + `BookingAttachCustomerTest` — ยัง fail อยู่ 2 เคส ต้องเก็บต่อ) · ~~ticket 08~~ (✅ grilling + implement ปิดแล้ว 2026-09-25 — filter `organization_id` + term ค้น customer_name · admin เห็น object organization · suite 602 เขียว) · ~~ticket 07~~ (✅ grilling ปิดแล้ว 2026-09-25 — attach = ขยาย `PUT /bookings/{id}` · implement รวมใน session เดียวกับ grilling) · ~~ticket 06~~ (✅ implement 03+04 ปิดแล้ว 2026-09-25 — suite 588 เขียว) · ~~ticket 04~~ (✅ ปิดแล้ว 2026-09-25) · ~~ticket 05~~ (✅ implement 01+02 ปิดแล้ว 2026-09-25 — suite 576 เขียว)
+- 🎯 **Frontier ปัจจุบัน (อัปเดต 2026-09-25 — แมปปิดสมบูรณ์):** ไม่มี ticket เปิดเหลือแล้ว — commit implement ของ ticket 07 ลงแล้ว (`0aa7c6c` — suite 604 เขียว) · ~~ticket 08~~ (✅ grilling + implement ปิดแล้ว 2026-09-25 — filter `organization_id` + term ค้น customer_name · admin เห็น object organization) · ~~ticket 07~~ (✅ grilling + implement ปิดแล้ว 2026-09-25 — attach = ขยาย `PUT /bookings/{id}` guard แยก field-group · reprice เฉพาะ draft) · ~~ticket 06~~ (✅ implement 03+04 ปิดแล้ว 2026-09-25 — suite 588 เขียว) · ~~ticket 04~~ (✅ ปิดแล้ว 2026-09-25) · ~~ticket 05~~ (✅ implement 01+02 ปิดแล้ว 2026-09-25 — suite 576 เขียว)
 
 ## Decisions so far
 
