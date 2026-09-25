@@ -2172,3 +2172,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Response เพิ่ม 6 field เสมอ (draft mode ด้วย):** `previous_total_amount` · `surcharge_amount` · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
 - **Regression ตั้งใจ 1 จุด:** `BookingTest::test_update_room_blocked_when_booking_not_draft` เดิมคาด 422 (user แก้ booking paid) — ใหม่เป็น **403** ตามสิทธิ์ admin-only ที่ชัดเจนขึ้น
 - Tests: `tests/Feature/BookingSurchargeAfterPaymentTest.php` (10 — surcharge deposit/full + reset is_paid + downgrade บล็อก/ยอม + 403 + pending 422 + availability 422 + room_id 422 + checked_in 422 + draft regression) · docs: `docs/api_guide.md` หัวข้อ "💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10)" + หัวข้อ endpoint PUT rooms
+
+## 🏛️ Organizations + Admin จองแทน user — 2 โหมดบน POST /bookings (2026-09-25, wayfinder/organization-bookings — ticket 05)
+
+> implement ตาม resolution ticket 01 (ตาราง organizations) + ticket 02 (admin booking 2 โหมด) · ticket 03/06 (org fields `organization_id` + snapshot บน bookings) **ยังไม่รวมในชุดนี้** — รอ ticket 03 ปิดก่อน
+
+- **ตาราง `organizations`:** `id` UUID · `erp` string **unique nullable** (logical FK ชี้ระบบ ERP ภายนอก — ไม่มี DB FK constraint เพราะไม่มีตาราง erp ในเครื่อง) · `name` string · `is_active` boolean default `true` (**PgBoolean** ตามกฎ) · timestamps · **ไม่มี SoftDeletes ไม่มี hard DELETE** — เลิกใช้ = toggle (precedent discounts)
+- **CRUD ใต้ `role:admin` + re-check in-controller (defense-in-depth):** `GET /organizations` (index + `search` ค้น name/erp) · `GET /organizations/{id}` · `POST /organizations` · `PUT /organizations/{id}` · `PATCH /organizations/{id}/toggle` — duplicate `erp` ตรวจ closure (trim แล้วเทียบ, ไม่ force case — รหัสภายนอกอาจ case-sensitive)
+- **Admin booking 2 โหมดบน `POST /bookings` เดิม** (endpoint เดิม — ตัดสินจาก `sanctum` role ของคนล็อกอิน, **ห้ามตัดสินจาก `source`** ตามธรรมเนียม BookingRule):
+  - **โหมด A — จองแทน + link user:** ส่ง field `user` = **UUID** → `bookings.user_id` = target (ไม่ใช่ admin ผู้สร้าง) · ส่ง `user` ได้เฉพาะ admin (non-admin = `403`) · UUID ไม่เจอ = `422` · **draft-dedup นับที่ target user** (admin มี draft ของตัวเองไม่ขวาง) · **room cap ใช้ role ของ target** (StoreBookingRequest คำนวณ `roomCapRule` จาก target) · **ราคา daily_ku ใช้ role ของ target** — แก้ `BookingController::createBooking` จาก `$request->user('sanctum')` เป็น `$booking->user` (addRooms/updateRoom ใช้ `$booking->user` อยู่แล้วจึงถูกต้องโดยอัตโนมัติ) · advance-notice ยังใช้ sanctum admin (admin exempt = จองวันนี้ได้)
+  - **โหมด B — เฮดเปล่า:** admin ไม่ส่ง `user` → `user_id = null` · **ไม่มี draft-dedup** (org/group จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้ดู — `getEffectiveDailyRate(?, null)`) · ไม่โดน room cap · ownership เหลือแต่ admin (โค้ด "เจ้าของหรือ admin" รองรับ null อยู่แล้ว)
+  - **ไม่เพิ่ม `created_by`** (ticket 02 ตัดสินแล้ว) · `source='admin'` เป็น marker ที่ client ส่งมา — ไม่ force ในโค้ด (validation in:online,admin,line เดิม)
+  - **flow เดิม regression 0%:** non-admin = `user_id` ตัวเอง + dedup ตัวเอง + cap ตัวเอง เหมือนเดิมทุกอย่าง
+- **การเก็บ payment_deadline ของเฮดเปล่า** ยังใช้กลไกเดิม 15 นาที + admin ต่อได้ผ่าน `PUT /bookings/{id}` (payment_deadline) — flow จ่ายของ userless booking = ticket 04 (ยัง open)
+- Tests: `tests/Feature/OrganizationTest.php` (CRUD + toggle + 403 + dup erp + ไม่มี DELETE) · `tests/Feature/AdminBookingForUserTest.php` (โหมด A/B + dedup ที่ target + cap ตาม role target + daily_ku ตาม target + 403 ของ non-admin + 422 UUID มั่ว + เฮดเปล่าจองซ้อนได้)

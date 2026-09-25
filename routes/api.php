@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\FrontDeskController;
 use App\Http\Controllers\Api\V1\GlobalRateController;
 use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\MockController;
+use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\RoomStatePeriodController;
@@ -160,6 +161,17 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/users/{id}', [UserController::class, 'update']);
         Route::delete('/users/{id}', [UserController::class, 'destroy']);
         Route::put('/users/{id}/verify', [UserController::class, 'verify']);
+
+        // 🏛️ Organizations (wayfinder/organization-bookings ticket 01/05) —
+        //    ไม่มี DELETE ตาม precedent discounts — เลิกใช้ = PATCH .../toggle
+        Route::get('/organizations', [OrganizationController::class, 'index']);
+        Route::post('/organizations', [OrganizationController::class, 'store']);
+        Route::get('/organizations/{id}', [OrganizationController::class, 'show'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::put('/organizations/{id}', [OrganizationController::class, 'update'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::patch('/organizations/{id}/toggle', [OrganizationController::class, 'toggle'])
+            ->where('id', '[0-9a-f\-]{36}');
 
         // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ, assign ห้อง)
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);

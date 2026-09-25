@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\User;
 use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -14,13 +15,24 @@ class StoreBookingRequest extends FormRequest
 
     public function rules(): array
     {
+        // 🏛️ (25/09/26, organization-bookings ticket 02): admin จองแทน (โหมด A ส่ง `user` UUID) —
+        //    room cap ใช้ role ของ target user ไม่ใช่ admin ผู้สร้าง (ticket 02 ตัดสิน)
+        $capUser = $this->user('sanctum');
+        if ($capUser && $capUser->role === 'admin' && $this->filled('user')) {
+            $capUser = User::find($this->input('user')) ?? $capUser;
+        }
+
         $bookingRoomsRules = ['required', 'array'];
-        if ($roomCapRule = BookingRule::roomCapRule($this->user('sanctum'))) {
+        if ($roomCapRule = BookingRule::roomCapRule($capUser)) {
             $bookingRoomsRules[] = $roomCapRule;
         }
 
         return [
             'source' => 'required|string|in:online,admin,line',
+
+            // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A จองแทน —
+            //    ระบุ user ปลายทางด้วย UUID · ส่งได้เฉพาะ admin (ตรวจสิทธิ์ 403 ใน controller)
+            'user' => 'nullable|uuid|exists:users,id',
 
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไปอยู่ใน booking_rooms (รองรับหลายคน/ห้อง)
             // bookings ไม่รับ guest fields แล้ว

@@ -1233,13 +1233,33 @@ class BookingController extends Controller
                 throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
             }
 
-            $hasDraft = Booking::where('user_id', $userId)
-                ->where('status', 'draft')
-                ->where('payment_deadline', '>', Carbon::now())
-                ->exists();
+            // 🏛️ (25/09/26, organization-bookings ticket 02): admin booking 2 โหมด —
+            //    โหมด A: admin ส่ง `user` (UUID) → user_id = target user (ไม่ใช่ admin ผู้สร้าง)
+            //    โหมด B: admin ไม่ส่ง `user` → user_id = null (เฮดเปล่า — org/group booking)
+            //    non-admin = flow เดิม 100% (user_id ตัวเอง)
+            //    ⚠️ ตัดสินโหมดจาก sanctum role เท่านั้น — ห้ามใช้ field 'source' ตามธรรมเนียม BookingRule
+            $isAdmin = $user !== null && $user->role === 'admin';
+            if ($request->filled('user') && ! $isAdmin) {
+                throw new \Exception('การระบุ user ปลายทาง (จองแทน) สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+            }
 
-            if ($hasDraft) {
-                throw new \Exception('มีรายการจองที่รอชำระเงินอยู่คะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
+            $bookingUserId = $userId;
+            if ($isAdmin) {
+                // 🏛️ โหมด A — link target user · โหมด B — เฮดเปล่า (null)
+                $bookingUserId = $request->filled('user') ? $validated['user'] : null;
+            }
+
+            // 🛑 draft-dedup — โหมด A นับที่ target user (admin มี draft ของตัวเองไม่ขวางการจองแทน)
+            //    · โหมด B (userless) ไม่มี dedup — org จองซ้อนหลายบิลได้ (group booking ปกติ)
+            if ($bookingUserId !== null) {
+                $hasDraft = Booking::where('user_id', $bookingUserId)
+                    ->where('status', 'draft')
+                    ->where('payment_deadline', '>', Carbon::now())
+                    ->exists();
+
+                if ($hasDraft) {
+                    throw new \Exception('มีรายการจองที่รอชำระเงินอยู่คะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
+                }
             }
 
             DB::beginTransaction();
@@ -1295,7 +1315,9 @@ class BookingController extends Controller
 
             $booking = Booking::create([
                 'confirmation' => $confirmationNo,
-                'user_id' => $userId,
+                // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A = target user ·
+                //    โหมด B = null (เฮดเปล่า) · non-admin = ตัวเอง (flow เดิม)
+                'user_id' => $bookingUserId,
                 'source' => $validated['source'],
                 'status' => 'draft',
 
@@ -1328,7 +1350,10 @@ class BookingController extends Controller
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
                 // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
-                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $request->user('sanctum')) * $nights;
+                // 🏛️ (25/09/26, organization-bookings ticket 02): ใช้ $booking->user (target) เสมอ —
+                //    admin จองแทนโหมด A คิดราคาตาม role ของ user ปลายทาง (daily_ku) ·
+                //    โหมด B userless = null → daily · non-admin = ตัวเอง (เหมือนเดิม)
+                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
                 $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
                 $extraBedUnit = $rates['extra_bed'] ?? 0;
                 $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
@@ -1399,7 +1424,8 @@ class BookingController extends Controller
                 'paid_amount' => $booking->fresh()->paid_amount,
                 'outstanding_amount' => $booking->fresh()->outstanding_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
-                'user_id' => $userId,
+                // 🏛️ (25/09/26, organization-bookings ticket 02): user_id = target (โหมด A) / null (โหมด B)
+                'user_id' => $bookingUserId,
                 'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 
