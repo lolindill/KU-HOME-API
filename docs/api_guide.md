@@ -1276,7 +1276,7 @@ curl -s -H "Accept: application/json" \
 > ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline)
 > 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
 > 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
-> 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้น) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
+> 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้นหลักสิบ) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
 
 **Validation Rules:**
 
@@ -2650,6 +2650,17 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 - **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`
 - **Check-in/out ไม่มี hard guard เรื่องเงิน** — เข้าพัก/ปิด booking ได้แม้ยอดค้าง (การตามเก็บเป็นกระบวนการ ไม่ใช่ระบบบล็อก)
 - **deadline / cleanup:** ทุก type ใช้ `payment_deadline` 15 นาทีเหมือนกัน — แต่ draft `deferred` **ยกเว้น `CleanupExpiredDrafts`** และ **ยึด slot ต่อ** จน admin อนุมัติหรือลบ (จุดประสงค์ของ deferred = การันตีห้องให้องค์กรก่อนชำระ)
+
+### 💵 กติกาปัดเศษขึ้นหลักสิบ (REQ-015/016) — 25/09/26
+
+> wayfinder `booking-payment-types` ticket 07/09 — "ยอดเงินลูกค้าไม่มีทศนิยม มีเศษให้ปัดขึ้นหลักสิบ" (`ceil($amount / 10) * 10`) — **กติกาเดียวทั้งระบบ ไม่แยก stay_type**
+
+- **ปัดที่ไหน:** `booking_rooms.amount` ใน `DiscountService::reprice()` (chokepoint เดียวของเงิน booking) — ลำดับ `(เรท×คืน) − ส่วนลด + addon → ปัดขึ้นสิบท้ายสุดครั้งเดียว` · `room_amount`/`discount_amount` เก็บค่าดิบ · `total_amount = Σ amount ที่ปัดแล้ว` (invariant `Σ booking_rooms.amount == total_amount` คงอยู่)
+- **มัดจำ default** (`deposit_amount` effective จาก config `booking.deposit_percent`) **ปัดสิบต่อ** — เป็นยอดที่ลูกต้องจ่าย · ส่วน `deposit_amount` ที่ admin ตั้งเอง **ไม่ force ปัด** (admin รับผิดชอบตัวเลขเอง)
+- **ชั้น A `booking_confirmations.amount` (ยอดแจ้งต่อครั้งส่งสลิป) ไม่บังคับปัด** — soft check ให้ admin ตัดสินตอน verify เหมือนเดิม
+- **ส่วนลด `percent` ใช้ `intdiv` ตัดทิ้งเหมือนเดิม** — การปัดท้ายครอบเศษที่เหลือทั้งหมด
+- **จองครึ่งคืนไม่มีในโดเมน** — ทุกจุดคำนวณคืน (`reprice()` + `BookingController` 4 จุด: create/confirm rooms/update rooms/record-walk-in) `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` เสมอ (กัน Carbon 3 คืน float เมื่อ input เป็น datetime เช่น `2026-10-01 14:00`)
+- **Regression:** เรทหลักร้อยตัวงั้น (เช่น 1,500) ยอดเดิมไม่เปลี่ยน — ปัดสิบโดนเฉพาะเมื่อเกิดเศษ
 
 ### PUT `/bookings/{id}` — Update booking payment fields (Admin) 🆕
 

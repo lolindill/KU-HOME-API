@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Casts\PgBoolean;
+use App\Support\RoundToTen;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -122,6 +123,8 @@ class Booking extends Model
      * 💳 deposit_amount (effective) — frontend อ่านตัวเดียวจบ:
      *    type ≠ deposit → null · type = deposit → column ?? ceil(total × deposit_percent)
      *    (accessor ทับ column เดิม — เขียนผ่าน $booking->deposit_amount = X ยังเข้า column ตามปกติ)
+     *    💵 (25/09/26) REQ-015/016 — มัดจำ default ปัดขึ้นหลักสิบต่อ (เป็นยอดที่ลูกต้องจ่าย)
+     *    · deposit_amount ที่ admin ตั้งเองไม่ force ปัด (admin รับผิดชอบตัวเลขเอง — ticket 07)
      */
     public function getDepositAmountAttribute(): ?int
     {
@@ -133,7 +136,9 @@ class Booking extends Model
             return (int) $this->attributes['deposit_amount'];
         }
 
-        return (int) ceil($this->total_amount * ((int) config('booking.deposit_percent', 50)) / 100);
+        return RoundToTen::round(
+            (int) ceil($this->total_amount * ((int) config('booking.deposit_percent', 50)) / 100)
+        );
     }
 
     /**

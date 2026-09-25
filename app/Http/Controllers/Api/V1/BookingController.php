@@ -336,8 +336,9 @@ class BookingController extends Controller
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
 
                 // คำนวณ nights รายห้อง
-                $roomCheckIn = Carbon::parse($roomRequest['check_in']);
-                $roomCheckOut = Carbon::parse($roomRequest['check_out']);
+                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
+                $roomCheckIn = Carbon::parse($roomRequest['check_in'])->startOfDay();
+                $roomCheckOut = Carbon::parse($roomRequest['check_out'])->startOfDay();
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
                 // 🌟 room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
@@ -673,7 +674,9 @@ class BookingController extends Controller
                 [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
                 $roomType = RoomType::findOrFail($effectiveTypeId);
-                $nights = Carbon::parse($effectiveCheckIn)->diffInDays(Carbon::parse($effectiveCheckOut)) ?: 1;
+                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
+                $nights = (int) Carbon::parse($effectiveCheckIn)->startOfDay()
+                    ->diffInDays(Carbon::parse($effectiveCheckOut)->startOfDay()) ?: 1;
 
                 $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
                 $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
@@ -935,7 +938,9 @@ class BookingController extends Controller
                     [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
 
                     $roomType = RoomType::findOrFail($u['type_id']);
-                    $nights = Carbon::parse($u['check_in'])->diffInDays(Carbon::parse($u['check_out'])) ?: 1;
+                    // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
+                    $nights = (int) Carbon::parse($u['check_in'])->startOfDay()
+                        ->diffInDays(Carbon::parse($u['check_out'])->startOfDay()) ?: 1;
 
                     $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
                     $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
@@ -1243,8 +1248,9 @@ class BookingController extends Controller
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
 
                 // 🌟 Refactor (02/07/26): คำนวณ nights รายห้อง (แต่ละห้องมีวันที่ต่างกันได้)
-                $roomCheckIn = Carbon::parse($roomRequest['check_in']);
-                $roomCheckOut = Carbon::parse($roomRequest['check_out']);
+                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
+                $roomCheckIn = Carbon::parse($roomRequest['check_in'])->startOfDay();
+                $roomCheckOut = Carbon::parse($roomRequest['check_out'])->startOfDay();
                 $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
 
                 // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)

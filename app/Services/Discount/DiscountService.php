@@ -7,6 +7,7 @@ use App\Models\BookingRoom;
 use App\Models\Discount;
 use App\Models\DiscountRedemption;
 use App\Models\GlobalRate;
+use App\Support\RoundToTen;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -163,7 +164,10 @@ class DiscountService
         $total = 0;
 
         foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
-            $nights = Carbon::parse($br->check_in)->diffInDays(Carbon::parse($br->check_out)) ?: 1;
+            // 🕒 (25/09/26) REQ-015/016 — normalize เป็นคืนเต็มเสมอ: startOfDay() ทั้งสองก่อน diffInDays()
+            //    (Carbon 3 คืน float เมื่อ input เป็น datetime เช่น 1.5 คืน — จองครึ่งคืนไม่มีในโดเมนนี้)
+            $nights = (int) Carbon::parse($br->check_in)->startOfDay()
+                ->diffInDays(Carbon::parse($br->check_out)->startOfDay()) ?: 1;
             $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
             $roomAmount = $rate * $nights;
 
@@ -180,6 +184,10 @@ class DiscountService
                 + ($br->addon?->breakfast_price ?? 0)
                 + ($br->addon?->early_checkIn_price ?? 0)
                 + ($br->addon?->late_checkOut_price ?? 0);
+
+            // 💵 (25/09/26) REQ-015/016 — ปัดเศษขึ้นหลักสิบท้ายสุดครั้งเดียว (ลดก่อน ปัดท้าย)
+            //    ปัดที่ amount ต่อห้อง แล้ว total_amount ไหลตาม (invariant Σ คงอยู่)
+            $amount = RoundToTen::round($amount);
 
             $br->update([
                 'room_amount' => $roomAmount,

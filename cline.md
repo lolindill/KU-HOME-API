@@ -2144,3 +2144,15 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Backfill:** booking เดิม `paid|confirmed` → payments row ย้อนหลัง 1 row = total_amount, reference `legacy-backfill:{id}` — อยู่ใน **`App\Support\LegacyPaymentBackfill`** (named class เพราะ migration เป็น anonymous — test เรียกซ้ำจำลองได้, idempotent ด้วย whereNotExists) · Migration gotcha: เพิ่ม column + backfill ใน release เดียว — ไม่ต้อง migrate:fresh (ไม่มี seeder เปลี่ยนรูป)
 - **State machine/transition ไม่เปลี่ยนแม้บรรทัดเดียว** (regression contract ข้อ 2) — hook is_paid/ledger อยู่ที่ controller verify/recordPayment ไม่ใช่ใน transitionStatus
 - Tests: `tests/Feature/BookingPaymentTypeTest.php` (14 — full regression+ledger / deposit effective+partial / deposit custom / 422 cross-field / 403 non-admin / deferred block+approve / PUT /bookings/{id} 4 เคส / reject-resubmit ledger / backfill+idempotent / cleanup skip 2 เคส / holdingSlot deferred / expected_amount switch) · แก้ BookingConfirmationTest + ImageTest (ใส่ amount)
+
+## 💵 ปัดเศษขึ้นหลักสิบ + normalize คืนเต็ม (2026-09-25, wayfinder/booking-payment-types — ticket 07/09)
+
+> REQ-015/016 — owner decision (ticket 07, 2026-09-25): "ยอดเงินลูกค้าไม่มีทศนิยม มีเศษให้ปัดขึ้นหลักสิบ" — กติกาเดียวทั้งระบบ ไม่แยก stay_type · implement = ticket 09 · suite **544 เขียว** (เดิม 540 + ใหม่ 4)
+
+- **Helper เดียว:** `App\Support\RoundToTen::round()` = `(int) ceil($baht / 10) * 10` — ใช้ 2 จุดเท่านั้น:
+  - `DiscountService::reprice()` — ปัดที่ `booking_rooms.amount` **หลัง** `(เรท×คืน) − ส่วนลด + addon` (ลดก่อน ปัดท้ายครั้งเดียว) · `room_amount`/`discount_amount` เก็บค่าดิบ · `total_amount = Σ amount ที่ปัดแล้ว` (invariant Σ คงอยู่ — ห้ามปัดที่ total แยก)
+  - `Booking::getDepositAmountAttribute()` — มัดจำ default (`ceil(total×deposit_percent/100)`) ปัดสิบต่อ (เป็นยอดลูกต้องจ่าย) · `deposit_amount` ที่ admin ตั้งเอง + ชั้น A `booking_confirmations.amount` **ไม่ force ปัด** (ชั้น A ยัง soft admin ตัดสินตาม ticket 04)
+- **ส่วนลด `percent` ใช้ `intdiv` ตัดทิ้งเหมือนเดิม** (`DiscountService.php:135` เดิม) — ปัดท้ายครอบเศษที่เหลือทั้งหมด ไม่ต้องแตะ
+- **🕒 Normalize คืนเต็มเสมอ:** ทุกจุดคำนวณคืน `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` — 5 จุด: `DiscountService::reprice()` + `BookingController` (createBooking, addRooms, updateRoom, updateRooms batch — เดิม :341/:676/:938/:1248) — Carbon 3 คืน **float** เมื่อ input เป็น datetime (เช่น 1.875 คืน) → คูณเรทแล้วเศษหลุด · จองครึ่งคืนไม่มีในโดเมนนี้ · `BookingRoom::nights()` มี startOfDay อยู่แล้ว
+- **เศษเงินเกิดได้จริงแค่ 2 ทาง** (fact จาก Explore 2026-09-25): (1) diffInDays float (2) ส่วนลด percent intdiv — ที่เหลือ int×int หมด · เรทปัจจุบันหลักร้อยตัวงั้น → regression 0%
+- Tests: `tests/Feature/BookingRoundingTest.php` (4 — เรท 1,255 ปัดสิบ / ส่วนลด percent 7% เศษ 1,168→1,170 / datetime 14:00→11:00 นับ 2 คืนเต็ม / deposit default 33% 416→420 + admin-set 416 ไม่ force) · docs: `docs/api_guide.md` หัวข้อ "💵 กติกาปัดเศษขึ้นหลักสิบ" ใต้ Payment types
