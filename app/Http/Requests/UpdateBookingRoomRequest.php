@@ -9,7 +9,10 @@ use Illuminate\Foundation\Http\FormRequest;
  * 🌟 (17/08/26): Request สำหรับแก้ไข booking room รายห้อง
  *
  * ใช้กับ PUT /bookings/{bookingId}/rooms/{bookingRoomId}
- * — อนุญาตเฉพาะ BR status='draft' และ parent booking status='draft' (guard ใน controller)
+ * — สองโหมด (guard ใน controller):
+ *   1) parent booking status='draft' + BR status='draft' — แก้ไขปกติ (เจ้าของหรือ admin)
+ *   2) 💳 (25/09/26, ticket 10) parent booking status='paid|confirmed' + BR draft|confirmed —
+ *      surcharge หลังจ่าย (admin เท่านั้น) — reprice ใหม่ ส่วนต่างเก็บต่อผ่าน recordPayment
  *
  * โครงสร้าง flat (ไม่ซ้อน booking_rooms.*) ต่างจาก StoreBookingRequest/AddBookingRoomsRequest
  * เพราะแก้ทีละห้องด้วย bookingRoomId ที่ระบุใน path

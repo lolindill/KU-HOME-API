@@ -1,11 +1,11 @@
 # 🗺️ Wayfinder Map — Booking Payment Types (เต็มจำนวน / มัดจำ / ค้างชำระ)
 
 - **label:** `wayfinder:map`
-- **status:** open
+- **status:** closed (2026-09-25 — ticket ปิดหมด, implement จบ suite 554 เขียว)
 - **tracker:** local-markdown — tickets อยู่ใน `tickets/` ของ directory นี้ (blocking ระบุใน field `blocked-by` ของแต่ละ ticket)
 - **charted:** 2026-09-24
 
-## Destination
+## Destination ✅ COMPLETED (2026-09-25)
 
 Booking มีระบบ **ประเภทการชำระเงิน** ครบ 3 แบบ — **เต็มจำนวน (full) · มัดจำ (deposit) · ค้างชำระ (deferred)** — ตั้งแต่ schema (`bookings.payment_type` + ยอดเงิน 2 ชั้น: ชั้น A `booking_confirmations.amount` ต่อครั้งส่งสลิป และชั้น B ภาพรวมจ่ายแล้ว/ค้างบน bookings) ผ่าน API contract + ประสาน state machine จนถึง **implement จบ + suite เขียว** — เพื่อให้ booking องค์กร (แมป `organization-bookings`) ใช้ค้างชำระได้ และ [ticket 08 ของ excel-reports](../excel-reports/tickets/08-payment-amount-channel-deposit.md) กลับมาตัดสิน column รายงานได้
 
@@ -30,7 +30,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 10](./tickets/10-implement-surcharge-after-payment.md) (implement surcharge หลังจ่าย — ปลดล็อกแล้ว) · ✅ **ticket 08 ปิดแล้ว (2026-09-25)** — ไม่มี cancel ในระบบ · ✅ ticket 09 ปิดแล้ว (2026-09-25) — implement ปัดเศษจบ suite 544 เขียว
+- 🎯 **Frontier ปัจจุบัน:** (ว่าง — ตั๋วปิดหมด) · ✅ ticket 10 ปิดแล้ว (2026-09-25) — implement surcharge หลังจ่ายจบ suite 554 เขียว → **แมปปิดสมบูรณ์** · ✅ ticket 08 ปิดแล้ว (2026-09-25) — ไม่มี cancel ในระบบ · ✅ ticket 09 ปิดแล้ว (2026-09-25) — implement ปัดเศษจบ suite 544 เขียว
 
 ## Decisions so far
 
@@ -43,6 +43,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - [06: Implement — migration + code + tests, suite เขียว](./tickets/06-implement-payment-types.md): migration `2026_09_25_100000` (+backfill ledger ผ่าน `App\Support\LegacyPaymentBackfill` — named class เพราะ migration anonymous) · ledger 3 จุดเขียน + envelope 4 field เป็น accessors/appends บน Booking · **PUT /bookings/{id} ใหม่** (admin/draft รับ payment_type/deposit_amount/discount_code/payment_deadline) · confirm `amount` required (**⚠️ breaking change — frontend ต้องอัปเดต**) + deferred block ก่อน state guard · cleanup + destroyBooking กันลบ draft ที่มี payments (422) · **suite 540 เขียว** (BookingPaymentTypeTest 14 ใหม่) · docs api_guide หัวข้อ "💳 Payment types" + cline.md จดครบ
 - [09: Implement — ปัดเศษขึ้นหลักสิบ + normalize คืนเต็ม](./tickets/09-implement-round-up-to-tens.md): helper `App\Support\RoundToTen::round()` ใช้ 2 จุด — `reprice()` ปัดที่ `booking_rooms.amount` หลังลด+addon (total = Σ ยอดที่ปัดแล้ว) + มัดจำ default ปัดสิบต่อ · admin-set deposit และชั้น A ไม่ force ปัด · `startOfDay()` ก่อน `diffInDays()` ครบ 5 จุด (reprice + BookingController 4) · `BookingRoundingTest` 4 ใหม่ · **suite 544 เขียว** · docs api_guide "💵 กติกาปัดเศษขึ้นหลักสิบ" + cline.md จดครบ
 - [08: ยกเลิก / no_show ของ booking มัดจำ·ค้างชำระ](./tickets/08-cancellation-and-deposit-refund.md): **ไม่มี "ยกเลิก" ในระบบเลย** — ห้ามยกเลิกหลังจ่าย (ไม่เพิ่มสถานะ cancelled) · ก่อนจ่ายใช้กลไกเดิม (draft ลบ/หมดอายุ · verify_error ค้าง · guard "มี payments ห้ามลบ" คือเส้นแบ่ง) · no_show = ยึดมัดจำเป็นค่าปรับตาย (ledger ไม่เขียนย้อน) · ยอดค้างที่เหลือ admin ตัดสินรายกรณี (ระบบไม่ enforce) · **ไม่มีการคืนเงินในระบบทุกรูปแบบ** · ชั้น B ไม่ต้องแตะ · กรณีเปลี่ยน room type ราคาเพิ่มหลังจ่าย = [ticket 10](./tickets/10-implement-surcharge-after-payment.md) (graduate ใหม่)
+- [10: Implement — Surcharge เปลี่ยน room type หลังจ่ายแล้ว](./tickets/10-implement-surcharge-after-payment.md): ขยาย `PUT /bookings/{id}/rooms/{brId}` เดิมเป็น 2 โหมด (draft = เดิม · paid/confirmed = **surcharge admin-only**) · BR ต้อง draft|confirmed · มี room_id = ห้ามเปลี่ยน shape · reprice ตรงผ่าน chokepoint (ปัดสิบไหลตาม) · **downgrade < paid = 422** (ไม่มีคืนเงิน) · deposit_amount ไม่ย้อน · is_paid reset ตามนิยาม · response +6 field (previous/surcharge/envelope) · suite **554 เขียว** (BookingSurchargeAfterPaymentTest 10 ใหม่) · docs + cline.md จดครบ
 
 ## Not yet specified
 

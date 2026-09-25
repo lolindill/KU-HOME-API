@@ -114,6 +114,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // 🌟 (17/08/26): แก้ไข / ลบ booking room รายห้อง (เฉพาะ BR=draft และ parent booking=draft)
     //    เจ้าของ booking หรือ admin ใช้ได้ (ownership check ใน controller)
+    // 💳 (25/09/26, booking-payment-types ticket 10): parent booking=paid|confirmed →
+    //    surcharge หลังจ่าย — admin เท่านั้น (ส่วนต่างราคาเก็บต่อผ่าน recordPayment)
     Route::put('/bookings/{bookingId}/rooms/{bookingRoomId}', [BookingController::class, 'updateRoom'])
         ->where(['bookingId' => '[0-9a-f\-]{36}', 'bookingRoomId' => '[0-9a-f\-]{36}'])
         ->middleware('throttle:5,1');

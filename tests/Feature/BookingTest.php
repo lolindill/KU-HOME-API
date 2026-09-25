@@ -1654,12 +1654,15 @@ class BookingTest extends TestCase
         $booking = $this->createDraftBooking($user, $roomType, 1, ['status' => 'paid']);
         $br = $booking->bookingRooms->first();
 
+        // 💳 (25/09/26, booking-payment-types ticket 10) — booking paid = โหมด surcharge
+        //    หลังจ่าย: user เจ้าของแก้ไม่ได้ (admin เท่านั้น) → 403 ชัดเจน
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'guests' => [['title' => 'mr', 'name' => 'New Name', 'nationality' => 'TH']],
             ]);
 
-        $response->assertStatus(422);
+        $response->assertStatus(403);
+        $response->assertJson(['status' => 'error']);
     }
 
     public function test_update_room_of_another_booking_returns_404(): void

@@ -2156,3 +2156,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **🕒 Normalize คืนเต็มเสมอ:** ทุกจุดคำนวณคืน `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` — 5 จุด: `DiscountService::reprice()` + `BookingController` (createBooking, addRooms, updateRoom, updateRooms batch — เดิม :341/:676/:938/:1248) — Carbon 3 คืน **float** เมื่อ input เป็น datetime (เช่น 1.875 คืน) → คูณเรทแล้วเศษหลุด · จองครึ่งคืนไม่มีในโดเมนนี้ · `BookingRoom::nights()` มี startOfDay อยู่แล้ว
 - **เศษเงินเกิดได้จริงแค่ 2 ทาง** (fact จาก Explore 2026-09-25): (1) diffInDays float (2) ส่วนลด percent intdiv — ที่เหลือ int×int หมด · เรทปัจจุบันหลักร้อยตัวงั้น → regression 0%
 - Tests: `tests/Feature/BookingRoundingTest.php` (4 — เรท 1,255 ปัดสิบ / ส่วนลด percent 7% เศษ 1,168→1,170 / datetime 14:00→11:00 นับ 2 คืนเต็ม / deposit default 33% 416→420 + admin-set 416 ไม่ force) · docs: `docs/api_guide.md` หัวข้อ "💵 กติกาปัดเศษขึ้นหลักสิบ" ใต้ Payment types
+
+## 💳 Surcharge — แก้ห้องหลังชำระเงินแล้ว (2026-09-25, wayfinder/booking-payment-types — ticket 10)
+
+> graduate จาก ticket 08 (owner: "มีกรณีเปลี่ยน room type แล้วราคาเพิ่ม ที่ทำได้ ปรับราคาให้จ่ายเพิ่มด้วย") — booking `paid|confirmed` เปลี่ยน room type/แก้ห้องได้ ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `recordPayment` · suite **554 เขียว** (เดิม 544 + ใหม่ 10)
+
+- **Endpoint = ขยายของเดิม** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` (`BookingController::updateRoom`) เป็น 2 โหมด ไม่สร้าง endpoint ใหม่:
+  - `draft` — flow เดิม 100% (เจ้าของหรือ admin) regression 0%
+  - `paid|confirmed` — **surcharge หลังจ่าย, admin เท่านั้น** (ตามธรรมเนียม payment fields — user เจ้าของ = `403`)
+- **Guard ฝั่ง surcharge:** BR ต้อง `draft|confirmed` (checked_in/checked_out/no_show = `422`) · BR ที่มี `room_id` (auto-assign แล้ว) **เปลี่ยน room_type/วันที่ไม่ได้** `422` (guests/billing/addons แก้ต่อได้) · availability re-check + `holdingSlot()` ใช้โค้ดเดิมทั้งก้อน · lock + re-check รับทั้ง draft/paid/confirmed
+- **Downgrade (ตัดสิน AFK — ไม่ re-litigate ticket 08):** ยอดรวมใหม่ **< `paid_amount` = `422` rollback** (ticket 08 ปิดทางคืนเงิน — ส่วนต่างลดจนเกินเงินที่จ่าย = ต้อง refund ซึ่งระบบไม่มี) · ลดได้เฉพาะยอดรวมใหม่ ≥ paid → outstanding ลดตาม (`surcharge_amount` ติดลบได้)
+- **`deposit_amount` ไม่ย้อน** — คง column เดิม (เป็นข้อมูลงวดที่ตั้ง/จ่ายไปแล้ว) · effective (null = 50%) ไหลตาม total ใหม่เอง ไม่กระทบ ledger
+- **`is_paid` reset:** `is_paid=true` เดิม + surcharge ทำ total > paid → update `false` (นิยาม ticket 04 `SUM(payments) ≥ total`) — recordPayment set คืนเมื่อเก็บส่วนต่างครบ
+- **ส่วนลด:** surcharge เรียก `DiscountService::reprice()` ตรง — **ไม่** ผ่าน `reconcileDiscount()` (`applyToDraft` guard draft-only · used redemption ยังถูกนับใน reprice เพราะ holds query ไม่ filter status) · ปัดสิบ (ticket 09) ไหลตามอัตโนมัติ
+- **Response เพิ่ม 6 field เสมอ (draft mode ด้วย):** `previous_total_amount` · `surcharge_amount` · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
+- **Regression ตั้งใจ 1 จุด:** `BookingTest::test_update_room_blocked_when_booking_not_draft` เดิมคาด 422 (user แก้ booking paid) — ใหม่เป็น **403** ตามสิทธิ์ admin-only ที่ชัดเจนขึ้น
+- Tests: `tests/Feature/BookingSurchargeAfterPaymentTest.php` (10 — surcharge deposit/full + reset is_paid + downgrade บล็อก/ยอม + 403 + pending 422 + availability 422 + room_id 422 + checked_in 422 + draft regression) · docs: `docs/api_guide.md` หัวข้อ "💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10)" + หัวข้อ endpoint PUT rooms

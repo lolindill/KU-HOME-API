@@ -1,0 +1,98 @@
+# 🧪 Tooling caches
+/.phpunit.cache
+.phpunit.result.cache
+.phpactor.json
+
+# 🖥️ IDE / editor
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
+
+# 🔐 Environment & secrets (.env จริงห้ามเข้า repo — ใช้ .env.example เท่านั้น)
+.env
+.env.*
+!.env.example
+/auth.json
+/storage/*.key
+
+# 🪟 OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# 📦 Dependencies & build output
+/node_modules
+/vendor
+/public/build
+/public/hot
+/public/storage
+
+# 🗃️ Local SQLite DB (dev ใช้ sqlite — prod เป็น PostgreSQL; defense ร่วมกับ database/.gitignore)
+/database/*.sqlite
+/database/*.sqlite-journal
+/database/*.sqlite-wal
+/database/*.sqlite-shm
+
+# 🧾 Logs & runtime
+*.log
+/storage/pail
+
+# 🏠 Laravel Homestead
+Homestead.json
+Homestead.yaml
+
+# 📚 docs/ — เก็บเฉพาะ api_guide + ER diagram + API Bin export ไว้ใน repo (ไฟล์อื่นทั้งหมด รวมถึงที่จะเพิ่มในอนาคต ไม่ track)
+/docs/*
+!/docs/api_guide.md
+!/docs/sso-frontend-guide.md
+!/docs/database-er.md
+!/docs/API Bin*.xlsx
+
+# 🚧 Project-specific scratch/output (KU HOME)
+api_bin_output.txt
+/test_scripts/
+/.freebuff
+/.zcode
+/.agent-hub
+
+# 🖼️ Scratch images (รูปทดสอบ ad-hoc ระดับ storage/ root — ไม่เกี่ยวกับ images table บน private disk)
+/storage/input.jpg
+/storage/respon.jpg
+
+# Local git worktrees (nested checkouts — never commit)
+/.worktree/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

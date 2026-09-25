@@ -555,9 +555,22 @@ class BookingController extends Controller
 
     /**
      * 🌟 (17/08/26): แก้ไข booking room รายห้อง (เจ้าของหรือ admin)
+     * 💳 (25/09/26, booking-payment-types ticket 10): เพิ่มโหมด **surcharge หลังจ่าย**
      *
-     * Constraints:
-     * - booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * สองโหมดตาม booking.status:
+     * - 'draft' — แก้ไขปกติ (เจ้าของหรือ admin) — flow เดิม regression 0%
+     *   · booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * - 'paid'|'confirmed' — surcharge หลังมีเงินเข้า ledger แล้ว (**admin เท่านั้น**)
+     *   · BR ต้องยัง draft|confirmed (checked_in/out/no_show แก้ไม่ได้)
+     *   · มี room_id ถูกจัดแล้ว → ห้ามเปลี่ยน room_type/วันที่ (422 — ปลดการจัดห้องก่อน)
+     *   · reprice ผ่าน chokepoint เดียว reprice() — ราคาเพิ่มไหลเข้า outstanding_amount
+     *     เก็บต่อผ่าน recordPayment (กลไกเดิม — ไม่มี endpoint เงินใหม่, ห้ามเขียน payments ตรง)
+     *   · ยอดรวมใหม่ต่ำกว่าเงินที่เข้า ledger = 422 (ticket 08 — ไม่มีการคืนเงินในระบบ)
+     *     · ลดได้เฉพาะยอดรวมใหม่ ≥ paid_amount (outstanding ลดตาม)
+     *   · deposit_amount คงเดิมไม่ย้อน (เป็นข้อมูลงวดที่ตั้ง/จ่ายไปแล้ว) ·
+     *     is_paid=true ที่ total ใหม่ทำให้ยอดค้างเกิด → reset เป็น false
+     *
+     * ร่วมกันทั้งสองโหมด:
      * - แก้ room_type_id/check_in/check_out ได้ โดยเช็ค availability ใหม่ (ตัดตัวเองออกจาก count)
      * - ราคาคิดใหม่ทั้งหมดที่ server (global_rates) — ไม่รับ price จาก client เด็ดขาด
      * - ห้ามแก้ room_id (ต้องผ่าน RoomAllocator) / status (ต้องผ่าน transitionStatus)
@@ -584,14 +597,31 @@ class BookingController extends Controller
                 ], 403);
             }
 
-            // 🔒 Draft guard — booking ต้องเป็น draft
-            if ($booking->status !== 'draft') {
+            // 💳 ticket 10 — ตัดสินโหมดก่อน guard: draft (เดิม) หรือ surcharge หลังจ่าย (paid/confirmed)
+            $postPayment = in_array($booking->status, ['paid', 'confirmed'], true);
+
+            // 🔒 Draft guard — โหมดเดิม booking ต้องเป็น draft
+            if (! $postPayment && $booking->status !== 'draft') {
                 throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
             }
 
             // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
             $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
-            if ($bookingRoom->status !== 'draft') {
+
+            // 💳 ticket 10 — surcharge หลังจ่าย: admin เท่านั้น (ตามธรรมเนียม payment fields)
+            if ($postPayment && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'แก้ไขห้องหลังชำระเงินแล้ว (surcharge) ต้องเป็นแอดมินเท่านั้นค่ะนายท่าน 🔒',
+                ], 403);
+            }
+
+            // 🔒 BR guard — draft mode: BR ต้อง draft · post-payment mode: แก้ได้ก่อนเข้าพักเท่านั้น
+            if ($postPayment) {
+                if (! in_array($bookingRoom->status, ['draft', 'confirmed'], true)) {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ', 422);
+                }
+            } elseif ($bookingRoom->status !== 'draft') {
                 throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
             }
 
@@ -599,9 +629,13 @@ class BookingController extends Controller
             try {
                 // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
                 $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
-                if ($locked->status !== 'draft') {
+                $lockedPostPayment = in_array($locked->status, ['paid', 'confirmed'], true);
+                if (! $lockedPostPayment && $locked->status !== 'draft') {
                     throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
                 }
+
+                // 💳 ticket 10 — ยอดรวมก่อนแก้ (ใช้คำนวณส่วนต่าง surcharge)
+                $previousTotal = (int) $locked->total_amount;
 
                 // 🎯 Merge ฟิลด์ที่ส่งมาลง BR — เช็คค่าเดิมใน DB เพื่ออัปเดตเฉพาะฟิลด์ที่เปลี่ยนจริง
                 $dirtyFields = [];
@@ -638,6 +672,12 @@ class BookingController extends Controller
                 $shapeChanged = isset($dirtyFields['room_type_id'])
                     || isset($dirtyFields['check_in'])
                     || isset($dirtyFields['check_out']);
+
+                // 💳 ticket 10 — surcharge: BR ที่ถูกจัดเลขห้องแล้วเปลี่ยนประเภท/วันที่ไม่ได้
+                //    (room_id ผูกกับ type เดิม — ให้ปลดการจัดห้องก่อน จึงจะเปลี่ยน shape ได้)
+                if ($postPayment && $bookingRoom->room_id && $shapeChanged) {
+                    throw new \Exception('ห้องนี้ถูกจัดเลขห้องจริงแล้ว ไม่สามารถเปลี่ยนประเภทห้องหรือวันที่ได้ — ให้ปลดการจัดห้องก่อนค่ะ 🏨', 422);
+                }
 
                 if ($shapeChanged) {
                     $checkIn = Carbon::parse($effectiveCheckIn);
@@ -709,7 +749,30 @@ class BookingController extends Controller
                 }
 
                 // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-                $this->reconcileDiscount($locked);
+                // 💳 ticket 10 — surcharge: reprice ตรง (applyToDraft guard draft-only ·
+                //    used redemption ยังถูกนับใน reprice — โค้ดส่วนลดคงเดิมไม่ถูกถอด)
+                if ($postPayment) {
+                    app(DiscountService::class)->reprice($locked);
+                } else {
+                    $this->reconcileDiscount($locked);
+                }
+
+                // 💳 ticket 10 — downgrade guard: ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
+                //    (ticket 08 — ไม่มีการคืนเงินในระบบ จึงบล็อกส่วนต่างลดจนเกินยอดที่จ่ายไปแล้ว)
+                $newTotal = (int) $locked->fresh()->total_amount;
+                $paidAmount = $locked->paid_amount;
+                if ($newTotal < $paidAmount) {
+                    throw new \Exception(
+                        'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.$newTotal.' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                        422
+                    );
+                }
+
+                // 💳 ticket 10 — is_paid=true เดิม (จ่ายครบ) แต่ surcharge ทำให้ยอดค้างเกิด → reset false
+                //    (ตามนิยาม is_paid = SUM(payments) ≥ total — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
+                if ($locked->is_paid && $newTotal > $paidAmount) {
+                    $locked->update(['is_paid' => false]);
+                }
 
                 DB::commit();
             } catch (\Exception $e) {
@@ -717,12 +780,23 @@ class BookingController extends Controller
                 throw $e;
             }
 
+            $surchargeAmount = ($newTotal ?? $previousTotal) - $previousTotal;
+
             return response()->json([
                 'status' => 'success',
-                'message' => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
+                'message' => $postPayment
+                    ? 'แก้ไขห้องหลังชำระเงินเรียบร้อยแล้ว — ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳'
+                    : 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
                 'booking_id' => $booking->id,
                 'booking_room' => $bookingRoom->fresh('addon'),
                 'total_amount' => $locked->fresh()->total_amount,
+                // 💳 (25/09/26, ticket 10) — surcharge หลังจ่าย: ส่วนต่าง + envelope ยอดเงินครบ
+                'previous_total_amount' => $previousTotal,
+                'surcharge_amount' => $surchargeAmount,
+                'payment_type' => $locked->fresh()->payment_type,
+                'deposit_amount' => $locked->fresh()->deposit_amount,
+                'paid_amount' => $locked->fresh()->paid_amount,
+                'outstanding_amount' => $locked->fresh()->outstanding_amount,
             ], 200);
 
         } catch (\Exception $e) {

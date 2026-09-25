@@ -1497,12 +1497,16 @@ curl -s -H "Accept: application/json" \
 
 ### PUT `/bookings/{bookingId}/rooms/{bookingRoomId}` — Update a booking room
 
-🌟 **(17/08/26)**: แก้ไข booking room **รายห้อง** — ใช้ได้เฉพาะเมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` เท่านั้น
+🌟 **(17/08/26)**: แก้ไข booking room **รายห้อง** — สองโหมดตาม parent booking:
 
-🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+1. **แก้ไขปกติ (draft)** — ใช้ได้เมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` (เจ้าของหรือ admin)
+2. 💳 **Surcharge หลังจ่าย (25/09/26, ticket 10)** — parent booking เป็น `paid|confirmed` → **admin เท่านั้น** (user เจ้าของ = `403`) · แก้ห้องแล้วราคาเปลี่ยน ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่)
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** (โหมด surcharge: **admin only**) · ⏱ Rate-limited: 5 requests/minute
 
 **Constraints:**
-- Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- โหมด surcharge 💳: Booking `paid|confirmed` + BR `draft|confirmed` (BR `checked_in/checked_out/no_show` = `422`) · BR ที่มี `room_id` ถูกจัดแล้ว **เปลี่ยน `room_type_id`/วันที่ไม่ได้** → `422` (ปลดการจัดห้องก่อน) · reprice ผ่าน `reprice()` เดิม (กติกาปัดสิบไหลตาม) · **ยอดรวมใหม่ต้อง ≥ เงินที่เข้า ledger แล้ว** — ต่ำกว่า = `422` (ticket 08: ไม่มีการคืนเงินในระบบ) · `deposit_amount` คงเดิมไม่ย้อน · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset เป็น `false` (เก็บครบแล้ว set คืนโดย recordPayment)
 - แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
@@ -1584,18 +1588,26 @@ curl -s -H "Accept: application/json" \
       "updated_at": "..."
     }
   },
-  "total_amount": 4900
+  "total_amount": 4900,
+  "previous_total_amount": 4400,
+  "surcharge_amount": 500,
+  "payment_type": "deposit",
+  "deposit_amount": 2200,
+  "paid_amount": 2200,
+  "outstanding_amount": 2700
 }
 ```
+
+> 💳 **(25/09/26, ticket 10)** — response เพิ่ม 6 field เสมอ (draft mode ด้วย): `previous_total_amount` (ยอดก่อนแก้), `surcharge_amount` (ส่วนต่าง — ติดลบได้เมื่อลดแต่ยัง ≥ paid), `payment_type`, `deposit_amount` (effective), `paid_amount`, `outstanding_amount` — โดมง surcharge ยอด `total_amount` ใหม่ไหลเข้า `outstanding_amount` เก็บต่อผ่าน recordPayment
 
 **Errors:**
 
 | Code | Cause |
 |------|-------|
 | 401  | ไม่ได้ล็อกอิน |
-| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin · 💳 โหมด surcharge (booking `paid|confirmed`) โดยไม่ใช่ admin |
 | 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
-| 422  | Booking หรือ BR ไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ / validation |
+| 422  | Booking หรือ BR ไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ / 💳 BR checked_in ไปแล้ว / 💳 เปลี่ยน shape ทั้งที่มี room_id / 💳 ยอดรวมใหม่ต่ำกว่าเงินที่ชำระแล้ว / validation |
 | 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
 
 ---
@@ -2661,6 +2673,16 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 - **ส่วนลด `percent` ใช้ `intdiv` ตัดทิ้งเหมือนเดิม** — การปัดท้ายครอบเศษที่เหลือทั้งหมด
 - **จองครึ่งคืนไม่มีในโดเมน** — ทุกจุดคำนวณคืน (`reprice()` + `BookingController` 4 จุด: create/confirm rooms/update rooms/record-walk-in) `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` เสมอ (กัน Carbon 3 คืน float เมื่อ input เป็น datetime เช่น `2026-10-01 14:00`)
 - **Regression:** เรทหลักร้อยตัวงั้น (เช่น 1,500) ยอดเดิมไม่เปลี่ยน — ปัดสิบโดนเฉพาะเมื่อเกิดเศษ
+
+### 💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10) — 25/09/26
+
+> กรณี booking `paid|confirmed` (มัดจำ/ค้างชำระ verify ผ่าน หรือจ่ายเต็มแล้ว) ต้องการ**เปลี่ยน room type หรือแก้รายละเอียดห้อง** ให้แขก — ราคารวมเปลี่ยน → ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `recordPayment` (กลไกเดิม — **ไม่มี endpoint เงินใหม่**)
+
+- **ช่องทาง:** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` เดิม (2 โหมด — draft = แก้ปกติ, `paid|confirmed` = surcharge) — **admin เท่านั้น** (user เจ้าของ = `403`)
+- **Guard:** BR ต้องยัง `draft|confirmed` (checked_in/out/no_show = `422`) · BR ที่มี `room_id` ถูกจัดแล้ว เปลี่ยน room type/วันที่ไม่ได้ (`422` — ปลดการจัดห้องก่อน) · availability re-check + `holdingSlot()` เหมือนโหมด draft
+- **Downgrade:** ยอดรวมใหม่ **ต่ำกว่าเงินที่เข้า ledger = `422`** (ticket 08 — ไม่มีการคืนเงินในระบบ) · ลดได้เฉพาะยอดรวมใหม่ยัง ≥ `paid_amount` → `outstanding_amount` ลดตาม
+- **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว) · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset `false` (ตามนิยาม `SUM(payments) ≥ total`)
+- **Response เพิ่ม 6 field เสมอ:** `previous_total_amount` · `surcharge_amount` (ติดลบได้) · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
 
 ### PUT `/bookings/{id}` — Update booking payment fields (Admin) 🆕
 
