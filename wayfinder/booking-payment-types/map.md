@@ -14,7 +14,7 @@ Booking มีระบบ **ประเภทการชำระเงิน
 - Domain: booking/payment ของ KU HOME API — อ่าน `AGENTS.md` ก่อนทุก session (money = **integer baht**, `PgBoolean` บน boolean column, state machine ผ่าน `transitionStatus()` เท่านั้น ห้าม `->status =` ตรง, UUID PKs, error shape ไทย+emoji)
 - **Facts จากโค้ด ณ วัน chart (2026-09-24)** — ปูพื้นให้ทุก ticket ไม่ต้องขุดซ้ำ:
   - `booking_confirmations` = **append-only log** (1 row = 1 ครั้งส่งสลิป · สลิปแนบผ่าน `images` morph · `pending → verified|rejected` ทั้งคู่ terminal · reject → booking `verify_error` · ส่งใหม่ = **row ใหม่เสมอ**) — **ไม่มี column `amount`** (admin verify ด้วยการดูรูปเฉย ๆ)
-  - `bookings`: `total_amount` (integer baht) + `is_paid` + `payment_deadline` 24 ชม. (`CleanupExpiredDrafts` กวาด 02:00) — `bookings.confirmation` unique = เลขที่ยืนยัน (**คนละเรื่อง**กับตาราง confirmations)
+  - `bookings`: `total_amount` (integer baht) + `is_paid` + `payment_deadline` **15 นาที** จาก config `booking.payment_deadline_minutes` (`CleanupExpiredDrafts` กวาด **ทุก 5 นาที**; draft หมดเวลาไม่ยึด slot — REQ-008 2026-09-24 · *แก้ fact เดิม "24 ชม./02:00" ที่ล้าสมัย* — สังเกตโดย ticket 02, 2026-09-25) — `bookings.confirmation` unique = เลขที่ยืนยัน (**คนละเรื่อง**กับตาราง confirmations)
   - State machine เดิม: `draft → pending → paid → confirmed → complete` (+`verify_error` รอส่งสลิปใหม่) — `paid` ปัจจุบันหมายถึง "ชำระเต็มและ verify ผ่าน" — **ไม่มี concept ชำระบางส่วน**
   - `payments` มี `amount` (integer baht) อยู่แล้ว แต่เขียนจริงแค่ 2 จุด (mock QR `PaymentController::requestPayment` + เงินสด `FrontDeskController::recordPayment`) · `receipts` FROZEN · webhook ยัง `410 GONE`
   - สิทธิ์ flow เดิม: ส่งสลิป = เจ้าของ booking (booking ต้องอยู่ `draft|verify_error`); verify/reject = admin; เงินสดหน้าเคาน์เตอร์ = admin/system (`draft → paid`)
@@ -24,21 +24,22 @@ Booking มีระบบ **ประเภทการชำระเงิน
   3. **`payment_type` อยู่ระดับ booking** — owner ยืนยันโครงเดิมถูกต้อง: confirmation เป็นแค่ log ของการส่งสลิป ไม่ใช่ที่เก็บประเภทการชำระ
   4. **แมป `organization-bookings` ticket 04 รอ design ของแมปนี้ก่อน** (ค้างชำระ = payment type ที่ org booking ใช้เสมอ — owner)
   5. Default ของ booking ออนไลน์ทั่วไป = **เต็มจำนวน (full)** — flow เดิมต้อง regression เป็น 0%
+- 🆕 **(2026-09-25) ticket 08 graduate จาก fog:** [ยกเลิก / no_show ของ booking มัดจำ·ค้างชำระ](./tickets/08-cancellation-and-deposit-refund.md) — flow หลักล็อกแล้ว (ticket 02) จึงถามได้ชัด · blocked-by ticket 04 (ต้องตัดสินบนโครงยอด 2 ชั้น)
 - 🆕 **(2026-09-24) ticket 07 เพิ่มจาก gap ตรวจ SRS v2:** [ปัดเศษขึ้นหลักสิบ — REQ-015/016](./tickets/07-round-up-to-tens.md) (ปัดยอดไหน ตอนไหน เศษมาจากไหน) — blocked-by ticket 04 (ยอดเงิน 2 ชั้น) · ระบบปัจจุบันไม่มี rounding ที่ไหนเลย
 - Related maps: `organization-bookings` (open — ticket 04 blocked cross-map รอแมปนี้), `excel-reports` (open — ticket 08 paused ปลดล็อกเมื่อ design แมปนี้ปิด)
 - ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
 - ก่อนเขียนโค้ดจริง: จด design decision ลง `cline.md` ตาม protocol ใน AGENTS.md
 - ทำงาน ticket ละ session — เริ่มจาก frontier (ticket open, blocked-by ปลดครบ, ยังไม่มี assignee) — commit tracker ไปกับ branch ปัจจุบันเสมอ
-- 🎯 **Frontier ปัจจุบัน:** [ticket 02](./tickets/02-deposit-semantics.md) (deposit semantics) + [ticket 03](./tickets/03-deferred-payment-and-permissions.md) (deferred + สิทธิ์) — ปลดบล็อกพร้อมกันหลัง ticket 01 ปิด (2026-09-25) ทำคนละ session ได้
+- 🎯 **Frontier ปัจจุบัน:** [ticket 03](./tickets/03-deferred-payment-and-permissions.md) (deferred + สิทธิ์) — tickets 01/02 ปิดแล้ว (2026-09-25) · ticket 04 ยังรอ ticket 03
 
 ## Decisions so far
 
 - [01: payment_type enum + schema บน bookings](./tickets/01-payment-type-enum-and-schema.md): column ใหม่บน `bookings` = `full|deposit|deferred` string · `NOT NULL DEFAULT 'full'` + backfill หมด (flow เดิม regression 0%) · ตั้งได้ admin เท่านั้น (POST /bookings มี field นี้ใน input → ต้อง admin, ไม่งั้น 403) · แก้ได้เฉพาะ draft ผ่าน endpoint ใหม่ `PUT /bookings/{id}` (admin-only) · ส่ง `payment_type` กลับทุก response ของ booking
+- [02: มัดจำ (deposit) semantics](./tickets/02-deposit-semantics.md): ยอดมัดจำ admin กำหนดต่อ booking (default 50% — field shape รอ ticket 04) · `paid` = งวดปัจจุบันผ่านแล้ว (สลิปมัดจำ verify → paid → confirmed เหมือนเดิม แต่ is_paid ไม่ set — is_paid สงวนให้จ่ายครบ) · เก็บยอดค้างตั้งใจตอน check-in ผ่าน recordPayment แต่**ไม่มี hard guard** — check-in/out ได้แม้ยอดไม่ครบ (org เบิกหลังเข้าพักได้ถึง 1 เดือน) · payment_deadline เดียวกัน 15 นาทีทุก type
 
 ## Not yet specified
 
 - **payment_channel (QR/เงินสด/บัตร) จะกลับมาไหม** — โดน drop ไปแล้ว (`2026_08_19_100000`) พร้อมกันทั้ง confirmations/payments — ยังไม่มีใครตัดสิน; [ticket 08 ของ excel-reports](../excel-reports/tickets/08-payment-amount-channel-deposit.md) ถามข้ามแมป — อาจโผล่มาระหว่าง grill เรื่องยอดเงิน
-- **ยกเลิก/คืนมัดจำ** — no_show / ยกเลิกหลังจ่ายมัดจำแล้ว เงินเป็นอย่างไร — รอ flow หลักล็อกก่อน (ticket 02)
 - **เอกสารหลังชำระ (ใบเสร็จ/ใบแจ้งหนี้)** — `receipts` FROZEN — การออกเอกสารของมัดจำ/ค้างชำระยุ่งกับ roadmap "report templates + digital signature" — รอ design เงินจบจึง spec ได้
 - **เก็บเงินหลายงวด** — ถ้ายอดชั้น B ออกแบบแล้วรองรับงวดย่อยตามธรรมชาติ จะดูว่า spec ขยายต่อหรือตัดทิ้ง
 
