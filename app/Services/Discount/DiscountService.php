@@ -7,6 +7,7 @@ use App\Models\BookingRoom;
 use App\Models\Discount;
 use App\Models\DiscountRedemption;
 use App\Models\GlobalRate;
+use App\Services\Addon\AddonPricing;
 use App\Support\RoundToTen;
 use Carbon\Carbon;
 use Exception;
@@ -155,12 +156,16 @@ class DiscountService
     /**
      * คำนวณยอดเงินใหม่ทั้งใบของการจอง (room_amount, discount_amount, amount, total_amount)
      * 🧾 (03/09/26) chokepoint เดียวที่เขียน `amount` (net ต่อห้อง) — walk-in ก็เรียก method นี้
+     * 📊 (05/10/26, excel-reports ticket 10) addon คิดจาก canonical fields ผ่าน AddonPricing —
+     *    breakfast × คืน (แก้ undercharge เดิม) · extra-bed รายคืน · snapshot ทุกตัวเขียนที่นี่
      */
     public function reprice(Booking $booking): Booking
     {
         $discount = $booking->discount_code ? Discount::where('code', $booking->discount_code)->first() : null;
         $holds = DiscountRedemption::whereIn('booking_room_id', $booking->bookingRooms()->pluck('id'))->get();
         $user = $booking->user;
+        // 📊 เรท addon อ่านครั้งเดียวต่อ booking — pricing source = global_rates เท่านั้น
+        $rates = GlobalRate::getPrices(['breakfast_100', 'breakfast_200', 'extra_bed', 'early_checkin', 'late_checkout']);
         $total = 0;
 
         foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
@@ -176,14 +181,27 @@ class DiscountService
                 ? $this->computeForRoom($discount, $rate, $nights)
                 : 0;
 
+            // 📊 addon totals จาก canonical fields (สูตรอยู่ที่ AddonPricing จุดเดียว)
+            $addon = $br->addon;
+            $extraBedTotal = AddonPricing::extraBedTotal(
+                $addon?->extra_beds_by_night ?? [],
+                (int) ($rates['extra_bed'] ?? 0)
+            );
+            $breakfastTotal = AddonPricing::breakfastTotal([
+                'set_100' => $addon?->breakfast_set_100 ?? 0,
+                'set_200' => $addon?->breakfast_set_200 ?? 0,
+            ], $rates, $nights);
+            $earlyTotal = ($addon?->early_hours ?? 0) * (int) ($rates['early_checkin'] ?? 0);
+            $lateTotal = ($addon?->late_hours ?? 0) * (int) ($rates['late_checkout'] ?? 0);
+
             // 🧾 (03/09/26) ยอดสุทธิต่อห้อง — สูตรอยู่จุดเดียว (chokepoint เดียวของ booking money):
-            //    amount = room_amount − discount_amount + addon 4 รายการ
+            //    amount = room_amount − discount_amount + extra_bed_total + breakfast_total + early + late
             //    invariant Σ booking_rooms.amount == bookings.total_amount
             $amount = $roomAmount - $discountAmount
-                + ($br->addon?->extra_bed_price ?? 0)
-                + ($br->addon?->breakfast_price ?? 0)
-                + ($br->addon?->early_checkIn_price ?? 0)
-                + ($br->addon?->late_checkOut_price ?? 0);
+                + $extraBedTotal
+                + $breakfastTotal
+                + $earlyTotal
+                + $lateTotal;
 
             // 💵 (25/09/26) REQ-015/016 — ปัดเศษขึ้นหลักสิบท้ายสุดครั้งเดียว (ลดก่อน ปัดท้าย)
             //    ปัดที่ amount ต่อห้อง แล้ว total_amount ไหลตาม (invariant Σ คงอยู่)
@@ -194,6 +212,21 @@ class DiscountService
                 'discount_amount' => $discountAmount,
                 'amount' => $amount,
             ]);
+
+            // 📊 snapshot ราคา addon — อ่านที่ response/รายงาน ให้ตรงสูตรเสมอ (เขียนที่นี่จุดเดียว)
+            if ($addon && (
+                (int) $addon->breakfast_price !== $breakfastTotal
+                || (int) $addon->extra_bed_price !== $extraBedTotal
+                || (int) $addon->early_checkIn_price !== $earlyTotal
+                || (int) $addon->late_checkOut_price !== $lateTotal
+            )) {
+                $addon->update([
+                    'breakfast_price' => $breakfastTotal,
+                    'extra_bed_price' => $extraBedTotal,
+                    'early_checkIn_price' => $earlyTotal,
+                    'late_checkOut_price' => $lateTotal,
+                ]);
+            }
 
             $total += $amount;
         }

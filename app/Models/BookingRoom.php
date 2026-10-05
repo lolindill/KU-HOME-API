@@ -262,7 +262,8 @@ class BookingRoom extends Model
         $checkIn = $this->check_in;
         $checkOut = $this->check_out;
 
-        $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
+        // 📊 (05/10/26) extra-bed เป็นรายคืนแล้ว — จับคู่ห้องด้วยจำนวนสูงสุดต่อคืน (accessor extra_beds_max)
+        $requestedExtraBeds = $this->addon ? $this->addon->extra_beds_max : 0;
 
         // ค้นหาห้องว่าง — เช็คจาก BR-level ชุด slot-holding (draft ที่ยังไม่หมดเวลา + confirmed + checked_in)
         // 🗓️ (24/09/26) room-state-periods: ตัด whereNotIn(status maintenance/reserved_closed) ออก —

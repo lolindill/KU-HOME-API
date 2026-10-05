@@ -96,12 +96,9 @@ class DiscountTest extends TestCase
                 'discount_amount' => 0,
             ]);
 
+            // 📊 (05/10/26) canonical schema — snapshot ราคาเขียนโดย reprice()
             Addon::create([
                 'booking_room_id' => $br->id,
-                'extra_bed' => 0,
-                'extra_bed_price' => 0,
-                'breakfast' => 0,
-                'breakfast_price' => 0,
                 'early_checkIn_price' => 0,
                 'late_checkOut_price' => 0,
             ]);
@@ -489,11 +486,14 @@ class DiscountTest extends TestCase
         $roomType = $this->createRoomType(2000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
-        // Add breakfast addon: 600 baht
+        // Add breakfast addon: 600 baht (2 ชุด × เรท 300 × 1 คืน — seed เรทเอง)
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 300, 'is_active' => true,
+        ]);
         $br = $booking->bookingRooms->first();
         $br->addon->update([
-            'breakfast' => 2,
-            'breakfast_price' => 600,
+            'breakfast_set_200' => 2,
         ]);
 
         Discount::create([

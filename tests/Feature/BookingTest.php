@@ -129,14 +129,12 @@ class BookingTest extends TestCase
                 ],
             ]);
 
+            // 📊 (05/10/26) canonical schema — sets default 0 · extra_beds_by_night null ·
+            //    snapshot ราคาเขียนโดย reprice()
             Addon::create([
                 'booking_room_id' => $br->id,
-                'extra_bed' => 0,
-                'extra_bed_price' => 0,
-                'breakfast' => 0,
-                'breakfast_price' => 0,
                 'early_checkIn_price' => 0,
-                'lateCheckOut_price' => 0,
+                'late_checkOut_price' => 0,
             ]);
         }
 
@@ -811,14 +809,14 @@ class BookingTest extends TestCase
         $this->createRoom($roomType);
         $this->createRoom($roomType);
 
-        // seed addon rates: extra_bed 100/คืน breakfast 50/ท่าน early_checkin 100/ชม.
+        // seed addon rates: extra_bed 100/คืน breakfast_200 50/ชุด/คืน early_checkin 100/ชม.
         GlobalRate::create([
             'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
             'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
         ]);
         GlobalRate::create([
-            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast',
-            'name_en' => 'Breakfast', 'default_price' => 50, 'is_active' => true,
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 50, 'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
@@ -828,7 +826,8 @@ class BookingTest extends TestCase
         $booking = $this->createDraftBooking($user, $roomType);
         $br = $booking->bookingRooms->first();
 
-        // 3 คืน + extra_bed 1 หลัง + breakfast 2 ท่าน + early 2 ชม. → (1500×3) + (100×1×3) + (50×2) + (100×2) = 5100
+        // 📊 (05/10/26) 3 คืน + extra_bed 1 หลัง + breakfast legacy 2 ชุด (→ set_200) + early 2 ชม.
+        //    → (1500×3) + (100×1×3) + (50×2×3 คืน) + (100×2) = 4500+300+300+200 = 5300
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'check_in' => now()->addDays(5)->toDateString(),
@@ -838,21 +837,26 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('total_amount', 5100);
+        $response->assertJsonPath('total_amount', 5300);
 
-        // 🛡️ ราคาถูกเขียนกลับลง Addon row ฝั่ง server เท่านั้น
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 1,
-            'extra_bed_price' => 300,
-            'breakfast' => 2,
-            'breakfast_price' => 100,
-            'early_hours' => 2,
-            'early_checkIn_price' => 200,
-        ]);
+        // 🛡️ ราคาถูกเขียนกลับลง Addon row ฝั่ง server เท่านั้น (canonical + snapshot โดย reprice)
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(2, $addon->breakfast_set_200); // legacy breakfast → set_200
+        $this->assertSame(300, $addon->breakfast_price); // 50 × 2 ชุด × 3 คืน
+        $this->assertSame(
+            [
+                now()->addDays(5)->toDateString() => 1,
+                now()->addDays(6)->toDateString() => 1,
+                now()->addDays(7)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(300, $addon->extra_bed_price); // 100 × 1 × 3 คืน
+        $this->assertSame(2, $addon->early_hours);
+        $this->assertSame(200, $addon->early_checkIn_price);
 
-        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 300 + 100 + 200 + 0 = 5100
-        $this->assertEquals(5100, $br->fresh()->amount);
+        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 300 + 300 + 200 + 0 = 5300
+        $this->assertEquals(5300, $br->fresh()->amount);
         $this->assertAmountInvariant($booking);
     }
 
@@ -885,11 +889,17 @@ class BookingTest extends TestCase
         $response->assertJsonPath('total_amount', 3400);
         $this->assertEquals(3400, $booking->fresh()->total_amount);
 
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 2,
-            'extra_bed_price' => 400,
-        ]);
+        // 📊 legacy int → flat map ทุกคืน (2 คืน = คืน +2 และ +3)
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(2, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 2,
+                now()->addDays(3)->toDateString() => 2,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(400, $addon->extra_bed_price);
 
         // amount = 3000 (ห้อง) − 0 + 400 = 3400
         $this->assertEquals(3400, $br->fresh()->amount);
@@ -931,11 +941,16 @@ class BookingTest extends TestCase
         $response->assertJsonPath('total_amount', 3200);
         $this->assertEquals(3200, $booking->fresh()->total_amount);
 
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 1,
-            'extra_bed_price' => 200,
-        ]);
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
         $this->assertAmountInvariant($booking);
     }
 
@@ -972,11 +987,11 @@ class BookingTest extends TestCase
         $response->assertJsonPath('total_amount', 3000);
         $this->assertEquals(3000, $booking->fresh()->total_amount);
 
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 0,
-            'extra_bed_price' => 0,
-        ]);
+        // extra_bed 0 → flat map ว่าง (column JSON = null) + snapshot 0
+        $addon = $br->fresh('addon')->addon;
+        $this->assertEmpty($addon->extra_beds_by_night);
+        $this->assertSame(0, $addon->extra_beds_max);
+        $this->assertSame(0, $addon->extra_bed_price);
         $this->assertAmountInvariant($booking);
     }
 
@@ -1232,12 +1247,10 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        // เงียบสนิท: extra_bed ยัง 0, total คงเดิม 3000
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 0,
-            'extra_bed_price' => 0,
-        ]);
+        // เงียบสนิท: extra_bed ยัง 0 (map ว่าง), total คงเดิม 3000
+        $addon = $br->fresh('addon')->addon;
+        $this->assertEmpty($addon->extra_beds_by_night);
+        $this->assertSame(0, $addon->extra_bed_price);
         $this->assertEquals(3000, $booking->fresh()->total_amount);
     }
 
@@ -1273,11 +1286,16 @@ class BookingTest extends TestCase
         $response->assertStatus(200);
         // extra_bed 1 เตียง × 100 × 2 คืน = 200 → total = 3000 + 200 = 3200
         $response->assertJsonPath('total_amount', 3200);
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 1,
-            'extra_bed_price' => 200,
-        ]);
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
         $this->assertAmountInvariant($booking);
     }
 
@@ -1360,8 +1378,8 @@ class BookingTest extends TestCase
         $this->createRoom($roomType);
 
         GlobalRate::create([
-            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast',
-            'name_en' => 'Breakfast', 'default_price' => 5000, 'is_active' => true,
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 5000, 'is_active' => true,
         ]);
         GlobalRate::create([
             'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
@@ -1374,8 +1392,8 @@ class BookingTest extends TestCase
 
         $booking = $this->createDraftBooking($user, $roomType);
         $br = $booking->bookingRooms->first();
-        // เดิมมี breakfast 2 ท่าน — payload ที่ frontend ส่งไม่มี breakfast → ต้องคงเดิม ไม่หายเป็น 0
-        $br->addon->update(['breakfast' => 2, 'breakfast_price' => 10000]);
+        // เดิมมี breakfast 2 ชุด — payload ที่ frontend ส่งไม่มี breakfast → ต้องคงเดิม ไม่หายเป็น 0
+        $br->addon->update(['breakfast_set_200' => 2]);
 
         // payload แบบเดียวกับที่ frontend (bookings.ts updateBookingRoomsInBooking) ส่งจริง
         $response = $this->actingAs($user, 'sanctum')
@@ -1389,17 +1407,16 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'early_hours' => 3,
-            'early_checkIn_price' => 30000, // reprice ฝั่ง server: 3 × 10000
-            'late_hours' => 2,
-            'late_checkOut_price' => 20000, // 2 × 10000
-            'breakfast' => 2,               // ไม่ส่งมา = คงเดิม
-            'breakfast_price' => 10000,
-        ]);
-        // total = ห้อง 3000 + breakfast 10000 + early 30000 + late 20000 = 63000
-        $response->assertJsonPath('total_amount', 63000);
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(3, $addon->early_hours);
+        $this->assertSame(30000, $addon->early_checkIn_price); // reprice ฝั่ง server: 3 × 10000
+        $this->assertSame(2, $addon->late_hours);
+        $this->assertSame(20000, $addon->late_checkOut_price); // 2 × 10000
+        $this->assertSame(2, $addon->breakfast_set_200);               // ไม่ส่งมา = คงเดิม
+        // breakfast คิด × คืน (05/10/26): 2 ชุด × 5000 × 2 คืน
+        $this->assertSame(20000, $addon->breakfast_price);
+        // total = ห้อง 3000 + breakfast 20000 + early 30000 + late 20000 = 73000
+        $response->assertJsonPath('total_amount', 73000);
     }
 
     /**
@@ -1572,17 +1589,24 @@ class BookingTest extends TestCase
         $response->assertStatus(201);
 
         // 2 คืน × (100 extra bed) = 200 — ราคา server คิดจาก global_rates เสมอ
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $response->json('booking_rooms.0.id'),
-            'extra_bed' => 1,
-            'extra_bed_price' => 200,
-        ]);
+        // 📊 (05/10/26) canonical: extra_beds_by_night map ครบทุกคืน + snapshot โดย reprice
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
 
         // 3000 (ห้อง 2 คืน) + 200 = 3200
         $this->assertEquals(3200, $response->json('total_amount'));
 
-        // input format = output format — echo กลับมาที่ addon.extra_bed
-        $this->assertEquals(1, $response->json('booking_rooms.0.addon.extra_bed'));
+        // input format = output format — echo กลับมาที่ addon (รายคืน: max accessor + map)
+        $this->assertEquals(1, $response->json('booking_rooms.0.addon.extra_beds_max'));
+        $this->assertCount(2, $response->json('booking_rooms.0.addon.extra_beds_by_night'));
     }
 
     /** 🛏️ ส่งทั้ง canonical + alias พร้อมกัน → canonical (addons.extra_bed) ชนะเสมอ */
@@ -1607,11 +1631,17 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br->id,
-            'extra_bed' => 1,
-            'extra_bed_price' => 200,
-        ]);
+        // 📊 canonical addons.extra_bed ชนะ legacy extra_beds หัวห้อง — flat map 1 เตียงทุกคืน
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
         $this->assertAmountInvariant($booking);
     }
 
@@ -1753,18 +1783,18 @@ class BookingTest extends TestCase
         $this->createRoom($roomType);
         $this->createRoom($roomType);
 
-        // seed breakfast 50/ท่าน
+        // seed breakfast_200 50/ชุด/คืน
         GlobalRate::create([
-            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast',
-            'name_en' => 'Breakfast', 'default_price' => 50, 'is_active' => true,
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 50, 'is_active' => true,
         ]);
 
         $booking = $this->createDraftBooking($user, $roomType, 2);
         [$br1, $br2] = $booking->bookingRooms->all();
         $deadline = $booking->payment_deadline;
 
-        // br1 ยืด 2→3 คืน (4500) · br2 เฉยๆ แต่เพิ่ม breakfast 2 ท่าน (3000+100)
-        // → total = 7600
+        // br1 ยืด 2→3 คืน (4500) · br2 เฉยๆ แต่เพิ่ม breakfast 2 ชุด (50×2×2 คืน = 200 → 3200)
+        // → total = 7700
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
                 'booking_rooms' => [
@@ -1782,7 +1812,7 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('total_amount', 7600);
+        $response->assertJsonPath('total_amount', 7700);
         $response->assertJsonCount(2, 'booking_rooms');
 
         $freshBr1 = $br1->fresh();
@@ -1791,18 +1821,17 @@ class BookingTest extends TestCase
 
         $freshBr2 = $br2->fresh();
         $this->assertEquals('Batch Guest', $freshBr2->guests[0]['name']);
-        $this->assertDatabaseHas('addons', [
-            'booking_room_id' => $br2->id,
-            'breakfast' => 2,
-            'breakfast_price' => 100,
-        ]);
+        // 📊 legacy breakfast 2 → set_200 · คิด × คืน (2 ชุด × 50 × 2 คืน = 200)
+        $addon2 = $freshBr2->addon;
+        $this->assertSame(2, $addon2->breakfast_set_200);
+        $this->assertSame(200, $addon2->breakfast_price);
 
         // payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
         $this->assertTrue($booking->fresh()->payment_deadline->equalTo($deadline));
 
-        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+100 = 3100 → Σ = 7600
+        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+200 = 3200 → Σ = 7700
         $this->assertEquals(4500, $freshBr1->amount);
-        $this->assertEquals(3100, $freshBr2->amount);
+        $this->assertEquals(3200, $freshBr2->amount);
         $this->assertAmountInvariant($booking);
     }
 

@@ -33,12 +33,24 @@ class RoomStatePeriod extends Model
 
     public const KIND_MAINTENANCE = 'maintenance';
 
+    // 📊 (05/10/26) excel-reports spec §2.5 — repair log (ใช้เฉพาะ kind=maintenance · ตามชีต truth)
+    public const WORK_TYPE_ELECTRICAL = 'ไฟฟ้า';
+
+    public const WORK_TYPE_PLUMBING = 'ประปา';
+
+    public const WORK_TYPE_SYSTEM = 'งานระบบ';
+
+    public const WORK_TYPES = [self::WORK_TYPE_ELECTRICAL, self::WORK_TYPE_PLUMBING, self::WORK_TYPE_SYSTEM];
+
     protected $fillable = [
         'room_id',
         'kind',
         'start_date',
         'end_date',
         'created_by',
+        // 📊 (05/10/26) repair log — วันแจ้งซ่อม = start_date · เสร็จ = end_date · duration derive
+        'work_type',
+        'repair_detail',
     ];
 
     // 'date:Y-m-d' — wire format ของ period เป็น YYYY-MM-DD ล้วน (ต่างจาก ISO datetime ของ

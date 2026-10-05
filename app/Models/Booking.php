@@ -44,6 +44,12 @@ class Booking extends Model
         'customer_name',
         'customer_phone',
         'customer_email',
+        // 📊 (05/10/26) excel-reports spec §2.1 — booking attributes (ticket 09)
+        //    is_complimentary tag-only — ยอดเงินคงเดิม · ตั้งได้ admin เท่านั้น (guard ใน controller)
+        'invoice_requested_at',
+        'special_request',
+        'comment',
+        'is_complimentary',
     ];
 
     protected $casts = [
@@ -54,6 +60,9 @@ class Booking extends Model
         'payment_deadline' => 'datetime',
         // 💳 (25/09/26) booking-payment-types
         'deposit_amount' => 'integer',
+        // 📊 (05/10/26) excel-reports spec §2.1
+        'invoice_requested_at' => 'datetime',
+        'is_complimentary' => PgBoolean::class,
     ];
 
     /**
