@@ -2230,3 +2230,31 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` ทันที (chokepoint อ่าน `$booking->user` — ku_member ได้ `daily_ku` อัตโนมัติ, ถอดกลับเป็น `daily` สมมาตร) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** (ไม่ยุ่งยอดที่สลิป/การชำระ lock ไว้)
 - **Response ของ `PUT /bookings/{id}`** เพิ่ม 5 field: `user_id` / `organization_id` / `customer_name` / `customer_phone` / `customer_email`
 - Tests: `tests/Feature/BookingAttachCustomerTest.php` (12 เคส — attach user/org บนเฮดเปล่า · switch org→org→user แทนที่ทั้งชุด · detach null · contact-only patch · mutually exclusive · organize ไม่มี name · erp มั่ว/inactive · non-admin 403 · attach หลัง draft ได้แต่ payment fields 422 · complete/no_show 422 · reprice daily_ku↔daily สมมาตร)
+
+## 📊 ระบบรายงาน Excel 15 ฉบับ & Additional Charges (05/10/26, wayfinder/excel-reports)
+
+> ระบบรายงาน Excel 15 ฉบับ (`phpoffice/phpspreadsheet` 5.x) แบบ Hybrid Renderer + Ledger ค่าปรับ/ค่ายืมอุปกรณ์ `additional_charges` + Reshape Addons รายคืน/แยกชุด (wayfinder map `excel-reports` — tickets 01–11, IMPL-01–08)
+
+- **สถาปัตยกรรม Hybrid Renderer (Engine / Data แบ่งหน้าที่กันชัดเจน):**
+  - **Engine กลาง (`ExcelReportRenderer`):** อ่าน template JSON จาก `resources/report-templates/` เพื่อวางโครงสร้างหน้ามาตรฐาน, styling ขาวดำแบบ Minimal flat (ไม่ merge cells, ไม่ fill สี, header & summary แถวหนา bold, autoFilter), กำหนด PageSetup A4 Landscape, freezePane A4, repeat print title แถวที่ 3, format ค่าตามชนิดคอลัมน์ (`#,##0` สำหรับ `money_baht`/`integer`, วันที่ พ.ศ. ผ่าน `ThaiDate`), และให้บริการ `streamResponse()` สร้างไฟล์ในหน่วยความจำแล้ว stream ออกทันที (0 ไฟล์ค้าง disk) — **⚠️ ข้อห้ามเด็ดขาด: Engine ห้ามมี business query ใดๆ ทั้งสิ้น**
+  - **Data Class 15 ฉบับ (`App\Services\ReportExcel\Data\*`):** Implement `ReportData` interface ทำหน้าที่ query ข้อมูลและ normalize เป็นแถว keyed ตามคอลัมน์ — **⚠️ ข้อห้ามเด็ดขาด: Data class ห้ามวาง cell coordinates หรือ styling เอง** (ให้ engine จัดการตาม template)
+  - **Template JSON 15 ไฟล์:** จัดเก็บที่ `resources/report-templates/*.json` พร้อม `_index.json` (track ใน git) เป็น runtime source of truth ประจำ repo ไม่พึ่งพา network ภายนอก
+- **🔒 ห้าม bypass chokepoint ทางการเงิน:**
+  - ยอดเงินของ booking ทุกจุดต้องคำนวณและปรับยอดที่ **`DiscountService::reprice()` จุดเดียวเท่านั้น** (chokepoint เดียวของระบบ)
+  - Snapshot ราคา addon ทั้งหมดถูกคำนวณและบันทึกที่นั่น
+  - Addon pricing ทั้งหมดถูก normalize ผ่านคลาสกลาง **`App\Services\Addon\AddonPricing`** (รองรับทั้ง canonical format: `breakfast_sets` แยกชุด 100/200, `extra_beds_by_night` map รายคืน และ legacy aliases: `breakfast`, `extra_bed`/`extra_beds` แปลงคืนค่าเดิม)
+  - Invariant สัญญาการเงิน Σ booking_rooms.amount == total_amount และการปัดขึ้นหลักสิบ `RoundToTen::round()` ยังคงเดิมทุกประการ
+- **💸 ตาราง `additional_charges` (Ledger ค่าใช้จ่ายเพิ่มเติม):**
+  - ตารางใหม่: `booking_id`, `transaction_date`, `item_code`, `item_name`, `qty`, `unit`, `price` (integer บาท), `charge_type` (`damage`|`rental`), `recorded_by`
+  - **Ledger รายงานล้วน — ยอดไม่เข้า booking**: ไม่ห้ามและไม่ไหลเข้า `payments` (ledger นั้นนิยาม "เงินของ booking") และไม่กระทบ `total_amount` ของ booking แต่อย่างใด
+  - Write CRUD: `POST/PATCH/DELETE /api/v1/additional-charges` (สิทธิ์ admin + staff) บันทึกอิสระทุกเมื่อ ไม่ผูกกับ flow checked_out · ไม่มี endpoint `GET` (อ่านรายการผ่าน Excel report `additional-charges` เท่านั้น)
+- **💳 Payment Channel Mapping (Daily Financial Report):**
+  - คอลัมน์ `payment_channel` ใน `DailyFinancialReportData` ถูก derive จาก `payments.reference_number`:
+    - หากเป็น UUID ตรงกับ `booking_confirmations.id` → จัดเป็น **"สลิป (โอน/QR)"**
+    - กรณีอื่น (เช่น บันทึกผ่าน `recordPayment` เงินสดหน้าเคาน์เตอร์) → จัดเป็น **"เงินสด"**
+- **🐞 บั๊กที่เคยเจอ & ข้อควรระวัง (Gotchas):**
+  - ใน `ReportController::exportReport`: ข้อผิดพลาดการ validate ฟิลเตอร์ของรายงานจะโยน `ValidationException` ซึ่งคลาสนี้ extends `\Exception` — **จำเป็นต้อง rethrow `ValidationException` ก่อนบล็อก catch `\Exception` กว้างๆ เสมอ** (`} catch (ValidationException $e) { throw $e; }`) มิฉะนั้นจะหลุดเข้าไปใน catch ล่างแล้วกลายเป็น HTTP 500 ทั้งที่ error contract ของระบบกำหนดไว้ว่าเป็น HTTP 422
+- **📋 Endpoints & สิทธิ์:**
+  - Explicit routes 15 ฉบับ: `GET /api/v1/reports/{slug}/export` (admin+staff ทุกใบ, housekeeping เพิ่ม 2 ใบแม่บ้าน `housekeeping` และ `housekeeping-v2`), throttle 10,1, filterRules validate เพดานช่วงวันที่ ≤ 366 วัน
+  - Attributes ใหม่บน `bookings`: `invoice_requested_at`, `special_request`, `comment`, `is_complimentary` (admin/system เท่านั้น — 403 ถ้า role อื่นส่ง)
+  - Checklist แม่บ้าน: `PATCH /dashboard/tasks/{id}/status` รับ `cleaning_check_1/2/3` โดย `status` เป็น optional เมื่อส่ง checklist (tick ล้วน = บันทึกประกอบ ไม่ผูก done)

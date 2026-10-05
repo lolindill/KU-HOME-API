@@ -1,6 +1,6 @@
 # 🔁 IMPL Handoff — excel-reports implementation (session ถัดไปอ่านก่อนลงมือ)
 
-> **สถานะ ณ 2026-10-05 (สิ้นสุด session implement รอบแรก):** suite เขียว **615 passed / 0 failed**
+> **สถานะ ณ 2026-10-05 (session head-agent + antigravity รอบสอง):** งานค้างข้อ 1-3 + 5 เสร็จหมด — IMPL-01..08 ครบ · suite เขียว (ดู commit ล่าสุด)
 > worktree `C:\dev\hotel\.worktree\excel-reports-impl` · branch `feature/excel-reports-impl`
 > spec = [spec.md](./spec.md) (label `ready-for-agent`) — อ่าน spec ก่อนเสมอ โดยเฉพาะ §2 (schema), §3 (mapping), §4 (API), §9 (ธงรอ sign-off 2 ข้อ)
 > ธรรมเนียม: claim งานในไฟล์นี้ (เติม `assignee:` ด้านล่าง) · commit ต่อบน branch เดิม
@@ -21,36 +21,25 @@ assignee: head-agent zcode session (dispatch งาน implement ให้ antig
 | IMPL-07 providers ห้อง/aggregate | ✅ | RoomStatus (legend 5 ค่า OCC/OOO/EA/VD/VC — VIP defer) · OutOfServiceRoom (repair log) · Supplies (minimal ตาม defer §2.8) · Occupancy (7 คืน + %Occ/ADR) · **Manager (matrix 20×6, mode Complete/Week/Month, LY=0, OOO จาก periods)** |
 | IMPL-04 API shell — **เสร็จบางส่วน** | 🟡 | ทำแล้ว: `ReportController` (registry 15 + 15 methods + re-check) · routes 15 (throttle 10,1 · 13 ใบ role:admin,staff / 2 ใบแม่บ้าน +housekeeping) · CRUD `additional-charges` (POST/PATCH/DELETE role:admin,staff) · booking attributes 4 ฟิลด์: validation + write path ที่ **PUT /bookings/{id}** แล้ว |
 
-## 🔴 ค้างอยู่ (ทำตามลำดับนี้)
+## ✅ เสร็จเพิ่ม (2026-10-05 session ที่สอง — head-agent zcode + antigravity dispatch)
 
-### 1. booking attributes — เติมฝั่ง createBooking (~10 นาที)
-- `app/Http/Requests/StoreBookingRequest.php` — เพิ่ม rules 4 ฟิลด์ (nullable เช่นเดียวกับ `UpdateBookingPaymentRequest`): `invoice_requested_at` (date) · `special_request`/`comment` (string max:2000) · `is_complimentary` (boolean)
-- `BookingController::createBooking` — guard ต่อจาก payment-type guard เดิม: ถ้า `$request->has()` ฟิลด์ใด และ role ไม่ใช่ admin/system → throw 403 (pattern เดียวกับ payment_type guard ที่บรรทัด ~1239) · แล้วใส่ค่าใน `Booking::create([...])` (จะได้ตั้งค่าตอนสร้าง, PgBoolean cast จัดการ boolean เอง)
-- ⚠️ ตอนนี้ validation ยังไม่รับ 4 ฟิลด์ฝั่ง POST — ส่งมาถูก strip เงียบ (ปลอดภัย แค่ admin ตั้งค่าตอนสร้างยังไม่ได้)
+| งาน | สถานะ | หมายเหตุ |
+|---|---|---|
+| booking attributes ฝั่ง createBooking | ✅ | `StoreBookingRequest` rules 4 ฟิลด์ + guard 403 ต่อจาก payment_type guard + `Booking::create` (commit 5a7b862) |
+| checklist tick ใน update-task | ✅ | `required_without_all` + tick ล้วน = บันทึกไม่ผูก done (commit 5a7b862) |
+| Feature test Seam 1 `ReportExportTest` | ✅ | 10 เคส 62 assertions — role matrix 15 ใบ/4 role, validation 422 (เพดาน 366 วัน), stream headers, 404 slug, additional-charges ข้อมูลจริงผ่าน IOFactory (commit 26b8c59) · suite bypass ThrottleRequests (throttle ไม่ใช่สิ่งที่ทดสอบ) |
+| 🐞 บั๊กจริงที่ test จับได้ (fix แล้ว) | ✅ | ① `ReportController::exportReport` — `ValidationException` ตกใน `catch \Exception` กลายเป็น 500 แทน 422 → rethrow แล้ว ② ParseError `?$spans`/`?$tasks` (nullable type hint ไม่มี type) ใน `RoomStatusReportData`/`HousekeepingReportData`/`HousekeepingReportV2Data` → `?Collection` แล้ว (ไฟล์เหล่านี้เดิมไม่เคยถูกโหลดจึงรอดจาก suite เดิม) |
+| IMPL-08 docs | ✅ | `docs/api_guide.md` (section รายงาน 15 ฉบับ + CRUD additional-charges + booking attributes + wire format addon) · `cline.md` (entry ระบบรายงาน + gotchas) · `AGENTS.md` (ย้ายออกจาก Planned → Critical Conventions) |
 
-### 2. checklist tick ใน update-task API (~20 นาที)
-- `DashboardController::updateStatus` (PATCH `/dashboard/tasks/{id}/status`) — เพิ่ม validation `cleaning_check_1/2/3` nullable boolean + persist ก่อน transition
-- ปัญหา: `status` เป็น `required` อยู่ — แก้เป็น `nullable|required_without_any:cleaning_check_1,cleaning_check_2,cleaning_check_3` แล้ว transition เมื่อ status มีค่าเท่านั้น (tick ล้วน = บันทึกประกอบ ไม่ผูก done ตาม spec §2.4)
-- รัน `php artisan test --filter=HousekeepingTaskTest` — ถ้า test เดิม fail เพราะ status ไม่ส่ง ให้ดู assertion ของเคส 422 แล้วปรับ test ให้สอดคล้อง (เจตนาเดิม: status หาย = 422 เมื่อไม่มี checklist มาด้วย)
+## 🟡 ค้างอยู่ (เหลือน้อยที่สุด)
 
-### 3. Feature test seam 1 — `tests/Feature/ReportExportTest.php` (งานหลัก ~2 ชม.)
-ตาม spec §7: auth/role matrix (admin ✓ · staff ✓ · housekeeping เฉพาะ `/reports/housekeeping/export` + `/reports/housekeeping-v2/export` · user/guest/ไม่ล็อกอิน 403 หรือ 401) · validation 422 + เพดานช่วงวันที่ > 366 วัน (เช่น extra-bed/erp-transfer ใส่ date_to เกิน from+366) · stream headers (Content-Type `application/vnd...spreadsheetml.sheet` + Content-Disposition มี `filename*=UTF-8''`) · slug ไม่ตรง = 404 (route ไม่มีอยู่เอง)
-- Tip: สร้าง user ด้วย `User::factory()->create(['role' => 'staff'])` · ทุกใบอย่างน้อยต้อง assert 200 + header ถูก (data ว่าง = ไฟล์ยังออก มีแค่หัวไฟล์+header row)
-- เคสที่ควรมีข้อมูลจริงอย่างน้อย 1 ใบ: additional-charges (สร้าง row เอง ง่ายสุด) เพื่อยืนยัน cell ผ่าน `IOFactory::load()` ต่อยอดจาก engine test ได้
-
-### 4. Test โครงสร้างเสริม (จาก spec §7 — เลือกทำตามเวลา)
-- Migration/data-migration test: `breakfast → breakfast_set_200` · `extra_bed int → flat map คงยอด` (สร้าง row เก่าด้วย DB::table แล้วรัน migration บางส่วนยาก — พอให้ assert ผ่าน `migrate:fresh` + สร้างข้อมูลใหม่แบบ canonical แทนได้ ตามดุลยพินิจ)
+### 1. Test โครงสร้างเสริม (จาก spec §7 — **optional** ยังไม่ทำ)
+- Migration/data-migration test: `breakfast → breakfast_set_200` · `extra_bed int → flat map คงยอด`
 - Manager/occupancy aggregate: Day แม่นด้วยสถานะ · MTD/YTD เฉลี่ยต่อคืน/ผลรวม · OOO จาก periods · LY = 0
 
-### 5. IMPL-08 docs
-- `docs/api_guide.md` — เพิ่ม section รายงาน 15 endpoints (query params ต่อใบ ดู `filterRules()` ของแต่ละ Data class) + CRUD additional-charges + **หมายเหตุ `room_types.extra_bed_price` = display-only** (spec §2.3) + canonical wire ของ addon (`breakfast_sets` / `extra_beds_by_night` + legacy alias)
-- `cline.md` — entry ใหม่ (ระบบรายงาน Excel: engine/Data pattern, ห้าม hard-code cell ใน Data, AddonPricing chokepoint, channel derive จาก reference_number)
-- `AGENTS.md` — ย้าย "Generate & print report templates" ออกจาก Planned → section จริง
-
-### 6. ปิดงาน
-- `vendor/bin/pint --dirty` + `php artisan test` เขียวเต็ม
-- commit ต่อบน branch + (ถ้า owner ให้ merge) PR เข้า `agust-11`/`main`
+### 2. ปิดงาน
 - ⚠️ **ธงรอ sign-off spec §9 (ยังค้างเหมือนเดิม — ทำตาม default ไว้แล้ว):** ① ผู้บันทึก charges = admin+staff ② Inspected = derive จาก prep_checkin — ถ้า owner ตัดสินกลับ แก้: ① สิทธิ์ที่ routes/api.php จุดเดียว ② method `houseStatus()` ใน `HousekeepingReportData`
+- PR เข้า `agust-11`/`main` เมื่อ owner อนุมัติ (ยอด suite เขียวเต็มแล้ว — ดู commit ล่าสุด)
 
 ## 🧭 จุดที่ต้องระวัง (จาก session นี้)
 

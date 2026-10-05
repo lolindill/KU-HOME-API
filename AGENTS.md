@@ -98,6 +98,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
   - **Split-user model:** column `users.auth_provider` (`password`|`ku_sso`) + composite unique `(email, auth_provider)` — email เดียวมี account ได้หลาย provider · **ห้าม link identity** (req change 2026-09-01)
   - `AuthController::login` มองเฉพาะ `auth_provider=password` เสมอ — อย่าถอด filter ออก · email unique ใน `StoreUserRequest`/`UpdateUserRequest` scope ต่อ provider
   - First login KU SSO = user role `ku_member` · password สุ่มทิ้ง · KU tokens (access/id_token) ทิ้งหมดไม่เก็บ DB · config ที่ `config/ku_sso.php` ผูก `KU_SSO_*` จาก `.env` · **PKCE S256 enforced ฝั่ง Keycloak** — exchange ต้องรับ `code_verifier` จาก SPA แล้ว relay ต่อ · claims live-verified แล้ว (2026-09-08): บุคลากรมี claim `email` ตรง, นิสิต fallback `google-mail`/`office365-mail` (ดู ticket 02 Amendment 2) · **column `is_ku_member` ถูก drop แล้ว** (2026-09-08) — สถานะสมาชิกใช้ role `ku_member` เท่านั้น
+- **📊 Excel reports system (2026-10-05):** ระบบรายงาน Excel 15 ฉบับผ่าน `phpoffice/phpspreadsheet` 5.x ใช้ตรง ๆ — สถาปัตยกรรม Hybrid renderer แบ่ง Engine/Data ชัดเจน: engine กลาง template-driven (`ExcelReportRenderer`) อ่าน template JSON จาก `resources/report-templates/` วางโครงหน้า/styling/print setup (A4 landscape, repeat print title แถว 3, freezePane) ห้ามมี business query; และ `ReportData` 15 classes (`app/Services/ReportExcel/Data/`) จัดการ query/normalize แถว ห้ามวาง cell coordinates หรือ styling เอง. Endpoints เป็น 15 explicit routes `GET /api/v1/reports/{slug}/export` stream ไฟล์ทันทีใน memory (admin+staff ทุกใบ, housekeeping เพิ่ม 2 ใบแม่บ้าน `housekeeping` และ `housekeeping-v2`), throttle 10,1, filterRules validate เพดานช่วงวันที่ ≤ 366 วัน. รายละเอียดสถาปัตยกรรม/chokepoint การเงิน/ledger additional_charges ดูที่ [`cline.md`](./cline.md).
 
 ## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
 
@@ -169,7 +170,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 - **`receipts` table is FROZEN (2026-07-24)** as read-only legacy — no new receipt rows, ever. New payment flow uses `booking_confirmations` (slip → admin verify/reject).
 - **`payments` table was UNFROZEN (2026-08-19)** to drop `payment_method` — the payment flow is now slip-image-only (no cash/credit_card/transfer distinction anywhere). `PaymentController::webhook` still returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
 - **Webhook has NO HMAC signature verification** (blocker #4) — waiting on payment gateway decision. Do not assume it's secure.
-- (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions · `Discount` เลิกเป็น draft แล้ว — ดู "Discount system (2026-08-27)" ใน Critical Conventions)
+- (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions · `Discount` เลิกเป็น draft แล้ว — ดู "Discount system (2026-08-27)" ใน Critical Conventions · `Excel reports` เลิกเป็น planned แล้ว — ดู "Excel reports system (2026-10-05)" ใน Critical Conventions)
 
 ## Conventions
 
@@ -191,8 +192,7 @@ curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" h
 > 🚧 These are **roadmap items only** — not yet built. Treat as greenfield when implementing. Check `cline.md` for any in-progress notes before starting, and create a scrutinize-style plan first.
 
 - **Static dashboard** — overview/stats dashboard (occupancy, revenue, room status aggregates). The existing `DashboardController` is **housekeeping-task-only** (`/api/v1/dashboard/tasks*`) — do **not** confuse it with this. Likely a new controller + read-only aggregate queries (no new writes to existing state machines).
-- **Generate & print report templates** — formatted printable reports (e.g. booking/occupancy/receipt). No PDF library is installed yet — **no** `dompdf`/`tcpdf`/`snappy`/`mpdf` in `composer.json`. Picking a PDF lib + designing the template layer is part of the task. Keep templates server-side rendered (this is an API-only repo; the React frontend is separate).
-- **Digital signature on physical documents** — capture/apply a digital signature onto a generated template document (e.g. signed receipt/agreement). Consider where the signature image is stored (the `images` table is now production-ready — polymorphic, private disk, signed URLs; see "Image system" in Critical Conventions) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
+- **Digital signature on physical documents** — capture/apply a digital signature onto a generated document (e.g. signed receipt/agreement). Consider where the signature image is stored (the `images` table is now production-ready — polymorphic, private disk, signed URLs; see "Image system" in Critical Conventions) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
 
 When starting any of the above: document the design decision + lib choice in `cline.md` before coding, and add a new entry here moving it from "Planned" to a real section once landed.
 
