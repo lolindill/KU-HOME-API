@@ -26,10 +26,12 @@ class ExcelReportRenderer
 {
     /**
      * @var array<string, string> รูปแบบ Number format ต่อชนิดคอลัมน์ (spec §5)
+     *                            · 'percent' เก็บสเกล 0–100 แสดงด้วย % literal (ไม่ใช่ 0% ที่ Excel คูณ 100 เอง)
      */
     public const FORMAT_MAP = [
         'money_baht' => '#,##0',
         'integer' => '#,##0',
+        'percent' => '0.0"%"',
     ];
 
     /**
@@ -47,8 +49,11 @@ class ExcelReportRenderer
         $templateFilters = $template['filters'] ?? [];
 
         // 1. 🔍 วิเคราะห์วันที่หลักและจัดสร้างข้อความแถว 2 (บรรทัด filter/ช่วงวันที่)
+        //    รายงาน real-time (template ระบุ "filter_line_mode": "as_of") ใช้บรรทัด "ข้อมูลอัพเดต : วันที่ เวลา"
         [$primaryFrom, $primaryTo, $primaryKey] = $this->resolvePrimaryDate($templateFilters, $filters);
-        $filterLine = $this->buildFilterLine($templateFilters, $filters, $primaryKey, $primaryFrom, $primaryTo);
+        $filterLine = ($template['filter_line_mode'] ?? null) === 'as_of'
+            ? ThaiDate::asOfLine()
+            : $this->buildFilterLine($templateFilters, $filters, $primaryKey, $primaryFrom, $primaryTo);
 
         // 2. 📄 สร้าง Spreadsheet และ active sheet
         $spreadsheet = new Spreadsheet;
@@ -110,6 +115,20 @@ class ExcelReportRenderer
 
                 $this->writeCellValue($sheet, "{$colLetter}{$currentRow}", $val, $colType);
             }
+
+            // 🏷️ format รายแถว (meta '_types' = map column key → type เช่นแถว % ของ manager-report)
+            if (isset($row['_types']) && is_array($row['_types'])) {
+                $keyIndex = array_column($columns, 'key');
+                foreach ($row['_types'] as $typeKey => $rowType) {
+                    $colIdx = array_search($typeKey, $keyIndex, true);
+                    if ($colIdx !== false && isset(self::FORMAT_MAP[$rowType])) {
+                        $colLetter = Coordinate::stringFromColumnIndex($colIdx + 1);
+                        $sheet->getStyle("{$colLetter}{$currentRow}")
+                            ->getNumberFormat()
+                            ->setFormatCode(self::FORMAT_MAP[$rowType]);
+                    }
+                }
+            }
             $currentRow++;
         }
 
@@ -123,35 +142,41 @@ class ExcelReportRenderer
             $sheet->setAutoFilter("A3:{$lastColLetter}{$lastDataRow}");
         }
 
-        // 🧮 แถวสุดท้าย = summary จาก $report->summary($filters) ถ้าไม่ว่าง (แถวเดียว bold)
+        // 🧮 แถวท้ายตาราง = summary จาก $report->summary($filters) — ทุกแถว bold
+        //    · map เดี่ยว (มี '_label') = แถวรวมแถวเดียว (spec §5)
+        //    · ['_rows' => [map, …]] = summary หลายแถวตามชีตต้นทาง (เช่น extra-bed 3 แถว)
         $summary = $report->summary($filters);
-        $hasSummary = ! empty($summary);
-        $summaryRow = null;
+        $summaryRows = [];
+        if (isset($summary['_rows']) && is_array($summary['_rows'])) {
+            $summaryRows = array_values($summary['_rows']);
+        } elseif (! empty($summary)) {
+            $summaryRows = [$summary];
+        }
 
-        if ($hasSummary) {
-            $summaryRow = $currentRow;
+        foreach ($summaryRows as $summaryRow) {
             foreach ($columns as $idx => $col) {
                 $colIdx = $idx + 1;
                 $colLetter = Coordinate::stringFromColumnIndex($colIdx);
 
                 if ($colIdx === 1) {
-                    $sheet->setCellValue("{$colLetter}{$summaryRow}", $summary['_label'] ?? 'รวม');
+                    $sheet->setCellValue("{$colLetter}{$currentRow}", $summaryRow['_label'] ?? 'รวม');
                 } else {
                     $colKey = $col['key'];
-                    if (array_key_exists($colKey, $summary)) {
+                    if (array_key_exists($colKey, $summaryRow)) {
                         $colType = $col['type'] ?? 'string';
-                        $this->writeCellValue($sheet, "{$colLetter}{$summaryRow}", $summary[$colKey], $colType);
+                        $this->writeCellValue($sheet, "{$colLetter}{$currentRow}", $summaryRow[$colKey], $colType);
                     }
                 }
             }
             if ($colCount > 0) {
-                $sheet->getStyle("A{$summaryRow}:{$lastColLetter}{$summaryRow}")->getFont()->setBold(true);
+                $sheet->getStyle("A{$currentRow}:{$lastColLetter}{$currentRow}")->getFont()->setBold(true);
             }
             $currentRow++;
         }
 
         // 🎨 กำหนด Number format รายบล็อก (ทั้งคอลัมน์ต่อช่วงแถว) ตาม spec §5
-        $endRow = $hasSummary ? $summaryRow : $lastDataRow;
+        $hasSummary = $summaryRows !== [];
+        $endRow = $hasSummary ? $currentRow - 1 : $lastDataRow;
         if ($endRow >= 4) {
             foreach ($columns as $idx => $col) {
                 $colType = $col['type'] ?? 'string';
@@ -166,7 +191,7 @@ class ExcelReportRenderer
         }
 
         // 📏 ปรับความกว้างคอลัมน์: ประมาณจาก mb_strlen ของหัวคอลัมน์กับค่าที่ยาวสุดในคอลัมน์นั้น + 2 (ขั้นต่ำ 10 สูงสุด 42)
-        $this->adjustColumnWidths($sheet, $columns, $rows, $summary);
+        $this->adjustColumnWidths($sheet, $columns, $rows, $summaryRows);
 
         return $spreadsheet;
     }
@@ -364,7 +389,7 @@ class ExcelReportRenderer
         }
 
         match ($type) {
-            'money_baht', 'integer' => is_numeric($val)
+            'money_baht', 'integer', 'percent' => is_numeric($val)
                 ? $sheet->setCellValueExplicit($cellCoordinate, $val + 0, DataType::TYPE_NUMERIC)
                 : $sheet->setCellValue($cellCoordinate, (string) $val),
             'date' => $sheet->setCellValueExplicit($cellCoordinate, ThaiDate::format($val), DataType::TYPE_STRING),
@@ -384,6 +409,7 @@ class ExcelReportRenderer
 
         return match ($type) {
             'money_baht', 'integer' => is_numeric($val) ? number_format((float) $val) : (string) $val,
+            'percent' => is_numeric($val) ? number_format((float) $val, 1).'%' : (string) $val,
             'date' => ThaiDate::format($val),
             'boolean' => $val ? 'TRUE' : 'FALSE',
             default => (string) $val,
@@ -392,11 +418,11 @@ class ExcelReportRenderer
 
     /**
      * 📏 คำนวณและปรับความกว้างคอลัมน์อัตโนมัติ (min 10, max 42)
+     *
+     * @param  array  $summaryRows  list ของแถว summary (0 หรือหลายแถว)
      */
-    protected function adjustColumnWidths($sheet, array $columns, array $rows, array $summary): void
+    protected function adjustColumnWidths($sheet, array $columns, array $rows, array $summaryRows): void
     {
-        $hasSummary = ! empty($summary);
-
         foreach ($columns as $idx => $col) {
             $colIdx = $idx + 1;
             $colLetter = Coordinate::stringFromColumnIndex($colIdx);
@@ -417,18 +443,17 @@ class ExcelReportRenderer
                 }
             }
 
-            // ตรวจสอบความยาวในแถว summary
-            if ($hasSummary) {
+            // ตรวจสอบความยาวในทุกแถว summary
+            foreach ($summaryRows as $summary) {
                 if ($colIdx === 1) {
                     $len = mb_strlen((string) ($summary['_label'] ?? 'รวม'));
-                    if ($len > $maxLen) {
-                        $maxLen = $len;
-                    }
                 } elseif (array_key_exists($colKey, $summary)) {
                     $len = mb_strlen($this->formatDisplayString($summary[$colKey], $colType));
-                    if ($len > $maxLen) {
-                        $maxLen = $len;
-                    }
+                } else {
+                    $len = 0;
+                }
+                if ($len > $maxLen) {
+                    $maxLen = $len;
                 }
             }
 

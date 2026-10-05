@@ -46,6 +46,18 @@ class ThaiDate
     }
 
     /**
+     * สร้างข้อความหัวไฟล์ "ข้อมูลอัพเดต : วันที่ เวลา" สำหรับรายงาน real-time
+     * (template ระบุ "filter_line_mode": "as_of" — เช่น room-status-report)
+     * → "ข้อมูลอัพเดต : 05/10/2569 17:49"
+     */
+    public static function asOfLine($when = null): string
+    {
+        $dt = $when instanceof Carbon ? $when->copy() : Carbon::parse($when ?? Carbon::now());
+
+        return 'ข้อมูลอัพเดต : '.self::format($dt).' '.$dt->format('H:i');
+    }
+
+    /**
      * slug ช่วงวันที่สำหรับชื่อไฟล์ (เช่น 14-09-2569_ถึง_20-09-2569)
      */
     public static function rangeSlug(?string $from, ?string $to): string

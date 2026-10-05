@@ -120,6 +120,8 @@ class HousekeepingReportV2Data extends BaseReportData
             'cleaning_check_1' => $task?->cleaning_check_1,
             'cleaning_check_2' => $task?->cleaning_check_2,
             'cleaning_check_3' => $task?->cleaning_check_3,
+            // note ของ task แม่บ้านวันนั้น — คอลัมน์เดียวกับ v1 (ตกจาก template ไปครั้งแรก)
+            'housekeeping_note' => $task?->notes,
         ];
     }
 }

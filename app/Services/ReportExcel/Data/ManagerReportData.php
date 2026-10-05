@@ -36,6 +36,11 @@ class ManagerReportData extends BaseReportData
         'percent_occupied_minus_ooo',
     ];
 
+    /** แถว % — render ด้วย format percent รายแถว (engine _types) — ค่าสเกล 0–100 */
+    private const PERCENT_KEYS = [
+        'percent_occupied', 'percent_occupied_plus_confirmed_provisional', 'percent_occupied_minus_ooo',
+    ];
+
     public function templateId(): string
     {
         return 'manager-report';
@@ -149,6 +154,14 @@ class ManagerReportData extends BaseReportData
             }
             foreach (['ly_day', 'ly_mtd', 'ly_ytd'] as $i => $colKey) {
                 $row[$colKey] = $this->aggregate($key, $lastYear[$i], $perNight, $nightsMax);
+            }
+
+            // แถว % ใช้ format percent รายแถว (คอลัมน์ matrix ใช้ type กลาง 'number' ร่วมกัน)
+            if (in_array($key, self::PERCENT_KEYS, true)) {
+                $row['_types'] = array_fill_keys(
+                    ['day', 'mtd', 'ytd', 'ly_day', 'ly_mtd', 'ly_ytd'],
+                    'percent'
+                );
             }
 
             return $row;

@@ -4,6 +4,7 @@ namespace App\Services\ReportExcel\Data;
 
 use App\Models\Addon;
 use App\Services\ReportExcel\BaseReportData;
+use App\Services\ReportExcel\ThaiDate;
 use Carbon\Carbon;
 
 /**
@@ -14,9 +15,9 @@ use Carbon\Carbon;
  *    (label = วันที่ พ.ศ. · ค่า = qty รายคืนจาก addons.extra_beds_by_night, null = 0)
  *
  *    · ห้อง "-" = ยังไม่ได้ assign ห้อง (room_id null — draft ยังไม่จ่ายห้อง)
- *    · summary 3 ชั้นตามชีต: Total Allocated (รวมจัดสรรรายคืน) / Total Inventory (config
+ *    · summary 3 แถวตามชีต: Total Allocated (รวมจัดสรรรายคืน) / Total Inventory (config
  *      reporting.extra_bed_fleet_size — ไม่ derive จาก rooms.builtin_extra_beds) / Balance
- *      → วางเป็นแถวเดียว "จัดสรร / คงเหลือ" ต่อคืน (คง stock ไว้ที่ config)
+ *      → คืนผ่านคีย์ '_rows' ของ engine (summary หลายแถว — ทุกแถว bold ท้ายตาราง)
  */
 class ExtraBedReportData extends BaseReportData
 {
@@ -32,6 +33,7 @@ class ExtraBedReportData extends BaseReportData
 
     /**
      * คอลัมน์ dynamic — แถบ 5 คอลัมน์หลัก + คอลัมน์รายคืน (key = YYYY-MM-DD)
+     * ช่วงคืน = [date_from, date_to] **รวมปลายทั้งสอง** ตาม night_columns ของ template truth
      */
     public function columns(array $filters): array
     {
@@ -44,7 +46,7 @@ class ExtraBedReportData extends BaseReportData
         foreach ($this->nights($filters) as $night) {
             $nightColumns[] = [
                 'key' => $night,
-                'label_th' => \App\Services\ReportExcel\ThaiDate::format($night),
+                'label_th' => ThaiDate::format($night),
                 'type' => 'integer',
             ];
         }
@@ -59,7 +61,8 @@ class ExtraBedReportData extends BaseReportData
         $addons = Addon::query()
             ->with(['bookingRoom.booking.user', 'bookingRoom.booking.organization', 'bookingRoom.room'])
             ->whereHas('bookingRoom', function ($q) use ($from, $to) {
-                $q->where('check_in', '<', $to)
+                // ครอบคืนใดคืนหนึ่งในช่วง [from, to] (รวมปลาย — night key = วันเริ่มคืน)
+                $q->where('check_in', '<=', $to)
                     ->where('check_out', '>', $from)
                     ->whereIn('status', ['draft', 'confirmed', 'checked_in']);
             })
@@ -76,21 +79,33 @@ class ExtraBedReportData extends BaseReportData
         [$from, $to, $nights] = $this->range($filters);
         $fleet = (int) config('reporting.extra_bed_fleet_size', 35);
 
-        $rows = iterator_to_array($this->rows($filters));
-        if ($rows === [] && $nights === []) {
+        if ($nights === []) {
             return [];
         }
 
-        $summary = ['_label' => "Total Allocated / Total Inventory ({$fleet}) / Balance"];
+        $rows = iterator_to_array($this->rows($filters));
+
+        // สรุป 3 แถวตามชีตต้นทาง — ค่าเป็น integer ต่อคืน (render ด้วย format #,##0)
+        $allocated = [];
+        $inventory = [];
+        $balance = [];
         foreach ($nights as $night) {
-            $allocated = array_sum(array_column($rows, $night));
-            $summary[$night] = "{$allocated} / {$fleet} / ".max(0, $fleet - $allocated);
+            $sum = (int) array_sum(array_column($rows, $night));
+            $allocated[$night] = $sum;
+            $inventory[$night] = $fleet;
+            $balance[$night] = max(0, $fleet - $sum);
         }
 
-        return $summary;
+        return ['_rows' => [
+            array_merge(['_label' => 'Total Allocated'], $allocated),
+            array_merge(['_label' => "Total Inventory ({$fleet})"], $inventory),
+            array_merge(['_label' => 'Balance'], $balance),
+        ]];
     }
 
     /**
+     * ช่วงคืนจาก filter — [date_from, date_to] รวมปลายทั้งสอง (ตรง title "ถึง …" และ truth template)
+     *
      * @return array{0: Carbon, 1: Carbon, 2: list<string>}
      */
     private function range(array $filters): array
@@ -99,7 +114,7 @@ class ExtraBedReportData extends BaseReportData
         $to = Carbon::parse($filters['date_to'])->startOfDay();
 
         $nights = [];
-        for ($d = $from->copy(); $d->lt($to); $d->addDay()) {
+        for ($d = $from->copy(); $d->lte($to); $d->addDay()) {
             $nights[] = $d->toDateString();
         }
 

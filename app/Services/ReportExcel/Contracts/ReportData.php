@@ -33,13 +33,15 @@ interface ReportData
     /**
      * แถวข้อมูล — iterable ของ array keyed ด้วย column key
      * แถวพิเศษ: ['_section' => 'ชื่อ section'] = แถว section label (engine เขียน bold ไม่ merge)
+     *           ['_types' => [columnKey => type]] = format รายแถว (เช่นแถว % ของ manager — type จาก FORMAT_MAP)
      * ค่า date ส่งเป็น ISO-8601 — engine format พ.ศ. ตอน render
      */
     public function rows(array $filters): iterable;
 
     /**
-     * แถวรวมท้ายตาราง — array keyed ด้วย column key (คีย์ '_label' = ข้อความช่องแรก, default 'รวม')
-     * รายงานที่ไม่มีแถวรวมคืน []
+     * แถวรวมท้ายตาราง — รายงานที่ไม่มีแถวรวมคืน []
+     * · map เดี่ยว: keyed ด้วย column key ('_label' = ข้อความช่องแรก, default 'รวม') — แถวเดียว bold
+     * · หลายแถวตามชีตต้นทาง: ['_rows' => [map, map, …]] — ทุกแถว bold (เช่น extra-bed 3 แถว)
      */
     public function summary(array $filters): array;
 }

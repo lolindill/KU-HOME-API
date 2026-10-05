@@ -66,7 +66,29 @@ class CheckInReportData extends BaseReportData
 
     public function summary(array $filters): array
     {
-        return [];
+        // นับชุดเดียวกับ rows() (checked_in + checked_out ของวัน checkin_date, มีห้อง)
+        $counts = BookingRoom::query()
+            ->whereIn('booking_rooms.status', ['checked_in', 'checked_out'])
+            ->whereNotNull('booking_rooms.room_id')
+            ->whereDate('booking_rooms.check_in', $filters['checkin_date'])
+            ->when(! empty($filters['room_type']) && $filters['room_type'] !== 'ทุกประเภท', function ($q) use ($filters) {
+                $q->whereHas('roomType', fn ($rt) => $rt->where('name_en', $filters['room_type']));
+            })
+            ->join('room_types', 'room_types.id', '=', 'booking_rooms.room_type_id')
+            ->groupBy('room_types.name_en')
+            ->selectRaw('room_types.name_en, COUNT(*) as total')
+            ->pluck('total', 'name_en');
+
+        if ($counts->isEmpty()) {
+            return [];
+        }
+
+        $byType = $counts->map(fn ($n, $type) => "{$type} {$n}")->implode(' · ');
+
+        return [
+            '_label' => 'รวม '.$counts->sum().' ห้อง',
+            'room_type' => $byType,
+        ];
     }
 
     private function mapRow(BookingRoom $br): array

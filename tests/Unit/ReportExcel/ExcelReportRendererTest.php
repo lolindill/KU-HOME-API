@@ -162,6 +162,70 @@ class ExcelReportRendererTest extends TestCase
     }
 
     /**
+     * ✅ summary หลายแถวผ่านคีย์ '_rows' (เช่น extra-bed 3 แถวตามชีต) — ทุกแถว bold ท้ายตาราง
+     *    และ autoFilter ยังครอบเฉพาะ header + แถวข้อมูล (ไม่รวม summary)
+     */
+    public function test_renders_multiple_summary_rows_via_rows_key(): void
+    {
+        $report = new StubMultiSummaryReportData;
+
+        $spreadsheet = $this->renderer->render($report, ['checkin_date' => '2026-09-11']);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        // แถว 4-5 = section · แถว 6-7 = ข้อมูล · แถว 8-9 = summary 2 แถว
+        $this->assertSame('Total Allocated', $sheet->getCell('A8')->getValue());
+        $this->assertEquals(2000, $sheet->getCell('I8')->getValue());
+        $this->assertSame('Balance', $sheet->getCell('A9')->getValue());
+        $this->assertEquals(500, $sheet->getCell('J9')->getValue());
+
+        // ทุกแถว summary bold ทั้งแถว
+        $this->assertTrue($sheet->getStyle('A8')->getFont()->getBold());
+        $this->assertTrue($sheet->getStyle('I8')->getFont()->getBold());
+        $this->assertTrue($sheet->getStyle('A9')->getFont()->getBold());
+        $this->assertTrue($sheet->getStyle('K9')->getFont()->getBold());
+
+        // autoFilter จบที่แถวข้อมูลสุดท้าย (7) — ไม่คลุม summary
+        $this->assertSame('A3:M7', $sheet->getAutoFilter()->getRange());
+    }
+
+    /**
+     * ✅ template ที่ระบุ "filter_line_mode": "as_of" (real-time เช่น room-status) —
+     *    แถว 2 = "ข้อมูลอัพเดต : วันที่ พ.ศ. H:i" ไม่ใช่ "ข้อมูลวันที่ -"
+     */
+    public function test_renders_as_of_filter_line_for_realtime_template(): void
+    {
+        $report = new StubRealtimeReportData;
+
+        $spreadsheet = $this->renderer->render($report, []);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        $filterLine = (string) $sheet->getCell('A2')->getValue();
+        $this->assertStringStartsWith('ข้อมูลอัพเดต : ', $filterLine);
+        $this->assertDoesNotMatchRegularExpression('/ข้อมูลวันที่/', $filterLine);
+        $this->assertMatchesRegularExpression('/\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/', $filterLine);
+    }
+
+    /**
+     * ✅ meta '_types' รายแถว — แถว % ของ manager-report ได้ format '0.0"%"'
+     *    ส่วนแถวอื่นคง General (format รายคอลัมน์เท่านั้น)
+     */
+    public function test_row_level_types_apply_percent_format(): void
+    {
+        $report = new StubPercentRowReportData;
+
+        $spreadsheet = $this->renderer->render($report, []);
+        $sheet = $spreadsheet->getActiveSheet();
+
+        // แถว 4 = %Occupied (มี _types) — format percent ทั้งแถวคอลัมน์ตัวเลข
+        $this->assertSame('0.0"%"', $sheet->getStyle('B4')->getNumberFormat()->getFormatCode());
+        $this->assertSame('0.0"%"', $sheet->getStyle('C4')->getNumberFormat()->getFormatCode());
+        $this->assertEquals(100, $sheet->getCell('B4')->getValue());
+
+        // แถว 5 = Total Rooms (ไม่มี _types) — คง General
+        $this->assertSame('General', $sheet->getStyle('B5')->getNumberFormat()->getFormatCode());
+    }
+
+    /**
      * ✅ ทดสอบการ sanitize ชื่อชีต (tab title) ตามข้อจำกัดของ Excel
      */
     public function test_sanitizes_sheet_title_properly(): void
@@ -249,6 +313,80 @@ class ExcelReportRendererTest extends TestCase
 }
 
 /**
+ * 🧪 Stub ReportData แบบ real-time — ใช้ template room-status-report.json (filter_line_mode: as_of)
+ */
+class StubRealtimeReportData extends BaseReportData
+{
+    public function templateId(): string
+    {
+        return 'room-status-report';
+    }
+
+    public function filterRules(): array
+    {
+        return [];
+    }
+
+    public function rows(array $filters): iterable
+    {
+        return [
+            [
+                'room_no' => '501',
+                'room_type' => 'Superior Twin',
+                'status' => 'OCC',
+                'guest_names' => 'คุณมานิตย์ คำสวย',
+                'arrival' => '2026-09-11',
+                'departure' => '2026-09-12',
+                'nights' => 1,
+                'note' => null,
+            ],
+        ];
+    }
+}
+
+/**
+ * 🧪 Stub ReportData ทดสอบ meta '_types' รายแถว (percent) — โครง matrix เหมือน manager-report
+ */
+class StubPercentRowReportData extends BaseReportData
+{
+    public function templateId(): string
+    {
+        return 'check-in-report';
+    }
+
+    public function filterRules(): array
+    {
+        return [];
+    }
+
+    public function columns(array $filters): array
+    {
+        return [
+            ['key' => 'metric', 'label_th' => 'รายการ', 'type' => 'string'],
+            ['key' => 'day', 'label_th' => 'Day', 'type' => 'number'],
+            ['key' => 'mtd', 'label_th' => 'Month to Date', 'type' => 'number'],
+        ];
+    }
+
+    public function rows(array $filters): iterable
+    {
+        return [
+            [
+                'metric' => '%Occupied',
+                'day' => 100,
+                'mtd' => 33.3,
+                '_types' => ['day' => 'percent', 'mtd' => 'percent'],
+            ],
+            [
+                'metric' => 'Total Rooms',
+                'day' => 100,
+                'mtd' => 100,
+            ],
+        ];
+    }
+}
+
+/**
  * 🧪 Stub ReportData สำหรับ Check-in report (ใช้ template check-in-report.json)
  */
 class StubCheckInReportData extends BaseReportData
@@ -309,5 +447,19 @@ class StubCheckInReportData extends BaseReportData
             'paid_amount' => 1000,
             'outstanding_amount' => 1000,
         ];
+    }
+}
+
+/**
+ * 🧪 Stub ReportData แบบ summary หลายแถว (คีย์ '_rows') — จำลอง extra-bed 3 แถวของชีตต้นทาง
+ */
+class StubMultiSummaryReportData extends StubCheckInReportData
+{
+    public function summary(array $filters): array
+    {
+        return ['_rows' => [
+            ['_label' => 'Total Allocated', 'full_price' => 2000, 'paid_amount' => 1000],
+            ['_label' => 'Balance', 'full_price' => 1000, 'paid_amount' => 500, 'outstanding_amount' => 500],
+        ]];
     }
 }

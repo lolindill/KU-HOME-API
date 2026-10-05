@@ -17,6 +17,7 @@ use Illuminate\Support\Collection;
  *    EA = ว่างรอแขกมาถึง (confirmed มาถึงวันนี้) · VD = ว่างสกปรก (rooms.status dirty) ·
  *    VC = ว่างสะอาด (available/prep_checkin)
  *    ลำดับตัดสิน: OOO > OCC > EA > VD > VC
+ *    หัวรายงานแถว 2 = "ข้อมูลอัพเดต : วันที่ เวลา" (template filter_line_mode: as_of — ตามชีตต้นทาง)
  */
 class RoomStatusReportData extends BaseReportData
 {
@@ -87,7 +88,9 @@ class RoomStatusReportData extends BaseReportData
             'room_type' => $room->roomType?->name_en,
             'status' => $status,
             'guest_names' => $span
-                ? collect($span->booking->guests ?? [])->pluck('name')->filter()->implode(', ')
+                // ชื่อแขกอยู่ใน guests JSON ของ BookingRoom — ว่าง fallback เป็นชื่อ primary ของ booking
+                ? (collect($span->guests ?? [])->pluck('name')->filter()->implode(', ')
+                    ?: $span->booking->primary_guest_name)
                 : null,
             'arrival' => $span?->check_in->toDateString(),
             'departure' => $span?->check_out->toDateString(),

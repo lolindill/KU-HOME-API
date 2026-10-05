@@ -27,6 +27,7 @@
             "sample_value": "ทุกสถานะ"
         }
     ],
+    "filter_line_mode": "as_of",
     "status_legend": {
         "OCC": "Occupied / แขกพักอยู่",
         "OOO": "Out of order / ห้องชำรุด ปรับปรุง",

@@ -75,6 +75,12 @@
             "nullable": true
         },
         {
+            "key": "housekeeping_note",
+            "label_th": "Housekeeping Note",
+            "type": "text",
+            "nullable": true
+        },
+        {
             "key": "cleaning_check_1",
             "label_th": "ช่องเช็คการทำความสะอาด 1 (ไม่มีหัวข้อในชีตต้นทาง)",
             "type": "boolean",
