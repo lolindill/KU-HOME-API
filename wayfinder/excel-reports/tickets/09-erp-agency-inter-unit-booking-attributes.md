@@ -18,7 +18,7 @@ Audit พบว่าไม่มี concept หน่วยงาน/ERP/โอ
 - **"ทำเรื่องแจ้งหนี้" (invoice requested):** template erp note ขอ — เป็น flag/date บน booking?
 - **`special_request` (text):** check-in/out report ต้องการ — ใส่ที่ booking หรือ booking_room?
 - **`comment` free-text:** ของ erp-transfer-report — รวมกับ special_request ได้ไหม หรือแยก?
-- **`complimentary_rooms` + `provisional`:** manager-report ใช้ — ต้องมี flag จริง หรือ re-define metric จากสิ่งที่มี (`source`, `pending`)? *(ส่วนนิยาม metric รวมถึง mode คุยใน [ticket 06](./06-manager-report-definition.md) — ใบนี้ตัดสินแค่ storage)*
+- **`complimentary_rooms` (+ `provisional`):** manager-report ใช้ — ✅ **[ticket 06](./06-manager-report-definition.md) ตัดสินแล้ว (2026-10-05): ต้องมี flag จริง `is_complimentary` บน `bookings`** (ส่วน `provisional` จบแล้ว — derive จาก state machine ไม่ต้อง storage) — ใบนี้เหลือ design รายละเอียดของ flag: ใครตั้งได้ (admin?), เงื่อนไข/เกณฑ์, ผลต่อยอดเงิน booking (ห้อง 0 บาท? กระทบ invariant `Σ amount == total_amount` ไหม — ประสานกับ ticket 08)
 
 **Precondition:** อ่าน audit §3.1, §3.4, §3.7, §3.15 + audit §4 gap 2, 3, 12 ก่อน
 
