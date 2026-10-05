@@ -1,7 +1,7 @@
 ---
 label: wayfinder:map
 title: "Excel report export — สร้าง Excel 15 รายงานจาก template docs/report_docAndSample"
-status: open
+status: closed
 ---
 
 # 🗺️ Wayfinder Map — Excel report export (15 รายงาน)
@@ -11,7 +11,7 @@ status: open
 - **tracker:** local-markdown — tickets อยู่ใน `tickets/`, research อยู่ใน `research/` (blocking = field `blocked-by` ของแต่ละ ticket)
 - **charted:** 2026-09-22
 
-## Destination
+## Destination ✅ COMPLETED (2026-10-05)
 
 Design spec (label `ready-for-agent`) ฉบับเดียว สำหรับฟีเจอร์ **export ไฟล์ Excel (.xlsx) ของรายงานทั้ง 15 ฉบับ** ตาม template ใน `docs/report_docAndSample/report-templates/` — ตัดสินครบ: library, renderer architecture + ที่อยู่ของ template, API contract + สิทธิ์, formatting/print conventions และ data-coverage รวม design ตารางใหม่ที่จำเป็น — พอให้ implement ต่อได้โดยไม่ต้องตัดสินใจใหญ่อีก
 
@@ -45,6 +45,7 @@ Design spec (label `ready-for-agent`) ฉบับเดียว สำหร�
 - [ERP/agency/inter-unit + booking attributes](tickets/09-erp-agency-inter-unit-booking-attributes.md) *(2026-10-05 — grilling)*: agency/erp_code = อ่านจาก `organizations` มีแล้ว · **inter-unit = derive จาก organization_id ไม่เพิ่ม flag** (check-in section Fully Paid ตามต้นทาง) · เพิ่ม 4 column บน `bookings`: **`invoice_requested_at` · `special_request` · `comment` · `is_complimentary` (tag-only — ยอดเงินคงเดิม, admin-only)** · ไม่มีตารางใหม่ · **fog "รายงานตามองค์กร" จบ** — v1 มีมุมมอง org แค่ erp-transfer + deposit (filter)
 - [Addon product model — breakfast แยกชุด, extra-bed รายคืน, checklist แม่บ้าน](tickets/10-addon-product-model-breakdown.md) *(2026-10-05 — grilling)*: breakfast = **2 columns `breakfast_set_100/200` บน addons** + เรท global_rates 2 แถว (`breakfast_100`/`breakfast_200`) · **คิดเงิน × คืน** (แก้ undercharge เดิมคิดครั้งเดียว) — วันกิน = เช้าวันถัดจากคืนนอน `(check_in, check_out]` ตรง sample ชีต · extra-bed = **JSON `extra_beds_by_night`** คิดรายคืน เรทจาก global_rates ต่อไป (`room_types.extra_bed_price` เหลือ display-only — เจอ inconsistency ระหว่าง grill) · fleet 35 = config · checklist = **3 booleans บน housekeeping_tasks แม่บ้าน tick** หัวข้อ label อยู่ config · reprice แก้ที่ chokepoint เดียว invariant คงเดิม
 - [โดเมนห้อง/สต๊อก — maintenance log, supplies, charges, VIP, room history](tickets/11-room-domain-new-tables.md) *(2026-10-05 — grilling)*: repair log = **เพิ่ม `work_type`+`repair_detail` บน `room_state_periods` ไม่มีตารางใหม่** (วันแจ้งซ่อม = start, เสร็จ = end, duration derive · note OOO = repair_detail) · charges = ตาราง `additional_charges` **ledger รายงานล้วน ไม่เข้ายอด booking** (invariant คงเดิม · ผู้บันทึก admin+staff = default ติดธง sign-off) · supplies = **เอาไว้ก่อน** รายงาน minimal จาก `stock_inventories` เดิม · **VIP ไว้ก่อน** legend เหลือ 5 ค่า OCC/OOO/VC/VD/EA · Inspected derive จาก `prep_checkin` (default ติดธง) · **room history หมดคำถามก่อน grill** — `status_change_logs` entity_type room + `room_state_periods` landed แล้วตามแมป `room-state-periods` — OOO ย้อนหลังของ occupancy/manager-report ปลดล็อก (ticket 06)
+- [รวบ decisions → spec.md ฉบับ ready-for-agent](tickets/07-spec-ready-for-agent.md) *(2026-10-05 — task AFK)*: **[spec.md](spec.md) ฉบับเดียวจบ** (label `ready-for-agent`) — phpspreadsheet 5.x ตรง · Hybrid engine + `ReportData` 15 classes · template ที่ `resources/report-templates/` · migration pack (bookings +4, addons reshape, global_rates +2, checklist 3, periods +2, ตาราง `additional_charges`) · 15 routes stream + สิทธิ์ · พ.ศ./`#,##0`/minimal flat/A4 · 2 seams testing · IMPL-01..08 — default รอ sign-off 2 ข้อติดธงใน spec §9 — **map ปิดสมบูรณ์**
 
 ## Not yet specified
 
