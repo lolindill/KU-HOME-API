@@ -2,8 +2,8 @@
 label: wayfinder:grilling
 type: HITL
 title: Payment/deposit semantics — ยอดเงินของสลิป, channel, มัดจำ 50%, receipt_ref
-status: open
-assignee:
+status: closed (2026-10-05 — grilling)
+assignee: kevii
 blocked-by: ["02-data-coverage-audit"]
 ---
 
@@ -40,3 +40,21 @@ Grilling เริ่มไปครึ่งทางแล้ว owner สั�
 - **ธงที่ยังเปิดให้ใบนี้ตัดสินเอง:** `payment_channel` — แมป payment-types ตัดสินว่า ledger แยกที่มาเงินได้จากจุดเขียน (verify=สลิป / recordPayment=เงินสด / QR) โดยไม่ต้องกลับ column แต่ "จะมี column channel ชัด ๆ ไหมในรายงาน" ยังเป็นคำถามของใบนี้ · `receipt_ref` ยังติด `receipts` FROZEN เหมือนเดิม
 
 pick ใบนี้ได้ตามปกติ — grilling ต่อจากจุด pause โดยเทียบ design ข้างบนเป็น base ค่ะนะ ✨
+
+## Resolution
+
+(2026-10-05 — grilling กับ owner ตรง · AskUserQuestion · ต่อจากจุด pause โดยใช้ design ของแมป [`booking-payment-types`](../../booking-payment-types/map.md) เป็น base)
+
+**ธงที่จบด้วยแมปพี่เลี้ยง (ไม่ต้องตัดสินซ้ำ):**
+
+- **ยอดสลิป:** ชั้น A = `booking_confirmations.amount` · ชั้น B derive ล้วนจาก `payments` ledger — `received_amount` ของรายงาน = `payments.amount` (SUM ต่อ booking ตาม flow), `paid_amount`/`outstanding` มี accessors พร้อม
+- **มัดจำ 50%:** `payment_status` ของรายงาน (เต็มจำนวน/มัดจำ 50%) แสดงจาก `bookings.payment_type` (`full|deposit|deferred`) + `deposit_amount` — ไม่เพิ่ม storage
+
+**ธงที่ใบนี้ตัดสินเอง (owner เลือก):**
+
+- **`payment_channel` → "ที่มาเงิน" 2 ค่า** — ตัด enum เดิม QR Code/เงินสด/บัตรเครดิต (ระบบไม่มีบัตรเครดิต, ช่องทางภายในสลิปอ่านค่าไม่ได้) เหลือ **สลิป (โอน/QR) | เงินสดหน้าเคาน์เตอร์** · ใช้ทั้ง column และ filter ของ daily-financial-report (filter = ทั้งหมด/สลิป/เงินสด) · **derive จากจุดเขียน ledger (verify=สลิป / recordPayment=เงินสด) ไม่เพิ่ม column channel** — ตาม design ของแมป payment-types ที่ไม่กลับไปแตะ `payment_method` ที่ drop ไปแล้ว
+- **`receipt_ref`:** **เก็บคอลัมน์ไว้ตาม layout ชีต แต่แสดง "-" ทุกแถว** (owner: "-" and take note) — receipts FROZEN ไม่มีข้อมูลให้เติม · spec จดหมายเหตุว่าคอลัมน์นี้รอระบบใบเสร็จใหม่ ถ้ามีวันหน้าค่อยเติมข้อมูลจริง (ไม่ใช้ `payments.reference_number` แทน — คงความหมายเดิมของหัวคอลัมน์)
+
+**ผลต่อ template:** `daily-financial-report.json` ต้อง adjust ตอน implement — filter `payment_channel` เหลือ 3 options (ทั้งหมด/สลิป/เงินสด) · column `payment_channel` เหลือ 2 ค่า · `receipt_ref` คงไว้เติม "-" · หมายเหตุใน template JSON ควรจดว่าชีตต้นทางยังเป็น QR/เงินสด/บัตร — **รายงานนี้ owner ตัดสินให้ระบบ wins** (เหนื่อยกว่าชีต แต่ตรงข้อมูลจริง)
+
+→ ลง spec หัวข้อ "financial data mapping" (ticket 07)
