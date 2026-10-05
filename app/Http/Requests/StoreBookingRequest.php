@@ -132,6 +132,12 @@ class StoreBookingRequest extends FormRequest
             //    deposit_amount มีความหมายเฉพาะ deposit — cross-field ตรวจใน controller
             'payment_type' => 'nullable|in:full,deposit,deferred',
             'deposit_amount' => 'nullable|integer|min:1',
+
+            // 📊 (05/10/26, excel-reports spec ticket 09): ตั้งได้ admin/system เท่านั้น — ตรวจสิทธิ์ 403 ใน controller
+            'invoice_requested_at' => 'nullable|date',
+            'special_request' => 'nullable|string|max:2000',
+            'comment' => 'nullable|string|max:2000',
+            'is_complimentary' => 'nullable|boolean',
         ];
     }
 
@@ -152,6 +158,10 @@ class StoreBookingRequest extends FormRequest
             'payment_type.in' => 'ประเภทการชำระเงินต้องเป็น full, deposit หรือ deferred เท่านั้นค่ะ 💳',
             'deposit_amount.integer' => 'ยอดมัดจำต้องเป็นตัวเลขจำนวนเต็ม (บาท) ค่ะ 💳',
             'deposit_amount.min' => 'ยอดมัดจำต้องมากกว่า 0 บาทค่ะ 💳',
+            'invoice_requested_at.date' => 'วันที่ขอใบแจ้งหนี้ต้องเป็นรูปแบบวันที่ที่ถูกต้องค่ะ 🧾',
+            'special_request.max' => 'คำขอพิเศษต้องไม่เกิน 2000 ตัวอักษรค่ะ 📝',
+            'comment.max' => 'หมายเหตุต้องไม่เกิน 2000 ตัวอักษรค่ะ 📝',
+            'is_complimentary.boolean' => 'สถานะ complimentary ต้องเป็น true หรือ false ค่ะ 💳',
             'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
             'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
             'booking_rooms.max' => BookingRule::roomCapMessage($this->user('sanctum')),

@@ -1234,6 +1234,14 @@ class BookingController extends Controller
                 throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
             }
 
+            // 📊 (05/10/26, excel-reports ticket 09): ตั้ง invoice_requested_at / special_request /
+            //    comment / is_complimentary ได้ admin/system เท่านั้น (403 ถ้า role อื่นส่งมา)
+            if ($request->hasAny(['invoice_requested_at', 'special_request', 'comment', 'is_complimentary'])) {
+                if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                    throw new \Exception('การตั้งข้อมูล invoice_requested_at / special_request / comment / is_complimentary สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+                }
+            }
+
             // 🏛️ (25/09/26, organization-bookings ticket 02): admin booking 2 โหมด —
             //    โหมด A: admin ส่ง `user` (UUID) → user_id = target user (ไม่ใช่ admin ผู้สร้าง)
             //    โหมด B: admin ไม่ส่ง `user` → user_id = null (เฮดเปล่า — org/group booking)
@@ -1370,6 +1378,11 @@ class BookingController extends Controller
                 'deposit_amount' => $depositAmount,
                 // ⏱️ (2026-09-24, REQ-008): ล็อกห้อง 15 นาที (config booking.payment_deadline_minutes)
                 'payment_deadline' => Carbon::now()->addMinutes((int) config('booking.payment_deadline_minutes')),
+                // 📊 (05/10/26, excel-reports spec ticket 09): booking attributes สำหรับรายงาน (admin/system)
+                'invoice_requested_at' => ! empty($validated['invoice_requested_at']) ? Carbon::parse($validated['invoice_requested_at']) : null,
+                'special_request' => $validated['special_request'] ?? null,
+                'comment' => $validated['comment'] ?? null,
+                'is_complimentary' => $request->has('is_complimentary') ? (bool) $validated['is_complimentary'] : false,
             ]);
 
             // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ

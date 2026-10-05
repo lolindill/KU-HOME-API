@@ -6,7 +6,7 @@
 > ธรรมเนียม: claim งานในไฟล์นี้ (เติม `assignee:` ด้านล่าง) · commit ต่อบน branch เดิม
 
 ```
-assignee: (ว่าง — session ถัดไปเติมชื่อก่อนลงมือ)
+assignee: head-agent zcode session (dispatch งาน implement ให้ antigravity ผ่าน agent-hub) 2026-10-05
 ```
 
 ## ✅ เสร็จแล้ว (commit บน branch แล้วทั้งหมด — ห้าม redo)
