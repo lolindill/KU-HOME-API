@@ -1607,6 +1607,24 @@ class BookingController extends Controller
                     $locked->payment_deadline = Carbon::parse($validated['payment_deadline']);
                 }
 
+                // 📊 (05/10/26, excel-reports §2.1) booking attributes — admin เท่านั้น
+                //    (route role:admin) · tag-only ไม่แตะยอดเงิน/state machine · ไม่ส่ง = คงเดิม
+                //    (ส่ง null ชัด ๆ = เคลียร์)
+                if ($request->has('invoice_requested_at')) {
+                    $locked->invoice_requested_at = $validated['invoice_requested_at'] !== null
+                        ? Carbon::parse($validated['invoice_requested_at'])
+                        : null;
+                }
+                if ($request->has('special_request')) {
+                    $locked->special_request = $validated['special_request'];
+                }
+                if ($request->has('comment')) {
+                    $locked->comment = $validated['comment'];
+                }
+                if ($request->has('is_complimentary')) {
+                    $locked->is_complimentary = (bool) $validated['is_complimentary'];
+                }
+
                 $locked->save();
 
                 // 🎟️ discount_code — reuse กลไก DiscountService เดิม (reconcile total_amount ครบ)

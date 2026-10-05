@@ -45,6 +45,13 @@ class UpdateBookingPaymentRequest extends FormRequest
             'customer_name' => 'nullable|string|max:255',
             'customer_phone' => 'nullable|string|max:50',
             'customer_email' => 'nullable|string|email|max:255',
+
+            // 📊 (05/10/26, excel-reports spec §2.1 — ticket 09) booking attributes สำหรับรายงาน
+            //    admin/system เท่านั้น (route role:admin + re-check ใน controller) · ไม่ผูก state
+            'invoice_requested_at' => 'nullable|date',
+            'special_request' => 'nullable|string|max:2000',
+            'comment' => 'nullable|string|max:2000',
+            'is_complimentary' => 'nullable|boolean',
         ];
     }
 

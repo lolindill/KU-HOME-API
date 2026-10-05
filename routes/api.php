@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AdditionalChargeController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
@@ -11,6 +12,7 @@ use App\Http\Controllers\Api\V1\ImageController;
 use App\Http\Controllers\Api\V1\MockController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\RoomStatePeriodController;
 use App\Http\Controllers\Api\V1\SsoController;
@@ -247,6 +249,43 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where(['roomId' => '[0-9a-f\-]{36}', 'periodId' => '[0-9a-f\-]{36}']);
         Route::delete('/rooms/{roomId}/periods/{periodId}', [RoomStatePeriodController::class, 'destroy'])
             ->where(['roomId' => '[0-9a-f\-]{36}', 'periodId' => '[0-9a-f\-]{36}']);
+    });
+
+    // 💸 Additional charges (05/10/26 — excel-reports spec §2.6): ledger ค่าเสียหาย/ค่ายืม
+    //    **รายงานล้วน — ยอดไม่เข้า booking** (ไม่แตะ invariant/payments) · บันทึกอิสระทุกเมื่อ
+    //    · สิทธิ์ admin+staff (default §9 รอ sign-off) · ไม่มี GET — อ่านผ่าน report /reports/additional-charges/export
+    Route::middleware('role:admin,staff')->group(function () {
+        Route::post('/additional-charges', [AdditionalChargeController::class, 'store']);
+        Route::patch('/additional-charges/{id}', [AdditionalChargeController::class, 'update'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::delete('/additional-charges/{id}', [AdditionalChargeController::class, 'destroy'])
+            ->where('id', '[0-9a-f\-]{36}');
+    });
+
+    // 📊 Reports — Excel export 15 ฉบับ (05/10/26 — excel-reports spec §4):
+    //    route ต่อรายงาน (explicit — owner เลือกแยก) · stream ไฟล์ทันที ไม่มีไฟล์ค้าง disk
+    //    · สิทธิ์ admin+staff ทุกใบ · housekeeping เฉพาะ 2 ใบแม่บ้าน (+in-controller re-check)
+    //    · throttle 10,1 (กลุ่ม lookups) · validate filter ต่อรายงาน (เพดานช่วงวันที่ ≤ 1 ปี)
+    Route::middleware('role:admin,staff')->prefix('reports')->group(function () {
+        Route::get('/check-in/export', [ReportController::class, 'checkIn'])->middleware('throttle:10,1');
+        Route::get('/check-out/export', [ReportController::class, 'checkOut'])->middleware('throttle:10,1');
+        Route::get('/daily-financial/export', [ReportController::class, 'dailyFinancial'])->middleware('throttle:10,1');
+        Route::get('/deposit/export', [ReportController::class, 'deposit'])->middleware('throttle:10,1');
+        Route::get('/occupancy/export', [ReportController::class, 'occupancy'])->middleware('throttle:10,1');
+        Route::get('/breakfast/export', [ReportController::class, 'breakfast'])->middleware('throttle:10,1');
+        Route::get('/erp-transfer/export', [ReportController::class, 'erpTransfer'])->middleware('throttle:10,1');
+        Route::get('/room-status/export', [ReportController::class, 'roomStatus'])->middleware('throttle:10,1');
+        Route::get('/extra-bed/export', [ReportController::class, 'extraBed'])->middleware('throttle:10,1');
+        Route::get('/supplies/export', [ReportController::class, 'supplies'])->middleware('throttle:10,1');
+        Route::get('/out-of-service-room/export', [ReportController::class, 'outOfServiceRoom'])->middleware('throttle:10,1');
+        Route::get('/additional-charges/export', [ReportController::class, 'additionalCharges'])->middleware('throttle:10,1');
+        Route::get('/manager/export', [ReportController::class, 'manager'])->middleware('throttle:10,1');
+    });
+
+    // 📊 Reports — 2 ใบแม่บ้าน (admin+staff+housekeeping)
+    Route::middleware('role:admin,staff,housekeeping')->prefix('reports')->group(function () {
+        Route::get('/housekeeping/export', [ReportController::class, 'housekeeping'])->middleware('throttle:10,1');
+        Route::get('/housekeeping-v2/export', [ReportController::class, 'housekeepingV2'])->middleware('throttle:10,1');
     });
 
     // 🧹 Dashboard / Housekeeping — Shared endpoints (admin OR housekeeping)
