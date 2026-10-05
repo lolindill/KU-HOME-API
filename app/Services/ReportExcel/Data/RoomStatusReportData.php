@@ -7,6 +7,7 @@ use App\Models\Room;
 use App\Models\RoomStatePeriod;
 use App\Services\ReportExcel\BaseReportData;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * 🛏️ RoomStatusReportData — รายงานสถานะห้องพัก real-time (excel-reports spec §2.8, ticket 11)
@@ -65,7 +66,7 @@ class RoomStatusReportData extends BaseReportData
         return [];
     }
 
-    private function mapRow(Room $room, Carbon $today, ?$spans, bool $maintenance): array
+    private function mapRow(Room $room, Carbon $today, ?Collection $spans, bool $maintenance): array
     {
         // span ที่กำลังเข้าพักจริง (checked_in ครอบคลุมวันนี้) ก่อน แล้วค่อย confirmed ที่มาถึงวันนี้
         $occupied = $spans?->first(fn ($br) => $br->status === 'checked_in' && $br->check_in->lte($today) && $br->check_out->gt($today));

@@ -8,6 +8,7 @@ use App\Models\Room;
 use App\Models\RoomStatePeriod;
 use App\Services\ReportExcel\BaseReportData;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * 🧹✨ HousekeepingReportV2Data — รายงานแม่บ้าน v2 (excel-reports spec §2.4/§6.2, ticket 10)
@@ -85,7 +86,7 @@ class HousekeepingReportV2Data extends BaseReportData
         return [];
     }
 
-    private function mapRow(Room $room, Carbon $date, ?$spans, ?$tasks, bool $maintenance): array
+    private function mapRow(Room $room, Carbon $date, ?Collection $spans, ?Collection $tasks, bool $maintenance): array
     {
         $span = $spans
             ?->first(fn ($br) => $br->status === 'checked_in' && $br->check_in->lte($date) && $br->check_out->gt($date))

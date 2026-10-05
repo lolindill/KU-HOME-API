@@ -23,6 +23,7 @@ use App\Services\ReportExcel\ExcelReportRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -169,6 +170,10 @@ class ReportController extends Controller
             $filters = $request->validate($report->filterRules());
 
             return app(ExcelReportRenderer::class)->streamResponse($report, $filters);
+            // 🛑 (05/10/26): ValidationException extends \Exception — ต้อง rethrow ก่อน
+            //    ไม่งั้นตกใน catch ล่างแล้วกลายเป็น 500 ทั้งที่ error contract คือ 422 (spec §4)
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error("Report export failed [{$slug}]: ".$e->getMessage(), [
                 'user_id' => optional($request->user('sanctum'))->id,

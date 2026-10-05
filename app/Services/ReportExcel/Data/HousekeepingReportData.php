@@ -8,6 +8,7 @@ use App\Models\Room;
 use App\Models\RoomStatePeriod;
 use App\Services\ReportExcel\BaseReportData;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * 🧹 HousekeepingReportData (v1) — รายงานแม่บ้าน (excel-reports spec §2.8, ticket 11)
@@ -61,7 +62,7 @@ class HousekeepingReportData extends BaseReportData
         return [];
     }
 
-    private function mapRow(Room $room, Carbon $date, ?$spans, ?$tasks): array
+    private function mapRow(Room $room, Carbon $date, ?Collection $spans, ?Collection $tasks): array
     {
         // span ที่ใช้แสดง: ครอบคลุมวันนั้นก่อน (stay/due out) ไม่งั้น span ที่มาถึงวันนั้น
         $span = $spans
