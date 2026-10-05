@@ -1,0 +1,196 @@
+{
+    "id": "occupancy-report",
+    "name_th": "รายงานการเข้าพัก",
+    "name_en": "Occupancy Report",
+    "category_th": "รายงานบริหารจัดการ",
+    "frequency_th": "รายสัปดาห์/รายเดือน",
+    "primary_users_th": [
+        "ผู้บริหาร",
+        "ผู้จัดการ"
+    ],
+    "output_format_th": "ดูหน้าจอ (กราฟ) + Export Excel",
+    "register_note_th": "ใช้วางแผนราคาห้องและโปรโมชัน",
+    "register_displayed_data_th": "จำนวนห้องทั้งหมด, ห้องที่ถูกจอง, % Occupancy, \nรายได้เฉลี่ยต่อห้อง (ADR)",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.การเข้าพัก",
+        "sheet_gid": "1475510915",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "ประจำวันที่ (ชีตแสดงช่วง 7 วันถัดไป)",
+            "type": "date",
+            "sample_value": "2026-09-14"
+        }
+    ],
+    "columns": [
+        {
+            "key": "date",
+            "label_th": "วันที่",
+            "type": "date"
+        },
+        {
+            "key": "total_rooms",
+            "label_th": "จำนวนห้องทั้งหมด",
+            "type": "integer"
+        },
+        {
+            "key": "occupied_rooms",
+            "label_th": "จำนวนห้องที่มีผู้พักทั้งหมด",
+            "type": "integer"
+        },
+        {
+            "key": "occupied_superior",
+            "label_th": "Superior (ห้องที่มีผู้พัก)",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "occupied_deluxe",
+            "label_th": "Deluxe (ห้องที่มีผู้พัก)",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "occupied_suite",
+            "label_th": "Suite (ห้องที่มีผู้พัก)",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "vacant_rooms",
+            "label_th": "จำนวนห้องว่าง",
+            "type": "integer"
+        },
+        {
+            "key": "reserved_rooms",
+            "label_th": "จำนวนห้องที่จองแล้ว",
+            "type": "integer"
+        },
+        {
+            "key": "out_of_service_rooms",
+            "label_th": "ห้องปิดใช้งาน",
+            "type": "integer"
+        },
+        {
+            "key": "arrivals",
+            "label_th": "Arrival",
+            "type": "integer"
+        },
+        {
+            "key": "departures",
+            "label_th": "Departures",
+            "type": "integer"
+        }
+    ],
+    "summary": {
+        "label": "total amount",
+        "sample_values": {
+            "reserved_rooms": 129,
+            "out_of_service_rooms": 0,
+            "arrivals": 0,
+            "departures": 0
+        }
+    },
+    "sample_data": [
+        {
+            "date": "2026-09-14",
+            "total_rooms": 100,
+            "occupied_rooms": 60,
+            "occupied_superior": 30,
+            "occupied_deluxe": 27,
+            "occupied_suite": 3,
+            "vacant_rooms": 40,
+            "reserved_rooms": 20,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 30
+        },
+        {
+            "date": "2026-09-15",
+            "total_rooms": 100,
+            "occupied_rooms": 35,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 65,
+            "reserved_rooms": 40,
+            "out_of_service_rooms": 2,
+            "arrivals": 2,
+            "departures": 40
+        },
+        {
+            "date": "2026-09-16",
+            "total_rooms": 100,
+            "occupied_rooms": 44,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 56,
+            "reserved_rooms": 18,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 30
+        },
+        {
+            "date": "2026-09-17",
+            "total_rooms": 100,
+            "occupied_rooms": 19,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 81,
+            "reserved_rooms": 2,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 10
+        },
+        {
+            "date": "2026-09-18",
+            "total_rooms": 100,
+            "occupied_rooms": 20,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 80,
+            "reserved_rooms": 2,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 9
+        },
+        {
+            "date": "2026-09-19",
+            "total_rooms": 100,
+            "occupied_rooms": 77,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 23,
+            "reserved_rooms": 0,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 5
+        },
+        {
+            "date": "2026-09-20",
+            "total_rooms": 100,
+            "occupied_rooms": 77,
+            "occupied_superior": null,
+            "occupied_deluxe": null,
+            "occupied_suite": null,
+            "vacant_rooms": 23,
+            "reserved_rooms": 10,
+            "out_of_service_rooms": 2,
+            "arrivals": 1,
+            "departures": 5
+        }
+    ],
+    "notes": [
+        "1 แถว = 1 วัน (7 วันถัดไป); คอลัมน์แยกประเภทห้อง (Superior/Deluxe/Suite) กรอกเฉพาะแถววันแรก",
+        "⚠️ แถว Summary ของชีตต้นทางวางตัวเลขไม่ตรงคอลัมน์ (129 ตรงกับผลรวม Departures) — ตอน implement ให้คำนวณ sum เองทุกคอลัมน์",
+        "สารบัญระบุ output เพิ่ม: % Occupancy และ ADR (รายได้เฉลี่ยต่อห้อง) แต่เทมเพลตยังไม่มีคอลัมน์นี้ — เสนอเพิ่มตอน implement"
+    ]
+}

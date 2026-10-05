@@ -1,0 +1,230 @@
+{
+    "id": "deposit-report",
+    "name_th": "รายงานยอดมัดจำ",
+    "name_en": "ข้อมูลวันที่ 14 กันยายน 2569",
+    "category_th": "รายงานการเงิน",
+    "frequency_th": "รายวัน/ตามต้องการ",
+    "primary_users_th": [
+        "ฝ่ายบัญชี",
+        "ผู้จัดการ"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export Excel",
+    "register_note_th": "ใช้ติดตามทวงถามลูกค้า",
+    "register_displayed_data_th": "ชื่อลูกค้า, เลขห้อง/ใบจอง, \nยอดค้างชำระ, วันครบกำหนด",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานการมัดจำ",
+        "sheet_gid": "149248714",
+        "extracted_at": "2026-09-22"
+    },
+    "alias_en": "Outstanding Payment Report",
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "ประจำวันที่",
+            "type": "date",
+            "sample_value": "2026-09-14"
+        },
+        {
+            "key": "guest_type",
+            "label_th": "ประเภท",
+            "type": "enum",
+            "options": [
+                "หน่วยงาน/ทั่วไป",
+                "หน่วยงาน",
+                "ทั่วไป"
+            ],
+            "sample_value": "หน่วยงาน/ทั่วไป"
+        }
+    ],
+    "columns": [
+        {
+            "key": "booking_date",
+            "label_th": "วันที่ทำการจอง",
+            "type": "date"
+        },
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "เลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "user_name",
+            "label_th": "ชื่อ USER",
+            "type": "string"
+        },
+        {
+            "key": "checkin_date",
+            "label_th": "วันที่เช็คอิน",
+            "type": "date"
+        },
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่เช็คเอ้าท์",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "จำนวนคืน",
+            "type": "integer"
+        },
+        {
+            "key": "full_amount",
+            "label_th": "ยอดเต็มจำนวน",
+            "type": "money_baht"
+        },
+        {
+            "key": "outstanding_amount",
+            "label_th": "ยอดค้างชำระ",
+            "type": "money_baht"
+        }
+    ],
+    "summary": {
+        "total_items": 12,
+        "total_full_amount_baht": 21500,
+        "total_outstanding_baht": 10750
+    },
+    "sample_data": [
+        {
+            "booking_date": "2026-09-09",
+            "booking_no": "xxxxx",
+            "room_no": "501",
+            "user_name": "คุณมานิตย์ คำสวย",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "full_amount": 1000,
+            "outstanding_amount": 500
+        },
+        {
+            "booking_date": "2026-09-09",
+            "booking_no": "xxxxx",
+            "room_no": "502",
+            "user_name": "คุณกันต์ ขยันจัง",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-13",
+            "nights": 2,
+            "full_amount": 2000,
+            "outstanding_amount": 1000
+        },
+        {
+            "booking_date": "2026-09-10",
+            "booking_no": "xxxxx",
+            "room_no": "503",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-15",
+            "checkout_date": "2026-09-16",
+            "nights": 1,
+            "full_amount": 1000,
+            "outstanding_amount": 500
+        },
+        {
+            "booking_date": "2026-09-10",
+            "booking_no": "xxxxx",
+            "room_no": "504",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-15",
+            "checkout_date": "2026-09-16",
+            "nights": 1,
+            "full_amount": 1000,
+            "outstanding_amount": 500
+        },
+        {
+            "booking_date": "2026-09-10",
+            "booking_no": "xxxxx",
+            "room_no": "510",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-15",
+            "checkout_date": "2026-09-16",
+            "nights": 1,
+            "full_amount": 1200,
+            "outstanding_amount": 600
+        },
+        {
+            "booking_date": "2026-09-10",
+            "booking_no": "xxxxx",
+            "room_no": "710",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-15",
+            "checkout_date": "2026-09-16",
+            "nights": 1,
+            "full_amount": 1200,
+            "outstanding_amount": 600
+        },
+        {
+            "booking_date": "2026-09-11",
+            "booking_no": "xxxxx",
+            "room_no": "711",
+            "user_name": "คุณธวัชชัย การงาน",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-14",
+            "nights": 1,
+            "full_amount": 1200,
+            "outstanding_amount": 600
+        },
+        {
+            "booking_date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "716",
+            "user_name": "คุณพงศกร สีเหลือง",
+            "checkin_date": "2026-09-16",
+            "checkout_date": "2026-09-18",
+            "nights": 2,
+            "full_amount": 2000,
+            "outstanding_amount": 1000
+        },
+        {
+            "booking_date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "805",
+            "user_name": "คุณยุวดี คิดไว",
+            "checkin_date": "2026-09-17",
+            "checkout_date": "2026-09-20",
+            "nights": 3,
+            "full_amount": 2400,
+            "outstanding_amount": 1200
+        },
+        {
+            "booking_date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "818",
+            "user_name": "คุณดวงใจ ต้นไม้",
+            "checkin_date": "2026-09-20",
+            "checkout_date": "2026-09-25",
+            "nights": 4,
+            "full_amount": 6000,
+            "outstanding_amount": 3000
+        },
+        {
+            "booking_date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "909",
+            "user_name": "คุณพรพรรณ ใจดี",
+            "checkin_date": "2026-09-16",
+            "checkout_date": "2026-09-17",
+            "nights": 1,
+            "full_amount": 1700,
+            "outstanding_amount": 850
+        },
+        {
+            "booking_date": "2026-09-14",
+            "booking_no": "xxxxx",
+            "room_no": "501",
+            "user_name": "คุณกนกพร สินใจ",
+            "checkin_date": "2026-10-20",
+            "checkout_date": "2026-10-21",
+            "nights": 1,
+            "full_amount": 800,
+            "outstanding_amount": 400
+        }
+    ],
+    "notes": [
+        "ชื่อในแท็บคือ \"รายงานยอดมัดจำ\" แต่ในแท็บสารบัญ (ใบรายงาน) จับคู่กับ \"รายงานยอดค้างชำระ (Outstanding Payment Report)\" — ยอดค้างชำระในตัวอย่าง = 50% ของยอดเต็ม (เงื่อนไขมัดจำ)"
+    ]
+}

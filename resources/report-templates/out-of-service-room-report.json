@@ -1,0 +1,152 @@
+{
+    "id": "out-of-service-room-report",
+    "name_th": "รายงานห้องชำรุด/บำรุงรักษา",
+    "name_en": "Out of Service-Room Report",
+    "category_th": "รายงานบำรุงรักษา",
+    "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+    "primary_users_th": [
+        "พนักงานหน้าเคาน์เตอร์",
+        "แอดมิน",
+        "หัวหน้าแม่บ้าน",
+        "ช่าง"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "วันที่, หมายเลขห้อง, \nประเภทงาน (ไฟฟ้า ประปา อื่นๆ), \nรายละเอียดการซ่อม, จำนวนครั้งที่ซ่อม",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานห้องชำรุด",
+        "sheet_gid": "1088585783",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date_range",
+            "label_th": "ช่วงเวลา",
+            "type": "date_range",
+            "sample_value": "15-17 กันยายน 2569"
+        },
+        {
+            "key": "work_type",
+            "label_th": "รายการ",
+            "type": "enum",
+            "options": [
+                "ทุกประเภท",
+                "ไฟฟ้า",
+                "ประปา",
+                "งานระบบ"
+            ],
+            "sample_value": "ทุกประเภท"
+        }
+    ],
+    "columns": [
+        {
+            "key": "report_date",
+            "label_th": "วันที่แจ้งซ่อม",
+            "type": "date"
+        },
+        {
+            "key": "room_no",
+            "label_th": "หมายเลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "work_type",
+            "label_th": "ประเภทงาน",
+            "type": "enum",
+            "options": [
+                "ไฟฟ้า",
+                "ประปา",
+                "งานระบบ"
+            ]
+        },
+        {
+            "key": "repair_detail",
+            "label_th": "รายละเอียดการซ่อม",
+            "type": "text"
+        },
+        {
+            "key": "fixed_date",
+            "label_th": "วันที่แก้ไขเสร็จ",
+            "type": "date"
+        },
+        {
+            "key": "repair_duration_days",
+            "label_th": "ระยะเวลาการซ่อม (วัน)",
+            "type": "integer"
+        }
+    ],
+    "summary": {
+        "total_items": 8
+    },
+    "sample_data": [
+        {
+            "report_date": "2026-09-15",
+            "room_no": "501",
+            "work_type": "ไฟฟ้า",
+            "repair_detail": "เปลี่ยนหลอดไฟ",
+            "fixed_date": "2026-09-17",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-15",
+            "room_no": "509",
+            "work_type": "ประปา",
+            "repair_detail": "ก็อกน้ำรั่ว",
+            "fixed_date": "2026-09-15",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-15",
+            "room_no": "802",
+            "work_type": "งานระบบ",
+            "repair_detail": "มอเตอร์ไม่ทำงาน",
+            "fixed_date": "2026-09-22",
+            "repair_duration_days": 8
+        },
+        {
+            "report_date": "2026-09-16",
+            "room_no": "910",
+            "work_type": "งานระบบ",
+            "repair_detail": "ช่องเสียบคีย์แท็ก",
+            "fixed_date": "2026-09-16",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-16",
+            "room_no": "912",
+            "work_type": "ไฟฟ้า",
+            "repair_detail": "ไฟดับ",
+            "fixed_date": "2026-09-16",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-17",
+            "room_no": "913",
+            "work_type": "ประปา",
+            "repair_detail": "ก็อกน้ำ",
+            "fixed_date": "2026-09-17",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-17",
+            "room_no": "914",
+            "work_type": "ประปา",
+            "repair_detail": "ฝักบัว (น้ำไหลเบา)",
+            "fixed_date": "2026-09-17",
+            "repair_duration_days": 1
+        },
+        {
+            "report_date": "2026-09-17",
+            "room_no": "915",
+            "work_type": "งานระบบ",
+            "repair_detail": "ทาสีประตูห้องพัก",
+            "fixed_date": "2026-09-22",
+            "repair_duration_days": 6
+        }
+    ],
+    "notes": [
+        "ผู้ใช้หลักตามสารบัญ: หน้าเคาน์เตอร์ แอดมิน หัวหน้าแม่บ้าน ช่าง — เชื่อมโยงกับ HousekeepingTask ฝั่งระบบได้ (งานแจ้งซ่อม)"
+    ]
+}

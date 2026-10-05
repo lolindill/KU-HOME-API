@@ -1,0 +1,1202 @@
+{
+    "id": "housekeeping-report-v2",
+    "name_th": "รายงานแม่บ้าน",
+    "name_en": "Housekeeping Report",
+    "category_th": "รายงานปฏิบัติการรายวัน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "หัวหน้าแม่บ้าน",
+        "พนักงานหน้าเคาน์เตอร์"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "เลขห้อง, วันเวลาเช็คเอ้า, Status การเข้าพัก (IN/OUT/STAY/OUT OF ORDER), จำนวนวันเข้าพัก,จำนวนผู้เข้าพัก, ประเภทห้อง,โน๊ต,",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานแม่บ้าน ",
+        "sheet_gid": "789642468",
+        "extracted_at": "2026-09-22"
+    },
+    "variant": "v2 (สถานะแบบ IN/OUT/Stay/Out of Order + emoji + Room Type ละเอียด)",
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "Date",
+            "type": "date",
+            "sample_value": "2026-09-09"
+        }
+    ],
+    "columns": [
+        {
+            "key": "room_no",
+            "label_th": "Room Number",
+            "type": "room_no"
+        },
+        {
+            "key": "room_type",
+            "label_th": "Room Type",
+            "type": "enum",
+            "options": [
+                "Superior Twin",
+                "Superior Kingsize",
+                "Deluxe Twin",
+                "Deluxe Triple",
+                "Deluxe Kingsize",
+                "Suite"
+            ]
+        },
+        {
+            "key": "room_status",
+            "label_th": "Room Status",
+            "type": "enum",
+            "options": [
+                "🟢 IN",
+                "🔴 OUT",
+                "🟡 Stay",
+                "⚫ Out of Order"
+            ],
+            "nullable": true
+        },
+        {
+            "key": "arrival",
+            "label_th": "Arrival",
+            "type": "date"
+        },
+        {
+            "key": "departure",
+            "label_th": "Departure",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "Night",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "cleaning_check_1",
+            "label_th": "ช่องเช็คการทำความสะอาด 1 (ไม่มีหัวข้อในชีตต้นทาง)",
+            "type": "boolean",
+            "nullable": true
+        },
+        {
+            "key": "cleaning_check_2",
+            "label_th": "ช่องเช็คการทำความสะอาด 2 (ไม่มีหัวข้อในชีตต้นทาง)",
+            "type": "boolean",
+            "nullable": true
+        },
+        {
+            "key": "cleaning_check_3",
+            "label_th": "ช่องเช็คการทำความสะอาด 3 (ไม่มีหัวข้อในชีตต้นทาง)",
+            "type": "boolean",
+            "nullable": true
+        }
+    ],
+    "sample_data": [
+        {
+            "room_no": "501",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "502",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "503",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "504",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "505",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "506",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "507",
+            "room_type": "Suite",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-13",
+            "nights": 6,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "508",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-13",
+            "nights": 6,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "509",
+            "room_type": "Deluxe Triple",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-13",
+            "nights": 6,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "510",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-14",
+            "nights": 8,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "511",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-15",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "512",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-06",
+            "departure": "2026-09-15",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "513",
+            "room_type": "Deluxe Twin",
+            "room_status": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "514",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "515",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "516",
+            "room_type": "Deluxe Twin",
+            "room_status": "⚫Out of Order",
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "517",
+            "room_type": "Deluxe Twin",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "518",
+            "room_type": "Suite",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "519",
+            "room_type": "Superior Twin",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "520",
+            "room_type": "Superior Twin",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "601",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "602",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "603",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "604",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "605",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "606",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "607",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "608",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "609",
+            "room_type": "Deluxe Triple",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-07",
+            "departure": "2026-09-10",
+            "nights": 3,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "610",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "611",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "612",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "613",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "614",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "615",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "616",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "617",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "618",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "619",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "620",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "701",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "702",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "703",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "704",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "705",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "706",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "707",
+            "room_type": "Suite",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "708",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-01",
+            "departure": "2026-09-10",
+            "nights": 9,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "709",
+            "room_type": "Deluxe Triple",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "710",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "711",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "712",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "713",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "714",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "715",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "716",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "717",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "718",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-11",
+            "nights": 2,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "719",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "720",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "801",
+            "room_type": "Superior Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "802",
+            "room_type": "Superior Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "803",
+            "room_type": "Superior Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "804",
+            "room_type": "Superior Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "805",
+            "room_type": "Superior Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "806",
+            "room_type": "Superior Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "807",
+            "room_type": "Suite",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "808",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "809",
+            "room_type": "Deluxe Triple",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "810",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "811",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🔴 OUT",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "812",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "813",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "814",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "815",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "816",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "817",
+            "room_type": "Deluxe Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "818",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "819",
+            "room_type": "Superior Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "820",
+            "room_type": "Superior Kingsize",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "901",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "902",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "903",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "904",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "905",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "906",
+            "room_type": "Superior Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "907",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "908",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "909",
+            "room_type": "Deluxe Triple",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "910",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "911",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "912",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "913",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "914",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "915",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "916",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "917",
+            "room_type": "Deluxe Twin",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "918",
+            "room_type": "Suite",
+            "room_status": "🟢 IN",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "919",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-04",
+            "departure": "2026-09-10",
+            "nights": 6,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        },
+        {
+            "room_no": "920",
+            "room_type": "Superior Twin",
+            "room_status": "🟡 Stay",
+            "arrival": "2026-09-05",
+            "departure": "2026-09-10",
+            "nights": 5,
+            "cleaning_check_1": false,
+            "cleaning_check_2": false,
+            "cleaning_check_3": false
+        }
+    ],
+    "notes": [
+        "ช่อง G/H/I ในชีตต้นทางไม่มีหัวข้อ (ค่า TRUE/FALSE) — น่าจะเป็น checklist ทำความสะอาด ต้องยืนยันหัวข้อกับเจ้าของชีตก่อน implement",
+        "สถานะใช้ emoji กำกับ: 🟢 IN / 🔴 OUT / 🟡 Stay / ⚫ Out of Order"
+    ]
+}
