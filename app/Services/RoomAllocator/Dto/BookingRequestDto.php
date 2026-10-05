@@ -50,6 +50,7 @@ final class BookingRequestDto
 
     /**
      * สร้างจาก Eloquent BookingRoom model (ต้อง eager-load addon + roomType)
+     * 📊 (05/10/26) extra-bed รายคืน — ใช้จำนวนสูงสุดต่อคืนจับคู่ห้อง (addon.extra_beds_max)
      */
     public static function fromModel(BookingRoom $br): self
     {
@@ -58,7 +59,7 @@ final class BookingRequestDto
             type: $br->roomType->name_en ?? 'Unknown',
             checkIn: $br->check_in->format('Y-m-d'),
             checkOut: $br->check_out->format('Y-m-d'),
-            extraBeds: $br->addon?->extra_bed ?? 0,
+            extraBeds: $br->addon?->extra_beds_max ?? 0,
             bedPreference: $br->bed_preference,
         );
     }

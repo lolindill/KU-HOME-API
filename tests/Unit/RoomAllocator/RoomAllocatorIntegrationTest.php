@@ -138,15 +138,18 @@ final class RoomAllocatorIntegrationTest extends TestCase
             'bed_preference' => $bedPref,
         ]);
         if ($extraBeds > 0) {
+            // 📊 (05/10/26) extra-bed รายคืน — flat map ทุกคืนของ stay [check_in, check_out)
+            $byNight = [];
+            for ($d = \Carbon\Carbon::parse($checkIn)->startOfDay(); $d->lt(\Carbon\Carbon::parse($checkOut)->startOfDay()); $d->addDay()) {
+                $byNight[$d->toDateString()] = $extraBeds;
+            }
+
             Addon::create([
                 'id' => Str::uuid()->toString(),
                 'booking_room_id' => $br->id,
-                'extra_bed' => $extraBeds,
-                'breakfast' => 0,
+                'extra_beds_by_night' => $byNight,
                 'early_checkIn_price' => 0,
                 'late_checkOut_price' => 0,
-                'extra_bed_price' => 0,
-                'breakfast_price' => 0,
             ]);
         }
 

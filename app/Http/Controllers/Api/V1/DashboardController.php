@@ -258,7 +258,10 @@ class DashboardController extends Controller
         }
 
         $validated = $request->validate([
-            'status' => 'required|in:in_progress,done',
+            'status' => 'nullable|required_without_all:cleaning_check_1,cleaning_check_2,cleaning_check_3|in:in_progress,done',
+            'cleaning_check_1' => 'nullable|boolean',
+            'cleaning_check_2' => 'nullable|boolean',
+            'cleaning_check_3' => 'nullable|boolean',
         ]);
 
         try {
@@ -267,25 +270,43 @@ class DashboardController extends Controller
             // Fix S-B2: ใช้ task_id แทน room_id — ไม่มี first() ที่จะเลือกผิด
             $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
 
-            // Fix L3 (เขียนใหม่): guard done→* อยู่ใน transitionStatus() แล้ว — ทำงานจริง
-            $task->transitionStatus($validated['status']);
+            // 📊 (05/10/26, excel-reports spec §2.4): tick ล้วน = บันทึกประกอบ ไม่ผูก done
+            $hasChecklist = false;
+            foreach (['cleaning_check_1', 'cleaning_check_2', 'cleaning_check_3'] as $field) {
+                if ($request->has($field)) {
+                    $task->{$field} = $validated[$field];
+                    $hasChecklist = true;
+                }
+            }
+            if ($hasChecklist) {
+                $task->save();
+            }
 
+            $status = $validated['status'] ?? null;
             $roomStatus = $task->room->status ?? 'unknown';
 
-            // ถ้างาน done → เปลี่ยนสถานะห้อง → available ผ่าน state machine
-            if ($validated['status'] === 'done' && $task->room_id) {
-                $room = Room::findOrFail($task->room_id);
-                $room->transitionStatusTo('available', $user->id);
-                $roomStatus = $room->status;
+            // transition เมื่อ status มีค่าเท่านั้น
+            if ($status !== null) {
+                // Fix L3 (เขียนใหม่): guard done→* อยู่ใน transitionStatus() แล้ว — ทำงานจริง
+                $task->transitionStatus($status);
+
+                // ถ้างาน done → เปลี่ยนสถานะห้อง → available ผ่าน state machine
+                if ($status === 'done' && $task->room_id) {
+                    $room = Room::findOrFail($task->room_id);
+                    $room->transitionStatusTo('available', $user->id);
+                    $roomStatus = $room->status;
+                }
             }
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => $validated['status'] === 'done'
-                    ? 'งานเสร็จเรียบร้อย! ห้องพร้อมให้บริการแล้วค่ะ 💖'
-                    : 'เริ่มทำงานแล้วค่ะ!',
+                'message' => $status === null
+                    ? 'บันทึก checklist เรียบร้อยค่ะ 🧹'
+                    : ($status === 'done'
+                        ? 'งานเสร็จเรียบร้อย! ห้องพร้อมให้บริการแล้วค่ะ 💖'
+                        : 'เริ่มทำงานแล้วค่ะ!'),
                 'task' => $this->serializeTask($task->fresh(['room.roomType', 'assignee'])),
                 'new_room_status' => $roomStatus,
             ]);

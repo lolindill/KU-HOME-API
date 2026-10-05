@@ -1,0 +1,214 @@
+{
+    "id": "breakfast-report",
+    "name_th": "รายงานอาหารเช้า",
+    "name_en": "Breakfast Report",
+    "category_th": "รายงานปฏิบัติการรายวัน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "พนักงานหน้าเคาน์เตอร์",
+        "แอดมิน"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": "ใช้เพื่อเตรียมข้อมูลให้ทางร้านอาหาร",
+    "register_displayed_data_th": "วันที่รับประทานอาหาร, ชื่อลูกค้า, จำนวน, ประเภทอาหาร (กล่องหรือแบบตัก), ราคา (100/200) จำนวนทั้งหมด",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานอาหารเช้า",
+        "sheet_gid": "1956752797",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "ประจำวันที่",
+            "type": "date",
+            "sample_value": "2026-09-12"
+        },
+        {
+            "key": "breakfast_type",
+            "label_th": "ประเภทของอาหารเช้า",
+            "type": "enum",
+            "options": [
+                "ทั้งหมด",
+                "ชุด 100",
+                "ชุด 200"
+            ]
+        }
+    ],
+    "columns": [
+        {
+            "key": "date",
+            "label_th": "วันที่",
+            "type": "date"
+        },
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "เลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "user_name",
+            "label_th": "USER",
+            "type": "string"
+        },
+        {
+            "key": "checkin_date",
+            "label_th": "วันที่เช็คอิน",
+            "type": "date"
+        },
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่เช็คเอ้าท์",
+            "type": "date"
+        },
+        {
+            "key": "qty_set_100",
+            "label_th": "จำนวน ชุด 100",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "qty_set_200",
+            "label_th": "จำนวน ชุด 200",
+            "type": "integer",
+            "nullable": true
+        }
+    ],
+    "summary": {
+        "total_items": 12,
+        "total_set_100": 8,
+        "total_set_200": 10
+    },
+    "sample_data": [
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "501",
+            "user_name": "คุณมานิตย์ คำสวย",
+            "checkin_date": "2026-09-09",
+            "checkout_date": "2026-09-13",
+            "qty_set_100": null,
+            "qty_set_200": 2
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "502",
+            "user_name": "คุณกันต์ ขยันจัง",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-14",
+            "qty_set_100": null,
+            "qty_set_200": 1
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "503",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 1,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "504",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 1,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "510",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 1,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "710",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 1,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "711",
+            "user_name": "คุณธวัชชัย การงาน",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 2,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "716",
+            "user_name": "คุณพงศกร สีเหลือง",
+            "checkin_date": "2026-09-10",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": null,
+            "qty_set_200": 2
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "805",
+            "user_name": "คุณยุวดี คิดไว",
+            "checkin_date": "2026-09-10",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": null,
+            "qty_set_200": 1
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "818",
+            "user_name": "คุณดวงใจ ต้นไม้",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": 2,
+            "qty_set_200": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "909",
+            "user_name": "คุณพรพรรณ ใจดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "qty_set_100": null,
+            "qty_set_200": 3
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "919",
+            "user_name": "คุณกนกพร สินใจ",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-15",
+            "qty_set_100": null,
+            "qty_set_200": 1
+        }
+    ],
+    "notes": [
+        "ชีตต้นทางใช้ตัว \"x\" เมื่อไม่มีรายการ — แปลงเป็น null (ตีความ: ไม่ได้ซื้อชุดนั้น)",
+        "ราคา 2 ระดับ: ชุด 100 / ชุด 200 บาท — ใช้เตรียมข้อมูลให้ทางร้านอาหาร"
+    ]
+}

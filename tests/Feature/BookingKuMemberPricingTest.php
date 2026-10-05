@@ -61,8 +61,8 @@ class BookingKuMemberPricingTest extends TestCase
         GlobalRate::create([
             'rate_type' => 'addon',
             'room_type_id' => null,
-            'code' => 'breakfast',
-            'name_en' => 'Breakfast',
+            'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200',
             'default_price' => 150,
             'is_active' => true,
         ]);
@@ -256,8 +256,8 @@ class BookingKuMemberPricingTest extends TestCase
                     'check_in' => $checkIn,
                     'check_out' => $checkOut,
                     'addons' => [
-                        'extra_bed' => 1, // 500 * 2 nights = 1,000 baht
-                        'breakfast' => 2, // 150 * 2 qty = 300 baht
+                        'extra_bed' => 1,   // 500 * 2 nights = 1,000 baht
+                        'breakfast' => 2,   // 150 * 2 ชุด * 2 คืน = 600 baht (คิด × คืน, 05/10/26)
                     ],
                 ],
             ],
@@ -270,12 +270,12 @@ class BookingKuMemberPricingTest extends TestCase
 
         // Room rate: 2 nights * 1,000 baht = 2,000 baht
         $this->assertSame(2000, $room->room_amount);
-        // Addons: 1,000 (extra bed) + 300 (breakfast) = 1,300 baht
+        // Addons: 1,000 (extra bed) + 600 (breakfast × คืน) = 1,600 baht
         $this->assertSame(1000, $room->addon->extra_bed_price);
-        $this->assertSame(300, $room->addon->breakfast_price);
-        // Total room amount: 2,000 + 1,300 = 3,300 baht
-        $this->assertSame(3300, $room->amount);
-        $this->assertSame(3300, $booking->total_amount);
+        $this->assertSame(600, $room->addon->breakfast_price);
+        // Total room amount: 2,000 + 1,600 = 3,600 baht
+        $this->assertSame(3600, $room->amount);
+        $this->assertSame(3600, $booking->total_amount);
         $this->assertSame($booking->total_amount, $booking->bookingRooms->sum('amount'));
     }
 

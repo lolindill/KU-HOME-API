@@ -58,6 +58,14 @@ class UpdateBookingRoomRequest extends FormRequest
 
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'addons' => 'nullable|array',
+            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
+            //    extra_beds_by_night (map รายคืน) · normalize ที่ App\Services\Addon\AddonPricing
+            'addons.breakfast_sets' => 'nullable|array',
+            'addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
+            'addons.breakfast_sets.set_200' => 'nullable|integer|min:0',
+            'addons.extra_beds_by_night' => 'nullable|array',
+            'addons.extra_beds_by_night.*' => 'nullable|integer|min:0',
+            // legacy alias — เก็บไว้ให้ frontend เดิม
             'addons.extra_bed' => 'nullable|integer|min:0',
             'addons.breakfast' => 'nullable|integer|min:0',
             'addons.early_checkin' => [

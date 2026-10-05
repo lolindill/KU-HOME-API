@@ -1,0 +1,1108 @@
+{
+    "id": "room-status-report",
+    "name_th": "รายงานสถานะห้องพัก",
+    "name_en": "Real-time Room Status",
+    "category_th": null,
+    "frequency_th": null,
+    "primary_users_th": null,
+    "output_format_th": null,
+    "register_note_th": null,
+    "register_displayed_data_th": null,
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงาน Room Status",
+        "sheet_gid": "1773614991",
+        "extracted_at": "2026-09-22"
+    },
+    "alias_en": "Real-time Room Status",
+    "filters": [
+        {
+            "key": "status",
+            "label_th": "สถานะ",
+            "type": "enum",
+            "options": [
+                "ทุกสถานะ"
+            ],
+            "sample_value": "ทุกสถานะ"
+        }
+    ],
+    "filter_line_mode": "as_of",
+    "status_legend": {
+        "OCC": "Occupied / แขกพักอยู่",
+        "OOO": "Out of order / ห้องชำรุด ปรับปรุง",
+        "VC": "Vacant Clean / ห้องว่าง (ทำห้องแล้ว)",
+        "VD": "Vacant Dirty / ห้องว่าง (ยังไม่ได้ทำ)",
+        "EA": "Expected Arrival / ห้องที่แขกเตรียมเข้าวันนี้",
+        "VIP": "Very important person / ห้องผู้บริหาร"
+    },
+    "columns": [
+        {
+            "key": "room_no",
+            "label_th": "Room Number",
+            "type": "room_no"
+        },
+        {
+            "key": "room_type",
+            "label_th": "Room Type",
+            "type": "enum",
+            "options": [
+                "Superior Twin",
+                "Superior Kingsize",
+                "Deluxe Twin",
+                "Deluxe Triple",
+                "Deluxe Kingsize",
+                "Suite"
+            ]
+        },
+        {
+            "key": "status",
+            "label_th": "Status",
+            "type": "enum",
+            "options": [
+                "OCC",
+                "OOO",
+                "VC",
+                "VD",
+                "EA",
+                "VIP"
+            ],
+            "nullable": true
+        },
+        {
+            "key": "guest_names",
+            "label_th": "ชื่อผู้เข้าพัก",
+            "type": "text",
+            "nullable": true
+        },
+        {
+            "key": "arrival",
+            "label_th": "Arrival",
+            "type": "date"
+        },
+        {
+            "key": "departure",
+            "label_th": "Departure",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "Night",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "note",
+            "label_th": "Note",
+            "type": "text",
+            "nullable": true
+        }
+    ],
+    "sample_data": [
+        {
+            "room_no": "501",
+            "room_type": "Superior Twin",
+            "status": "OCC",
+            "guest_names": "สมชาย ใจงาม",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "note": null
+        },
+        {
+            "room_no": "502",
+            "room_type": "Superior Twin",
+            "status": "OCC",
+            "guest_names": "สมบูรณ์ ใจดี, สิริวรรณ ใจดี",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "note": null
+        },
+        {
+            "room_no": "503",
+            "room_type": "Superior Twin",
+            "status": "OCC",
+            "guest_names": "ดวงใจ ต้นไม้",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "note": null
+        },
+        {
+            "room_no": "504",
+            "room_type": "Superior Twin",
+            "status": "OCC",
+            "guest_names": "พงศกร นวมินทร์",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "note": null
+        },
+        {
+            "room_no": "505",
+            "room_type": "Superior Twin",
+            "status": "OCC",
+            "guest_names": "ธวัชชัย เกิดกล้า, ธงชัย เกิดกล้า",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "note": null
+        },
+        {
+            "room_no": "506",
+            "room_type": "Superior Twin",
+            "status": "EA",
+            "guest_names": "ยุวดี เห็นชอบ",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-12",
+            "nights": 1,
+            "note": null
+        },
+        {
+            "room_no": "507",
+            "room_type": "Suite",
+            "status": "VIP",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "508",
+            "room_type": "Deluxe Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "509",
+            "room_type": "Deluxe Triple",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "510",
+            "room_type": "Deluxe Twin",
+            "status": "OCC",
+            "guest_names": "พหลโยธิน ผดุงรัฐ",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 3,
+            "note": null
+        },
+        {
+            "room_no": "511",
+            "room_type": "Deluxe Twin",
+            "status": "OCC",
+            "guest_names": "ถนอม ธนะบูรณ์, สฤษดิ์ กิตติเดช",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 3,
+            "note": null
+        },
+        {
+            "room_no": "512",
+            "room_type": "Deluxe Twin",
+            "status": "OCC",
+            "guest_names": "ชาติชาย อภัยวงค์, ผิณ พิบูลราษฎร์",
+            "arrival": "2026-09-04",
+            "departure": "2026-09-14",
+            "nights": 10,
+            "note": null
+        },
+        {
+            "room_no": "513",
+            "room_type": "Deluxe Twin",
+            "status": "OCC",
+            "guest_names": "สัญญา ธรรมจักร",
+            "arrival": "2026-09-05",
+            "departure": "2026-09-12",
+            "nights": 7,
+            "note": null
+        },
+        {
+            "room_no": "514",
+            "room_type": "Deluxe Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "515",
+            "room_type": "Deluxe Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "516",
+            "room_type": "Deluxe Twin",
+            "status": "OCC",
+            "guest_names": "ประยูร ภมรดนตรี",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-12",
+            "nights": 4,
+            "note": null
+        },
+        {
+            "room_no": "517",
+            "room_type": "Deluxe Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "518",
+            "room_type": "Suite",
+            "status": "OOO",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": "ปรับปรุงห้องน้ำ"
+        },
+        {
+            "room_no": "519",
+            "room_type": "Superior Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "520",
+            "room_type": "Superior Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "601",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "602",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "603",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "604",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "605",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "606",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "607",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "608",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "609",
+            "room_type": "Deluxe Triple",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "610",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "611",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "612",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "613",
+            "room_type": "Deluxe Twin",
+            "status": "OOO",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": "เครื่องปรับอากาศชำรุด"
+        },
+        {
+            "room_no": "614",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "615",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "616",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "617",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "618",
+            "room_type": "Suite",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "619",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "620",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "701",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "702",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "703",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "704",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "705",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "706",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "707",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "708",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "709",
+            "room_type": "Deluxe Triple",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "710",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "711",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "712",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "713",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "714",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "715",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "716",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "717",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "718",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "719",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "720",
+            "room_type": "Superior Twin",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": "2026-09-01",
+            "departure": "2026-10-01",
+            "nights": 30,
+            "note": null
+        },
+        {
+            "room_no": "801",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-15",
+            "nights": 6,
+            "note": null
+        },
+        {
+            "room_no": "802",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-07",
+            "departure": "2026-09-14",
+            "nights": 7,
+            "note": null
+        },
+        {
+            "room_no": "803",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-07",
+            "departure": "2026-09-13",
+            "nights": 6,
+            "note": null
+        },
+        {
+            "room_no": "804",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-08",
+            "departure": "2026-09-13",
+            "nights": 5,
+            "note": null
+        },
+        {
+            "room_no": "805",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-08",
+            "departure": "2026-09-13",
+            "nights": 5,
+            "note": null
+        },
+        {
+            "room_no": "806",
+            "room_type": "Superior Kingsize",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "807",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "808",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "809",
+            "room_type": "Deluxe Triple",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "810",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "811",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "812",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "813",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "814",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "815",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "816",
+            "room_type": "Deluxe Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "817",
+            "room_type": "Deluxe Kingsize",
+            "status": "VIP",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "818",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "819",
+            "room_type": "Superior Kingsize",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "820",
+            "room_type": "Superior Kingsize",
+            "status": "OCC",
+            "guest_names": null,
+            "arrival": "2026-09-01",
+            "departure": "2026-10-01",
+            "nights": 30,
+            "note": null
+        },
+        {
+            "room_no": "901",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "902",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "903",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "904",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "905",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "906",
+            "room_type": "Superior Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "907",
+            "room_type": "Suite",
+            "status": "VC",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "908",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "909",
+            "room_type": "Deluxe Triple",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "910",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "911",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "912",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "913",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "914",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "915",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "916",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "917",
+            "room_type": "Deluxe Twin",
+            "status": null,
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "918",
+            "room_type": "Suite",
+            "status": "VIP",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "919",
+            "room_type": "Superior Twin",
+            "status": "VD",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        },
+        {
+            "room_no": "920",
+            "room_type": "Superior Twin",
+            "status": "VD",
+            "guest_names": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "note": null
+        }
+    ],
+    "notes": [
+        "รายงาน real-time มี timestamp \"ข้อมูลอัพเดต\" บนหัวรายงาน (ตัวอย่าง 11/9/2569 เวลา 17.49 น.)",
+        "ห้องที่ยังไม่มีข้อมูลสถานะในตัวอย่างจะได้ status = null",
+        "แท็บนี้ไม่มีแถวตรงในสารบัญ (ใบรายงาน) — เข้าหมวดรายงานปฏิบัติการรายวัน ผู้ใช้: หน้าเคาน์เตอร์/แม่บ้าน"
+    ]
+}

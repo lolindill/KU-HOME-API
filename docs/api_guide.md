@@ -21,6 +21,7 @@
 11. [DB Models Reference](#db-models-reference)
 12. [State Machines](#state-machines)
 13. [Appendix](#appendix)
+14. [📊 Reports & Additional Charges (ระบบรายงาน Excel 15 ฉบับ)](#-reports--additional-charges-ระบบรายงาน-excel-15-ฉบับ--051026)
 
 ---
 
@@ -3512,4 +3513,197 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/che
 
 ---
 
-*Last updated: 2026-07-14 · KU HOME API v1*
+## 📊 Reports & Additional Charges (ระบบรายงาน Excel 15 ฉบับ) — 05/10/26
+
+> ระบบรายงาน Excel 15 ฉบับ (phpoffice/phpspreadsheet 5.x) + ระบบจัดการค่าใช้จ่ายเพิ่มเติม (Additional Charges ledger) ตามข้อกำหนด `wayfinder/excel-reports` (spec §2, §2.3, §2.6, §4)
+
+### 1. ระบบรายงาน Excel (Excel Export 15 ฉบับ)
+
+- **สถาปัตยกรรม & การส่งไฟล์:** 
+  - สตรีมไฟล์ `.xlsx` สดออกจากหน่วยความจำทันที (Synchronous streaming — ไม่มีไฟล์ค้างบน disk)
+  - รูปแบบการจัดหน้า: Minimal flat table ขาวดำ, ไม่ merge cells, header & summary แถวหนา (Bold), freezePane แถวข้อมูล, repeat print title แถวหัวตาราง, หน้ากระดาษ A4 แนวนอน (Landscape), เปิด autoFilter ให้กรองใน Excel ได้
+  - วันที่จัดรูปแบบเป็น พ.ศ. (`d/m/YYYY`) และยอดเงิน (`money_baht`) จัดรูปแบบเป็นตัวเลขจำนวนเต็มบาท `#,##0` ไม่มีทศนิยม
+- **HTTP Headers ที่ตอบกลับ (StreamedResponse):**
+  ```http
+  Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+  Content-Disposition: attachment; filename=report.xlsx; filename*=UTF-8''<url_encoded_filename>
+  Cache-Control: max-age=0
+  ```
+- **สิทธิ์การเข้าถึง (Authorization):**
+  - ทุกรายงานเข้าถึงได้โดยผู้ใช้สิทธิ์ `admin` และ `staff`
+  - มี **2 ฉบับแม่บ้าน** ที่อนุญาตให้ผู้ใช้สิทธิ์ `housekeeping` เข้าถึงเพิ่มเติมได้ ได้แก่ `housekeeping` และ `housekeeping-v2`
+- **อัตราจำกัดการเรียก (Rate Limit / Throttle):** `10,1` (10 ครั้ง/นาที ต่อ IP/ผู้ใช้ ในกลุ่ม lookups)
+- **รหัสข้อผิดพลาด (Error Contract):**
+  - `401 Unauthorized` — ไม่ได้ส่ง Sanctum Bearer Token หรือ Token หมดอายุ (เกิน 8 ชั่วโมง)
+  - `403 Forbidden` — ผู้ใช้ไม่มีสิทธิ์เข้าถึงรายงาน (`{"status":"error","message":"คุณไม่มีสิทธิ์เข้าถึงรายงานนี้ค่ะ"}`)
+  - `404 Not Found` — ไม่พบ slug รายงานที่ระบุในระบบ (`{"status":"error","message":"ไม่พบรายงานที่ระบุค่ะ"}`)
+  - `422 Unprocessable Content` — พารามิเตอร์ไม่ผ่านเงื่อนไขการตรวจสอบตาม `filterRules()` ของรายงานนั้นๆ (เช่น ไม่ได้ระบุวันที่, รูปแบบวันที่ผิด, หรือช่วงวันที่เกินเพดาน 366 วัน)
+  - `500 Internal Server Error` — เกิดข้อผิดพลาดฝั่งเซิร์ฟเวอร์ โดยจะตอบกลับ generic message และบันทึกรายละเอียดลงใน error log
+
+#### ตารางรายละเอียดรายงานทั้ง 15 ฉบับ (`GET /api/v1/reports/{slug}/export`)
+
+| Slug | ชื่อรายงาน (ภาษาไทย) | สิทธิ์ (Role) | Query Parameters & กฎการตรวจสอบ (จาก `filterRules()` จริง) |
+|---|---|---|---|
+| `check-in` | รายงานห้องเข้าพัก | `admin`, `staff` | • `checkin_date` *(required, date)*: วันที่เช็คอิน<br>• `room_type` *(nullable, string, max:100)*: กรองตามประเภทห้อง (เช่น Deluxe, Standard หรือ 'ทุกประเภท') |
+| `check-out` | รายงานห้องออก | `admin`, `staff` | • `checkout_date` *(required, date)*: วันที่เช็คเอาท์<br>• `room_type` *(nullable, string, max:100)*: กรองตามประเภทห้อง |
+| `daily-financial` | รายงานการเงินประจำวัน | `admin`, `staff` | • `date` *(required, date)*: วันที่ทำรายการการเงิน<br>• `payment_channel` *(nullable, in:ทั้งหมด,สลิป (โอน/QR),เงินสด)*: ค่าเริ่มต้นคือ 'ทั้งหมด' (ที่มาเงิน derive จาก reference_number โดย confirmation UUID = สลิป ไม่งั้นคือเงินสด) |
+| `deposit` | รายงานยอดมัดจำ / ยอดค้างชำระ | `admin`, `staff` | • `date` *(required, date)*: วันที่สร้างการจอง<br>• `guest_type` *(nullable, in:หน่วยงาน/ทั่วไป,หน่วยงาน,ทั่วไป)*: ค่าเริ่มต้นคือ 'หน่วยงาน/ทั่วไป' |
+| `occupancy` | รายงานการเข้าพัก 7 วันถัดไป | `admin`, `staff` | • `date` *(required, date)*: วันที่เริ่มต้นช่วง 7 คืน |
+| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด,ชุด 100,ชุด 200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' |
+| `erp-transfer` | รายงานการโอนระหว่างหน่วยงาน | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้นสร้างการจอง<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง date_from ถึง date_to ต้อง ≤ 366 วัน)<br>• `agency_code` *(nullable, string, max:100)*: รหัส ERP ของหน่วยงาน |
+| `housekeeping` | รายงานแม่บ้าน (v1) | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้านและสถานะห้องพัก |
+| `housekeeping-v2` | รายงานแม่บ้าน v2 | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้าน (หัวคอลัมน์ checklist 3 ช่องอ่านจาก config `reporting.cleaning_checks`) |
+| `room-status` | รายงานสถานะห้องพัก real-time | `admin`, `staff` | • `status` *(nullable, in:ทุกสถานะ,OCC,OOO,EA,VD,VC)*: กรองสถานะห้อง (รายงาน snapshot ณ เวลาที่ export ปัจจุบัน — **ไม่รับพารามิเตอร์วันที่**) |
+| `extra-bed` | รายงานเตียงเสริม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน — **คอลัมน์ขยาย dynamic ตามคืนในช่วงวันที่**, ยอด inventory อิง config `reporting.extra_bed_fleet_size`) |
+| `supplies` | รายงานวัสดุสิ้นเปลือง | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `category` *(nullable, string, max:100)*: หมวดหมู่พัสดุ (แสดง minimal จาก `stock_inventories` ฟิลด์ที่ไม่มีตารางรองจะเว้นว่าง) |
+| `out-of-service-room` | รายงานห้องชำรุด/บำรุงรักษา | `admin`, `staff` | • `date_from` *(required, date)*: วันที่แจ้งซ่อมเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `work_type` *(nullable, in:ทุกประเภท,ไฟฟ้า,ประปา,งานระบบ)*: ประเภทงานซ่อม |
+| `additional-charges` | รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่ทำรายการเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `item_type` *(nullable, in:ทุกประเภท,ค่าเสียหาย,ค่ายืม)*: ประเภทรายการ |
+| `manager` | รายงานผู้จัดการ (Manager Report) | `admin`, `staff` | • `date` *(required, date)*: วันที่ประจำรายงาน<br>• `mode` *(nullable, in:Complete,Week,Month)*: โหมดรายงาน (ค่าเริ่มต้นคือ 'Complete')<br>• `date_from` *(required_if:mode,Month, date)*: วันที่เริ่มต้นช่วงเดือนที่เลือก (เฉพาะเมื่อ `mode=Month`)<br>• `date_to` *(required_if:mode,Month, date, after_or_equal:date_from)*: วันสิ้นสุด (เฉพาะเมื่อ `mode=Month`, ช่วงห่าง ≤ 366 วัน) |
+
+---
+
+### 2. Additional Charges CRUD (ค่าเสียหาย / ค่ายืมอุปกรณ์)
+
+ตาราง `additional_charges` เป็น **Ledger สำหรับการออกรายงานโดยเฉพาะ (Report-only ledger)**
+- ⚠️ **หมายเหตุสำคัญ:** ยอดเงินในตารางนี้ **ไม่ไหลเข้าและไม่กระทบยอดรวมของ booking (`total_amount`) หรือยอดชำระเงินใน `payments`** (แยกการเก็บเงินสด/หน้าเคาน์เตอร์ออกจาก invariant บัญชีการจอง)
+- บันทึกได้อย่างอิสระทุกเมื่อ ไม่ผูกมัดกับสถานะ checked_out
+- **ไม่มี endpoint `GET`** ในกลุ่มนี้ — การตรวจสอบและดูรายการทั้งหมดให้ดูผ่าน Excel Report `GET /api/v1/reports/additional-charges/export`
+- **สิทธิ์:** `admin` และ `staff` เท่านั้น (ทั้ง POST, PATCH, DELETE)
+
+#### `POST /api/v1/additional-charges` (สร้างรายการ)
+สร้างรายการบันทึกค่าเสียหายหรือค่ายืมอุปกรณ์เพิ่มเติม
+
+**Request Headers:**
+```http
+Authorization: Bearer <token>
+Content-Type: application/json
+Accept: application/json
+```
+
+**Request Body (`StoreAdditionalChargeRequest`):**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `booking_id` | UUID | Yes | รหัสการจองที่ผูกรายการ (`exists:bookings,id`) |
+| `transaction_date` | Date string | Yes | วันที่ทำรายการ รูปแบบ `YYYY-MM-DD` |
+| `item_code` | String | No | รหัสรายการ/สินค้า (nullable, สูงสุด 100 ตัวอักษร) |
+| `item_name` | String | Yes | ชื่อรายการ เช่น "ค่าเสียหาย ปลอกหมอน", "เตารีดไอน้ำ" (สูงสุด 255 ตัวอักษร) |
+| `qty` | Integer | No | จำนวน (ขั้นต่ำ 1, ค่าเริ่มต้นคือ 1) |
+| `unit` | String | No | หน่วยนับ เช่น "ชิ้น", "อัน", "ครั้ง" (nullable, สูงสุด 50 ตัวอักษร) |
+| `price` | Integer | Yes | ราคารวมของรายการ หน่วยเป็น **จำนวนเต็มบาท (integer baht)** ขั้นต่ำ 0 |
+| `charge_type` | String | Yes | ประเภทรายการ: `damage` (ค่าเสียหาย) หรือ `rental` (ค่ายืม) |
+
+**Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "บันทึกรายการค่าใช้จ่ายเรียบร้อยแล้วค่ะ 💸",
+  "additional_charge": {
+    "id": "ac-uuid-here",
+    "booking_id": "booking-uuid-here",
+    "transaction_date": "2026-10-05T00:00:00.000000Z",
+    "item_code": "DMG-001",
+    "item_name": "ค่าเสียหาย แก้วน้ำแตก",
+    "qty": 1,
+    "unit": "ใบ",
+    "price": 150,
+    "charge_type": "damage",
+    "recorded_by": "user-uuid-here",
+    "created_at": "2026-10-05T14:00:00.000000Z",
+    "updated_at": "2026-10-05T14:00:00.000000Z"
+  }
+}
+```
+
+#### `PATCH /api/v1/additional-charges/{id}` (แก้ไขรายการ)
+แก้ไขข้อมูลรายการตาม UUID (`UpdateAdditionalChargeRequest`)
+
+- URL Parameter: `id` (UUID ของรายการ)
+- Request Body: ฟิลด์เหมือนกับ `POST` ทุกตัว แต่เป็น optional ทั้งหมด (`sometimes`)
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "แก้ไขรายการเรียบร้อยแล้วค่ะ",
+  "additional_charge": { ... }
+}
+```
+
+#### `DELETE /api/v1/additional-charges/{id}` (ลบรายการ)
+ลบรายการออกจาก ledger
+
+- URL Parameter: `id` (UUID ของรายการ)
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ลบรายการเรียบร้อยแล้วค่ะ"
+}
+```
+
+---
+
+### 3. Booking Attributes 4 ฟิลด์ใหม่ (ระดับ Booking Container)
+
+ระบบเพิ่ม 4 ฟิลด์ใหม่บนตาราง `bookings` เพื่อรองรับรายงานและการทำงานของฝ่ายจัดการ (spec §2.1):
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| `invoice_requested_at` | nullable timestamp / date | เวลาที่เจ้าหน้าที่กดทำเรื่องขอใบแจ้งหนี้ ERP (null = ยังไม่ได้ทำเรื่อง) |
+| `special_request` | nullable string (max: 2000) | คำขอพิเศษของผู้เข้าพัก (แสดงซ้ำในทุกห้องของ booking เดียวกันในรายงาน) |
+| `comment` | nullable string (max: 2000) | หมายเหตุฝั่งแอดมินหรือฝ่ายบัญชีงาน ERP (**แยกออกจาก special_request**) |
+| `is_complimentary` | nullable boolean (default: false) | ป้ายกำกับห้องพักอภินันทนาการ (**Tag-only — ไม่แตะ invariant การเงินหรือลดราคายอดจองใดๆ**) |
+
+🔒 **กติกาสิทธิ์การแก้ไข (Authorization):**
+- ฟิลด์ทั้ง 4 ตัวนี้ **ตั้งได้เฉพาะผู้ใช้สิทธิ์ `admin` หรือ `system` เท่านั้น**
+- สามารถส่งได้ผ่าน 2 ช่องทาง:
+  1. `POST /api/v1/bookings` (ตอนสร้างการจอง)
+  2. `PUT /api/v1/bookings/{id}` (ตอนแก้ไขข้อมูลการจอง)
+- หากผู้ใช้ role อื่น (เช่น `user`, `guest`, `staff`) ส่งฟิลด์ใดฟิลด์หนึ่งใน 4 ตัวนี้มา ระบบจะปฏิเสธด้วย HTTP **`403 Forbidden`** ทันที
+
+---
+
+### 4. หมายเหตุ Wire Format สำหรับ Addons & Room Types
+
+- **`room_types.extra_bed_price` (Display-only):**
+  - ฟิลด์ `extra_bed_price` บนโมเดล `RoomType` (ที่ส่งกลับใน availability / calendar endpoints) ทำหน้าที่เป็น **display-only สำหรับการแสดงผลหน้า UI เท่านั้น**
+  - การคำนวณเงินจริงของระบบอ้างอิงจาก `global_rates` (code: `extra_bed`) ผ่าน `AddonPricing` เสมอ
+- **Addon Canonical Wire Format (รูปแบบมาตรฐานใหม่):**
+  - **ชุดอาหารเช้า (Breakfast):** ส่งเป็น `breakfast_sets` object แยก 2 ราคา:
+    ```json
+    "addons": {
+      "breakfast_sets": {
+        "set_100": 1,
+        "set_200": 2
+      }
+    }
+    ```
+  - **เตียงเสริม (Extra Bed):** ส่งเป็น `extra_beds_by_night` object ในรูปแบบ Map รายคืนของช่วงที่พัก `[check_in, check_out)`:
+    ```json
+    "addons": {
+      "extra_beds_by_night": {
+        "2026-10-10": 1,
+        "2026-10-11": 2
+      }
+    }
+    ```
+- **การรองรับ Legacy Alias (ย้อนหลัง):**
+  - ระบบยังคงรับและแปลงค่าผ่านคลาส `App\Services\Addon\AddonPricing` อัตโนมัติ:
+    - ส่ง `breakfast: N` (integer เดิม) → ถูก normalize แปลงเป็น `set_200 = N` (เรทเดิม 200 บาท)
+    - ส่ง `extra_bed: N` หรือ `extra_beds: N` (integer เดิม) → ถูก normalize เป็น flat map ทุกคืนเท่ากับ $N$ เตียงตลอดช่วงเวลาเข้าพัก
+
+---
+
+### 5. Housekeeping Task Checklist Tick (บันทึก Checklist แม่บ้าน)
+
+`PATCH /api/v1/dashboard/tasks/{id}/status` รองรับการบันทึกรายการตรวจสอบความสะอาด 3 ข้อ (spec §2.4):
+- **สิทธิ์:** `admin` หรือ `housekeeping`
+- **ฟิลด์ Request Body:**
+  - `cleaning_check_1`: nullable boolean — ตรวจความสะอาดข้อ 1 (ค่าเริ่มต้น: ทำความสะอาดห้องน้ำ)
+  - `cleaning_check_2`: nullable boolean — ตรวจความสะอาดข้อ 2 (ค่าเริ่มต้น: เครื่องนอน/ผ้า)
+  - `cleaning_check_3`: nullable boolean — ตรวจความสะอาดข้อ 3 (ค่าเริ่มต้น: พื้น + ขยะ)
+  - `status`: nullable string (`in_progress`, `done`) — **เป็น optional เมื่อมีการส่ง checklist ข้อใดข้อหนึ่งมาด้วย** (`required_without_all:cleaning_check_1,cleaning_check_2,cleaning_check_3`)
+- **พฤติกรรม:** การส่งเฉพาะ checklist (tick ล้วน) ถือเป็น **การบันทึกข้อมูลประกอบการทำงาน ไม่จำเป็นต้องเปลี่ยนสถานะงานเป็น `done`** (ไม่บังคับผูกกับ state machine)
+
+---
+
+*Last updated: 2026-10-05 · KU HOME API v1*

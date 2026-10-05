@@ -37,6 +37,10 @@ class HousekeepingTask extends Model
         'completed_at',
         'accepted_at',
         'scheduled_for',
+        // 📊 (05/10/26) excel-reports spec §2.4 — checklist แม่บ้าน 3 หัวข้อ (tick ประกอบ ไม่ผูก done)
+        'cleaning_check_1',
+        'cleaning_check_2',
+        'cleaning_check_3',
     ];
 
     // 🌟 Fix L1 (03/07/26): missing casts — completed_at / accepted_at ใช้เป็น Carbon
@@ -44,6 +48,10 @@ class HousekeepingTask extends Model
         'completed_at' => 'datetime',
         'accepted_at' => 'datetime',
         'scheduled_for' => 'date',
+        // 📊 (05/10/26) PgBoolean — PostgreSQL strict boolean (ห้าม 'boolean' ตรง ๆ)
+        'cleaning_check_1' => \App\Casts\PgBoolean::class,
+        'cleaning_check_2' => \App\Casts\PgBoolean::class,
+        'cleaning_check_3' => \App\Casts\PgBoolean::class,
     ];
 
     // 🧹 Drop (15/07/26): ปิด updated_at auto-manage — column ถูก drop แล้ว

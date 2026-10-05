@@ -1,0 +1,157 @@
+{
+    "id": "additional-charges-report",
+    "name_th": "รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม",
+    "name_en": "Additional Charges Report",
+    "category_th": "รายงานบริหารจัดการ",
+    "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+    "primary_users_th": [
+        "พนักงานหน้าเคาน์เตอร์",
+        "แอดมิน"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "วันที่, รายการ, จำนวน, หน่วย, ราคา, เลขบุ๊คกิ้ง",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.ค่าปรับ/ยืมอุปกรณ์เพิ่มเติม ",
+        "sheet_gid": "1399833695",
+        "extracted_at": "2026-09-22"
+    },
+    "alias_en": "Additional Charges Report",
+    "filters": [
+        {
+            "key": "date_range",
+            "label_th": "ช่วงเวลา",
+            "type": "date_range",
+            "sample_value": "15-17 กันยายน 2569"
+        },
+        {
+            "key": "item_type",
+            "label_th": "รายการ",
+            "type": "enum",
+            "options": [
+                "ทุกประเภท"
+            ],
+            "sample_value": "ทุกประเภท"
+        }
+    ],
+    "columns": [
+        {
+            "key": "transaction_date",
+            "label_th": "วันที่ทำรายการ",
+            "type": "date"
+        },
+        {
+            "key": "item_code",
+            "label_th": "รหัสรายการ",
+            "type": "string"
+        },
+        {
+            "key": "item_name",
+            "label_th": "รายการ",
+            "type": "string"
+        },
+        {
+            "key": "qty",
+            "label_th": "จำนวน",
+            "type": "integer"
+        },
+        {
+            "key": "unit",
+            "label_th": "หน่วย",
+            "type": "string"
+        },
+        {
+            "key": "price",
+            "label_th": "ราคา",
+            "type": "money_baht"
+        },
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        }
+    ],
+    "summary": {
+        "total_items": 8,
+        "total_amount_baht": 1750
+    },
+    "sample_data": [
+        {
+            "transaction_date": "2026-09-15",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย ปลอกผ้าหนวม",
+            "qty": 1,
+            "unit": "จุด",
+            "price": 100,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-15",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย ปลอกหมอก",
+            "qty": 1,
+            "unit": "ผืน",
+            "price": 250,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-15",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย กุญแจ",
+            "qty": 2,
+            "unit": "ดอก",
+            "price": 500,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-16",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย ปลอกหมอน",
+            "qty": 1,
+            "unit": "ชิ้น",
+            "price": 200,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-16",
+            "item_code": "xxxx",
+            "item_name": "ค่ายืม หมอน",
+            "qty": 2,
+            "unit": "ใบ",
+            "price": 100,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-17",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย ปลอกหมอก",
+            "qty": 1,
+            "unit": "ผืน",
+            "price": 250,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-17",
+            "item_code": "xxxx",
+            "item_name": "ค่าเสียหาย ปลอกหมอก",
+            "qty": 1,
+            "unit": "ผืน",
+            "price": 250,
+            "booking_no": "xxxxx"
+        },
+        {
+            "transaction_date": "2026-09-17",
+            "item_code": "xxxx",
+            "item_name": "ค่ายืม หมอน",
+            "qty": 1,
+            "unit": "ใบ",
+            "price": 100,
+            "booking_no": "xxxxx"
+        }
+    ],
+    "notes": [
+        "รายการแยกเป็น \"ค่าเสียหาย\" (ค่าปรับ) และ \"ค่ายืม\" (อุปกรณ์เพิ่มเติม) — ผูกกับ booking ทุกรายการ"
+    ]
+}

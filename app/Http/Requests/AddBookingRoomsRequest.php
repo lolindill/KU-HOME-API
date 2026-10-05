@@ -50,6 +50,14 @@ class AddBookingRoomsRequest extends FormRequest
             'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
 
             'booking_rooms.*.addons' => 'nullable|array',
+            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
+            //    extra_beds_by_night (map รายคืน) · normalize ที่ App\Services\Addon\AddonPricing
+            'booking_rooms.*.addons.breakfast_sets' => 'nullable|array',
+            'booking_rooms.*.addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.breakfast_sets.set_200' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.extra_beds_by_night' => 'nullable|array',
+            'booking_rooms.*.addons.extra_beds_by_night.*' => 'nullable|integer|min:0',
+            // legacy alias — เก็บไว้ให้ frontend เดิม
             'booking_rooms.*.addons.extra_bed' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.early_checkin' => [

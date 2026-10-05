@@ -11,13 +11,13 @@ use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
-use App\Models\GlobalRate;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\StatusChangeLog;
 use App\Models\User;
+use App\Services\Addon\AddonPricing;
 use App\Services\Discount\DiscountService;
 use App\Services\RoomAllocator\RoomAllocator;
 use App\Support\BookingRule;
@@ -340,39 +340,23 @@ class BookingController extends Controller
                 }
             }
 
-            // 🌟 ดึง rate จาก global_rates (server-side) — เหมือน createBooking
-            $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
-
-            $addedAmount = 0;
+            // 📊 (05/10/26) เขียน canonical addon เท่านั้น — ยอดเงินคิดใน reprice() จุดเดียว
             $addedRooms = [];
 
             // 🌟 สร้าง BookingRoom + Addon ทีละห้อง (clone pattern จาก createBooking)
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
+                $addonInput = $roomRequest['addons'] ?? null;
 
-                // คำนวณ nights รายห้อง
-                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
-                $roomCheckIn = Carbon::parse($roomRequest['check_in'])->startOfDay();
-                $roomCheckOut = Carbon::parse($roomRequest['check_out'])->startOfDay();
-                $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
-
-                // 🌟 room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
-                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
-                $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
-                $extraBedUnit = $rates['extra_bed'] ?? 0;
-                $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
-
-                // คำนวณราคา Addon ของห้องนี้ (rate จาก server เท่านั้น)
-                $addons = $roomRequest['addons'] ?? [];
-                $breakfastQty = $addons['breakfast'] ?? 0;
-                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addons);
-                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
-                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
-
-                // รวมยอดของห้องใหม่นี้
-                $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
-                $addedAmount += $subtotal;
+                // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
+                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $roomRequest,
+                    $addonInput,
+                    null,
+                    $roomType->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput);
 
                 $bookingRoom = BookingRoom::create([
                     'booking_id' => $booking->id,
@@ -387,16 +371,13 @@ class BookingController extends Controller
                     'billing_comment' => $roomRequest['billing_comment'] ?? null,
                 ]);
 
-                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id
+                // 🌟 บันทึก Addon — canonical เท่านั้น (snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'extra_bed' => $extraBedQty,
-                    'extra_bed_price' => $extraBedTotal,
-                    'breakfast' => $breakfastQty,
-                    'breakfast_price' => $breakfastPrice,
-                    'early_checkIn_price' => $earlyCheckInPrice,
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
-                    'late_checkOut_price' => $lateCheckOutPrice,
                     'late_hours' => $lateHours,
                 ]);
 
@@ -411,6 +392,9 @@ class BookingController extends Controller
             $bookingRoomsResponse = array_map(function ($br) {
                 return $br->fresh('addon');
             }, $addedRooms);
+
+            // 📊 added_amount = ผลรวม amount ของห้องที่เพิ่งเพิ่ม (จาก reprice แล้ว)
+            $addedAmount = collect($bookingRoomsResponse)->sum(fn ($br) => (int) $br->amount);
 
             return response()->json([
                 'status' => 'success',
@@ -717,41 +701,42 @@ class BookingController extends Controller
                     $bookingRoom->update($dirtyFields);
                 }
 
-                // 🌟 Reprice server-side — extra_beds/addons: ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row
-                $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+                // 🌟 Reprice server-side — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
+                //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
                 $existingAddon = $bookingRoom->addon;
                 $addonInput = $validated['addons'] ?? null;
 
-                $extraBedQty = $this->resolveExtraBed($validated, $addonInput, $existingAddon);
-                $breakfastQty = is_array($addonInput)
-                    ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
-                    : ($existingAddon?->breakfast ?? 0);
-                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
-
-                $roomType = RoomType::findOrFail($effectiveTypeId);
-                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
-                $nights = (int) Carbon::parse($effectiveCheckIn)->startOfDay()
-                    ->diffInDays(Carbon::parse($effectiveCheckOut)->startOfDay()) ?: 1;
-
-                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
-                $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
-                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
-                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
+                $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
+                $effectiveRoomRequest = $validated;
+                $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
+                $effectiveRoomRequest['check_out'] = $effectiveCheckOut;
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $effectiveRoomRequest,
+                    $addonInput,
+                    $existingAddon,
+                    RoomType::findOrFail($effectiveTypeId)->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                 $addonData = [
-                    'extra_bed' => $extraBedQty,
-                    'extra_bed_price' => $extraBedTotal,
-                    'breakfast' => $breakfastQty,
-                    'breakfast_price' => $breakfastPrice,
-                    'early_checkIn_price' => $earlyCheckInPrice,
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
-                    'late_checkOut_price' => $lateCheckOutPrice,
                     'late_hours' => $lateHours,
                 ];
                 if ($existingAddon) {
                     $dirtyAddonFields = [];
                     foreach ($addonData as $k => $v) {
+                        if ($k === 'extra_beds_by_night') {
+                            // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
+                            if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                $dirtyAddonFields[$k] = $v;
+                            }
+
+                            continue;
+                        }
                         if ((int) $existingAddon->$k !== (int) $v) {
                             $dirtyAddonFields[$k] = $v;
                         }
@@ -1006,9 +991,8 @@ class BookingController extends Controller
                     }
                 }
 
-                // 🌟 Apply + reprice รายห้อง — extra_beds/addons: ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิมจาก Addon row
-                $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
-
+                // 🌟 Apply + reprice รายห้อง — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
+                //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
                 foreach ($updates as $u) {
                     $bookingRoom = $u['model'];
                     $roomRequest = $u['request'];
@@ -1020,35 +1004,37 @@ class BookingController extends Controller
                     $existingAddon = $bookingRoom->addon;
                     $addonInput = $roomRequest['addons'] ?? null;
 
-                    $extraBedQty = $this->resolveExtraBed($roomRequest, $addonInput, $existingAddon);
-                    $breakfastQty = is_array($addonInput)
-                        ? ($addonInput['breakfast'] ?? ($existingAddon?->breakfast ?? 0))
-                        : ($existingAddon?->breakfast ?? 0);
-                    [$earlyHours, $lateHours] = $this->resolveEarlyLate($addonInput, $existingAddon);
-
-                    $roomType = RoomType::findOrFail($u['type_id']);
-                    // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
-                    $nights = (int) Carbon::parse($u['check_in'])->startOfDay()
-                        ->diffInDays(Carbon::parse($u['check_out'])->startOfDay()) ?: 1;
-
-                    $extraBedTotal = ($extraBedQty * ($rates['extra_bed'] ?? 0)) * $nights;
-                    $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                    $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
-                    $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
+                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    // effective roomRequest — legacy extra_beds หัวห้องติดไปด้วย (pattern resolveExtraBed เดิม)
+                    $effectiveRoomRequest = $roomRequest;
+                    $effectiveRoomRequest['check_in'] = $u['check_in'];
+                    $effectiveRoomRequest['check_out'] = $u['check_out'];
+                    $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                        $effectiveRoomRequest,
+                        $addonInput,
+                        $existingAddon,
+                        RoomType::findOrFail($u['type_id'])->max_extra_beds
+                    );
+                    [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                     $addonData = [
-                        'extra_bed' => $extraBedQty,
-                        'extra_bed_price' => $extraBedTotal,
-                        'breakfast' => $breakfastQty,
-                        'breakfast_price' => $breakfastPrice,
-                        'early_checkIn_price' => $earlyCheckInPrice,
+                        'breakfast_set_100' => $sets['set_100'],
+                        'breakfast_set_200' => $sets['set_200'],
+                        'extra_beds_by_night' => $extraBedsByNight ?: null,
                         'early_hours' => $earlyHours,
-                        'late_checkOut_price' => $lateCheckOutPrice,
                         'late_hours' => $lateHours,
                     ];
                     if ($existingAddon) {
                         $dirtyAddonFields = [];
                         foreach ($addonData as $k => $v) {
+                            if ($k === 'extra_beds_by_night') {
+                                // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
+                                if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
                             if ((int) $existingAddon->$k !== (int) $v) {
                                 $dirtyAddonFields[$k] = $v;
                             }
@@ -1248,6 +1234,14 @@ class BookingController extends Controller
                 throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
             }
 
+            // 📊 (05/10/26, excel-reports ticket 09): ตั้ง invoice_requested_at / special_request /
+            //    comment / is_complimentary ได้ admin/system เท่านั้น (403 ถ้า role อื่นส่งมา)
+            if ($request->hasAny(['invoice_requested_at', 'special_request', 'comment', 'is_complimentary'])) {
+                if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                    throw new \Exception('การตั้งข้อมูล invoice_requested_at / special_request / comment / is_complimentary สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+                }
+            }
+
             // 🏛️ (25/09/26, organization-bookings ticket 02): admin booking 2 โหมด —
             //    โหมด A: admin ส่ง `user` (UUID) → user_id = target user (ไม่ใช่ admin ผู้สร้าง)
             //    โหมด B: admin ไม่ส่ง `user` → user_id = null (เฮดเปล่า — org/group booking)
@@ -1384,41 +1378,32 @@ class BookingController extends Controller
                 'deposit_amount' => $depositAmount,
                 // ⏱️ (2026-09-24, REQ-008): ล็อกห้อง 15 นาที (config booking.payment_deadline_minutes)
                 'payment_deadline' => Carbon::now()->addMinutes((int) config('booking.payment_deadline_minutes')),
+                // 📊 (05/10/26, excel-reports spec ticket 09): booking attributes สำหรับรายงาน (admin/system)
+                'invoice_requested_at' => ! empty($validated['invoice_requested_at']) ? Carbon::parse($validated['invoice_requested_at']) : null,
+                'special_request' => $validated['special_request'] ?? null,
+                'comment' => $validated['comment'] ?? null,
+                'is_complimentary' => $request->has('is_complimentary') ? (bool) $validated['is_complimentary'] : false,
             ]);
 
             // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ
             // ไม่รับ price จาก client อีกต่อไป — ป้องกัน price manipulation (#20)
-            // 🌟 Refactor (22/07/26): ย้ายจาก addon_rates → global_rates (rate_type='addon')
-            $rates = GlobalRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
-
+            // 📊 (05/10/26) ยอดเงิน addon คำนวณใน reprice() จุดเดียว — write path normalize input ล้วน
             $createdRooms = [];
 
             // 🌟 ปรับลูปให้สร้าง BookingRoom และ Addon ไปพร้อมๆ กันต่อห้องเลยค่ะ
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
+                $addonInput = $roomRequest['addons'] ?? null;
 
-                // 🌟 Refactor (02/07/26): คำนวณ nights รายห้อง (แต่ละห้องมีวันที่ต่างกันได้)
-                // 🕒 (25/09/26) REQ-015/016 — startOfDay() ทั้งสองก่อน diffInDays() (Carbon 3 float guard)
-                $roomCheckIn = Carbon::parse($roomRequest['check_in'])->startOfDay();
-                $roomCheckOut = Carbon::parse($roomRequest['check_out'])->startOfDay();
-                $nights = $roomCheckIn->diffInDays($roomCheckOut) ?: 1;
-
-                // 🌟 Refactor (22/07/26): อ่าน room rate จาก global_rates (คำนึงถึงสิทธิ์ ku_member)
-                // 🏛️ (25/09/26, organization-bookings ticket 02): ใช้ $booking->user (target) เสมอ —
-                //    admin จองแทนโหมด A คิดราคาตาม role ของ user ปลายทาง (daily_ku) ·
-                //    โหมด B userless = null → daily · non-admin = ตัวเอง (เหมือนเดิม)
-                $roomPriceTotal = GlobalRate::getEffectiveDailyRate($roomType, $booking->user) * $nights;
-                $extraBedQty = $this->resolveExtraBed($roomRequest, $roomRequest['addons'] ?? null);
-                $extraBedUnit = $rates['extra_bed'] ?? 0;
-                $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
-
-                // คำนวณราคา Addon ของห้องนี้ (rate จาก server เท่านั้น)
-                $addons = $roomRequest['addons'] ?? [];
-                $breakfastQty = $addons['breakfast'] ?? 0;
-                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                [$earlyHours, $lateHours] = $this->resolveEarlyLate($addons);
-                $earlyCheckInPrice = $earlyHours * ($rates['early_checkin'] ?? 0);
-                $lateCheckOutPrice = $lateHours * ($rates['late_checkout'] ?? 0);
+                // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
+                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $roomRequest,
+                    $addonInput,
+                    null,
+                    $roomType->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput);
 
                 $bookingRoom = BookingRoom::create([
                     'booking_id' => $booking->id,
@@ -1436,16 +1421,14 @@ class BookingController extends Controller
                     'billing_comment' => $roomRequest['billing_comment'] ?? null,
                 ]);
 
-                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id แทนค่ะ
+                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id แทนค่ะ (canonical เท่านั้น —
+                //    snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'extra_bed' => $extraBedQty,
-                    'extra_bed_price' => $extraBedTotal,
-                    'breakfast' => $breakfastQty,
-                    'breakfast_price' => $breakfastPrice,
-                    'early_checkIn_price' => $earlyCheckInPrice,
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
-                    'late_checkOut_price' => $lateCheckOutPrice,
                     'late_hours' => $lateHours,
                 ]);
 
@@ -1635,6 +1618,24 @@ class BookingController extends Controller
                 // ⏱️ payment_deadline — ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม
                 if ($validated['payment_deadline'] ?? null) {
                     $locked->payment_deadline = Carbon::parse($validated['payment_deadline']);
+                }
+
+                // 📊 (05/10/26, excel-reports §2.1) booking attributes — admin เท่านั้น
+                //    (route role:admin) · tag-only ไม่แตะยอดเงิน/state machine · ไม่ส่ง = คงเดิม
+                //    (ส่ง null ชัด ๆ = เคลียร์)
+                if ($request->has('invoice_requested_at')) {
+                    $locked->invoice_requested_at = $validated['invoice_requested_at'] !== null
+                        ? Carbon::parse($validated['invoice_requested_at'])
+                        : null;
+                }
+                if ($request->has('special_request')) {
+                    $locked->special_request = $validated['special_request'];
+                }
+                if ($request->has('comment')) {
+                    $locked->comment = $validated['comment'];
+                }
+                if ($request->has('is_complimentary')) {
+                    $locked->is_complimentary = (bool) $validated['is_complimentary'];
                 }
 
                 $locked->save();
@@ -2107,40 +2108,9 @@ class BookingController extends Controller
     }
 
     /**
-     * 🕐 (27/08/26): สูตรรายชั่วโมง — addons.early_checkin / addons.late_checkout รับ int จำนวนชั่วโมง (0-7)
-     * 🔧 (01/09/26): รับ alias early_hours / late_hours (frontend echo ชื่อ column กลับมา — bug "แก้ชั่วโมงแล้วไม่อัปเดต")
-     *                ลำดับ resolve ของแต่ละ key: canonical → alias → คงค่าเดิมจากแถว addon
-     * ไม่ส่ง addons key มาเลย = ใช้ค่าจากแถว addon เดิม (fallback ตามพฤติกรรมเดิมของ updateRoom/updateRooms)
+     * 🕐🛏️ (05/10/26): normalize ของ addon ทั้งหมดย้ายไป App\Services\Addon\AddonPricing จุดเดียว
+     * (resolveEarlyLate / resolveExtraBed เดิมถูกดูดรวม — 4 write paths เรียกผ่านคลาสเดียวกัน)
      */
-    private function resolveEarlyLate(?array $addonInput, ?Addon $existing = null): array
-    {
-        if (is_array($addonInput)) {
-            $earlyHours = (int) ($addonInput['early_checkin'] ?? $addonInput['early_hours']
-                ?? ($existing?->early_hours ?? 0));
-            $lateHours = (int) ($addonInput['late_checkout'] ?? $addonInput['late_hours']
-                ?? ($existing?->late_hours ?? 0));
-
-            return [$earlyHours, $lateHours];
-        }
-
-        $earlyHours = ! empty($existing?->early_checkIn_price) ? ($existing?->early_hours ?? 0) : 0;
-        $lateHours = ! empty($existing?->late_checkOut_price) ? ($existing?->late_hours ?? 0) : 0;
-
-        return [$earlyHours, $lateHours];
-    }
-
-    /**
-     * 🛏️ (04/09/26): input format = output format — เตียงเสริมอยู่ใน addons object เหมือน addon อื่น ๆ
-     *    canonical: addons.extra_bed (ตรงกับ addon.extra_bed ตอน response)
-     *    alias: extra_beds (หัวห้อง — โครงสร้างเก่า เก็บไว้ให้ frontend เดิม)
-     *    ลำดับ resolve ตาม resolveEarlyLate(): canonical → alias → คงค่าเดิมจากแถว addon
-     */
-    private function resolveExtraBed(array $roomRequest, ?array $addonInput, ?Addon $existing = null): int
-    {
-        return (int) ($addonInput['extra_bed']
-            ?? $roomRequest['extra_beds']
-            ?? ($existing?->extra_bed ?? 0));
-    }
 
     /**
      * 🎫 (26/09/26) ticket 03 map reserved-room-pool — denominator ของ capacity checks
