@@ -44,7 +44,10 @@ return new class extends Migration
                 continue;
             }
 
-            DB::statement("UPDATE {$table} SET {$column} = {$column} / 100");
+            // ⚠️ PostgreSQL gotcha: column บางตัวถูกสร้างแบบ quoted mixed-case
+            // (เช่น addons."early_checkIn_price") — ต้อง quote identifier เสมอ
+            // ไม่งั้น pgsql fold เป็นตัวพิมพ์เล็กแล้วหา column ไม่เจอ (42703)
+            DB::statement("UPDATE \"{$table}\" SET \"{$column}\" = \"{$column}\" / 100");
         }
 
         // 🎟️ discounts.value — เฉพาะ fixed/set_room_price เคยเป็น satang, percent ไม่แตะ
@@ -75,7 +78,7 @@ return new class extends Migration
                 continue;
             }
 
-            DB::statement("UPDATE {$table} SET {$column} = {$column} * 100");
+            DB::statement("UPDATE \"{$table}\" SET \"{$column}\" = \"{$column}\" * 100");
         }
 
         if (Schema::hasTable('discounts')) {
