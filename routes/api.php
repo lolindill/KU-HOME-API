@@ -47,6 +47,10 @@ Route::prefix('v1')->group(function () {
     //    throttle เทียบเท่า login · error map ตาม contract ticket 03
     Route::post('/auth/sso/exchange', [SsoController::class, 'exchange'])->middleware('throttle:5,1');
 
+    // 🎫 Google SSO (wayfinder/google-integration): SPA รับ code จาก Google แล้วส่งมาแลก Sanctum token
+    //    mirror KU SSO ทุกอย่างยกเว้น role = 'user' (contract ticket 06 sign-off 2026-10-06)
+    Route::post('/auth/sso/google/exchange', [SsoController::class, 'exchangeGoogle'])->middleware('throttle:5,1');
+
     // 🏨 Rooms (public read-only)
     Route::get('/rooms', [RoomController::class, 'allRooms']);
     Route::get('/rooms/status', [RoomController::class, 'roomStatus']);

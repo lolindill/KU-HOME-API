@@ -233,6 +233,39 @@ Used by `GET /bookings` and `GET /users`:
 
 ---
 
+### POST `/auth/sso/google/exchange` — Google login (Google Identity / OIDC)
+
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/google-integration` (contract sign-off 2026-10-06, ticket 06) · sibling ของ KU SSO — mirror ทุกอย่างยกเว้น role
+
+> Flow: SPA เปิด `https://accounts.google.com/o/oauth2/v2/auth` รับ `code` (scope `openid email profile` · state ฝั่ง SPA · PKCE S256 ฝั่ง SPA สร้างเอง — Google ไม่ enforce สำหรับ web client แต่ SPA ส่ง S256 เป็น hardening) → ส่ง `code` + `code_verifier` มาที่นี่ → backend แลก code + client_secret (`client_secret_post`, `redirect_uri` จาก `GOOGLE_SSO_REDIRECT_URI` — ต้องตรง Authorized redirect URI ใน Cloud Console ทุก byte) → ดึง userinfo → find-or-create User (`auth_provider=google`, **role `user` เสมอ** — Google ไม่พิสูจน์สถานะ มก. ป้องกันส่วนลด `daily_ku` หลุด; ต่างจาก KU SSO ที่ได้ `ku_member`) → ออก Sanctum token
+> Google access token ใช้ยิง userinfo รอบเดียวแล้วทิ้ง (ไม่ขอ `access_type=offline` — ไม่มี refresh token) · logout เป็น purely local (Google ไม่มี END_SESSION endpoint)
+
+**Request Body:** เหมือน KU SSO — `{ "code": "...", "code_verifier": "..." }` (rule 43–128 ตัวอักษร charset `[A-Za-z0-9-._~]`)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Google login successful",
+  "access_token": "13|abcdef1234567890...",
+  "token_type": "Bearer",
+  "user": { ...user object (role: user)... },
+  "id_token": "eyJhbGciOi..."
+}
+```
+
+**Error Map:**
+| HTTP | สถานการณ์ |
+|------|-----------|
+| `422` | validation ของ `code` หรือ `code_verifier` (หาย / สั้น-ยาวเกิน / ตัวอักษรนอก charset) |
+| `422` | `invalid_grant` — code หมดอายุ/ใช้แล้ว (single-use) → SPA เริ่ม login flow ใหม่ (ห้าม retry) |
+| `422` | ไม่มี claim `email` หรือ `email_verified !== true` (fail-closed — Google ยืนยันอีเมลได้จริง ต่างจาก KU SSO) |
+| `500` | `invalid_client` — `GOOGLE_SSO_CLIENT_ID/SECRET` ใน `.env` พัง (log ไว้ ไม่ expose) |
+| `500` | `redirect_uri_mismatch` ที่ token endpoint — config ไม่ตรงกันระหว่าง SPA/API (ไม่ใช่ความผิด user) |
+| `502` | Google ล่ม / timeout / ตอบผิดปกติ |
+
+---
+
 ### POST `/logout` — Logout
 
 🔒 **Auth required**
@@ -305,9 +338,9 @@ Revokes the current access token.
 
 **Query Params:**
 - Pagination automatic (15 per page)
-- `auth_provider` (optional) — กรองเฉพาะ provider (`password` | `ku_sso`) · 🎫 split-user model: email เดียวมีได้หลาย account ข้าม provider (2026-09-07)
+- `auth_provider` (optional) — กรองเฉพาะ provider (`password` | `ku_sso` | `google`) · 🎫 split-user model: email เดียวมีได้หลาย account ข้าม provider (2026-09-07)
 
-> ทุก user object serialize รวม field `auth_provider` (`password` เริ่มต้นสำหรับ user เก่า · `ku_sso` สำหรับ account ที่เกิดจาก KU SSO login)
+> ทุก user object serialize รวม field `auth_provider` (`password` เริ่มต้นสำหรับ user เก่า · `ku_sso` สำหรับ account ที่เกิดจาก KU SSO login · `google` สำหรับ account ที่เกิดจาก Google login)
 
 **Response `200`:**
 ```json
