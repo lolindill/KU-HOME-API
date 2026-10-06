@@ -2,7 +2,7 @@
 
 - **label:** `wayfinder:grilling`
 - **type:** HITL
-- **status:** open
+- **status:** closed *(2026-10-06 — owner sign-off ครบ 7 ข้อใน grilling session)*
 - **blocked-by:** —
 - **assignee:** antigravity (2026-09-16, prep only — grilling รอ owner)
 
@@ -174,11 +174,21 @@ Owner sign-off 2 ข้อก่อน implementation (ข้อมูลคร�
 
 เมื่อนายท่านตรวจสอบและเห็นชอบ สามารถติ๊กถูก `[x]` ใน Checklist ด้านล่างนี้เพื่อปิดตั๋วได้ใน sitting เดียวเลยค่ะ:
 
-- [ ] **1. Default Role:** ผู้ใช้ที่เกิดจาก Google login ครั้งแรก ได้รับ role **`user`** (ไม่ใช่ `ku_member` เพื่อคุ้มครองอัตราค่าห้อง `daily_ku`)
-- [ ] **2. Endpoint Shape:** กำหนดเส้นทางเป็น **`POST /api/v1/auth/sso/google/exchange`** นอก auth group พร้อม middleware **`throttle:5,1`**
-- [ ] **3. Request Contract:** Body รับ **`{ "code": "...", "code_verifier": "..." }`** โดยค่า `redirect_uri` อ่านจาก backend config (`config('google_sso.redirect_uri')`)
-- [ ] **4. Response Contract:** คืน HTTP 200 พร้อม JSON ครบ 6 keys: **`status`**, **`message`**, **`access_token`**, **`token_type`**, **`user`**, **`id_token`** (Mirror KU SSO)
-- [ ] **5. Fail-Closed Email Policy:** ตรวจสอบทั้งรูปแบบ `email` และ **`email_verified === true`** (tolerant boolean) มิฉะนั้นปฏิเสธด้วย HTTP 422
-- [ ] **6. Error Mapping:** รับรองตารางจับคู่ข้อผิดพลาด (422 สำหรับ grant/email, 500 สำหรับ client/redirect mismatch, 502 สำหรับ service unavailable)
-- [ ] **7. Standing Decisions Ratification:** รับรอง standing decisions ทั้ง 7 ข้อ (Split-user, 0-package Sibling service, Purely local logout, Sanctum policy)
+- [x] **1. Default Role:** ผู้ใช้ที่เกิดจาก Google login ครั้งแรก ได้รับ role **`user`** (ไม่ใช่ `ku_member` เพื่อคุ้มครองอัตราค่าห้อง `daily_ku`)
+- [x] **2. Endpoint Shape:** กำหนดเส้นทางเป็น **`POST /api/v1/auth/sso/google/exchange`** นอก auth group พร้อม middleware **`throttle:5,1`**
+- [x] **3. Request Contract:** Body รับ **`{ "code": "...", "code_verifier": "..." }`** โดยค่า `redirect_uri` อ่านจาก backend config (`config('google_sso.redirect_uri')`)
+- [x] **4. Response Contract:** คืน HTTP 200 พร้อม JSON ครบ 6 keys: **`status`**, **`message`**, **`access_token`**, **`token_type`**, **`user`**, **`id_token`** (Mirror KU SSO)
+- [x] **5. Fail-Closed Email Policy:** ตรวจสอบทั้งรูปแบบ `email` และ **`email_verified === true`** (tolerant boolean) มิฉะนั้นปฏิเสธด้วย HTTP 422
+- [x] **6. Error Mapping:** รับรองตารางจับคู่ข้อผิดพลาด (422 สำหรับ grant/email, 500 สำหรับ client/redirect mismatch, 502 สำหรับ service unavailable)
+- [x] **7. Standing Decisions Ratification:** รับรอง standing decisions ทั้ง 7 ข้อ (Split-user, 0-package Sibling service, Purely local logout, Sanctum policy)
+
+---
+
+## Resolution (2026-10-06 — owner sign-off)
+
+Owner sign-off ครบทั้ง 7 ข้อใน grilling session (HITL — owner ตอบในที่ประชุม) ✅
+
+- **อิง KU SSO เป็นฐาน:** owner ระบุแนวทาง "อิง ku login sso" — ข้อ 2–7 mirror KU SSO ตามคำแนะนำ prep ทั้งหมด (route แยก, payload `code`+`code_verifier`, response 6 keys, fail-closed, error map, ratify standing decisions)
+- **ข้อ 1 (role) เคลียร์เฉพาะบุญ:** owner ยืนยัน **role `user`** สำหรับ Google-born user — ต่างจาก KU SSO ที่ first login ได้ `ku_member` โดยเจตนา เพราะ Google เป็น public identity ไม่พิสูจน์สถานะ มก. (ป้องกันส่วนลด `daily_ku` หลุดให้ Gmail ทั่วไป) — บุคลากร/นิสิตที่ต้องการส่วนลดใช้ช่องทาง KU SSO ตามเดิม
+- สรุป contract ที่ implementation session ถือปฏิบัติ (เขียนโค้ดได้โดยไม่ถามซ้ำ): `POST /api/v1/auth/sso/google/exchange` (public, `throttle:5,1`) · body `{code, code_verifier}` (code_verifier RFC 7636 min:43 max:128) · `redirect_uri` จาก `config('google_sso.redirect_uri')` · success 200 = `{status, message, access_token, token_type, user, id_token}` mirror KU SSO · error map: `invalid_grant`→422, email ไม่ผ่าน/`email_verified!==true`→422, `invalid_client`/`redirect_uri_mismatch`→500 (generic + Log::error), Google ล่ม/timeout→502, Throwable→500 · default role `user` · สถาปัตยกรรม sibling `GoogleSsoService` คู่ `KuSsoService` (0 package) บนฐานโค้ด SSO ที่ merge แล้วใน `agust-11`
 
