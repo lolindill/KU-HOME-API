@@ -2,9 +2,9 @@
 
 - **label:** `wayfinder:task`
 - **type:** AFK
-- **status:** open
+- **status:** closed *(2026-10-14 — out-of-scope: ticket 10 มติ deviation ไม่ทำชั้นใบเสร็จในระบบ)*
 - **blocked-by:** [10-receipt-issuance-grilling](./10-receipt-issuance-grilling.md)
-- **assignee:** (ว่าง)
+- **assignee:** (ว่าง — ไม่มีวัน implement)
 - **summary:** Implement ตาราง/endpoint ออกใบเสร็จ + split ต่อผู้รับตาม design ticket 10 + tests
 - **phase:** 4
 
@@ -21,4 +21,6 @@
 
 ## Resolution
 
-(ยังว่าง)
+**ปิดเป็น out-of-scope (2026-10-14)** — [ticket 10](./10-receipt-issuance-grilling.md) มติ owner: **deviation — ไม่ทำชั้นใบเสร็จในระบบ** (ใบเสร็จจริงออกโดยฝ่ายอื่นนอกระบบ KU HOME · gateway มีปัญหาจึงใช้ admin verify สลิปผ่าน `booking_confirmations` ต่อไป)
+
+ไม่มี migration/endpoint/tests ให้ implement · `receipts` ❄️ คง frozen · `receipt_sequences` คงหลับ · deviation จด ledger ข้อ 5 ใน `cline.md` แล้ว — reference design (หากวันหน้า owner สั่งใหม่) เก็บไว้ที่ Resolution ของ ticket 10

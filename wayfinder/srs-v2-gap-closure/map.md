@@ -15,12 +15,12 @@ SRS v2 (`srs_room_booking_v2.pdf` — REQ-001…052 + ใบเสร็จ 3.8)
   - 🧊 **SRS = acceptance** — ห้ามปล่อย REQ ลอย: ไม่ทำ = ต้องมี deviation line ที่จดเหตุผล
   - 🧊 **ราคา group/month: auto-apply ฝั่ง server** ใน `DiscountService::reprice` (≥30 คืน → เรท `month` · ≥5 ห้อง → `group` min_5 · ≥10 ห้อง → min_10 แทน `daily`) — ห้ามย้ายไปให้ frontend คิด (edge ที่เหลือ grill ที่ [ticket 08](./tickets/08-pricing-tier-grilling.md))
   - 🧊 **Guest cap 2 ชั้น (REQ-007/019):** ห้ามจำนวน `guests` เกิน `room_types.max_guests` ทุกจุดที่ส่ง + บังคับ ≥1 คนตอน submit สลิป confirm — **ห้าม**บังคับ guests required ตั้งแต่ create (ทับ flow draft real-time)
-  - 🧊 **ใบเสร็จ 3.8 = backend ชั้นบันทึกเท่านั้น:** ออกเลข atomic + แถวแบ่งยอดต่อผู้รับ (1 เต็ม / 2 หาร 2 / 3 หาร 3 / >1 กรอกเอง) — PDF render ฝั่ง frontend · ตัว `receipts` ❄️ เดิมคง frozen — ออกแบบชั้น record ใหม่ที่ [ticket 10](./tickets/10-receipt-issuance-grilling.md)
+  - ~~🧊 **ใบเสร็จ 3.8 = backend ชั้นบันทึกเท่านั้น:** ออกเลข atomic + แถวแบ่งยอดต่อผู้รับ (1 เต็ม / 2 หาร 2 / 3 หาร 3 / >1 กรอกเอง) — PDF render ฝั่ง frontend · ตัว `receipts` ❄️ เดิมคง frozen — ออกแบบชั้น record ใหม่ที่ [ticket 10](./tickets/10-receipt-issuance-grilling.md)~~ *(❌ supersede 2026-10-14 — owner ยืนยันใบเสร็จจริงออกโดยฝ่ายอื่น**นอกระบบ** ไม่รวมเข้าระบบ · มติใหม่ = **deviation ไม่ทำ** ดู [ticket 10](./tickets/10-receipt-issuance-grilling.md) + ledger ข้อ 5 ใน `cline.md` · `receipts` ❄️ ยังคง frozen)*
   - 🧊 **REQ-048 รูปแม่บ้าน:** ใช้ `images` table (morph `HousekeepingTask`) ตาม AGENTS.md — ห้ามสร้างตารางรูปใหม่ · หมวด before/after (cap ห้องละ 5+5)/forgotten_item/damage + หมายเหตุ · retention 90 วัน
   - 🧊 **สต๊อก (REQ-051/052):** CRUD + `reorder_point`/`max_stock` + สถานะ derived ok/low/out (แถบสีให้ frontend render) + movement log เก็บ 1 ปี · roles: admin+staff เขียน, housekeeping อ่าน
 - **Interpretation (implementation ปัจจุบันถือว่าครอบคลุม — จดลง deviation ledger เช่นกัน):** REQ-045 upgrade = เปลี่ยน `room_type_id` + ส่วนต่างเข้ายอดค้างชำระ (surcharge) · REQ-012 draft = draft + เลข confirm ออกตั้งแต่ตอนสร้าง
 - **WIP นอก map:** สลิปไม่แจ้งยอด `amount` nullable (owner 08/10/26, 5 ไฟล์แก้ + tests เขียว) — commit แยกก่อนเริ่มงานใน map นี้
-- **ลำดับงานแนะนำ (advise เท่านั้น — frontier คือของจริง):** Phase 0 = ticket 01 (deviation ledger) · Phase 1 quick wins = 02, 03, 04 · Phase 2 money = 08 → 09 · Phase 3 โครงสร้างใหม่ = 05, 06, 07 · Phase 4 grilling ก่อนลงมือ = 10 → 11 และ 12 → 13
+- **ลำดับงานแนะนำ (advise เท่านั้น — frontier คือของจริง):** Phase 0 = ticket 01 (deviation ledger) · Phase 1 quick wins = 02, 03, 04 · Phase 2 money = 08 → 09 · Phase 3 โครงสร้างใหม่ = 05, 06, 07 · Phase 4 grilling ก่อนลงมือ = ~~10 → 11~~ *(10 ปิด deviation 2026-10-14 · 11 ปิด out-of-scope)* และ 12 → 13
 - ธรรมเนียมเดิม: 1 ticket ต่อ 1 session — claim ด้วย `assignee:` ก่อนลงมือ · resolve แล้วเขียน `## Resolution` ลง ticket → `status: closed` → append 1 บรรทัดใน "Decisions so far" แล้ว commit tracker ไปกับ branch ที่ทำงานอยู่
 
 ## Decisions so far
@@ -31,6 +31,7 @@ SRS v2 (`srs_room_booking_v2.pdf` — REQ-001…052 + ใบเสร็จ 3.8)
 - [05: Check-in evidence](./tickets/05-checkin-evidence-upload.md): morph `BookingRoom` + column `images.metadata` · state guard confirmed/checked_in/checked_out · retention 365 วันต่อ `app:cleanup-images` (REQ-033 ✅)
 - [06: Housekeeping photos](./tickets/06-housekeeping-photos.md): morph `HousekeepingTask` + column `images.category` · drop scaffold `housekeeping_photos` · cap 5+5 · notes ใช้ column เดิม · retention 90 วัน (REQ-048 ✅)
 - [07: Stock system](./tickets/07-stock-crud-movement-log.md): CRUD `/stock` + derived ok/low/out + `stock_movements` (soft delete คง audit trail) + cleanup 365 วัน + `SuppliesReportData` เต็ม (REQ-051/052 ✅)
+- [10: Grill โครงใบเสร็จ 3.8](./tickets/10-receipt-issuance-grilling.md) *(2026-10-14 — grilling)*: **deviation — ไม่ทำชั้นใบเสร็จในระบบ** — owner ยืนยันใบเสร็จจริงออกโดยฝ่ายอื่นนอกระบบ + gateway มีปัญหาจึงใช้ admin verify สลิปผ่าน `booking_confirmations` ต่อไป · `receipts` ❄️ คง frozen · `receipt_sequences` คงหลับ · มติเดิม "backend ชั้นบันทึก" ถูก supersede — ledger ข้อ 5 ใน `cline.md`
 
 > dispatch ขนาน 2026-10-14 ผ่าน agent-hub (antigravity · gemini-3.8-flash) — 7 worktree แยก แล้ว merge กลับ `agust-11` โดยผู้จัดการ · suite 725 เขียว · เอกสาร API ผนวกท้าย `docs/api_guide.md` (หัวข้อ 🧩 SRS v2 Gap Closure)
 
@@ -42,6 +43,7 @@ SRS v2 (`srs_room_booking_v2.pdf` — REQ-001…052 + ใบเสร็จ 3.8)
 
 ## Out of scope
 
+- **ชั้นบันทึกใบเสร็จในระบบ (SRS §3.8)** — [ticket 11](./tickets/11-receipt-issuance-impl.md) *(ปิด out-of-scope 2026-10-14)*: ใบเสร็จจริงออกโดยฝ่ายอื่นนอกระบบ KU HOME (มติ owner ใน [ticket 10](./tickets/10-receipt-issuance-grilling.md)) — ไม่สร้างตาราง/endpoint ออกเลข ไม่ปลด freeze `receipts` ❄️ · deviation จด ledger ข้อ 5 ใน `cline.md`
 - **REQ-009/040/041 เมลยืนยันอัตโนมัติ 2 formats + REQ-020 quotation/ใบ confirm/Guest Folio** — deviation ตาม freeze 06/10/26: frontend senior gen เอกสารอยู่แล้ว + admin ส่งเองตามช่องทาง (Facebook/Line/หน้าฟ้อน) — งานเมลคง frozen ที่ `google-integration` (tickets 04/07/08) ปลดได้เมื่อ owner สั่งใหม่เท่านั้น
 - **REQ-049 หัวหน้าแม่บ้าน Approve/Reject** — deviation ไว้ก่อน: ชน state machine `done = terminal/locked` + ไม่มี role หัวหน้าแม่บ้าน รอโครงสร้างทีมชัดเจน
 - **REQ-038 เปลี่ยนราคาห้องล่วงหน้าในอนาคต (effective-dated rates)** — deviation ⚠️ risk จดไว้: แก้ราคาทันทีมีผลกับ draft ที่จองในราคาเก่า · จะกลับมาทำได้เมื่อมีหลักฐานความเสียหายจริง (ทางแก้จดไว้: `effective_from` บน `global_rates` + query เลือกแถวล่าสุดที่ ≤ วันเข้าพัก)

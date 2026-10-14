@@ -2296,9 +2296,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
    - **⚠️ Risk Note:** การแก้ไขราคาห้องพักในปัจจุบันจะมีผลทันทีต่อ Draft Bookings ที่สร้างค้างไว้ด้วยราคาเดิมตอนถูก recalculate ยอดชำระเงิน
    - **ทางกลับถ้ามี:** เมื่อมีความจำเป็นทางธุรกิจหรือพบความเสียหายจริง ให้เพิ่มคอลัมน์ `effective_from` / `effective_to` บน `global_rates` และปรับ query ใน `GlobalRate::getEffectiveDailyRate()` และ `DiscountService::reprice()` ให้ดึงเรทตามวันเข้าพักของ booking
 
+5. **SRS §3.8 — การออกใบเสร็จรับเงิน (Receipt issuance + แบ่งยอดต่อผู้รับ)**
+   - **REQ ID:** SRS §3.8 (หัวข้อใบเสร็จ — ไม่มีเลข REQ-0xx, gap audit 2026-10-14 อ้างเป็นหัวข้อ 3.8)
+   - **สถานะ:** `deviation`
+   - **วันที่ตัดสิน:** 2026-10-14 (grilling คู่กับ owner — wayfinder ticket [10](./wayfinder/srs-v2-gap-closure/tickets/10-receipt-issuance-grilling.md))
+   - **เหตุผล:**
+     1) Owner ยืนยันว่า**ใบเสร็จจริงถูกออกโดยส่วนงานอื่นนอกระบบ KU HOME** และไม่ถูกรวมเข้าระบบ — ระบบจึงไม่มีชั้นออกเลขใบเสร็จ/บันทึกแถวแบ่งยอดต่อผู้รับ
+     2) **Payment gateway มีปัญหา** → ช่องทางการชำระจริงใช้การ verify สลิปโดย admin ผ่าน `booking_confirmations` ซึ่งใช้งานได้จริงอยู่แล้ว
+     3) มติเดิมใน map ("backend ชั้นบันทึก — ออกเลข atomic + split lines") **ถูก supersede** — `receipts` ❄️ คง frozen, `receipt_sequences` + `Receipt::generateUniqueReceiptNo()` คงหลับ (ไม่ reuse), `payments` ledger คงเดิม 3 จุดเขียน
+   - **ทางกลับถ้ามี:** เมื่อ Owner สั่งใหม่ ให้เปิด wayfinder ticket ใหม่ โดยใช้ reference design ที่เก็บไว้ใน Resolution ของ ticket 10 (ตารางใหม่ `receipt_issues` header + `receipt_issue_lines` · reuse `receipt_sequences` format `REC-YYYYMM-XXXXX` · roles admin+staff · line อ้าง `payment_id` nullable) — **ห้ามปลด freeze `receipts` เดิม**
+
 ### 2. รายการ Pending External (รอความพร้อมจากภายนอก)
 
-5. **REQ-010 — การชำระเงินผ่าน QR Code จริง (PromptPay) พร้อม Webhook HMAC Signature**
+6. **REQ-010 — การชำระเงินผ่าน QR Code จริง (PromptPay) พร้อม Webhook HMAC Signature**
    - **REQ ID:** REQ-010
    - **สถานะ:** `pending-external`
    - **วันที่ตัดสิน:** 2026-10-14
@@ -2307,14 +2317,14 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 
 ### 3. รายการ Interpretation (ระบบเดิมครอบคลุมแล้วตามการตีความทางเทคนิค)
 
-6. **REQ-045 — การอัปเกรดประเภทห้องพัก (Room Upgrade)**
+7. **REQ-045 — การอัปเกรดประเภทห้องพัก (Room Upgrade)**
    - **REQ ID:** REQ-045
    - **สถานะ:** `interpretation`
    - **วันที่ตัดสิน:** 2026-10-14
    - **เหตุผล:** สถาปัตยกรรมของระบบปัจจุบันรองรับการอัปเกรดห้องพักผ่านการแก้ไข `room_type_id` บน `BookingRoom` (ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}`) ซึ่งระบบจะตรวจสอบความพร้อมของห้องใหม่ (Availability re-check) และคำนวณส่วนต่างราคาห้องพักเข้าสู่ยอดค้างชำระ (surcharge) โดยอัตโนมัติผ่าน `DiscountService::reprice()` จึงถือว่าครอบคลุมการทำงานตามข้อกำหนดแล้ว โดยไม่ต้องมี endpoint อัปเกรดห้องแยกเป็นพิเศษ
    - **ทางกลับถ้ามี:** ไม่ต้องมีทางกลับ เนื่องจากเป็นสถาปัตยกรรมหลักที่ทำงานได้สมบูรณ์แล้ว
 
-7. **REQ-012 — การสร้าง Draft Booking และการออกรหัสการจอง**
+8. **REQ-012 — การสร้าง Draft Booking และการออกรหัสการจอง**
    - **REQ ID:** REQ-012
    - **สถานะ:** `interpretation`
    - **วันที่ตัดสิน:** 2026-10-14

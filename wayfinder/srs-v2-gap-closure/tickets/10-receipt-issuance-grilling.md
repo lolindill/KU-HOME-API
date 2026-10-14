@@ -2,9 +2,9 @@
 
 - **label:** `wayfinder:grilling`
 - **type:** HITL
-- **status:** open
+- **status:** closed *(2026-10-14 — grilling กับ owner จบใน 1 รอบ: มติ deviation ไม่ทำในระบบ)*
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** zcode session (grilling กับ owner 2026-10-14)
 - **summary:** Grill owner โครงตารางใบเสร็จใหม่ split ต่อผู้รับ เงื่อนไข/roles ก่อน implement ชั้นบันทึก
 - **phase:** 4
 
@@ -25,4 +25,25 @@ Owner ล็อกแล้ว (2026-10-14): ใบเสร็จ SRS 3.8 = **b
 
 ## Resolution
 
-(ยังว่าง — รอ grilling คู่กับ owner)
+**มติ owner 2026-10-14 (grilling คู่กับ owner ใน session นี้): DEVIATION — ไม่ทำชั้นใบเสร็จในระบบ**
+
+Owner ให้ข้อมูลใหม่ที่เปลี่ยนทิศของ ticket:
+
+1. **ใบเสร็จจริงถูกออกโดยส่วนงานอื่น นอกระบบ KU HOME** และ**ไม่ถูกรวมเข้าระบบนี้** — ระบบจึงไม่มีชั้นออกเลข/บันทึกแถวแบ่งยอดต่อผู้รับจาก SRS §3.8 อีกต่อไป
+2. **Payment gateway มีปัญหา** → ช่องทางการชำระจริงยังใช้การ **verify สลิปโดย admin ผ่าน `booking_confirmations`** (flow ที่มีอยู่และใช้งานได้จริง) ต่อไป
+
+คำตอบต่อ 6 คำถามเดิม (ทุกข้อจบด้วย deviation — ไม่มี schema ใหม่):
+
+1. **โครงเก็บ** — ไม่สร้าง `receipt_issues`/`receipt_issue_lines` และ**ไม่ปลด freeze** `receipts` ❄️ (คง frozen ตามเดิม)
+2. **เลขใบเสร็จ** — ระบบไม่ออกเลข · `receipt_sequences` + `Receipt::generateUniqueReceiptNo()` คงหลับต่อไป (ไม่ reuse)
+3. **เงื่อนไขออก** — N/A (ออกนอกระบบ)
+4. **Split semantics** — N/A (ผู้ออกใบภายนอกจัดการเอง)
+5. **Roles** — N/A
+6. **ผูก ledger** — N/A · `payments` ledger คงเดิม 3 จุดเขียน ไม่ถูกอ้างจากใบเสร็จในระบบ
+
+**ผลตามมา:**
+
+- มติเดิมใน map Notes "🧊 ใบเสร็จ 3.8 = backend ชั้นบันทึกเท่านั้น (ออกเลข atomic + split lines)" **ถูก supersede ด้วยมตินี้** — แก้ Notes ของ map แล้ว
+- Deviation ลง ledger ข้อ 5 ใน `cline.md` (📋 SRS v2 deviation ledger) แล้ว
+- [ticket 11 (implement)](./11-receipt-issuance-impl.md) **ปิดเป็น out-of-scope** — ไม่มีอะไรต้อง implement
+- **ทางกลับถ้ามี:** เมื่อ owner สั่งใหม่ ให้เปิด ticket ใหม่ ออกแบบจาก reference ของ ticket นี้ (โครง `receipt_issues` header + lines · reuse `receipt_sequences` format `REC-YYYYMM-XXXXX` · roles admin+staff เทียบ `recordPayment` · line อ้าง `payment_id` nullable · หารไม่ลงตัวให้ frontend คิดยอดส่งมา backend validate ผลรวม) — **ห้ามปลด freeze `receipts` เดิม**
