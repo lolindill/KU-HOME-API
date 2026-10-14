@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 #[Signature('app:daily-room-maintenance')]
-#[Description('Daily: auto-assign rooms, flag stale rooms dirty (+create task), prep_checkin tomorrow arrivals (+create task)')]
+#[Description('Daily: auto-assign rooms (today + T-2), flag stale rooms dirty (+create task), prep_checkin tomorrow arrivals (+create task)')]
 class DailyRoomMaintenance extends Command
 {
     public function handle()
@@ -86,8 +86,73 @@ class DailyRoomMaintenance extends Command
             }
         });
 
+        $results['auto_assigned_rooms_today'] = $autoAssigned;
         $results['auto_assigned_rooms'] = $autoAssigned;
         $this->info("  ✓ Auto-assigned {$autoAssigned} room(s) to today's check-ins.");
+
+        // =========================================================
+        // 1b. Auto-assign room numbers to bookings checking in at T-2 (REQ-023)
+        //     arrivals ของวันพรุ่งนี้+1 (2 วันก่อนวันเข้าพัก)
+        //     - ลำดับความสำคัญ: arrivals วันนี้ทำเสร็จก่อนเสมอ → จากนั้นจึงทำ T-2
+        //     - ผ่าน RoomAllocator เดิมเพื่อป้องกัน double-booking (ห้าม bypass allocator เด็ดขาด)
+        //     - Fail-safe: หากห้องไม่พอสำหรับ T-2 ให้ทิ้งไว้ไม่ assign + Log warning
+        //       เพื่อให้ admin จัดมือได้ โดยไม่ crash หรือขัดจังหวะการทำงานทั้ง run
+        // =========================================================
+        $t2Date = Carbon::today()->addDays(2);
+
+        $t2Bookings = Booking::with(['bookingRooms.addon', 'bookingRooms.booking', 'bookingRooms.roomType'])
+            ->whereIn('status', ['paid', 'confirmed'])
+            ->whereHas('bookingRooms', function ($br) use ($t2Date) {
+                $br->whereDate('check_in', $t2Date);
+            })
+            ->get();
+
+        $t2Sorted = $t2Bookings->sort(function ($a, $b) use ($priority, $weights) {
+            $brsA = $a->bookingRooms->map(fn ($br) => BookingRequestDto::fromModel($br))->all();
+            $brsB = $b->bookingRooms->map(fn ($br) => BookingRequestDto::fromModel($br))->all();
+            $traitsA = $priority::traits($a, $brsA, $weights);
+            $traitsB = $priority::traits($b, $brsB, $weights);
+
+            return $priority::compare($traitsA, $traitsB);
+        })->values();
+
+        $autoAssignedT2 = 0;
+        foreach ($t2Sorted as $booking) {
+            $unassignedRooms = $booking->bookingRooms->whereNull('room_id');
+
+            if ($unassignedRooms->isEmpty()) {
+                continue;
+            }
+
+            try {
+                DB::transaction(function () use ($booking, $unassignedRooms, $allocator, &$autoAssignedT2) {
+                    $result = $allocator->allocate($unassignedRooms);
+
+                    if ($result->ok) {
+                        foreach ($result->assignments as $brId => $roomId) {
+                            BookingRoom::where('id', $brId)->update(['room_id' => $roomId]);
+                            $autoAssignedT2++;
+                        }
+                        $this->line("  ✓ [T-2] Cluster-assigned {$unassignedRooms->count()} room(s) for booking {$booking->confirmation} (algo: {$result->winner}, cost: ".round($result->cost, 1).')');
+                    } else {
+                        // Fail-safe: ห้องไม่พอ ทิ้งไว้ไม่ assign + Log warning ให้ admin จัดมือ
+                        $failedTypes = $unassignedRooms->map(fn ($br) => $br->room_type_id)->unique()->implode(', ');
+                        $errorMsg = "  ✗ [T-2] Alert: ห้องไม่พอ/จัด cluster ไม่ได้สำหรับ Booking: {$booking->confirmation} (Room Type: {$failedTypes}, algo: {$result->winner})";
+                        $this->warn($errorMsg);
+                        Log::warning($errorMsg);
+                    }
+                });
+            } catch (\Throwable $e) {
+                // Fail-safe: ป้องกัน crash ทั้ง run หากเกิด exception
+                $errorMsg = "  ✗ [T-2] Exception: เกิดข้อผิดพลาดในการจัดห้องสำหรับ Booking: {$booking->confirmation}: {$e->getMessage()}";
+                $this->warn($errorMsg);
+                Log::warning($errorMsg);
+            }
+        }
+
+        $results['auto_assigned_rooms_t2'] = $autoAssignedT2;
+        $results['auto_assigned_rooms'] = $autoAssigned + $autoAssignedT2;
+        $this->info("  ✓ Auto-assigned {$autoAssignedT2} room(s) to T-2 check-ins ({$t2Date->toDateString()}).");
 
         // =========================================================
         // 2. 🧹 Phase A (15/07/26): pre_checkin trigger — Fix S-B1, D2
