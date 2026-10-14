@@ -27,8 +27,9 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 **มติที่บันทึกจาก grilling (2026-10-14 — ticket ยังเปิด รอครบ 4+1 ข้อ):**
 
 - **ข้อ 4 (การชำระ) — ✅ ล็อกแล้ว:** ค่าปรับ/ค่าเสียหายเป็นการเก็บเพิ่ม**หลังลูกค้าเข้าพัก ชำระที่ front desk** โดย **staff เป็นผู้คุมความถูกต้อง** (มติ owner ใน session นี้) → ช่องทางเดียวคือ `recordPayment` (admin+staff — เงินสด/อ้างอิงหน้าเคาน์เตอร์) ตรงตาม draft แนะนำ · **ไม่เปิด**ให้ user ส่งสลิปเพิ่มผ่าน confirm flow · state machine + confirm flow + payments ledger 3 write points ไม่ถูกแตะ
+- **ข้อ 5 (หลักฐานการจ่ายเงินตามห้องพัก) — ✅ ล็อกแล้ว: ไม่ทำรูปหลักฐานต่อ charge (เลือก B)** — มติ owner: เงินเก็บหน้างานไม่มีรูปหลักฐาน และ REQ ไม่ได้หมายถึงรูปภาพ → "หลักฐานการจ่ายเงินตามห้องพัก" (อนุประโยคท้าย REQ-042 — มีอยู่ในตัวอักษรจริง) **ตีความเป็น "บันทึกการชำระเงินระดับ booking"** ซึ่งระบบมีอยู่แล้ว: `payments` ผ่าน `recordPayment` (amount/received_by/reference_number) + สลิปฝั่ง user ที่ `booking_confirmations` · ไม่สร้างเจ้าที่ 4 ให้ images table · ⚠️ ต้องจด **interpretation line ลง deviation ledger** (REQ-042 อนุประโยคนี้) เมื่อปิด ticket 13 — กัน QA ถามย้อน
 
-(ยังว่าง — รอมติข้อ 1/2/3/5 ครบแล้วจึงปิด ticket)
+(ยังว่าง — รอมติข้อ 1/2/3 (+4a) ครบแล้วจึงปิด ticket)
 
 ## Draft ข้อเสนอจาก agent (2026-10-14 — ⚠️ ยังไม่ใช่มติ owner)
 
@@ -67,7 +68,7 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 - Charge หลังจ่าย/confirm → admin+staff เก็บผ่าน `recordPayment` (ตรง flow org deferred เดิม) · state machine + confirm flow + payments ledger 3 write points **ไม่ถูกแตะ**
 - ทางเลือกเปิดให้ user ส่งสลิปเพิ่ม = ต้องเปิด transition ใหม่บน state machine (paid/confirmed → pending) — ใหญ่กว่าตัว charge เอง → ไม่แนะนำ
 
-**ข้อ 5 — หลักฐานการจ่ายเงินตามห้องพัก (REQ-042 ตัวจริง): เปิดให้ owner เลือก A/B**
+**ข้อ 5 — หลักฐานการจ่ายเงินตามห้องพัก (REQ-042 ตัวจริง): ✅ ล็อกแล้วตามมติ owner (ดู Resolution) — เลือก B ไม่ทำรูปหลักฐาน**
 
 - ข้อเท็จจริง: `images` table มีเจ้าของแล้ว 3 เจ้า — สลิป (`BookingConfirmation`), หลักฐานเช็คอิน (`BookingRoom` — ticket 05 ของ map นี้), รูปแม่บ้าน (`HousekeepingTask` — ticket 06, 14/10/26) · **ไม่มี generic upload endpoint โดยตั้งใจ** (รูปเกิดจาก flow ของเจ้าของเสมอ) — ทางเลือก A จึงเป็น "สร้างเจ้าที่ 4" ด้วย endpoint ใหม่จริง (งานใหม่ แต่ลอกแบบแผน ticket 05/06 ที่ทำมาแล้ว 2 ครั้งใน map นี้)
 - **A: แนบรูปต่อ charge** (morph `AdditionalCharge` + endpoint ใหม่ admin+staff) — ตอบ REQ-042 คำต่อคำ · retention แนะนำไม่ลบอัตโนมัติ (หลักฐานการเงิน)
