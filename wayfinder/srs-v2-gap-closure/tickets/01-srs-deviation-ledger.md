@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** เขียน SRS v2 deviation ledger 5 ข้อ + interpretation 2 ข้อลง cline.md พร้อม pointer ใน AGENTS.md
 - **phase:** 0
 

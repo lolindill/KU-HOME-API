@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** อัปโหลดรูปงานแม่บ้าน 4 หมวด cap ก่อน/หลัง 5+5 ผ่าน images morph เก็บ 90 วัน
 - **phase:** 3
 

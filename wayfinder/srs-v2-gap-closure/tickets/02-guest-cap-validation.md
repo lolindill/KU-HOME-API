@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** บังคับจำนวน guests ไม่เกิน room_types.max_guests ทุก write path + ≥1 คนเมื่อ submit สลิป confirm
 - **phase:** 1
 

@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** flow อัปโหลดบัตร ปชช./registration/PDPA ตอน check-in ผ่าน images morph เก็บ 365 วัน
 - **phase:** 3
 

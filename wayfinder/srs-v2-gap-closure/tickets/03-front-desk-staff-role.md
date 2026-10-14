@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** เปิด route group front-desk + in-controller re-check ให้ staff ทำ check-in/out คู่ admin
 - **phase:** 1
 

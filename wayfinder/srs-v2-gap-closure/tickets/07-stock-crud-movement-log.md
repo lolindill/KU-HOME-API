@@ -4,7 +4,7 @@
 - **type:** AFK
 - **status:** open
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** (ว่าง)
+- **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** สต๊อก CRUD /stock + reorder_point/max_stock + สถานะ derived + movement log เก็บ 1 ปี
 - **phase:** 3
 
