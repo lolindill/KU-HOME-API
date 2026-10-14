@@ -2,7 +2,7 @@
 
 - **label:** `wayfinder:task`
 - **type:** AFK
-- **status:** open
+- **status:** closed
 - **blocked-by:** (ไม่มี — frontier)
 - **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** สต๊อก CRUD /stock + reorder_point/max_stock + สถานะ derived + movement log เก็บ 1 ปี
@@ -28,4 +28,53 @@
 
 ## Resolution
 
-(ยังว่าง)
+### 1. สิ่งที่ทำ (Implementation Summary)
+- **Database Migrations:**
+  - เพิ่มคอลัมน์ `item_code`, `category`, `reorder_point`, `max_stock`, และ `deleted_at` (soft deletes) ในตาราง `stock_inventories`
+  - สร้างตาราง `stock_movements` (uuid `id`, `stock_inventory_id`, `user_id`, `housekeeping_task_id`, `delta`, `quantity_before`, `quantity_after`, `reason`, `notes`, `timestamps`, พร้อม composite indexes)
+- **Models:**
+  - `StockInventory`: ติดตั้ง `SoftDeletes`, `$fillable`, `$casts`, accessor `status` (`out`, `low`, `ok`), `$appends = ['status']`, relationship `movements()`, และ helper `recordMovement()`
+  - `StockMovement`: HasUuids, `$fillable`, `$casts`, relationships (`stockInventory` withTrashed, `user`, `housekeepingTask`)
+- **FormRequests:**
+  - `StoreStockInventoryRequest`
+  - `UpdateStockInventoryRequest`
+  - `AdjustStockInventoryRequest`
+- **Controller & Routes:**
+  - `StockController`: มี methods `index`, `show`, `store`, `update`, `destroy`, `adjust`, `movements`
+  - Route groups ใน `routes/api.php`:
+    - `role:admin,staff,housekeeping`: `GET /stock`, `GET /stock/{id}`, `GET /stock/{id}/movements`
+    - `role:admin,staff`: `POST /stock`, `PUT /stock/{id}`, `DELETE /stock/{id}`, `POST /stock/{id}/adjust` (housekeeping ได้ 403 Forbidden)
+- **Scheduled Cleanup Command:**
+  - สร้าง `CleanupStockMovements` (`app:cleanup-stock-movements {--dry-run}`) ตัด retention 365 วันตาม precedent `CleanupStatusLogs`
+  - ลงทะเบียนใน `routes/console.php` ด้วย `Schedule::command('app:cleanup-stock-movements')->dailyAt('03:00')`
+- **Supplies Report Data:**
+  - อัปเดต `SuppliesReportData` ให้คำนวณ `carried_over`, `received`, `issued`, `remaining` จาก master stock + movement logs ร่วมกับช่วงวันที่
+  - เติม `item_code`, `category`, `reorder_point`, `max_stock`, และสถานะ ('ปกติ' / 'สั่งซื้อ') ครบถ้วน ถอด null ทิ้งทั้งหมดตาม spec รายงาน
+- **API Documentation Handoff:**
+  - เขียนคู่มือ API ครบทุก endpoint และ payload ตัวอย่างไว้ที่ `wayfinder/srs-v2-gap-closure/research/api-doc-handoff-07.md` พร้อมให้ผู้จัดการนำไปอัปเดตใน `docs/api_guide.md`
+- **Worktree Test Bootstrap:**
+  - เพิ่ม `tests/bootstrap.php` และปรับ `phpunit.xml` เพื่อให้ PHPUnit resolve `App\` และ `Tests\` ชี้มาที่ worktree directory อย่างถูกต้องเมื่อ vendor โฟลเดอร์เป็น symlink/junction
+
+### 2. การตัดสินใจทางเทคนิค (Decisions)
+- **Soft Delete vs Hard Delete (ตัดสินใจเลือก Soft Delete):**
+  - **เหตุผล:** ระบบมีข้อกำหนดในการเก็บประวัติการเคลื่อนไหวสต๊อก (`stock_movements`) ย้อนหลัง 1 ปี (365 วัน) เพื่อความสมบูรณ์ของ audit trail และรายงานวัสดุสิ้นเปลืองย้อนหลัง (Supplies Report)
+  - หากใช้ Hard Delete: ถ้าตั้ง FK restrict จะทำให้ไม่สามารถลบ item ใน master ได้หากมี movement แล้ว หรือหากตั้ง cascade จะทำให้ movement logs ในอดีตถูกลบทิ้งไปด้วย ทำลาย audit trail
+  - การใช้ Soft Delete (`deleted_at`) ช่วยให้การลบออกจากระบบ active inventory ทำได้ตามมาตรฐาน REST CRUD โดยที่ข้อมูล master ยังคงถูกเก็บไว้อ้างอิงใน `stock_movements` (ผ่าน `withTrashed()`) ได้อย่างปลอดภัย 100%
+- **Retention Period:**
+  - กำหนด retention 365 วัน (1 ปี) ตาม REQ-051 โดยดึงค่าจาก config `stock.movement_retention_days` (default: 365 วัน)
+
+### 3. ผลการทดสอบ (Test Results)
+- `tests/Feature/StockTest.php`: 12 passed (71 assertions)
+  - ทดสอบสิทธิ์ครบ 3 role: admin (CRUD+adjust ได้), staff (CRUD+adjust ได้), housekeeping (อ่านได้, เขียน/ลบ/adjust โดน 403), user ทั่วไป (403)
+  - ทดสอบ derived status ตรงขอบพอดี: `quantity <= 0` (out), `quantity == reorder_point` (low), `quantity < reorder_point` (low), `quantity > reorder_point` (ok)
+  - ทดสอบ movement logs ถูกบันทึกทุกจุดที่ quantity เปลี่ยน (initial > 0, update quantity, adjust delta/quantity ทั้งบวกและลบ)
+  - ทดสอบ adjust แล้วติดลบได้ 422 error และไม่บันทึก movement
+  - ทดสอบ soft delete ไม่ทำให้ movement logs หายไป
+- `tests/Feature/CleanupStockMovementsTest.php`: 3 passed (7 assertions)
+  - ทดสอบ cleanup ลบเฉพาะ movement ที่เกิน 365 วัน
+  - ทดสอบ custom retention config
+  - ทดสอบ flag `--dry-run` ไม่ลบข้อมูลจริง
+- `tests/Feature/SuppliesReportDataTest.php`: 2 passed (23 assertions)
+  - ทดสอบการคำนวณ carried_over, received, issued, remaining, status ใน `SuppliesReportData` และตรวจสอบว่าไม่มี null
+  - ทดสอบ stream export `/api/v1/reports/supplies/export` ดึงข้อมูลจริงจากฐานข้อมูลเข้าสู่ Excel cell
+- **PHPUnit Full Suite:** **666 passed (2706 assertions)** เขียวชอุ่ม 100%

@@ -4,13 +4,25 @@ namespace Tests;
 
 use App\Models\Booking;
 use App\Models\User;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
 
+$_ENV['APP_BASE_PATH'] = dirname(__DIR__);
+$_SERVER['APP_BASE_PATH'] = dirname(__DIR__);
+
 abstract class TestCase extends BaseTestCase
 {
     use RefreshDatabase;
+
+    public function createApplication()
+    {
+        $app = require __DIR__.'/../bootstrap/app.php';
+        $app->make(Kernel::class)->bootstrap();
+
+        return $app;
+    }
 
     /**
      * 🧾 (03/09/26) Invariant การเงิน: Σ booking_rooms.amount == bookings.total_amount
