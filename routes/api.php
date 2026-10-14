@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RoomController;
 use App\Http\Controllers\Api\V1\RoomStatePeriodController;
 use App\Http\Controllers\Api\V1\SsoController;
+use App\Http\Controllers\Api\V1\StockController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Middleware\RequireJsonAccept;
 use Illuminate\Support\Facades\Route;
@@ -326,5 +327,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where('id', '[0-9a-f\-]{36}');
         Route::get('/tasks/{id}/photos', [DashboardController::class, 'listPhotos'])
             ->where('id', '[0-9a-f\-]{36}');
+    });
+
+    // 📦 Stock Inventories (REQ-051/052)
+    //    - อ่าน: admin, staff, housekeeping
+    //    - เขียน: admin, staff เท่านั้น (housekeeping 403)
+    Route::middleware('role:admin,staff,housekeeping')->group(function () {
+        Route::get('/stock', [StockController::class, 'index']);
+        Route::get('/stock/{id}', [StockController::class, 'show'])->where('id', '[0-9a-f\-]{36}');
+        Route::get('/stock/{id}/movements', [StockController::class, 'movements'])->where('id', '[0-9a-f\-]{36}');
+    });
+
+    Route::middleware('role:admin,staff')->group(function () {
+        Route::post('/stock', [StockController::class, 'store']);
+        Route::put('/stock/{id}', [StockController::class, 'update'])->where('id', '[0-9a-f\-]{36}');
+        Route::delete('/stock/{id}', [StockController::class, 'destroy'])->where('id', '[0-9a-f\-]{36}');
+        Route::post('/stock/{id}/adjust', [StockController::class, 'adjust'])->where('id', '[0-9a-f\-]{36}');
     });
 });

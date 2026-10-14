@@ -18,3 +18,6 @@ Schedule::command('app:cleanup-images')->dailyAt('02:30');
 // 📝 (2026-09-24, REQ-039): ประวัติสถานะห้องเก็บ 1 ปีย้อนหลัง — ตัดเกิน retention รายวัน
 //    (ลดเฉพาะ entity_type='room' — log ของ booking/booking_room ไม่ถูกแตะ)
 Schedule::command('app:cleanup-status-logs')->dailyAt('02:45');
+// 📦 (2026-10-14, REQ-051): ประวัติการเคลื่อนไหวสต๊อกเก็บ 1 ปีย้อนหลัง (365 วัน)
+Schedule::command('app:cleanup-stock-movements')->dailyAt('03:00');
+
