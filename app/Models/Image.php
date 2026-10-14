@@ -34,6 +34,7 @@ class Image extends Model
         'mime_type',
         'size',
         'original_name',
+        'category',
         'uploaded_by',
         'imageable_id',
         'imageable_type',

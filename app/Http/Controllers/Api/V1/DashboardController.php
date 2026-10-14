@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
@@ -332,6 +333,192 @@ class DashboardController extends Controller
                     : 'เกิดข้อผิดพลาดในการอัปเดตสถานะ กรุณาลองใหม่ค่ะ',
             ], $statusCode);
         }
+    }
+
+    /**
+     * 🖼️ (14/10/26, REQ-048): อัปโหลดรูปภาพงานทำความสะอาด
+     * หมวด: before / after (cap 5+5 ภาพต่อ task) / forgotten_item / damage
+     * หมายเหตุ: บันทึกลง notes ของ task
+     * POST /api/v1/dashboard/tasks/{id}/photos
+     */
+    public function uploadPhoto(Request $request, string $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะอัปโหลดรูปภาพได้ค่ะ');
+        }
+
+        $task = HousekeepingTask::find($id);
+        if (! $task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+        }
+
+        // แม่บ้านอัปโหลดได้เฉพาะ task ที่ได้รับมอบหมายเท่านั้น (คนอื่น 403)
+        if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+            return $this->forbidden('ไม่มีสิทธิ์อัปโหลดรูปภาพสำหรับงานนี้ค่ะ');
+        }
+
+        $request->validate([
+            'category' => 'required|string|in:before,after,forgotten_item,damage',
+            'photo' => 'required_without:photos|file|image|max:10240',
+            'photos' => 'required_without:photo|array',
+            'photos.*' => 'file|image|max:10240',
+            'notes' => 'nullable|string',
+        ]);
+
+        $category = $request->input('category');
+
+        $files = [];
+        if ($request->hasFile('photo')) {
+            $files[] = $request->file('photo');
+        } elseif ($request->hasFile('photos')) {
+            $files = $request->file('photos');
+        }
+
+        if (empty($files)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'กรุณาแนบไฟล์รูปภาพค่ะนายท่าน',
+            ], 422);
+        }
+
+        // ตรวจสอบ cap 5+5 สำหรับหมวด before และ after
+        if (in_array($category, ['before', 'after'], true)) {
+            $currentCount = $task->photos()->where('category', $category)->count();
+            if ($currentCount + count($files) > 5) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "หมวด {$category} สามารถอัปโหลดได้สูงสุด 5 ภาพต่อ task ค่ะ (ปัจจุบันมี {$currentCount} ภาพ)",
+                ], 422);
+            }
+        }
+
+        $uploadedImages = [];
+        $savedPaths = [];
+
+        try {
+            DB::beginTransaction();
+
+            if ($request->has('notes')) {
+                $task->notes = $request->input('notes');
+                $task->save();
+            }
+
+            foreach ($files as $file) {
+                $path = $file->store('housekeeping', 'local');
+                $savedPaths[] = $path;
+
+                $image = $task->photos()->create([
+                    'path' => $path,
+                    'disk' => 'local',
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                    'original_name' => $file->getClientOriginalName(),
+                    'category' => $category,
+                    'uploaded_by' => $user->id,
+                ]);
+
+                $uploadedImages[] = $image;
+            }
+
+            DB::commit();
+
+            $photoPayload = array_map(fn ($img) => [
+                'id' => $img->id,
+                'task_id' => $task->id,
+                'category' => $img->category,
+                'original_name' => $img->original_name,
+                'size' => $img->size,
+                'mime_type' => $img->mime_type,
+                'url' => $img->url,
+                'uploaded_by' => $img->uploaded_by,
+                'created_at' => $img->created_at?->toISOString(),
+            ], $uploadedImages);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'อัปโหลดรูปภาพงานทำความสะอาดเรียบร้อยค่ะ ✨',
+                'photo' => count($photoPayload) === 1 ? $photoPayload[0] : null,
+                'photos' => $photoPayload,
+                'task_id' => $task->id,
+                'notes' => $task->notes,
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            foreach ($savedPaths as $path) {
+                Storage::disk('local')->delete($path);
+            }
+            Log::error('Upload housekeeping photo failed: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ กรุณาลองใหม่อีกครั้งค่ะ',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🖼️ (14/10/26, REQ-048): ดูรายการรูปภาพของงานทำความสะอาด
+     * GET /api/v1/dashboard/tasks/{id}/photos
+     */
+    public function listPhotos(Request $request, string $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะดูรูปภาพได้ค่ะ');
+        }
+
+        $task = HousekeepingTask::find($id);
+        if (! $task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+        }
+
+        // แม่บ้านดูได้เฉพาะ task ตัวเอง (admin ดูได้ทั้งหมด)
+        if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+            return $this->forbidden('ไม่มีสิทธิ์ดูรูปภาพของงานนี้ค่ะ');
+        }
+
+        $query = $task->photos()->orderBy('created_at', 'asc');
+
+        if ($category = $request->query('category')) {
+            $query->where('category', $category);
+        }
+
+        $allPhotos = $task->photos()->get();
+        $counts = [
+            'before' => $allPhotos->where('category', 'before')->count(),
+            'after' => $allPhotos->where('category', 'after')->count(),
+            'forgotten_item' => $allPhotos->where('category', 'forgotten_item')->count(),
+            'damage' => $allPhotos->where('category', 'damage')->count(),
+        ];
+
+        $photos = $query->get()->map(fn ($img) => [
+            'id' => $img->id,
+            'task_id' => $task->id,
+            'category' => $img->category,
+            'original_name' => $img->original_name,
+            'size' => $img->size,
+            'mime_type' => $img->mime_type,
+            'url' => $img->url,
+            'uploaded_by' => $img->uploaded_by,
+            'created_at' => $img->created_at?->toISOString(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'task_id' => $task->id,
+            'notes' => $task->notes,
+            'total_photos' => $photos->count(),
+            'counts' => $counts,
+            'photos' => $photos,
+        ]);
     }
 
     // ============================================

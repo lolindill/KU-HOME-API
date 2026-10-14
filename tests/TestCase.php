@@ -12,6 +12,14 @@ abstract class TestCase extends BaseTestCase
 {
     use RefreshDatabase;
 
+    public function createApplication()
+    {
+        $_ENV['APP_BASE_PATH'] = dirname(__DIR__);
+        $_SERVER['APP_BASE_PATH'] = dirname(__DIR__);
+
+        return parent::createApplication();
+    }
+
     /**
      * 🧾 (03/09/26) Invariant การเงิน: Σ booking_rooms.amount == bookings.total_amount
      *    (ทั้งสองฝั่ง net, integer baht) — บังคับด้วย test เท่านั้น ไม่มี runtime guard/observer

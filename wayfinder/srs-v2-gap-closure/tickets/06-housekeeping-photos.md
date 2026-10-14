@@ -2,7 +2,7 @@
 
 - **label:** `wayfinder:task`
 - **type:** AFK
-- **status:** open
+- **status:** closed
 - **blocked-by:** (ไม่มี — frontier)
 - **assignee:** agent-hub:antigravity/gemini-3.8-flash (manager dispatch 2026-10-14)
 - **summary:** อัปโหลดรูปงานแม่บ้าน 4 หมวด cap ก่อน/หลัง 5+5 ผ่าน images morph เก็บ 90 วัน
@@ -28,4 +28,32 @@ SRS REQ-048: อัปโหลดรูปทำความสะอาด —
 
 ## Resolution
 
-(ยังว่าง)
+- **สิ่งที่ทำ:**
+  1. สร้าง migration `2026_10_14_100000_drop_housekeeping_photos_and_add_category_to_images.php` ทำการ drop ตาราง dead scaffold `housekeeping_photos` และเพิ่ม column `category` (nullable indexed string) ให้กับตาราง `images`
+  2. ลบ model `app/Models/HousekeepingPhoto.php` และปรับ `HousekeepingTask::photos()` ให้เป็น `MorphMany` เชื่อมโยงกับ `App\Models\Image` (พร้อม alias `images()`) และเพิ่ม `booted()` deleting hook เพื่อ cascade ลบรูปภาพและไฟล์จริงบน disk เมื่อ task ถูกลบ
+  3. เพิ่ม `category` ใน `$fillable` ของ `App\Models\Image`
+  4. เพิ่ม Routes ใน `routes/api.php` ใต้กลุ่ม `role:admin,housekeeping` และ prefix `dashboard`:
+     - `POST /api/v1/dashboard/tasks/{id}/photos` (`DashboardController@uploadPhoto`)
+     - `GET /api/v1/dashboard/tasks/{id}/photos` (`DashboardController@listPhotos`)
+  5. พัฒนา `DashboardController@uploadPhoto` และ `DashboardController@listPhotos`:
+     - รองรับ 4 หมวด: `before`, `after`, `forgotten_item`, `damage`
+     - Server-side validate cap: `before` และ `after` สูงสุดอย่างละ 5 ภาพต่อ task หากเกินปฏิเสธด้วย HTTP `422 Unprocessable Entity`
+     - หมวด `forgotten_item` และ `damage` ไม่จำกัด cap 5
+     - ⚠️ รูปภาพหมวด `damage` เป็นหลักฐานภาพถ่ายเท่านั้น ไม่มีผลทางบัญชี ไม่มีการสร้างรายการชำระเงินหรือบันทึกค่าเสียหาย
+     - บันทึกหมายเหตุงานลงฟิลด์ `notes` ของ task เมื่อมีการส่งฟิลด์ `notes` มาพร้อมกับการอัปโหลด
+     - ส่งออก temporary signed URL อายุ 15 นาที (`images.file`) สำหรับเปิดดูรูปภาพ
+     - สิทธิ์ (Authorization): แม่บ้านอัปโหลดและดูได้เฉพาะ task ที่ได้รับมอบหมาย (`assigned_to === auth.id`) หากเป็นงานของแม่บ้านคนอื่นจะได้ `403 Forbidden`; แอดมินมีสิทธิ์อัปโหลดและดูได้ทุก task; บทบาทอื่นโดน middleware ปฏิเสธ 403
+  6. ปรับปรุง `app:cleanup-images` (`CleanupImages.php`):
+     - เพิ่มการ sweep ไฟล์กำพร้าในโฟลเดอร์ `housekeeping` บน private disk
+     - เพิ่มการ sweep แถวรูปภาพกำพร้าที่ผูกกับ `HousekeepingTask` ที่ถูกลบไปแล้ว
+     - เพิ่ม Retention policy ลบรูปภาพของ `HousekeepingTask` ที่เก่าเกิน 90 วัน (`HOUSEKEEPING_PHOTO_RETENTION_DAYS` default 90)
+  7. เขียนเอกสาร API ส่งมอบไว้ที่ `wayfinder/srs-v2-gap-closure/research/api-doc-handoff-06.md`
+
+- **การตัดสินใจ (Decisions):**
+  1. *Scaffold `housekeeping_photos`:* ตัดสินใจ drop ตาราง `housekeeping_photos` ผ่าน migration ใหม่ และลบ model `HousekeepingPhoto.php` เนื่องจากเป็น dead code เดิมที่ไม่มีการใช้งานจริง และเพื่อให้เป็นไปตามกฎของ `AGENTS.md` ที่กำหนดให้ใช้ตาราง `images` (morph `HousekeepingTask`) เท่านั้น
+  2. *หมายเหตุ (Notes):* ตรวจสอบ schema พบว่าตาราง `housekeeping_tasks` มีคอลัมน์ `notes` (text nullable) และอยู่ใน `$fillable` อยู่แล้ว จึงตัดสินใจใช้คอลัมน์ `notes` เดิมที่มีอยู่ในการบันทึกหมายเหตุงานทำความสะอาด ไม่ต้องเพิ่มคอลัมน์ใหม่
+  3. *Retention 90 วัน:* ตัดสินใจขยายการทำงานของคำสั่ง `app:cleanup-images` เดิม แทนการสร้าง command ใหม่ เนื่องจากคำสั่งนี้ถูกตั้งเวลาใน `routes/console.php` ให้รันทุกวันเวลา 02:30 น. อยู่แล้ว เป็นจุดรวมศูนย์นโยบายการจัดเก็บรูปภาพบน local disk และลดภาระในการตั้ง cron schedule ซ้ำซ้อน
+
+- **ผลการทดสอบ (Test Results):**
+  - สร้าง Feature test suite `tests/Feature/HousekeepingPhotoTest.php` ครอบคลุม 18 กรณีทดสอบ (71 assertions) ผ่าน 100%
+  - รันชุดทดสอบทั้งระบบ (`php artisan test`): **ผ่าน 100% ทั้งหมด 667 tests (2,676 assertions)** โดยไม่มีข้อผิดพลาดใด ๆ
