@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\RoomType;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreBookingRoomRequest extends FormRequest
@@ -37,5 +38,20 @@ class StoreBookingRoomRequest extends FormRequest
             'billing_address' => 'nullable|string|max:255',
             'billing_comment' => 'nullable|string|max:255',
         ];
+    }
+
+    /**
+     * 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests ไม่เกิน max_guests ของประเภทห้อง
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if ($this->has('guests') && is_array($this->guests) && $this->filled('room_type_id')) {
+                $roomType = RoomType::find($this->room_type_id);
+                if ($roomType && count($this->guests) > $roomType->max_guests) {
+                    $validator->errors()->add('guests', "ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺");
+                }
+            }
+        });
     }
 }

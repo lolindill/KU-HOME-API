@@ -86,6 +86,7 @@ class BookingSurchargeAfterPaymentTest extends TestCase
                     'room_type_id' => $roomTypeId,
                     'check_in' => now()->addDays(5)->toDateString(),
                     'check_out' => now()->addDays(6)->toDateString(),
+                    'guests' => [['name' => 'Somchai Jaidee']],
                 ],
             ],
         ], $overrides);

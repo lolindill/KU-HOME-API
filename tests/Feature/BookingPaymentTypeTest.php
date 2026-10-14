@@ -90,6 +90,7 @@ class BookingPaymentTypeTest extends TestCase
                     'room_type_id' => $roomTypeId,
                     'check_in' => $checkIn,
                     'check_out' => now()->addDays(6)->toDateString(),
+                    'guests' => [['name' => 'Somchai Jaidee']],
                 ],
             ],
         ], $overrides);

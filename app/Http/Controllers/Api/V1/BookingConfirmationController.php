@@ -81,6 +81,14 @@ class BookingConfirmationController extends Controller
             );
         }
 
+        // 👥 ชั้น 2 (REQ-007/019): ทุก booking_room ของ booking ต้องมี guests >= 1 คน
+        foreach ($booking->bookingRooms as $room) {
+            $guests = $room->guests;
+            if (empty($guests) || ! is_array($guests) || count($guests) < 1) {
+                return $this->error('กรุณาระบุข้อมูลผู้เข้าพักอย่างน้อย 1 คนต่อห้องก่อนส่งหลักฐานการชำระเงินค่ะ 🥺', 422);
+            }
+        }
+
         $validated = $request->validated();
 
         $slipPath = null;

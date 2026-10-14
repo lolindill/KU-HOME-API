@@ -292,6 +292,16 @@ class BookingController extends Controller
                 }
             }
 
+            // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests ไม่เกิน max_guests ของประเภทห้อง
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                if (! empty($roomRequest['guests']) && is_array($roomRequest['guests'])) {
+                    $roomType = RoomType::find($roomRequest['room_type_id']);
+                    if ($roomType && count($roomRequest['guests']) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
+                }
+            }
+
             DB::beginTransaction();
             $inTransaction = true;
 
@@ -657,7 +667,7 @@ class BookingController extends Controller
                     }
                 }
 
-                // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
+                // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing + guests cap)
                 $effectiveTypeId = $validated['room_type_id'] ?? $bookingRoom->room_type_id;
                 $effectiveCheckIn = isset($validated['check_in'])
                     ? Carbon::parse($validated['check_in'])->toDateString()
@@ -665,6 +675,15 @@ class BookingController extends Controller
                 $effectiveCheckOut = isset($validated['check_out'])
                     ? Carbon::parse($validated['check_out'])->toDateString()
                     : $bookingRoom->check_out->toDateString();
+
+                // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests เทียบกับ max_guests ของประเภทห้อง
+                $effectiveGuests = array_key_exists('guests', $validated) ? $validated['guests'] : $bookingRoom->guests;
+                if (! empty($effectiveGuests) && is_array($effectiveGuests)) {
+                    $roomType = RoomType::find($effectiveTypeId);
+                    if ($roomType && count($effectiveGuests) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
+                }
 
                 // 🌟 Availability re-check — เฉพาะเมื่อแก้ประเภทห้องหรือวันที่จริงเท่านั้น
                 //    (นับ existing แบบตัดตัวเองออก — ไม่งั้นเปลี่ยนวันที่แล้วนับซ้ำตัวเอง)
@@ -945,6 +964,21 @@ class BookingController extends Controller
                     //     ทับ check_out เดิม หรือส่งแต่ check_out ก่อน check_in เดิม)
                     if (Carbon::parse($updates[$brId]['check_out'])->lte(Carbon::parse($updates[$brId]['check_in']))) {
                         throw new \Exception('วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้นค่ะ', 422);
+                    }
+                }
+
+                // 👥 ชั้น 1 (REQ-007/019): ตรวจเทียบ final state ของทั้ง batch
+                foreach ($updates as $u) {
+                    $roomRequest = $u['request'];
+                    $bookingRoom = $u['model'];
+                    $effectiveTypeId = $u['type_id'];
+                    $effectiveGuests = array_key_exists('guests', $roomRequest) ? $roomRequest['guests'] : $bookingRoom->guests;
+
+                    if (! empty($effectiveGuests) && is_array($effectiveGuests)) {
+                        $roomType = RoomType::find($effectiveTypeId);
+                        if ($roomType && count($effectiveGuests) > $roomType->max_guests) {
+                            throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                        }
                     }
                 }
 
@@ -1301,6 +1335,16 @@ class BookingController extends Controller
 
                 if ($hasDraft) {
                     throw new \Exception('มีรายการจองที่รอชำระเงินอยู่คะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
+                }
+            }
+
+            // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests ไม่เกิน max_guests ของประเภทห้อง
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                if (! empty($roomRequest['guests']) && is_array($roomRequest['guests'])) {
+                    $roomType = RoomType::find($roomRequest['room_type_id']);
+                    if ($roomType && count($roomRequest['guests']) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
                 }
             }
 
