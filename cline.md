@@ -2321,3 +2321,16 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
    - **เหตุผล:** เมื่อผู้ใช้เริ่มทำการจอง ระบบจะสร้าง Booking ในสถานะ `draft` แบบ Real-time ทันที พร้อมทั้งสร้างรหัสการจอง (`confirmation` เช่น `BK...`) ผ่าน Atomic Sequence (`booking_sequences`) ตั้งแต่ตอนสร้าง เพื่อทำการกันห้อง (holding slot) 15 นาทีตาม payment deadline พฤติกรรมนี้ถือว่าครอบคลุมข้อกำหนด REQ-012 โดยสมบูรณ์และป้องกัน race condition ได้อย่างรัดกุม
    - **ทางกลับถ้ามี:** ไม่ต้องมีทางกลับ ถือเป็น core contract ของระบบการจอง
 
+
+### 4. ปิดด้วย Implementation (2026-10-14 — wayfinder tickets 02–07, dispatch ขนานผ่าน agent-hub/antigravity)
+
+> REQ กลุ่มนี้ไม่เคยติด ledger เป็น deviation — ปิดด้วยโค้ดจริงตาม decisions ที่ grill ล็อกกับ owner 2026-10-14 (suite 725 เขียว · merge ทั้งหมดบน `agust-11`)
+
+| REQ | Ticket | สิ่งที่ implement | Decision ที่ล็อกเพิ่มตอนทำ |
+|---|---|---|---|
+| REQ-007/019 | 02 guest cap | cap `max_guests` ทุก write path + ≥1 คนตอน confirm | batch ตรวจ final state · ห้ามบังคับ guests ตอน create draft |
+| REQ-031 | 03 front-desk staff | `role:admin,staff` บน check-in/out + **payment + assign-rooms** | walk-in / mark-no-show คง admin-only · เพิ่ม `staff` ใน validTransitions ของ Booking/BookingRoom เฉพาะเส้นทางบริการ 24 ชม. |
+| REQ-023 | 04 auto-assign T-2 | `DailyRoomMaintenance` assign ล่วงหน้า 2 วัน ผ่าน RoomAllocator | fail-safe ต่อ booking (ห้องไม่พอ = log ทิ้งไว้ ไม่ crash) |
+| REQ-033 | 05 check-in evidence | `POST/GET /front-desk/booking-rooms/{id}/evidence` (morph `BookingRoom`) | state guard `confirmed/checked_in/checked_out` · retention 365 วัน ต่อ `app:cleanup-images` · เพิ่ม column `images.metadata` (JSON) |
+| REQ-048 | 06 housekeeping photos | `POST/GET /dashboard/tasks/{id}/photos` (morph `HousekeepingTask`) | drop ตาราง dead scaffold `housekeeping_photos` · เพิ่ม column `images.category` · cap before/after 5+5 · retention 90 วัน |
+| REQ-051/052 | 07 stock | CRUD `/stock` + derived status ok/low/out + `stock_movements` + `CleanupStockMovements` (03:00) | soft delete (คง audit trail 1 ปี) · housekeeping อ่านอย่างเดียว · เติม `SuppliesReportData` เต็ม |

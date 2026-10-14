@@ -22,6 +22,7 @@
 12. [State Machines](#state-machines)
 13. [Appendix](#appendix)
 14. [📊 Reports & Additional Charges (ระบบรายงาน Excel 15 ฉบับ)](#-reports--additional-charges-ระบบรายงาน-excel-15-ฉบับ--051026)
+15. [🧩 SRS v2 Gap Closure (REQ-007/019/023/031/033/048/051/052)](#-srs-v2-gap-closure-tickets-0107--141026)
 
 ---
 
@@ -3739,4 +3740,695 @@ Accept: application/json
 
 ---
 
-*Last updated: 2026-10-05 · KU HOME API v1*
+---
+
+## 🧩 SRS v2 Gap Closure (Tickets 01–07) — 14/10/26
+
+> ผนวกจาก handoff ของ wayfinder map `srs-v2-gap-closure` (dispatch ขนานผ่าน agent-hub/antigravity · gemini-3.8-flash) · ticket 01 (SRS deviation ledger) เป็นเอกสารล้วน อยู่ใน `cline.md` ไม่มี endpoint ใหม่
+
+
+---
+
+## API Doc Handoff — Ticket 02: Guest Cap Validation (REQ-007, REQ-019)
+
+เอกสารส่งมอบสำหรับผู้จัดการเพื่อนำไปผนวกเข้าใน `docs/api_guide.md`
+
+---
+
+## สรุปภาพรวมการเปลี่ยนแปลง (Summary of Changes)
+
+เพิ่มระบบตรวจสอบจำนวนผู้เข้าพัก (Guest Cap Validation) 2 ชั้น ตามข้อกำหนด SRS REQ-007 และ REQ-019:
+1. **ชั้นที่ 1 (Cap Validation):** ตรวจสอบจำนวนผู้เข้าพักใน `guests` array ของแต่ละห้อง ต้องไม่เกิน `max_guests` ของประเภทห้องนั้นๆ
+2. **ชั้นที่ 2 (Confirmation Guest Requirement):** ตรวจสอบก่อนส่งหลักฐานการชำระเงิน (Confirm) ว่าทุกห้องในรายการจองจะต้องมีผู้เข้าพักอย่างน้อย 1 คน (`guests >= 1`)
+
+> **หมายเหตุสำคัญเกี่ยวกับการจอง:**
+> - การสร้างรายการจองในขั้นตอน Draft (`POST /api/v1/bookings`) **ไม่บังคับ** ฟิลด์ `guests` เพื่อรองรับ Real-time Draft Creation Flow ผู้ใช้สามารถสร้างห้องจองก่อนแล้วค่อยกรอกรายชื่อผู้เข้าพักภายหลังได้
+> - รองรับชื่อผู้เข้าพักซ้ำกันในห้องเดียวกันหรือข้ามห้องได้ตาม REQ-019 โดยไม่มีการ reject ด้วย unique validation
+
+---
+
+## Endpoints ที่ได้รับผลกระทบ
+
+### 1. `POST /api/v1/bookings` (สร้างการจองใหม่)
+- **พฤติกรรม:** หากมีการระบุ `guests` ในแต่ละ `booking_rooms` จำนวนสมาชิกใน `guests` ต้องไม่เกิน `room_types.max_guests`
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 2 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 2. `POST /api/v1/bookings/{id}/rooms` (เพิ่มห้องในรายการจอง)
+- **พฤติกรรม:** หากมีการระบุ `guests` ในห้องที่เพิ่ม จำนวนสมาชิกใน `guests` ต้องไม่เกิน `room_types.max_guests` ของห้องนั้น
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 2 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 3. `PUT /api/v1/bookings/{id}/rooms/{roomId}` (แก้ไขห้องเดี่ยว)
+- **พฤติกรรม:** 
+  - หากระบุ `guests` ใหม่: จำนวนคนต้องไม่เกิน `max_guests` ของประเภทห้องที่มีผล (effective room type)
+  - หากระบุเฉพาะ `room_type_id` ใหม่โดยไม่เปลี่ยน `guests`: จำนวน `guests` เดิมของห้องนั้นต้องไม่เกิน `max_guests` ของประเภทห้องใหม่
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 1 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 4. `PUT /api/v1/bookings/{id}/rooms` (แก้ไขห้องแบบกลุ่ม / Batch)
+- **พฤติกรรม:** ตรวจสอบ Final State ของทุกห้องใน Batch หากมีห้องใดห้องหนึ่งมีจำนวน `effectiveGuests` เกิน `effectiveTypeId.max_guests` จะถูก reject ทันที
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 1 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 5. `POST /api/v1/bookings/{id}/confirm` (ส่งหลักฐานการชำระเงิน)
+- **พฤติกรรม:** ตรวจสอบทุก `booking_rooms` ของ booking นั้น หากพบห้องใดที่ `guests` ว่างเปล่า (`empty`, `null` หรือ `count < 1`) จะถูกปฏิเสธทันที
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "กรุณาระบุข้อมูลผู้เข้าพักอย่างน้อย 1 คนต่อห้องก่อนส่งหลักฐานการชำระเงินค่ะ 🥺"
+  }
+  ```
+
+---
+
+## Request Model / FormRequest
+
+- `App\Http\Requests\StoreBookingRoomRequest`: เพิ่ม `withValidator()` ตรวจสอบกรณี `count(guests) > roomType->max_guests` ส่งคืน validation error key `guests`
+
+
+---
+
+## API Documentation Handoff — Ticket 03 (Front Desk Staff Role / REQ-031)
+
+เอกสารส่งมอบสำหรับผู้จัดการเพื่อนำไปผนวกเข้ากับ `docs/api_guide.md` หลังปิด Ticket 03
+
+---
+
+## สรุปการเปลี่ยนแปลงสิทธิ์ (Permissions Changes)
+
+ตามข้อกำหนด SRS REQ-031 (เปิดให้แผนกต้อนรับ/รปภ. ให้บริการเช็คอิน-เช็คเอาต์ได้ตลอด 24 ชั่วโมง โดยใช้บัญชี role `staff`) ได้มีการปรับเปลี่ยนสิทธิ์การเข้าถึง endpoint ที่เกี่ยวข้องดังนี้:
+
+| Endpoint | Method | สิทธิ์เดิม (Before) | สิทธิ์ใหม่ (After) | เหตุผล |
+|---|---|---|---|---|
+| `/bookings/{bookingId}/assign-rooms` | `PUT` | `admin` (or owner) | `admin`, `staff` (or owner) | เพื่อให้เจ้าหน้าที่หน้าฟร้อนสามารถจัดสรรห้องอัตโนมัติตาม cluster allocator ได้ทันทีเมื่อผู้เข้าพักมาถึง |
+| `/front-desk/{bookingId}/check-in` | `POST` | `admin` | `admin`, `staff` | REQ-031 รับเช็คอินผู้เข้าพักได้ตลอด 24 ชม. |
+| `/front-desk/{bookingId}/check-out` | `POST` | `admin` | `admin`, `staff` | REQ-031 รับเช็คเอาต์ผู้เข้าพักและ trigger งานแม่บ้าน (housekeeping task) อัตโนมัติ |
+| `/front-desk/{bookingId}/payment` | `POST` | `admin` | `admin`, `staff` | จำเป็นอย่างยิ่งในการเคลียร์ยอดค้างชำระหน้าเคาน์เตอร์ก่อนเช็คอิน หรือค่าใช้จ่ายเพิ่มเติมก่อนเช็คเอาต์ |
+| `/front-desk/walk-in` | `POST` | `admin` | `admin` (คงเดิม) | การเปิดห้อง walk-in นอกระบบยังคงสงวนไว้สำหรับระดับบริหาร/Admin |
+| `/front-desk/{bookingId}/mark-no-show` | `POST` | `admin` | `admin` (คงเดิม) | การตัด no-show และริบมัดจำยังคงเป็นอำนาจของ Admin |
+
+---
+
+## ส่วนที่ต้องอัปเดตใน `docs/api_guide.md`
+
+### 1. หมวด `PUT /bookings/{bookingId}/assign-rooms`
+
+**แก้ไขหัวข้อและป้ายกำกับสิทธิ์:**
+```markdown
+### PUT `/bookings/{bookingId}/assign-rooms` — Auto-assign rooms (Admin / Staff)
+
+🔒 **Admin, Staff** (or booking owner)
+```
+
+### 2. หมวด Front Desk Endpoints
+
+**แก้ไขคำนำหน้าหมวดหมู่:**
+```markdown
+> Endpoints in this section are restricted to **Admin** and **Staff** (front-desk operations), except `/walk-in` and `/mark-no-show` which remain strictly **Admin only**.
+```
+
+**แก้ไขป้ายกำกับสิทธิ์ของแต่ละ Endpoint:**
+
+#### `POST /front-desk/{bookingId}/check-in`
+```markdown
+### POST `/front-desk/{bookingId}/check-in` — Check-in guest
+
+🔒 **Admin, Staff**
+```
+
+#### `POST /front-desk/{bookingId}/check-out`
+```markdown
+### POST `/front-desk/{bookingId}/check-out` — Check-out guest
+
+🔒 **Admin, Staff**
+```
+
+#### `POST /front-desk/{bookingId}/payment`
+```markdown
+### POST `/front-desk/{bookingId}/payment` — Record payment
+
+🔒 **Admin, Staff**
+```
+
+*(หมายเหตุ: `POST /front-desk/walk-in` และ `POST /front-desk/{bookingId}/mark-no-show` ยังคงระบุ `🔒 Admin only` ตามเดิม)*
+
+
+---
+
+## API Guide Handoff - Ticket 04: Auto-assign เลขห้องล่วงหน้า 2 วันก่อน check-in (REQ-023)
+
+## ส่วนที่เกี่ยวข้องกับเอกสาร `docs/api_guide.md`
+
+### การเปลี่ยนแปลงในคำสั่ง Daily Room Maintenance (`app:daily-room-maintenance`)
+
+คำสั่ง `php artisan app:daily-room-maintenance` ซึ่งทำงานตามรอบเวลาทุกวัน (Daily Schedule) ได้รับการปรับปรุงเพื่อรองรับข้อกำหนด **REQ-023** โดยมีรายละเอียดดังนี้:
+
+#### 1. การทำงานและลำดับการจัดสรรห้องพักอัตโนมัติ (Auto-assign Pipeline)
+- **ลำดับที่ 1 (Today Check-ins):** ระบบจะค้นหาและจัดสรรหมายเลขห้องพักให้กับบุ๊กกิ้งที่ยืนยันแล้ว (`paid`, `confirmed`) ซึ่งมีกำหนดการเข้าพัก **ในวันนี้ (Today)** ก่อนเสมอ
+- **ลำดับที่ 2 (T-2 Check-ins):** หลังจากจัดสรรห้องพักสำหรับวันนี้เสร็จสิ้น ระบบจะดำเนินการค้นหาและจัดสรรหมายเลขห้องพักให้กับบุ๊กกิ้งที่มีกำหนดการเข้าพัก **ล่วงหน้า 2 วัน (T-2 หรือ Today + 2 วัน)**
+- **การจัดสรรตามอัลกอริทึม:** ใช้ `RoomAllocator` (Hybrid+ v3 cluster algorithm) ร่วมกับการเรียงลำดับความสำคัญของบุ๊กกิ้งด้วย `BookingPriority` (Suite → X09-free → Twin → Most-rooms → Least-checkout)
+- **พฤติกรรม Fail-Safe:** หากห้องพักประเภทที่ต้องการไม่เพียงพอสำหรับการจัดสรรในวัน T-2 ระบบจะไม่หยุดการทำงาน (No Crash/Throw Exception) แต่จะบันทึก Warning Log และคงสถานะ `room_id` ของห้องนั้นเป็น `null` เพื่อให้ผู้ดูแลระบบ (Admin) ตรวจสอบและจัดสรรห้องพักด้วยตนเอง
+
+#### 2. ความสัมพันธ์กับระบบเตรียมห้องพัก (Housekeeping - `prep_checkin`)
+- ห้องพักที่ได้รับการจัดสรรล่วงหน้าสำหรับวัน T-2 จะยังคงสถานะเดิม (`available` หรือ `dirty`) จนกระทั่งถึงวัน T-1 (1 วันก่อนเข้าพัก / Tomorrow)
+- เมื่อถึงวัน T-1 กระบวนการ Sweep ใน `DailyRoomMaintenance` จะดึงห้องพักที่มี `room_id` แล้วและมีกำหนดเข้าพักในวันพรุ่งนี้ เพื่อปรับสถานะเป็น `prep_checkin` และสร้างงานทำความสะอาด `pre_checkin` โดยอัตโนมัติ โดยไม่เกิดงานซ้ำซ้อน
+
+#### 3. การปรับเปลี่ยนและจัดห้องพักด้วยตนเองโดยผู้ดูแลระบบ (Manual Override)
+- การทำงานอัตโนมัตินี้ไม่กระทบต่อฟังก์ชันการจัดห้องและย้ายห้องของผู้ดูแลระบบ:
+  - `PUT /api/v1/bookings/{bookingId}/assign-rooms` ยังคงสามารถเรียกใช้งานเพื่อจัดห้องพักใหม่ได้
+  - `PUT /api/v1/bookings/{bookingId}/rooms/{bookingRoomId}` สามารถแก้ไขเปลี่ยนห้องพัก (`room_id`) ได้
+  - `POST /api/v1/frontdesk/bookings/{id}/check-in` สามารถส่ง `assigned_rooms` เพื่อสลับหรือระบุห้องพักใหม่ในขณะทำการเช็คอินได้ตามปกติ
+
+
+---
+
+## API Documentation Handoff — Ticket 05 (REQ-033: Check-in Evidence Upload)
+
+> เอกสารส่วนต่อขยายสำหรับนำไปผสานเข้าสู่ `docs/api_guide.md` (เขียนแยกตามกติกาห้ามแก้ไข `docs/api_guide.md` โดยตรงใน ticket worktree)
+
+---
+
+## 🛎️ Front Desk Check-in Evidence Operations (REQ-033)
+
+ระบบจัดเก็บและจัดการไฟล์หลักฐานการเข้าพักตอน check-in เช่น บัตรประชาชน (ID Card / Passport), ใบลงทะเบียนเข้าพัก (Registration Form), Guest Register (กระดาษ/ดิจิทัล), เอกสารยินยอม PDPA และเอกสารอื่นๆ โดยใช้โครงสร้าง `images` table ร่วมกับ private disk (`local` = `storage/app/private/checkin_evidences/`) และเข้าถึงไฟล์ผ่าน Signed URL อายุ 15 นาทีตามมาตรฐานความปลอดภัยของ KU HOME API
+
+- **Model ที่ผูก:** `BookingRoom` (Polymorphic `imageable_*` ผ่าน relation `evidences()`)
+- **สิทธิ์การใช้งาน (RBAC):** `admin` และ `staff` เท่านั้น (user / housekeeping ได้ 403 Forbidden)
+- **สถานะห้องพักที่อนุญาต (State Guard):** `confirmed`, `checked_in`, `checked_out` (หากเป็น `draft` หรือ `no_show` จะตอบกลับ `422 Unprocessable Entity`)
+- **ระยะเวลาจัดเก็บ (Retention):** 365 วัน (1 ปี) ตัดตามอายุตรง ๆ ผ่านคำสั่ง `php artisan app:cleanup-images` (รันอัตโนมัติรอบ 02:30 ทุกวัน)
+
+---
+
+### 1. Upload Check-in Evidence
+
+อัปโหลดไฟล์หลักฐานการเข้าพักสำหรับห้องพักที่ระบุ (`booking_rooms.id`)
+
+- **Method:** `POST`
+- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **Headers:**
+  - `Authorization: Bearer <TOKEN>`
+  - `Content-Type: multipart/form-data`
+  - `Accept: application/json`
+- **Roles:** `admin`, `staff`
+- **Path Parameters:**
+  - `id` *(string, required)*: UUID ของ `booking_rooms`
+- **Body (Multipart Form-Data):**
+  - `file` *(file, required)*: ไฟล์ภาพหรือเอกสาร (mimes: `jpeg, png, jpg, webp, pdf`, ขนาดสูงสุด 10MB = 10,240 KB)
+  - `type` *(string, required)*: ประเภทของหลักฐาน ค่าที่รองรับได้แก่:
+    - `id_card`: บัตรประจำตัวประชาชน หรือ Passport
+    - `registration`: ใบลงทะเบียนการเข้าพัก (Registration Form)
+    - `guest_register`: Guest Register
+    - `pdpa`: เอกสารยินยอม PDPA
+    - `other`: เอกสารอื่นๆ
+  - `note` *(string, optional)*: หมายเหตุเพิ่มเติม (ความยาวไม่เกิน 1,000 ตัวอักษร)
+
+#### Success Response (201 Created)
+
+```json
+{
+  "status": "success",
+  "message": "อัปโหลดหลักฐานการเข้าพักเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "01a1386c-ec31-7203-8e78-dcf3bbd84a0d",
+    "booking_room_id": "01a1386c-eb99-7032-9cb1-8de20df98a12",
+    "type": "id_card",
+    "metadata": {
+      "type": "id_card",
+      "note": "บัตรประชาชนนายสมชาย"
+    },
+    "file_name": "id_card.jpg",
+    "mime_type": "image/jpeg",
+    "size": 102400,
+    "url": "https://ku-home.ku.ac.th/backend/api/v1/images/01a1386c-ec31-7203-8e78-dcf3bbd84a0d/file?expires=1770956400&signature=abcdef123456...",
+    "created_at": "2026-10-14T03:20:00.000000Z"
+  }
+}
+```
+
+#### Error Responses
+
+- **401 Unauthorized:** ไม่ได้ส่ง Token หรือ Token หมดอายุ
+- **403 Forbidden:** ผู้ใช้ไม่ใช่ role `admin` หรือ `staff`
+- **404 Not Found:** ไม่พบ `booking_room` ตาม UUID ที่ส่งมา
+- **422 Unprocessable Entity:** 
+  - ส่งประเภทหลักฐานผิด / ไม่ได้แนบไฟล์ / ไฟล์เกิน 10MB / นามสกุลไฟล์ไม่รองรับ
+  - สถานะห้องไม่อยู่ในกลุ่มที่อนุญาต (เช่น ยังเป็น `draft` หรือถูกมาร์ก `no_show`)
+
+---
+
+### 2. Get Check-in Evidences
+
+ดึงรายการหลักฐานทั้งหมดของห้องพักที่ระบุ พร้อม Signed URL สดใหม่ (อายุ 15 นาที) สำหรับเปิดดูไฟล์
+
+- **Method:** `GET`
+- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **Headers:**
+  - `Authorization: Bearer <TOKEN>`
+  - `Accept: application/json`
+- **Roles:** `admin`, `staff`
+- **Path Parameters:**
+  - `id` *(string, required)*: UUID ของ `booking_rooms`
+
+#### Success Response (200 OK)
+
+```json
+{
+  "status": "success",
+  "booking_room_id": "01a1386c-eb99-7032-9cb1-8de20df98a12",
+  "evidences": [
+    {
+      "id": "01a1386c-ec31-7203-8e78-dcf3bbd84a0d",
+      "type": "id_card",
+      "metadata": {
+        "type": "id_card",
+        "note": "บัตรประชาชนนายสมชาย"
+      },
+      "file_name": "id_card.jpg",
+      "mime_type": "image/jpeg",
+      "size": 102400,
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/images/01a1386c-ec31-7203-8e78-dcf3bbd84a0d/file?expires=1770956400&signature=abcdef123456...",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 3. File Streaming Route
+
+- **Method:** `GET`
+- **URL:** `/api/v1/images/{image}/file?expires=...&signature=...`
+- **Auth:** ไม่ต้องส่ง Sanctum Token (ใช้ Laravel Temporary Signed URL ยืนยันสิทธิ์ มีอายุ 15 นาที)
+- **Exempt:** ยกเว้น `RequireJsonAccept` เพื่อให้บราวเซอร์ใช้ `<img src="...">` หรือดาวน์โหลดไฟล์ตรงได้ทันที
+
+
+---
+
+## 📝 API Documentation Handoff — Ticket 06 (REQ-048: Housekeeping Photos)
+
+เอกสารส่งมอบสำหรับนำไปรวมใน `docs/api_guide.md` (ตามกติกาห้ามแตะ `docs/api_guide.md` โดยตรงใน branch ticket)
+
+---
+
+## 🧹 Housekeeping Task Photos API (REQ-048)
+
+ระบบอัปโหลดและดูรูปภาพงานแม่บ้าน 4 หมวด (ก่อน/หลัง, ของที่ลืม, ความเสียหาย) พร้อมบันทึกหมายเหตุงาน จัดเก็บด้วยตาราง `images` (polymorphic morph กับ `HousekeepingTask`) บน private disk (`local`) และเปิดดูผ่าน Temporary Signed URL อายุ 15 นาที โดยมีระบบ Retention เก็บรักษา 90 วันผ่านคำสั่ง `app:cleanup-images`
+
+---
+
+### 1. อัปโหลดรูปภาพงานทำความสะอาด
+
+- **Endpoint:** `POST /api/v1/dashboard/tasks/{id}/photos`
+- **Auth:** `auth:sanctum`
+- **Role:** `admin`, `housekeeping`
+  - `housekeeping`: อัปโหลดได้เฉพาะ task ที่ตนเองได้รับมอบหมาย (`assigned_to === auth.id`) หากเป็นงานของคนอื่นหรือยังไม่มีผู้รับ จะได้ `403 Forbidden`
+  - `admin`: อัปโหลดได้กับทุก task
+- **Content-Type:** `multipart/form-data`
+- **Headers:** `Accept: application/json`
+
+#### Request Parameters (Form-Data)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `category` | String | Yes | หมวดหมู่รูปภาพ: `before`, `after`, `forgotten_item`, `damage` |
+| `photo` | File | Yes* | ไฟล์รูปภาพ (`image/*`, ขนาดสูงสุด 10MB) (*จำเป็นเมื่อไม่ส่ง `photos`) |
+| `photos` | File[] | Yes* | อาร์เรย์ของไฟล์รูปภาพ (*จำเป็นเมื่อไม่ส่ง `photo`) |
+| `notes` | String | No | ข้อความหมายเหตุงานทำความสะอาด (บันทึกลงฟิลด์ `notes` ของ task) |
+
+#### Validation & Cap Rules
+
+1. **Cap 5+5 ภาพ:**
+   - หมวด `before` สามารถอัปโหลดได้สูงสุด **5 ภาพ** ต่อ 1 task
+   - หมวด `after` สามารถอัปโหลดได้สูงสุด **5 ภาพ** ต่อ 1 task
+   - หากจำนวนรูปเดิม + รูปใหม่เกิน 5 ระบบจะปฏิเสธด้วย `422 Unprocessable Entity` พร้อมข้อความแจ้งเตือน
+2. **หมวด forgotten_item / damage:** ไม่ติด cap 5 ภาพ
+3. **⚠️ Damage Photo Disclaimer:** รูปภาพความเสียหายเป็นหลักฐานสภาพห้องเท่านั้น **ไม่มีผลทางบัญชี** ไม่มีการสร้างรายการชำระเงินหรือบันทึกค่าเสียหายลงในระบบการเงินโดยอัตโนมัติ
+
+#### Response `201 Created`
+
+```json
+{
+  "status": "success",
+  "message": "อัปโหลดรูปภาพงานทำความสะอาดเรียบร้อยค่ะ ✨",
+  "photo": {
+    "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+    "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+    "category": "before",
+    "original_name": "before_cleaning.jpg",
+    "size": 245120,
+    "mime_type": "image/jpeg",
+    "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+    "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+    "created_at": "2026-10-14T03:20:00.000000Z"
+  },
+  "photos": [
+    {
+      "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "before",
+      "original_name": "before_cleaning.jpg",
+      "size": 245120,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    }
+  ],
+  "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+  "notes": "พบรอยเปื้อนบนพรม"
+}
+```
+
+---
+
+### 2. ดูรายการรูปภาพของงานทำความสะอาด
+
+- **Endpoint:** `GET /api/v1/dashboard/tasks/{id}/photos`
+- **Auth:** `auth:sanctum`
+- **Role:** `admin`, `housekeeping`
+  - `housekeeping`: ดูได้เฉพาะงานที่ได้รับมอบหมาย (`assigned_to === auth.id`) หากเป็นงานของแม่บ้านคนอื่น จะได้ `403 Forbidden`
+  - `admin`: ดูได้ทุกงาน
+- **Headers:** `Accept: application/json`
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `category` | String | No | กรองดูเฉพาะหมวด: `before`, `after`, `forgotten_item`, `damage` |
+
+#### Response `200 OK`
+
+```json
+{
+  "status": "success",
+  "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+  "notes": "พบรอยเปื้อนบนพรม",
+  "total_photos": 2,
+  "counts": {
+    "before": 1,
+    "after": 1,
+    "forgotten_item": 0,
+    "damage": 0
+  },
+  "photos": [
+    {
+      "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "before",
+      "original_name": "before_cleaning.jpg",
+      "size": 245120,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    },
+    {
+      "id": "01a1386c-7f12-7003-9112-a1b2c3d4e5f6",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "after",
+      "original_name": "after_cleaning.jpg",
+      "size": 268400,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386c-7f12-7003-9112-a1b2c3d4e5f6/file?expires=1791948900&signature=def456...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:35:00.000000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 3. การแสดงผลรูปภาพและความปลอดภัย (Signed URL)
+
+- URL ของรูปภาพ (`url`) เป็น Temporary Signed Route ของ `GET /api/v1/images/{id}/file` อายุ **15 นาที**
+- ผู้ใช้ปลายทาง (Browser/App) สามารถใช้ `<img src="url">` ได้โดยตรงโดยไม่ต้องแนบ Sanctum Token (ลายเซ็นใน URL ทำหน้าที่ยืนยันสิทธิ์แทน)
+- หากลายเซ็นหมดอายุหรือถูกแก้ไข ระบบจะปฏิเสธด้วย `403 Invalid signature`
+- การลบงานทำความสะอาด (`HousekeepingTask::delete()`) จะลบแถวรูปภาพในตาราง `images` และลบไฟล์จริงออกจาก Storage โดยอัตโนมัติ
+
+---
+
+### 4. นโยบายการจัดเก็บและล้างข้อมูล (Retention Policy 90 วัน)
+
+- คำสั่ง `php artisan app:cleanup-images` (ตั้งเวลาไว้ใน `routes/console.php` ทำงานทุกวันเวลา 02:30 น.) จะทำการ:
+  1. ลบไฟล์กำพร้าในโฟลเดอร์ `housekeeping` บน local disk
+  2. ลบแถว `images` ที่ผูกกับ `HousekeepingTask` ที่ถูกลบไปแล้ว
+  3. ลบรูปภาพงานแม่บ้านที่มีอายุเกิน **90 วัน** (ปรับแต่งได้ผ่าน ENV: `HOUSEKEEPING_PHOTO_RETENTION_DAYS`)
+
+
+---
+
+## API Documentation Handoff — Ticket 07 (REQ-051/052)
+## ระบบจัดการสต็อกสินค้าและวัสดุสิ้นเปลือง (Stock Inventory & Movement Logs)
+
+สำหรับนำไปผนวกเข้ากับ `docs/api_guide.md` โดยผู้จัดการ
+
+---
+
+### ภาพรวม (Overview)
+- **Base URL Prefix:** `/api/v1/stock`
+- **Authentication:** Bearer Token (Sanctum) ทุก endpoint
+- **Role Permissions:**
+  - `admin`, `staff`: สิทธิ์อ่านและเขียนเต็มรูปแบบ (CRUD + Adjust Stock)
+  - `housekeeping`: สิทธิ์อ่านอย่างเดียว (`GET /stock`, `GET /stock/{id}`, `GET /stock/{id}/movements`), เขียนจะได้รับ HTTP 403
+  - `user`, `guest`: ไม่มีสิทธิ์ (HTTP 403)
+- **Derived Status:**
+  - `out`: เมื่อ `quantity <= 0`
+  - `low`: เมื่อ `quantity <= reorder_point` (และ `quantity > 0`)
+  - `ok`: สต็อกปกติ (`quantity > reorder_point`)
+  - *หมายเหตุ:* Backend ส่ง enum สถานะ (`ok`, `low`, `out`) ให้ frontend จัดการแสดงสีแถบสถานะตาม UI Design
+- **Deletion Strategy:** Soft Delete (`deleted_at`) เพื่อรักษาประวัติการเคลื่อนไหวสต๊อก (Movement Logs) ย้อนหลัง 1 ปี (365 วัน)
+- **Audit & Movement Log:** ทุกครั้งที่มีการเพิ่ม/ลด `quantity` (ไม่ว่าจะผ่าน Create, Update, หรือ Adjust) ระบบจะบันทึก `stock_movements` โดยอัตโนมัติ
+
+---
+
+### Endpoint Reference
+
+#### 1. รายการสต็อกสินค้า (List Stock Items)
+`GET /api/v1/stock`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Query Parameters:**
+  - `search` (string, optional): ค้นหาชื่อสินค้า, รหัสสินค้า, หรือหมายเหตุ
+  - `category` (string, optional): กรองหมวดหมู่สินค้า เช่น `Guest Amenities`, `Linen and Bedding`
+  - `status` (string, optional): กรองตามสถานะ derived (`ok`, `low`, `out`)
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "019266e7-...",
+      "item_code": "SKU-WATER-01",
+      "item_name": "น้ำดื่ม 500ml",
+      "category": "Guest Amenities",
+      "quantity": 150,
+      "unit": "ขวด",
+      "reorder_point": 50,
+      "max_stock": 500,
+      "status": "ok",
+      "notes": "สต็อกชั้น 1",
+      "created_at": "2026-10-14T03:00:00.000000Z",
+      "updated_at": "2026-10-14T03:00:00.000000Z"
+    }
+  ]
+}
+```
+
+#### 2. ดูรายละเอียดสต็อกสินค้า (Show Stock Item)
+`GET /api/v1/stock/{id}`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "019266e7-...",
+    "item_code": "SKU-WATER-01",
+    "item_name": "น้ำดื่ม 500ml",
+    "category": "Guest Amenities",
+    "quantity": 150,
+    "unit": "ขวด",
+    "reorder_point": 50,
+    "max_stock": 500,
+    "status": "ok",
+    "notes": null,
+    "created_at": "2026-10-14T03:00:00.000000Z",
+    "updated_at": "2026-10-14T03:00:00.000000Z"
+  }
+}
+```
+
+#### 3. เพิ่มรายการสินค้าในคลัง (Create Stock Item)
+`POST /api/v1/stock`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body:**
+```json
+{
+  "item_code": "SKU-SOAP-01",
+  "item_name": "สบู่เหลวอาบน้ำ",
+  "category": "Guest Amenities",
+  "quantity": 100,
+  "unit": "ขวด",
+  "reorder_point": 30,
+  "max_stock": 300,
+  "notes": "ยี่ห้อ KU Fresh",
+  "reason": "เปิดคลังรอบใหม่"
+}
+```
+- **Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "เพิ่มรายการสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "019266e8-...",
+    "item_code": "SKU-SOAP-01",
+    "item_name": "สบู่เหลวอาบน้ำ",
+    "category": "Guest Amenities",
+    "quantity": 100,
+    "unit": "ขวด",
+    "reorder_point": 30,
+    "max_stock": 300,
+    "status": "ok",
+    "notes": "ยี่ห้อ KU Fresh",
+    "created_at": "2026-10-14T03:10:00.000000Z",
+    "updated_at": "2026-10-14T03:10:00.000000Z"
+  }
+}
+```
+
+#### 4. แก้ไขข้อมูลสินค้า (Update Stock Item)
+`PUT /api/v1/stock/{id}`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body:**
+```json
+{
+  "item_name": "สบู่เหลวอาบน้ำ (สูตรอ่อนโยน)",
+  "reorder_point": 40,
+  "quantity": 120,
+  "reason": "นับสต็อกประจำสัปดาห์พบส่วนเกิน"
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "อัปเดตข้อมูลสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": { ... }
+}
+```
+
+#### 5. ปรับปรุงจำนวนสต็อก / เบิก-จ่าย / รับเข้า (Adjust Stock Quantity)
+`POST /api/v1/stock/{id}/adjust`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body (ระบุ delta หรือ quantity อย่างใดอย่างหนึ่ง):**
+```json
+{
+  "delta": -5,
+  "reason": "เบิกใส่ห้องพัก",
+  "housekeeping_task_id": "019266e9-...",
+  "notes": "ห้อง 204"
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ปรับปรุงจำนวนสต็อกสินค้าเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "...",
+    "quantity": 95,
+    "status": "ok",
+    ...
+  },
+  "movement": {
+    "id": "019266ea-...",
+    "stock_inventory_id": "...",
+    "delta": -5,
+    "quantity_before": 100,
+    "quantity_after": 95,
+    "reason": "เบิกใส่ห้องพัก",
+    "housekeeping_task_id": "019266e9-...",
+    "user_id": "...",
+    "notes": "ห้อง 204",
+    "created_at": "2026-10-14T03:15:00.000000Z"
+  }
+}
+```
+
+#### 6. ลบรายการสินค้า (Delete Stock Item)
+`DELETE /api/v1/stock/{id}`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ลบรายการสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน 🗑️"
+}
+```
+
+#### 7. ดูประวัติการเคลื่อนไหวสต๊อก (List Stock Movements)
+`GET /api/v1/stock/{id}/movements`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "019266ea-...",
+      "stock_inventory_id": "...",
+      "delta": -5,
+      "quantity_before": 100,
+      "quantity_after": 95,
+      "reason": "เบิกใส่ห้องพัก",
+      "housekeeping_task_id": "019266e9-...",
+      "user_id": "...",
+      "notes": "ห้อง 204",
+      "created_at": "2026-10-14T03:15:00.000000Z",
+      "user": { ... },
+      "housekeeping_task": { ... }
+    }
+  ]
+}
+```
+
+---
+
+### Scheduled Command: Cleanup Stock Movements
+`php artisan app:cleanup-stock-movements {--dry-run}`
+- รันอัตโนมัติทุกวันเวลา 03:00 น. (`dailyAt('03:00')`)
+- ลบประวัติ `stock_movements` ที่มีอายุเกิน `STOCK_MOVEMENT_RETENTION_DAYS` (default 365 วัน)
+- ตัวเลือก `--dry-run` สำหรับการนับจำนวนโดยไม่ลบจริง
+
+
+---
+
+*Last updated: 2026-10-14 · KU HOME API v1*

@@ -24,8 +24,16 @@ SRS v2 (`srs_room_booking_v2.pdf` — REQ-001…052 + ใบเสร็จ 3.8)
 - ธรรมเนียมเดิม: 1 ticket ต่อ 1 session — claim ด้วย `assignee:` ก่อนลงมือ · resolve แล้วเขียน `## Resolution` ลง ticket → `status: closed` → append 1 บรรทัดใน "Decisions so far" แล้ว commit tracker ไปกับ branch ที่ทำงานอยู่
 
 ## Decisions so far
+- [01: SRS deviation ledger](./tickets/01-srs-deviation-ledger.md): ledger 7 ข้อ (deviation 5 + interpretation 2) ลง `cline.md` + pointer ใน AGENTS.md — REQ ที่ "งด" ต้องมีบรรทัดที่เดียว
+- [02: Guest cap validation](./tickets/02-guest-cap-validation.md): cap `max_guests` ทุก write path + ≥1 คนตอน confirm — ห้ามบังคับ guests ตอน create draft (REQ-007/019 ✅ implemented)
+- [03: Front-desk staff](./tickets/03-front-desk-staff-role.md): `role:admin,staff` บน check-in/out **+ payment + assign-rooms** (ฟร้อนต้องทำงานจบในตัว) · walk-in/no-show คง admin · staff เข้า validTransitions เส้นทางบริการ (REQ-031 ✅)
+- [04: Auto-assign T-2](./tickets/04-auto-assign-t2.md): `DailyRoomMaintenance` assign เลขห้อง 2 วันก่อน check-in ผ่าน RoomAllocator · fail-safe ต่อ booking (REQ-023 ✅)
+- [05: Check-in evidence](./tickets/05-checkin-evidence-upload.md): morph `BookingRoom` + column `images.metadata` · state guard confirmed/checked_in/checked_out · retention 365 วันต่อ `app:cleanup-images` (REQ-033 ✅)
+- [06: Housekeeping photos](./tickets/06-housekeeping-photos.md): morph `HousekeepingTask` + column `images.category` · drop scaffold `housekeeping_photos` · cap 5+5 · notes ใช้ column เดิม · retention 90 วัน (REQ-048 ✅)
+- [07: Stock system](./tickets/07-stock-crud-movement-log.md): CRUD `/stock` + derived ok/low/out + `stock_movements` (soft delete คง audit trail) + cleanup 365 วัน + `SuppliesReportData` เต็ม (REQ-051/052 ✅)
 
-(map เพิ่ง charted — การตัดสินใจทั้ง 7 จุดเกิดก่อน charting จึงฝังเป็น standing decisions ใน Notes และเนื้อ ticket โดยตรง · บรรทัดถัดไปจะเกิดจาก ticket ที่ปิดจริง)
+> dispatch ขนาน 2026-10-14 ผ่าน agent-hub (antigravity · gemini-3.8-flash) — 7 worktree แยก แล้ว merge กลับ `agust-11` โดยผู้จัดการ · suite 725 เขียว · เอกสาร API ผนวกท้าย `docs/api_guide.md` (หัวข้อ 🧩 SRS v2 Gap Closure)
+
 
 ## Not yet specified
 
