@@ -22,6 +22,14 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 
 **Done เมื่อ:** Resolution ตอบครบ 4 ข้อ (+ ข้อ 5 หลักฐานการจ่ายเงิน — เพิ่มจากการทวน SRS ต้นฉบับ 2026-10-14) + ยกตัวอย่าง flow จริง 1 เคส (เช่น แก้วแตก 250 บาท หลัง check-in ของ org booking deferred) — ticket 13 ห้ามเริ่มก่อนปิด ticket นี้
 
+## Resolution
+
+**มติที่บันทึกจาก grilling (2026-10-14 — ticket ยังเปิด รอครบ 4+1 ข้อ):**
+
+- **ข้อ 4 (การชำระ) — ✅ ล็อกแล้ว:** ค่าปรับ/ค่าเสียหายเป็นการเก็บเพิ่ม**หลังลูกค้าเข้าพัก ชำระที่ front desk** โดย **staff เป็นผู้คุมความถูกต้อง** (มติ owner ใน session นี้) → ช่องทางเดียวคือ `recordPayment` (admin+staff — เงินสด/อ้างอิงหน้าเคาน์เตอร์) ตรงตาม draft แนะนำ · **ไม่เปิด**ให้ user ส่งสลิปเพิ่มผ่าน confirm flow · state machine + confirm flow + payments ledger 3 write points ไม่ถูกแตะ
+
+(ยังว่าง — รอมติข้อ 1/2/3/5 ครบแล้วจึงปิด ticket)
+
 ## Draft ข้อเสนอจาก agent (2026-10-14 — ⚠️ ยังไม่ใช่มติ owner)
 
 > AskUserQuestion ถึง owner ยังไม่มีคำตอบ (session วิ่ง autonomous) — ด้านล่างเป็นข้อเสนอ + เหตุผลจากโค้ดจริง เตรียมไว้ให้ owner ตัดสินเร็ว · **ทุกข้อยังเป็นทางเลือก ห้ามถือเป็นมติ** — ปิด ticket ได้เมื่อ owner รับ/แก้ครบ 4 ข้อเท่านั้น
@@ -53,7 +61,7 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 - Free-text item ต่อห้อง = charge ที่ผูก `booking_room_id` (item_name/qty/price กรอกเอง) — **ไม่แตะ** `addons` fixed เลย ไม่เกิดกลไกที่สาม
 - เปิดให้ owner เลือกเสริม: เพิ่ม `charge_type = 'addon'` เป็นค่าที่สามเพื่อให้รายงานแยกหมวดได้ (report filter ตาม type อยู่แล้ว) หรือใช้ damage|rental เดิมพอ
 
-**ข้อ 4 — การชำระ: แนะนำ `recordPayment` เท่านั้นสำหรับ charge หลังชำระ**
+**ข้อ 4 — การชำระ: ✅ ล็อกแล้วตามมติ owner (ดู Resolution) — `recordPayment` เท่านั้นสำหรับ charge หลังชำระ**
 
 - Charge ก่อน verify (draft/pending) → รวมในสลิปแรกได้เลย เพราะ expected/outstanding รวม charges แล้ว
 - Charge หลังจ่าย/confirm → admin+staff เก็บผ่าน `recordPayment` (ตรง flow org deferred เดิม) · state machine + confirm flow + payments ledger 3 write points **ไม่ถูกแตะ**
@@ -67,7 +75,3 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 **เคสตรวจสอบ (แก้วแตก 250 · org booking deferred หลัง check-in):** staff `POST /additional-charges` {booking_id, booking_room_id ห้อง 201, "ค่าเสียหาย แก้วแตก", qty 1, price 250, charge_type damage} → `outstanding_amount` +250 ทันที (accessor คำนวณสด) · ตอน org มาเบิก/checkout → admin `recordPayment` 250 → ครบเมื่อ `paid ≥ total + charges` → `is_paid` true
 
 **รายละเอียดที่ต้องล็อกต่อใน ticket 13 (ไม่ใช่คำถาม owner):** การแก้/ลบ charge หลัง `is_paid` เคยถูกตั้ง — is_paid เป็น column จึงต้องมีจุด recompute เมื่อ charge เปลี่ยน (ไม่งั้นลบ charge แล้ว paid ≥ ยอดใหม่แต่ is_paid ค้าง false)
-
-## Resolution
-
-(ยังว่าง — รอ grilling คู่กับ owner)
