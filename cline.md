@@ -2258,3 +2258,66 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   - Explicit routes 15 ฉบับ: `GET /api/v1/reports/{slug}/export` (admin+staff ทุกใบ, housekeeping เพิ่ม 2 ใบแม่บ้าน `housekeeping` และ `housekeeping-v2`), throttle 10,1, filterRules validate เพดานช่วงวันที่ ≤ 366 วัน
   - Attributes ใหม่บน `bookings`: `invoice_requested_at`, `special_request`, `comment`, `is_complimentary` (admin/system เท่านั้น — 403 ถ้า role อื่นส่ง)
   - Checklist แม่บ้าน: `PATCH /dashboard/tasks/{id}/status` รับ `cleaning_check_1/2/3` โดย `status` เป็น optional เมื่อส่ง checklist (tick ล้วน = บันทึกประกอบ ไม่ผูก done)
+
+## 📋 SRS v2 deviation ledger (2026-10-14)
+
+> บันทึกรายการข้อกำหนด SRS v2 (`srs_room_booking_v2.pdf`) ที่มีข้อยุติอย่างเป็นทางการกับ Owner แล้วว่า **ไม่ทำ (Deviation)**, **สถานะรอปัจจัยภายนอก (Pending External)**, หรือ **ระบบเดิมรองรับแล้วผ่านการตีความเชิงสถาปัตยกรรม (Interpretation)** โดยล็อกการตัดสินใจ ห้าม Re-litigate โดยไม่มีหลักฐานหรือคำสั่งใหม่จาก Owner (อ้างอิง Wayfinder map [`wayfinder/srs-v2-gap-closure/map.md`](./wayfinder/srs-v2-gap-closure/map.md) ticket [01](./wayfinder/srs-v2-gap-closure/tickets/01-srs-deviation-ledger.md))
+
+### 1. รายการ Deviation (ข้อกำหนดที่ไม่ทำตามเอกสารเดิม)
+
+1. **REQ-009 / REQ-040 / REQ-041 — ส่งอีเมลยืนยันการจองอัตโนมัติ 2 รูปแบบ (Customer & Admin)**
+   - **REQ ID:** REQ-009, REQ-040, REQ-041
+   - **สถานะ:** `deviation`
+   - **วันที่ตัดสิน:** 2026-10-06 (freeze ตามมติเดิมของ wayfinder map `google-integration`)
+   - **เหตุผล:** ฝั่ง Frontend (Senior Client) มีโมดูล generate เอกสาร/ใบยืนยันอยู่แล้ว และทีม Admin เป็นผู้ส่งเอกสารยืนยันให้ลูกค้าด้วยตนเองผ่านช่องทางปฏิบัติการจริง (LINE, Facebook Messenger หรือพิมพ์มอบให้หน้าเคาน์เตอร์) การทำระบบส่งอีเมลอัตโนมัติบน Backend ถูกระงับ (frozen) ไว้ที่ tickets 04/07/08 ของ `google-integration` เพื่อป้องกันความซ้ำซ้อนและลดภาระ integration ฝั่ง API
+   - **ทางกลับถ้ามี:** ปลด freeze ได้ต่อเมื่อ Owner สั่งการใหม่ โดยสร้าง Mail notification service บน Backend และผูก SMTP หรือ Google Mail API
+
+2. **REQ-020 — การออกเอกสารทางการ (Quotation / ใบยืนยันการจอง / Guest Folio)**
+   - **REQ ID:** REQ-020
+   - **สถานะ:** `deviation`
+   - **วันที่ตัดสิน:** 2026-10-06 (freeze ตามมติเดียวกับ REQ-009/040/041)
+   - **เหตุผล:** ระบบ KU HOME API ถูกออกแบบเป็น API-only service (ไม่มี Blade/HTML/PDF render engine) การจัดหน้าและจัดพิมพ์ Quotation, Confirmation Slip และ Guest Folio เป็นหน้าที่ของ Frontend โดยตรง ไม่มีการสร้าง endpoint เอกสาร binary/PDF บน Backend
+   - **ทางกลับถ้ามี:** หากในอนาคตมีข้อกำหนดให้ Backend ต้อง serve ไฟล์ PDF เอกสารดังกล่าว ให้เพิ่ม Document Rendering Service (เช่น DomPDF / Snappy) พร้อม template และ routes ใหม่สำหรับ download
+
+3. **REQ-049 — หัวหน้าแม่บ้าน Approve / Reject งานทำความสะอาด**
+   - **REQ ID:** REQ-049
+   - **สถานะ:** `deviation`
+   - **วันที่ตัดสิน:** 2026-10-14
+   - **เหตุผล:** 
+     1) ชนกับ State Machine ของ `HousekeepingTask` ที่ถูกออกแบบให้สถานะ `done` เป็น **terminal / locked** โดยสมบูรณ์ ไม่เปิดให้ย้อนกลับหรือแตกแขนง
+     2) โครงสร้างสิทธิ์ปัจจุบันยังไม่มี Role "หัวหน้าแม่บ้าน" (Head Housekeeper) มีเพียง `housekeeping`, `staff`, `admin` เท่านั้น จึงต้องระงับไว้เพื่อรอโครงสร้างและการแบ่งหน้าที่ของทีมแม่บ้านในทางปฏิบัติที่ชัดเจน
+   - **ทางกลับถ้ามี:** เมื่อมีการกำหนด Role หัวหน้าแม่บ้านในระบบ และทำ refactor State Machine ของ `HousekeepingTask` เพิ่มสถานะตรวจสอบ (เช่น `review_pending → approved | rejected`) พร้อม migration และปรับสิทธิ์ใน `DashboardController`
+
+4. **REQ-038 — การเปลี่ยนราคาห้องพักล่วงหน้าในอนาคต (Effective-dated rates)**
+   - **REQ ID:** REQ-038
+   - **สถานะ:** `deviation`
+   - **วันที่ตัดสิน:** 2026-10-14
+   - **เหตุผล:** ระบบปัจจุบันใช้การกำหนดราคาปัจจุบัน (Current flat rates) บน `room_types.rates` และ `global_rates` ยังไม่มี schema รองรับตารางเวลาของราคาล่วงหน้า (effective dating) การสร้างฟีเจอร์นี้มีความซับซ้อนเกินจำเป็นสำหรับระยะนี้
+   - **⚠️ Risk Note:** การแก้ไขราคาห้องพักในปัจจุบันจะมีผลทันทีต่อ Draft Bookings ที่สร้างค้างไว้ด้วยราคาเดิมตอนถูก recalculate ยอดชำระเงิน
+   - **ทางกลับถ้ามี:** เมื่อมีความจำเป็นทางธุรกิจหรือพบความเสียหายจริง ให้เพิ่มคอลัมน์ `effective_from` / `effective_to` บน `global_rates` และปรับ query ใน `GlobalRate::getEffectiveDailyRate()` และ `DiscountService::reprice()` ให้ดึงเรทตามวันเข้าพักของ booking
+
+### 2. รายการ Pending External (รอความพร้อมจากภายนอก)
+
+5. **REQ-010 — การชำระเงินผ่าน QR Code จริง (PromptPay) พร้อม Webhook HMAC Signature**
+   - **REQ ID:** REQ-010
+   - **สถานะ:** `pending-external`
+   - **วันที่ตัดสิน:** 2026-10-14
+   - **เหตุผล:** อยู่ระหว่างรอข้อสรุปและการตัดสินใจเลือก Payment Gateway ภายนอกอย่างเป็นทางการ (Blocker #4 จากยุค webhook) ปัจจุบันระบบใช้ Mock Gateway (`gateway.mockbank.com`) และ Webhook ตอบ `410 GONE` โดยมีระบบตรวจสลิปโอนเงิน (`BookingConfirmation` + private disk images) เป็นช่องทางหลักที่ใช้งานได้จริงในปัจจุบัน สถานะนี้จึงเป็น "รอปัจจัยภายนอก" ไม่ใช่การปิดถาวร
+   - **ทางกลับถ้ามี:** เมื่อได้ Gateway จริงและ API specifications ชัดเจน จะเปิด ticket ใหม่เพื่อ implement ตัวสร้าง QR จริง และระบบ Webhook HMAC signature verification พร้อม sync เข้า state machine
+
+### 3. รายการ Interpretation (ระบบเดิมครอบคลุมแล้วตามการตีความทางเทคนิค)
+
+6. **REQ-045 — การอัปเกรดประเภทห้องพัก (Room Upgrade)**
+   - **REQ ID:** REQ-045
+   - **สถานะ:** `interpretation`
+   - **วันที่ตัดสิน:** 2026-10-14
+   - **เหตุผล:** สถาปัตยกรรมของระบบปัจจุบันรองรับการอัปเกรดห้องพักผ่านการแก้ไข `room_type_id` บน `BookingRoom` (ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}`) ซึ่งระบบจะตรวจสอบความพร้อมของห้องใหม่ (Availability re-check) และคำนวณส่วนต่างราคาห้องพักเข้าสู่ยอดค้างชำระ (surcharge) โดยอัตโนมัติผ่าน `DiscountService::reprice()` จึงถือว่าครอบคลุมการทำงานตามข้อกำหนดแล้ว โดยไม่ต้องมี endpoint อัปเกรดห้องแยกเป็นพิเศษ
+   - **ทางกลับถ้ามี:** ไม่ต้องมีทางกลับ เนื่องจากเป็นสถาปัตยกรรมหลักที่ทำงานได้สมบูรณ์แล้ว
+
+7. **REQ-012 — การสร้าง Draft Booking และการออกรหัสการจอง**
+   - **REQ ID:** REQ-012
+   - **สถานะ:** `interpretation`
+   - **วันที่ตัดสิน:** 2026-10-14
+   - **เหตุผล:** เมื่อผู้ใช้เริ่มทำการจอง ระบบจะสร้าง Booking ในสถานะ `draft` แบบ Real-time ทันที พร้อมทั้งสร้างรหัสการจอง (`confirmation` เช่น `BK...`) ผ่าน Atomic Sequence (`booking_sequences`) ตั้งแต่ตอนสร้าง เพื่อทำการกันห้อง (holding slot) 15 นาทีตาม payment deadline พฤติกรรมนี้ถือว่าครอบคลุมข้อกำหนด REQ-012 โดยสมบูรณ์และป้องกัน race condition ได้อย่างรัดกุม
+   - **ทางกลับถ้ามี:** ไม่ต้องมีทางกลับ ถือเป็น core contract ของระบบการจอง
+
