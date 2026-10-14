@@ -266,6 +266,15 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where('id', '[0-9a-f\-]{36}');
     });
 
+    // 🛎️ Check-in Evidence (REQ-033 — admin+staff)
+    //    อัปโหลดบัตร ปชช./registration/PDPA ผูกกับ BookingRoom (เก็บ 365 วัน)
+    Route::middleware('role:admin,staff')->prefix('front-desk')->group(function () {
+        Route::post('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'uploadEvidence'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::get('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'getEvidences'])
+            ->where('id', '[0-9a-f\-]{36}');
+    });
+
     // 📊 Reports — Excel export 15 ฉบับ (05/10/26 — excel-reports spec §4):
     //    route ต่อรายงาน (explicit — owner เลือกแยก) · stream ไฟล์ทันที ไม่มีไฟล์ค้าง disk
     //    · สิทธิ์ admin+staff ทุกใบ · housekeeping เฉพาะ 2 ใบแม่บ้าน (+in-controller re-check)
