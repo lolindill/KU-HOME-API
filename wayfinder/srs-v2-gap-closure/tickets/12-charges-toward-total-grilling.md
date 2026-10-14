@@ -16,14 +16,16 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 2. **ผูกห้อง:** REQ-042 ต้องการ "รายห้องพัก" — ยกระดับ `additional_charges` เป็น polymorphic (booking | booking_room) + flag กลายเป็น chargeable หรือตารางใหม่ (จดเหตุผล + อย่าทำ report 15 ฉบับพัง — `additional-charges`, `daily-financial`, `manager` ต้องยังตรง)
 3. **REQ-044 addon free-text:** เพิ่ม free-text item บน `addons` หรือรวมเป็นกลไกเดียวกับ charges ข้อ 2 (อย่าสร้างกลไกคู่ขนานสามตัว — addon โครง fixed, additional_charges, และตัวใหม่)
 4. **การชำระ:** หลัง charge เพิ่มหลังจ่ายแล้ว — ผู้ใช้ส่งสลิปเพิ่มผ่าน confirm flow เดิมได้ไหม หรือเก็บสดหน้าเคาน์เตอร์ (`recordPayment`) เท่านั้น
+5. **หลักฐานการจ่ายเงินตามห้องพัก** *(เพิ่ม 2026-10-14 จากการทวน SRS ต้นฉบับ)*: REQ-042 ตัวจริงระบุ "เพิ่มรายการความเสียหายรายห้องพัก พร้อมคำนวณราคารวมทั้งหมด**และหลักฐานการจ่ายเงินตามห้องพัก**" — ticket เดิมมองข้ามอนุประโยคนี้ · ตัดสินว่าหลักฐานผูกระดับ booking พอ (สลิป `booking_confirmations` / `reference_number` ของ `recordPayment`) หรือ upload หลักฐานต่อ charge ผ่าน `images` morph (imageable = `AdditionalCharge`)
 
 **⚠️ ข้อห้ามข้าม (AGENTS.md):** ห้าม bypass `transitionStatus()`/ledger chokepoints · เงิน = integer baht · PgBoolean · อย่า mutate `total_amount` โดยไม่ได้ตัดสินข้อ 1 ชัดๆ
 
-**Done เมื่อ:** Resolution ตอบครบ 4 ข้อ + ยกตัวอย่าง flow จริง 1 เคส (เช่น แก้วแตก 250 บาท หลัง check-in ของ org booking deferred) — ticket 13 ห้ามเริ่มก่อนปิด ticket นี้
+**Done เมื่อ:** Resolution ตอบครบ 4 ข้อ (+ ข้อ 5 หลักฐานการจ่ายเงิน — เพิ่มจากการทวน SRS ต้นฉบับ 2026-10-14) + ยกตัวอย่าง flow จริง 1 เคส (เช่น แก้วแตก 250 บาท หลัง check-in ของ org booking deferred) — ticket 13 ห้ามเริ่มก่อนปิด ticket นี้
 
 ## Draft ข้อเสนอจาก agent (2026-10-14 — ⚠️ ยังไม่ใช่มติ owner)
 
 > AskUserQuestion ถึง owner ยังไม่มีคำตอบ (session วิ่ง autonomous) — ด้านล่างเป็นข้อเสนอ + เหตุผลจากโค้ดจริง เตรียมไว้ให้ owner ตัดสินเร็ว · **ทุกข้อยังเป็นทางเลือก ห้ามถือเป็นมติ** — ปิด ticket ได้เมื่อ owner รับ/แก้ครบ 4 ข้อเท่านั้น
+> ทวน SRS PDF ต้นฉบับแล้ว (2026-10-14): REQ-042/044 อยู่ §3.3.6 ตรงตามที่ ticket อ้าง — และพบอนุประโยค REQ-042 "หลักฐานการจ่ายเงินตามห้องพัก" ที่ ticket เดิมมองข้าม → เพิ่มเป็นข้อ 5 (แก้ Question + Done แล้ว)
 
 **ข้อเท็จจริงจากโค้ด (ตรวจ 2026-10-14):**
 
@@ -56,6 +58,11 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 - Charge ก่อน verify (draft/pending) → รวมในสลิปแรกได้เลย เพราะ expected/outstanding รวม charges แล้ว
 - Charge หลังจ่าย/confirm → admin+staff เก็บผ่าน `recordPayment` (ตรง flow org deferred เดิม) · state machine + confirm flow + payments ledger 3 write points **ไม่ถูกแตะ**
 - ทางเลือกเปิดให้ user ส่งสลิปเพิ่ม = ต้องเปิด transition ใหม่บน state machine (paid/confirmed → pending) — ใหญ่กว่าตัว charge เอง → ไม่แนะนำ
+
+**ข้อ 5 — หลักฐานการจ่ายเงินตามห้องพัก (REQ-042 ตัวจริง): แนะนำ upload หลักฐานต่อ charge ผ่าน `images` morph**
+
+- แนะนำ: `images` table morph `AdditionalCharge` (production-ready ตาม AGENTS.md: polymorphic + private disk + signed URL 15 นาที) — แนบหลักฐานได้ราย charge ทั้งระดับห้องและระดับ booking ครอบคลุมคำ REQ ตรงตัว **ไม่สร้างตารางรูปใหม่** (ตามข้อห้าม image system)
+- ทางเลือกเบากว่า: หลักฐานระดับ booking พอ (สลิป `booking_confirmations` / `reference_number` ของ `recordPayment`) — เลือกได้ถ้า owner เห็นว่าไม่มีเคสแนบรูปราย charge จริงในทางปฏิบัติ
 
 **เคสตรวจสอบ (แก้วแตก 250 · org booking deferred หลัง check-in):** staff `POST /additional-charges` {booking_id, booking_room_id ห้อง 201, "ค่าเสียหาย แก้วแตก", qty 1, price 250, charge_type damage} → `outstanding_amount` +250 ทันที (accessor คำนวณสด) · ตอน org มาเบิก/checkout → admin `recordPayment` 250 → ครบเมื่อ `paid ≥ total + charges` → `is_paid` true
 
