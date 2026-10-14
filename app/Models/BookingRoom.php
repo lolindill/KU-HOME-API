@@ -67,10 +67,10 @@ class BookingRoom extends Model
 
     /**
      * BR State Machine:
-     *   draft → confirmed (admin/system)
-     *   confirmed → checked_in (admin)       [walk-in skip มาตรงนี้]
+     *   draft → confirmed (admin/staff/system)
+     *   confirmed → checked_in (admin/staff)       [walk-in skip มาตรงนี้]
      *   confirmed → no_show (admin)
-     *   checked_in → checked_out (admin)
+     *   checked_in → checked_out (admin/staff)
      */
     public function transitionStatus(string $newStatus, string $userRole = 'admin'): void
     {
@@ -78,14 +78,14 @@ class BookingRoom extends Model
 
         $validTransitions = [
             'draft' => [
-                'confirmed' => ['admin', 'system'],
+                'confirmed' => ['admin', 'staff', 'system'],
             ],
             'confirmed' => [
-                'checked_in' => ['admin'],
+                'checked_in' => ['admin', 'staff'],
                 'no_show' => ['admin'],
             ],
             'checked_in' => [
-                'checked_out' => ['admin'],
+                'checked_out' => ['admin', 'staff'],
             ],
         ];
 

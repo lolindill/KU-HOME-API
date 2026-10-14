@@ -202,9 +202,9 @@ class Booking extends Model
      *   pending → paid (admin — verify สลิปผ่านแล้ว)
      *   pending → verify_error (admin — reject สลิป รอ user ส่งใหม่)
      *   verify_error → pending (user, guest, admin — ส่งสลิปใหม่ รอตรวจ)
-     *   draft → paid (admin, system — front-desk เก็บเงินสด / webhook อนาคต)
+     *   draft → paid (admin, staff, system — front-desk เก็บเงินสด / webhook อนาคต)
      *   draft → confirmed (admin, walk-in เข้าตรงๆ)
-     *   paid → confirmed (admin)
+     *   paid → confirmed (admin, staff)
      *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show)
      *
      * ❌ ไม่มี cancelled แล้ว — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
@@ -218,7 +218,7 @@ class Booking extends Model
         $validTransitions = [
             'draft' => [
                 'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิป — รอ admin ตรวจ
-                'paid' => ['admin', 'system'], // front-desk เก็บเงินหน้าเคาน์เตอร์ / webhook
+                'paid' => ['admin', 'staff', 'system'], // front-desk เก็บเงินหน้าเคาน์เตอร์ / webhook
                 'confirmed' => ['admin'], // walk-in by admin (skip paid)
             ],
             'pending' => [
@@ -229,7 +229,7 @@ class Booking extends Model
                 'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิปใหม่ — รอ admin ตรวจอีกครั้ง
             ],
             'paid' => [
-                'confirmed' => ['admin'],
+                'confirmed' => ['admin', 'staff'],
             ],
             'confirmed' => [
                 'complete' => ['admin', 'system'], // auto เมื่อ BR ครบ

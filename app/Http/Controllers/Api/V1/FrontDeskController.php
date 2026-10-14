@@ -140,6 +140,15 @@ class FrontDeskController extends Controller
     // 🛎️ 2. Check-In (BR-level)
     public function checkIn(Request $request, $bookingId)
     {
+        // 🌟 Defense-in-depth: ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'staff'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นถึงจะ Check-in ได้ค่ะนายท่าน',
+            ], 403);
+        }
+
         if (is_string($request->input('assigned_rooms'))) {
             $request->merge([
                 'assigned_rooms' => [$request->input('assigned_rooms')],
@@ -154,11 +163,6 @@ class FrontDeskController extends Controller
             DB::beginTransaction();
 
             $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
-
-            $user = $request->user();
-            if (! $user) {
-                throw new \Exception('Unauthorized: ไม่พบข้อมูลผู้ใช้งานจาก Token ค่ะนายท่าน', 401);
-            }
 
             $userId = $user->id;
             $userRole = $user->role;
@@ -218,9 +222,9 @@ class FrontDeskController extends Controller
                 // 🌟 Refactor (25/06/26): BR state machine → checked_in
                 //    BR ต้องเป็น confirmed ก่อน — ถ้ายังเป็น draft ให้ confirmed ก่อน
                 if ($bRoom->status === 'draft') {
-                    $bRoom->transitionStatus('confirmed', 'admin');
+                    $bRoom->transitionStatus('confirmed', $userRole);
                 }
-                $bRoom->transitionStatus('checked_in', 'admin');
+                $bRoom->transitionStatus('checked_in', $userRole);
 
                 $roomUpdates[] = [
                     'room_number' => $room->room_number,
@@ -278,10 +282,10 @@ class FrontDeskController extends Controller
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
         $user = $request->user();
-        if (! $user || $user->role !== 'admin') {
+        if (! $user || ! in_array($user->role, ['admin', 'staff'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะ Check-out ได้ค่ะนายท่าน',
+                'message' => 'ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นถึงจะ Check-out ได้ค่ะนายท่าน',
             ], 403);
         }
 
@@ -321,7 +325,7 @@ class FrontDeskController extends Controller
                 $room = Room::findOrFail($bRoom->room_id);
 
                 // 🌟 Refactor (25/06/26): BR state machine → checked_out
-                $bRoom->transitionStatus('checked_out', 'admin');
+                $bRoom->transitionStatus('checked_out', $user->role);
 
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง → checkout_makeup
                 $room->transitionStatusTo('checkout_makeup', $validated['verified_by']);
@@ -483,10 +487,10 @@ class FrontDeskController extends Controller
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย
         $user = $request->user();
-        if (! $user || $user->role !== 'admin') {
+        if (! $user || ! in_array($user->role, ['admin', 'staff'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ต้องเป็นแอดมินเท่านั้นถึงจะบันทึกการรับชำระเงินได้ค่ะนายท่าน',
+                'message' => 'ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นถึงจะบันทึกการรับชำระเงินได้ค่ะนายท่าน',
             ], 403);
         }
 
@@ -518,7 +522,7 @@ class FrontDeskController extends Controller
 
                 // 🌟 Refactor (25/06/26): draft → paid (container)
                 if ($booking->status === 'draft') {
-                    $booking->transitionStatus('paid', 'admin');
+                    $booking->transitionStatus('paid', $user->role);
                 }
 
                 // ❄️ FROZEN (24/07/26): Receipt table deprecated — ไม่สร้าง receipt row ใหม่อีกต่อไป
