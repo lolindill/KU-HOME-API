@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
 use Exception;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * 🧹 Housekeeping Task (Phase A refactor — 15/07/26)
@@ -49,9 +50,9 @@ class HousekeepingTask extends Model
         'accepted_at' => 'datetime',
         'scheduled_for' => 'date',
         // 📊 (05/10/26) PgBoolean — PostgreSQL strict boolean (ห้าม 'boolean' ตรง ๆ)
-        'cleaning_check_1' => \App\Casts\PgBoolean::class,
-        'cleaning_check_2' => \App\Casts\PgBoolean::class,
-        'cleaning_check_3' => \App\Casts\PgBoolean::class,
+        'cleaning_check_1' => PgBoolean::class,
+        'cleaning_check_2' => PgBoolean::class,
+        'cleaning_check_3' => PgBoolean::class,
     ];
 
     // 🧹 Drop (15/07/26): ปิด updated_at auto-manage — column ถูก drop แล้ว
@@ -68,9 +69,25 @@ class HousekeepingTask extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
-    public function photos(): HasMany
+    /**
+     * 🖼️ (14/10/26, REQ-048): รูปภาพงานทำความสะอาด — morphMany ไป images table (หมวด before, after, forgotten_item, damage)
+     */
+    public function photos(): MorphMany
     {
-        return $this->hasMany(HousekeepingPhoto::class, 'task_id');
+        return $this->morphMany(Image::class, 'imageable');
+    }
+
+    public function images(): MorphMany
+    {
+        return $this->morphMany(Image::class, 'imageable');
+    }
+
+    protected static function booted(): void
+    {
+        // 🧹 เมื่อ task ถูกลบ → ลบรูปภาพที่ผูกอยู่ทั้งหมด (hook deleting ของ Image จะลบไฟล์บน disk ให้)
+        static::deleting(function (HousekeepingTask $task) {
+            $task->photos->each->delete();
+        });
     }
 
     // 🧹 Phase A (15/07/26): ลบ inventories() relation — HousekeepingInventory ถูกลบแล้ว (Fix S-B3)

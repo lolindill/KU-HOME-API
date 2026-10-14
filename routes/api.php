@@ -321,5 +321,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where('id', '[0-9a-f\-]{36}');
         Route::patch('/tasks/{id}/status', [DashboardController::class, 'updateStatus'])
             ->where('id', '[0-9a-f\-]{36}');
+        // 🖼️ (14/10/26, REQ-048): รูปภาพงานแม่บ้าน 4 หมวด (before/after/forgotten_item/damage)
+        Route::post('/tasks/{id}/photos', [DashboardController::class, 'uploadPhoto'])
+            ->where('id', '[0-9a-f\-]{36}');
+        Route::get('/tasks/{id}/photos', [DashboardController::class, 'listPhotos'])
+            ->where('id', '[0-9a-f\-]{36}');
     });
 });

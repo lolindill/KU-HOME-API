@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\BookingConfirmation;
 use App\Models\BookingRoom;
+use App\Models\HousekeepingTask;
 use App\Models\Image;
 use Carbon\Carbon;
 use Illuminate\Console\Attributes\Description;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 #[Signature('app:cleanup-images')]
-#[Description('Sweep orphaned slip/evidence files/rows + apply retention policy on rejected slips (30d) and checkin evidences (365d)')]
+#[Description('Sweep orphaned slip/evidence/housekeeping files/rows + apply retention policy on rejected slips (30d), checkin evidences (365d) and housekeeping photos (90d)')]
 class CleanupImages extends Command
 {
     public function handle()
@@ -25,13 +26,14 @@ class CleanupImages extends Command
             'orphan_rows_deleted' => 0,
             'rejected_slips_deleted' => 0,
             'checkin_evidences_deleted' => 0,
+            'expired_housekeeping_photos_deleted' => 0,
         ];
 
         // ── 1) ไฟล์กำพร้าบน disk — เขียนไปแล้วแต่ไม่มี row คุม
         //    (เช่น เหลือจาก failed transaction ก่อน best-effort delete ใน controller จะทำงาน)
         $disk = Storage::disk('local');
         $knownPaths = Image::where('disk', 'local')->pluck('path')->flip();
-        foreach (['slips', 'checkin_evidences'] as $folder) {
+        foreach (['slips', 'checkin_evidences', 'housekeeping'] as $folder) {
             foreach ($disk->files($folder) as $file) {
                 if (! $knownPaths->has($file)) {
                     $disk->delete($file);
@@ -54,7 +56,7 @@ class CleanupImages extends Command
             $this->line("  ✓ Orphan confirmation row deleted: {$image->id}");
         }
 
-        //    2b. image morph ไป booking_room ที่ถูกลบไปแล้ว
+        //    2b. image morph ไป booking_room (หลักฐาน check-in) ที่ถูกลบไปแล้ว
         $orphanEvidences = Image::query()
             ->where('imageable_type', BookingRoom::class)
             ->whereNotIn('imageable_id', BookingRoom::pluck('id'))
@@ -65,7 +67,18 @@ class CleanupImages extends Command
             $this->line("  ✓ Orphan checkin evidence row deleted: {$image->id}");
         }
 
-        //    2c. image ไม่มี imageable เลยและแก่กว่า 24 ชม. (สร้างไม่สำเร็จ/ค้างจากอะไรก็ตาม)
+        //    2c. image morph ไป housekeeping task ที่ถูกลบไปแล้ว
+        $taskOrphans = Image::query()
+            ->where('imageable_type', HousekeepingTask::class)
+            ->whereNotIn('imageable_id', HousekeepingTask::pluck('id'))
+            ->get();
+        foreach ($taskOrphans as $image) {
+            $image->delete(); // hook deleting จะลบไฟล์บน disk ให้
+            $results['orphan_rows_deleted']++;
+            $this->line("  ✓ Orphan task photo row deleted: {$image->id}");
+        }
+
+        //    2d. image ไม่มี imageable เลยและแก่กว่า 24 ชม. (สร้างไม่สำเร็จ/ค้างจากอะไรก็ตาม)
         $unlinked = Image::query()
             ->whereNull('imageable_id')
             ->where('created_at', '<', Carbon::now()->subDay())
@@ -108,11 +121,25 @@ class CleanupImages extends Command
             $this->line("  ✓ Check-in evidence image deleted (retention {$evidenceRetentionDays}d): {$image->id}");
         }
 
+        // ── 5) retention — รูปแม่บ้าน (HousekeepingTask) เก็บ 90 วัน (REQ-048)
+        //    รูปที่สร้างเกิน N วัน (default 90) → ลบรูป (hook deleting จะลบไฟล์บน disk ให้)
+        $hkRetentionDays = max(1, (int) env('HOUSEKEEPING_PHOTO_RETENTION_DAYS', 90));
+        $expiredHkPhotos = Image::query()
+            ->where('imageable_type', HousekeepingTask::class)
+            ->where('created_at', '<', Carbon::now()->subDays($hkRetentionDays))
+            ->get();
+        foreach ($expiredHkPhotos as $image) {
+            $image->delete();
+            $results['expired_housekeeping_photos_deleted']++;
+            $this->line("  ✓ Expired housekeeping photo deleted (retention {$hkRetentionDays}d): {$image->id}");
+        }
+
         Log::info('Image cleanup completed', $results);
         $this->info("  ✓ Orphan files deleted: {$results['orphan_files_deleted']}");
         $this->info("  ✓ Orphan rows deleted: {$results['orphan_rows_deleted']}");
         $this->info("  ✓ Rejected slip images deleted (retention {$retentionDays}d): {$results['rejected_slips_deleted']}");
         $this->info("  ✓ Check-in evidence images deleted (retention {$evidenceRetentionDays}d): {$results['checkin_evidences_deleted']}");
+        $this->info("  ✓ Expired housekeeping photos deleted (retention {$hkRetentionDays}d): {$results['expired_housekeeping_photos_deleted']}");
         $this->info('✅ Image cleanup completed.');
 
         return Command::SUCCESS;
