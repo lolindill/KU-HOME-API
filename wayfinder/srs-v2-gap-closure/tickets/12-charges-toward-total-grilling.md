@@ -67,10 +67,12 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 - Charge หลังจ่าย/confirm → admin+staff เก็บผ่าน `recordPayment` (ตรง flow org deferred เดิม) · state machine + confirm flow + payments ledger 3 write points **ไม่ถูกแตะ**
 - ทางเลือกเปิดให้ user ส่งสลิปเพิ่ม = ต้องเปิด transition ใหม่บน state machine (paid/confirmed → pending) — ใหญ่กว่าตัว charge เอง → ไม่แนะนำ
 
-**ข้อ 5 — หลักฐานการจ่ายเงินตามห้องพัก (REQ-042 ตัวจริง): แนะนำ upload หลักฐานต่อ charge ผ่าน `images` morph**
+**ข้อ 5 — หลักฐานการจ่ายเงินตามห้องพัก (REQ-042 ตัวจริง): เปิดให้ owner เลือก A/B**
 
-- แนะนำ: `images` table morph `AdditionalCharge` (production-ready ตาม AGENTS.md: polymorphic + private disk + signed URL 15 นาที) — แนบหลักฐานได้ราย charge ทั้งระดับห้องและระดับ booking ครอบคลุมคำ REQ ตรงตัว **ไม่สร้างตารางรูปใหม่** (ตามข้อห้าม image system)
-- ทางเลือกเบากว่า: หลักฐานระดับ booking พอ (สลิป `booking_confirmations` / `reference_number` ของ `recordPayment`) — เลือกได้ถ้า owner เห็นว่าไม่มีเคสแนบรูปราย charge จริงในทางปฏิบัติ
+- ข้อเท็จจริง: `images` table มีเจ้าของแล้ว 3 เจ้า — สลิป (`BookingConfirmation`), หลักฐานเช็คอิน (`BookingRoom` — ticket 05 ของ map นี้), รูปแม่บ้าน (`HousekeepingTask` — ticket 06, 14/10/26) · **ไม่มี generic upload endpoint โดยตั้งใจ** (รูปเกิดจาก flow ของเจ้าของเสมอ) — ทางเลือก A จึงเป็น "สร้างเจ้าที่ 4" ด้วย endpoint ใหม่จริง (งานใหม่ แต่ลอกแบบแผน ticket 05/06 ที่ทำมาแล้ว 2 ครั้งใน map นี้)
+- **A: แนบรูปต่อ charge** (morph `AdditionalCharge` + endpoint ใหม่ admin+staff) — ตอบ REQ-042 คำต่อคำ · retention แนะนำไม่ลบอัตโนมัติ (หลักฐานการเงิน)
+- **B: หลักฐานระดับ booking** — ไม่แตะระบบรูปเลย: `payments` มี `received_by`/`reference_number` อยู่แล้ว (front desk ใส่เลขอ้างอิงใบเสร็จกระดาษนอกระบบได้) + สลิปฝั่ง user อยู่ที่ `booking_confirmations` · ถ้าเลือกต้องจด interpretation ลง ledger ("หลักฐานตามห้องพัก" = ระดับ booking + staff คุมหน้างาน)
+- เกณฑ์เลือก: หน้างานมีเคสถ่ายรูปหลักฐานประจำ → A · เก็บสดล้วนไม่มีอะไรถ่าย → B + reference_number
 
 **เคสตรวจสอบ (แก้วแตก 250 · org booking deferred หลัง check-in):** staff `POST /additional-charges` {booking_id, booking_room_id ห้อง 201, "ค่าเสียหาย แก้วแตก", qty 1, price 250, charge_type damage} → `outstanding_amount` +250 ทันที (accessor คำนวณสด) · ตอน org มาเบิก/checkout → admin `recordPayment` 250 → ครบเมื่อ `paid ≥ total + charges` → `is_paid` true
 
