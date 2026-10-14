@@ -1880,7 +1880,7 @@ curl -s -H "Accept: application/json" \
 🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
-💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, required ≥ 1)** — สลิปใหม่ต้องแจ้งยอดเสมอ · ⚠️ **breaking change ตั้งแต่ deploy นี้: frontend ต้องส่ง `amount` มาด้วย** · booking `deferred` **บล็อกสลิป 422** (มีช่องเดียวคือ admin อนุมัติ)
+💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · booking `deferred` **บล็อกสลิป 422** (มีช่องเดียวคือ admin อนุมัติ)
 
 🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
 
@@ -1892,7 +1892,7 @@ curl -s -H "Accept: application/json" \
 |-------------------|-----------|----------|-----------------------------------------------|
 | `slip_image`      | file      | ✅       | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — บังคับเสมอ |
 | `transfer_time`   | datetime  | ❌       | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
-| `amount`          | integer   | ✅       | 💳 ยอดที่ชำระตามสลิป (บาท, ≥ 1) — เก็บเป็น `booking_confirmations.amount` (ชั้น A) |
+| `amount`          | integer   | ❌       | 💳 ยอดที่ชำระตามสลิป (บาท, ≥ 1 ถ้าส่ง) — เก็บเป็น `booking_confirmations.amount` (ชั้น A) · ไม่ส่ง = null (verify ไม่แตะ ledger/is_paid) |
 
 **Example**:
 ```bash
@@ -1938,7 +1938,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed`
 
-💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount` (full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · สลิปเก่าก่อน deploy (amount = null) คง flow เดิม ไม่เขียน ledger
+💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount` (full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · 💳 **(08/10/26)** สลิปที่ **ไม่แจ้งยอด (amount = null)** → **ไม่เขียน ledger และไม่แตะ `is_paid`** (คงค่าเดิม — is_paid ตรวจเฉพาะเมื่อมีการแจ้งยอด · admin เก็บเงินเพิ่มผ่าน `recordPayment` ภายหลังได้)
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
@@ -2710,7 +2710,7 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 }
 ```
 
-- **ชั้น A** — `booking_confirmations.amount` (บาท, required ≥ 1 สลิปใหม่): ยอดที่ user แจ้งต่อครั้งส่งสลิป · สลิปเก่าก่อน deploy = null (คง flow เดิม)
+- **ชั้น A** — `booking_confirmations.amount` (บาท, **nullable** — 08/10/26, ≥ 1 ถ้าส่ง): ยอดที่ user แจ้งต่อครั้งส่งสลิป · ไม่แจ้ง = null → verify **ไม่เขียน ledger + ไม่แตะ `is_paid`**
 - **ชั้น B** — ภาพรวมจ่ายแล้ว/ค้าง **derive จาก ledger ล้วน ไม่มี column** — `payments` = ledger เดียวของ "เงินที่เข้าจริง" · **เขียนได้ 3 จุดเท่านั้น:** ① `PUT /booking-confirmations/{id}/verify` (สลิปผ่าน) ② `POST /front-desk/{id}/payment` (เงินสด) ③ `POST /payments` (mock QR)
 - **`is_paid`** = `SUM(payments) ≥ total_amount` — "จ่ายครบ" เท่านั้น (deposit งวดแรกผ่าน ≠ is_paid) · ตั้งจริงตอน verify / recordPayment / QR
 - **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`

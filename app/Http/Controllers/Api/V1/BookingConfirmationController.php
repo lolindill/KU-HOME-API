@@ -97,8 +97,8 @@ class BookingConfirmationController extends Controller
             $confirmation = BookingConfirmation::create([
                 'booking_id' => $booking->id,
                 'transfer_time' => $validated['transfer_time'] ?? null,
-                // 💳 (25/09/26, ticket 04 ชั้น A): ยอดที่ user แจ้งต่อครั้งส่งสลิป (required ≥ 1)
-                'amount' => $validated['amount'],
+                // 💳 (25/09/26, ticket 04 ชั้น A): ยอดที่ user แจ้งต่อครั้งส่งสลิป (08/10/26 → nullable)
+                'amount' => $validated['amount'] ?? null,
                 'status' => 'pending',
             ]);
 
@@ -178,9 +178,9 @@ class BookingConfirmationController extends Controller
             //    1 row = 1 เหตุการณ์เงิน · reference_number = confirmation UUID (จุดเขียน payments
             //    = 3 จุดเท่านั้น: verify / recordPayment / mock QR)
             //
-            //    ⚠️ สลิปเก่าก่อน deploy (amount = null — ไม่มีการแจ้งยอด) คง flow เดิม:
-            //    ไม่เขียน ledger (0 บาท ไม่ใช่เหตุการณ์เงิน) + is_paid = true ตาม pre-deploy
-            //    — row แบบนี้เกิดไม่ได้อีกตั้งแต่ confirm บังคับ amount แล้ว
+            //    💳 (08/10/26, owner): amount เป็น nullable — สลิปที่ user ไม่แจ้งยอด:
+            //    ไม่เขียน ledger (0 บาท ไม่ใช่เหตุการณ์เงิน) + **ไม่แตะ is_paid** (คงค่าเดิม —
+            //    is_paid ตรวจเฉพาะเมื่อมีการแจ้งยอดเท่านั้น; admin ตัดสินจากภาพสลิปเอง)
             $payment = null;
             if ($confirmation->amount !== null) {
                 $payment = Payment::create([
@@ -194,9 +194,6 @@ class BookingConfirmationController extends Controller
                 // 💳 is_paid = SUM(payments) ≥ total (จ่ายครบจุดไหนจุดนั้น — deposit งวดแรกยัง false)
                 //    full จ่ายเต็ม → true เหมือน flow เดิม (regression 0%)
                 $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount]);
-            } else {
-                // 🌟 Fix 03/07/26: ใช้ PHP true + PgBoolean cast (ห้ามใช้ DB::raw('TRUE'))
-                $booking->update(['is_paid' => true]);
             }
 
             // 🌟 Refactor (25/08/26): pending → paid (ตอนนี้ 'paid' = admin ตรวจแล้ว + is_paid ตาม ledger)

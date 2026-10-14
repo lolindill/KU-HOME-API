@@ -72,7 +72,7 @@ class BookingConfirmationTest extends TestCase
 
     private function confirmPayload(array $overrides = []): array
     {
-        // 💳 (25/09/26) confirm บังคับ amount ≥ 1 แล้ว (booking-payment-types ticket 04/05)
+        // 💳 (08/10/26) amount เป็น nullable — ส่งหรือไม่ส่งก็ได้ (≥ 1 ถ้าส่ง)
         return array_merge([
             'slip_image' => $this->slipFile(),
             'transfer_time' => now()->subHour()->toDateTimeString(),
@@ -288,8 +288,10 @@ class BookingConfirmationTest extends TestCase
         ]);
         $this->assertNotNull($confirmation->fresh()->reviewed_by);
 
-        // 🌟 Refactor (25/08/26): is_paid ถูก set ตอน verify (pending → paid → confirmed)
-        $this->assertTrue($booking->fresh()->is_paid);
+        // 💳 (08/10/26): confirmation นี้ไม่มี amount (ไม่แจ้งยอด) → verify ไม่แตะ is_paid/ledger
+        //    (is_paid ตรวจเฉพาะสลิปที่แจ้งยอด — ดู BookingPaymentTypeTest)
+        $this->assertFalse($booking->fresh()->is_paid);
+        $this->assertDatabaseMissing('payments', ['booking_id' => $booking->id]);
     }
 
     public function test_full_flow_confirm_then_verify_confirms_booking(): void

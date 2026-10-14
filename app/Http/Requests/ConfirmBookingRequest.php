@@ -12,9 +12,11 @@ use Illuminate\Foundation\Http\FormRequest;
  * - transfer_time: เวลาที่ลูกค้าแจ้งโอน (จากสลิป) — optional
  *
  * 💳 (25/09/26, booking-payment-types ticket 04/05): amount บังคับ ≥ 1 —
- *    สลิปใหม่ต้องแจ้งยอดเสมอ (ชั้น A booking_confirmations.amount) —
- *    ⚠️ breaking change ตั้งแต่ deploy นี้: frontend ต้องส่ง amount มาด้วย
- *    (admin verify เทียบ expected vs claimed แล้วตัดสินเอง — ระบบไม่ hard-reject)
+ *    สลิปใหม่ต้องแจ้งยอดเสมอ (ชั้น A booking_confirmations.amount)
+ *
+ * 💳 (08/10/26, owner): amount กลับเป็น nullable — user ไม่แจ้งยอดก็ส่งสลิปได้
+ *    (admin verify เทียบ expected vs claimed แล้วตัดสินเอง — ระบบไม่ hard-reject ·
+ *     verify ไม่แตะ is_paid/ledger เมื่อไม่มีการแจ้งยอด)
  */
 class ConfirmBookingRequest extends FormRequest
 {
@@ -28,7 +30,7 @@ class ConfirmBookingRequest extends FormRequest
         return [
             'slip_image' => 'required|file|image|mimes:jpeg,png,jpg|max:4096',
             'transfer_time' => 'nullable|date|before_or_equal:now',
-            'amount' => 'required|integer|min:1',
+            'amount' => 'nullable|integer|min:1',
         ];
     }
 
@@ -38,7 +40,6 @@ class ConfirmBookingRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'amount.required' => 'กรุณาระบุยอดเงินที่ชำระตามสลิป (บาท) ค่ะ 💳',
             'amount.integer' => 'ยอดเงินที่ชำระต้องเป็นตัวเลขจำนวนเต็ม (บาท) ค่ะ 💳',
             'amount.min' => 'ยอดเงินที่ชำระต้องมากกว่า 0 บาทค่ะ 💳',
         ];

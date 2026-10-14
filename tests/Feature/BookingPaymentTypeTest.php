@@ -162,6 +162,66 @@ class BookingPaymentTypeTest extends TestCase
     }
 
     // =========================================================
+    // 💳 สลิปไม่แจ้งยอด (amount nullable — 08/10/26)
+    // =========================================================
+
+    public function test_slip_without_amount_verifies_without_ledger_or_is_paid(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $user = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // ส่งสลิปโดยไม่ส่ง amount → 201 (echo amount = null · expected ยังคำนวณให้)
+        ($this->actingAs($user, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('booking_status', 'pending')
+            ->assertJsonPath('amount', null)
+            ->assertJsonPath('expected_amount', 1500);
+
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->assertNull($confirmation->amount);
+
+        // verify ผ่าน → confirmed แต่ "ไม่แตะ ledger และ is_paid" (เช็คเฉพาะสลิปที่แจ้งยอด)
+        $this->actingAs($this->admin(), 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('claimed_amount', null)
+            ->assertJsonPath('payment_recorded', null)
+            ->assertJsonPath('paid_amount', 0)
+            ->assertJsonPath('outstanding_amount', 1500)
+            ->assertJsonPath('booking_is_paid', false);
+
+        $this->assertSame(0, Payment::where('booking_id', $booking->id)->count(), 'สลิปไม่แจ้งยอด = ไม่มี ledger row');
+        $this->assertFalse($booking->fresh()->is_paid, 'is_paid ต้องคง false — verify ไม่มีสิทธิ์ตั้ง true เองเมื่อไม่มียอดแจ้ง');
+    }
+
+    public function test_slip_amount_zero_still_rejected_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $user = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // nullable ≠ ยอดอะไรก็ได้ — 0 บาทยังไม่ใช่เหตุการณ์เงิน → 422
+        ($this->actingAs($user, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+                'amount' => 0,
+            ])
+            ->assertStatus(422);
+    }
+
+    // =========================================================
     // 💰 deposit
     // =========================================================
 
