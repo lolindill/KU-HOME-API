@@ -61,6 +61,7 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 
 - Free-text item ต่อห้อง = charge ที่ผูก `booking_room_id` (item_name/qty/price กรอกเอง) — **ไม่แตะ** `addons` fixed เลย ไม่เกิดกลไกที่สาม
 - เปิดให้ owner เลือกเสริม: เพิ่ม `charge_type = 'addon'` เป็นค่าที่สามเพื่อให้รายงานแยกหมวดได้ (report filter ตาม type อยู่แล้ว) หรือใช้ damage|rental เดิมพอ
+- ⚠️ **ตอบคำถาม owner "ย้ายไปเก็บใน addon ได้ไหม" (2026-10-14) — ไม่แนะนำ:** addon แก้ได้ทางเดียวผ่านแก้ห้อง (`PUT /bookings/{id}/rooms/{brId}`) ซึ่ง guard บล็อก BR `checked_in/checked_out/no_show` = 422 — **ชนมติข้อ 4 โดยตรง** (charge เกิดหลังเข้าพัก จะบันทึกไม่ได้เลย) · โครง addons เป็น per-room เท่านั้น (HasOne) REQ-044 ต้องการต่อ booking ด้วย → ต้องสร้างที่วางที่สอง = กลไกคู่ขนานที่ห้ามไว้ · รายการแบบ item/ราคา/จำนวนหลายแถวต้องยัด JSON = mini-ledger ไร้ FK/audit · ตาราง `additional_charges` + รายงาน damage/rental ที่มีอยู่แล้วจะซ้ำซ้อน · SRS ใช้คำ "Add-on ให้แอดมินกรอก" เป็นชื่อเรียกฟีเจอร์ ไม่ได้ผูกว่าต้องอยู่ตาราง addons — **เงินจ่ายรวมกันได้ที่ front desk อยู่แล้วผ่านยอดค้าง (ข้อ 1) โดยไม่ต้องย้ายบ้านข้อมูล**
 
 **ข้อ 4 — การชำระ: ✅ ล็อกแล้วตามมติ owner (ดู Resolution) — `recordPayment` เท่านั้นสำหรับ charge หลังชำระ**
 
