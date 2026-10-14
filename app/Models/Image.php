@@ -37,6 +37,11 @@ class Image extends Model
         'uploaded_by',
         'imageable_id',
         'imageable_type',
+        'metadata',
+    ];
+
+    protected $casts = [
+        'metadata' => 'array',
     ];
 
     protected $appends = ['url'];

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Auth;
 
 class BookingRoom extends Model
@@ -242,6 +243,15 @@ class BookingRoom extends Model
     public function addon(): HasOne
     {
         return $this->hasOne(Addon::class);
+    }
+
+    /**
+     * 🖼️ (REQ-033): หลักฐานการเข้าพักตอน check-in (บัตร ปชช., registration, PDPA ฯลฯ)
+     * morphMany ไปยัง images table (เก็บ 365 วัน)
+     */
+    public function evidences(): MorphMany
+    {
+        return $this->morphMany(Image::class, 'imageable');
     }
 
     // =========================================================
