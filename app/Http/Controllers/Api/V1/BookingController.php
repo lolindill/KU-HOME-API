@@ -2026,7 +2026,7 @@ class BookingController extends Controller
             $booking = Booking::with(['bookingRooms.addon'])->findOrFail($bookingId);
 
             // =========================================================
-            // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin)
+            // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin/Staff)
             // =========================================================
             $user = $request->user('sanctum');
 
@@ -2039,8 +2039,8 @@ class BookingController extends Controller
                 ], 401);
             }
 
-            // ถ้าไม่ใช่ Admin และ ID ไม่ตรงกับคนจอง
-            if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
+            // ถ้าไม่ใช่ Admin/Staff และ ID ไม่ตรงกับคนจอง
+            if (! in_array($user->role, ['admin', 'staff']) && $booking->user_id !== $user->id) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️',

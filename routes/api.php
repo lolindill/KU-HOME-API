@@ -179,9 +179,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::patch('/organizations/{id}/toggle', [OrganizationController::class, 'toggle'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ, assign ห้อง)
+        // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ)
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
-        Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
 
         // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
         //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
@@ -212,10 +211,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         // 🛎️ Front Desk Operations (admin only)
         Route::prefix('front-desk')->group(function () {
             Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);
-            Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
-            Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
             Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow']);
-            Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
         });
 
         // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
@@ -237,6 +233,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/tasks', [DashboardController::class, 'createTask']);
             Route::put('/tasks/{id}/assign', [DashboardController::class, 'assignTask'])
                 ->where('id', '[0-9a-f\-]{36}');
+        });
+    });
+
+    // ============================================
+    // 🛎️ Front Desk & Operations (admin + staff — REQ-031 24hr front desk)
+    // ============================================
+    Route::middleware('role:admin,staff')->group(function () {
+        // 📅 Auto assign rooms for booking
+        Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
+
+        // 🛎️ Front Desk Operations (check-in, check-out, counter payment)
+        Route::prefix('front-desk')->group(function () {
+            Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
+            Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
+            Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
         });
     });
 
