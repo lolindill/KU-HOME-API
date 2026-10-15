@@ -2,9 +2,9 @@
 
 - **label:** `wayfinder:grilling`
 - **type:** HITL
-- **status:** open
+- **status:** closed *(2026-10-15 — grilling จบ: owner อนุมัติ design ครบทั้ง draft — ดู Resolution)*
 - **blocked-by:** (ไม่มี — frontier)
-- **assignee:** kevii (claimed 2026-10-14)
+- **assignee:** kevii (grilling กับ owner 2026-10-14–15)
 - **summary:** Grill owner กลไก charges ต่อห้อง/ต่อ booking ที่บวกยอดจริงโดยไม่พัง ledger/money chokepoint
 - **phase:** 4
 
@@ -24,16 +24,22 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 
 ## Resolution
 
-**มติที่บันทึกจาก grilling (2026-10-14 — ticket ยังเปิด รอครบ 4+1 ข้อ):**
+**มติ owner ครบ — อนุมัติ design ตาม draft ทั้งหมด (grilling 2026-10-14–15):**
 
 - **ข้อ 4 (การชำระ) — ✅ ล็อกแล้ว:** ค่าปรับ/ค่าเสียหายเป็นการเก็บเพิ่ม**หลังลูกค้าเข้าพัก ชำระที่ front desk** โดย **staff เป็นผู้คุมความถูกต้อง** (มติ owner ใน session นี้) → ช่องทางเดียวคือ `recordPayment` (admin+staff — เงินสด/อ้างอิงหน้าเคาน์เตอร์) ตรงตาม draft แนะนำ · **ไม่เปิด**ให้ user ส่งสลิปเพิ่มผ่าน confirm flow · state machine + confirm flow + payments ledger 3 write points ไม่ถูกแตะ
 - **ข้อ 5 (หลักฐานการจ่ายเงินตามห้องพัก) — ✅ ล็อกแล้ว: ไม่ทำรูปหลักฐานต่อ charge (เลือก B)** — มติ owner: เงินเก็บหน้างานไม่มีรูปหลักฐาน และ REQ ไม่ได้หมายถึงรูปภาพ → "หลักฐานการจ่ายเงินตามห้องพัก" (อนุประโยคท้าย REQ-042 — มีอยู่ในตัวอักษรจริง) **ตีความเป็น "บันทึกการชำระเงินระดับ booking"** ซึ่งระบบมีอยู่แล้ว: `payments` ผ่าน `recordPayment` (amount/received_by/reference_number) + สลิปฝั่ง user ที่ `booking_confirmations` · ไม่สร้างเจ้าที่ 4 ให้ images table · ⚠️ ต้องจด **interpretation line ลง deviation ledger** (REQ-042 อนุประโยคนี้) เมื่อปิด ticket 13 — กัน QA ถามย้อน
 
-(ยังว่าง — รอมติข้อ 1/2/3 (+4a) ครบแล้วจึงปิด ticket)
+- **ข้อ 1 (กลไกยอด) — ✅ ล็อกแล้ว:** คง `total_amount` = ค่าห้องล้วน · เพิ่ม accessor `charges_total` = Σ additional_charges · `outstanding_amount` = max(0, total + charges − paid) · `is_paid` = paid ≥ total + charges (รวมกลไก reset เมื่อ charge ทำยอดโตเกิน paid — เทียบ surcharge) · deposit 50% ไม่ขยับ · invariant Σ booking_rooms.amount == total_amount คงเดิม · บวกจริงทุกสถานะ
+- **ข้อ 2 (ผูกห้อง) — ✅ ล็อกแล้ว:** คง `booking_id` (FK restrict) + เพิ่ม `booking_room_id` nullable (FK) — ใส่คู่ = จดต่อห้อง, ใส่เดียว = รวมทั้ง booking · validate ต้องเป็นลูกของ booking_id (422 ถ้าไม่ใช่) · ไม่ใช่ polymorphic / ไม่สร้างตารางใหม่
+- **ข้อ 3 (REQ-044) — ✅ ล็อกแล้ว:** รวมเป็นกลไกเดียวกับ charges + เพิ่ม `charge_type = 'addon'` เป็นค่าที่สามเพื่อแยกหมวดในรายงาน · **ไม่แตะ** `addons` fixed · owner เคยถาม "ย้ายไป addons ได้ไหม" → ปฏิเสธ (guard checked_in = 422 ชนข้อ 4 + โครง per-room + JSON mini-ledger ไร้ FK — ดู draft)
+- **4a (สถานะ) — ✅ ล็อกแล้ว:** ยืดหยุ่น — ไม่ล็อก guard บังคับ checked_in ขึ้นไป (staff คุมเองตามข้อ 4 · กันเคสพบความเสียหายทีหลัง checkout)
+- **API surface — ✅ ตามร่างด้านล่าง:** CRUD เดิม + `booking_room_id` · `GET /api/v1/bookings/{bookingId}/additional-charges` ใหม่ · booking appends `charges_total` · mutation response แนบ snapshot เงิน · ฝั่งชำระใช้ `recordPayment` เดิม
 
-## Draft ข้อเสนอจาก agent (2026-10-14 — ⚠️ ยังไม่ใช่มติ owner)
+**ผลตามมา:** ticket 13 ปลดล็อก — implement ตามมตินี้ ห้ามเปลี่ยน design · REQ-042/044 ยังไม่ปิดใน deviation ledger จน ticket 13 เสร็จ (+ จด interpretation ของข้อ 5 พร้อมกัน)
 
-> AskUserQuestion ถึง owner ยังไม่มีคำตอบ (session วิ่ง autonomous) — ด้านล่างเป็นข้อเสนอ + เหตุผลจากโค้ดจริง เตรียมไว้ให้ owner ตัดสินเร็ว · **ทุกข้อยังเป็นทางเลือก ห้ามถือเป็นมติ** — ปิด ticket ได้เมื่อ owner รับ/แก้ครบ 4 ข้อเท่านั้น
+## Draft ข้อเสนอจาก agent (2026-10-14 — ✅ owner อนุมัติครบ 2026-10-15 — ทางเลือกที่ปฏิเสธเก็บไว้เป็นประวัติการตัดสิน)
+
+> ข้อเสนอแรกก่อนได้มติ — ทุกข้อถูกอนุมัติตามนี้ (มติฉบับสมบูรณ์อยู่ที่ Resolution ด้านบน)
 > ทวน SRS PDF ต้นฉบับแล้ว (2026-10-14): REQ-042/044 อยู่ §3.3.6 ตรงตามที่ ticket อ้าง — และพบอนุประโยค REQ-042 "หลักฐานการจ่ายเงินตามห้องพัก" ที่ ticket เดิมมองข้าม → เพิ่มเป็นข้อ 5 (แก้ Question + Done แล้ว)
 
 **ข้อเท็จจริงจากโค้ด (ตรวจ 2026-10-14):**
