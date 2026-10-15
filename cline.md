@@ -2089,11 +2089,23 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - ตรวจจาก SRS v2 gap list แล้วพบว่า **validation `max:7` มีครบทั้ง 4 write paths อยู่แล้ว** (StoreBookingRequest / AddBookingRoomsRequest / UpdateBookingRoomRequest / UpdateBookingRoomsRequest — ทั้ง canonical `early_checkin`/`late_checkout` และ alias `early_hours`/`late_hours`, ข้อความไทยครบ)
 - ช่องที่หายคือ test — เพิ่ม `tests/Feature/BookingAddonHoursCapTest.php` 3 tests ครอบ add-rooms (`early_hours=8` → 422) / แก้รายห้อง (`late_checkout=8`) / แก้ batch (`late_hours=8`) — create path มี BookingTest คุมอยู่แล้ว
 
+## 💸 Additional charges บวกยอดจริง (2026-10-15 — srs-v2-gap-closure ticket 13, REQ-042/044)
+
+- **นิยามยอดใหม่ (มติ owner ticket 12 — ห้าม re-litigate):** `total_amount` = **ค่าห้องล้วนตลอดไป** (invariant Σ `booking_rooms.amount` == `total_amount` ไม่พัง) · booking append **`charges_total`** = Σ `additional_charges.price` · **`outstanding_amount` = max(0, total + charges − paid)** · **`is_paid` = paid ≥ total + charges** · `deposit_amount` 50% **ไม่ขยับ** (มัดจำผูกค่าห้อง) — สูตรอยู่ที่ accessors ใน `Booking` (`getChargesTotalAttribute`/`getOutstandingAmountAttribute`) + **`Booking::syncIsPaid()`** = จุด recompute `is_paid` เดียว เรียกจาก `AdditionalChargeController` ทั้ง create/update/delete (update ย้าย booking → recompute ทั้งสอง booking)
+- **จุดเปรียบเทียบ is_paid ที่ต้องรวม charges (แก้ครบ 3 จุดแล้ว):** verify สลิป (`BookingConfirmationController::verify`) · `FrontDeskController::recordPayment` · surcharge guard ใน `BookingController` (downgrade guard + reset false — ยอดรวม = total + charges)
+- **การชำระ:** charge หลังจ่าย/เข้าพัก เก็บที่ front desk ผ่าน `recordPayment` **เท่านั้น** (admin+staff — staff คุมความถูกต้อง มติข้อ 4) — **ไม่เปิด**ให้ user ส่งสลิปเพิ่มผ่าน confirm flow · payments ledger ยังเขียน 3 จุดเท่าเดิม · state machine ไม่ถูกแตะ (charge เปลี่ยนแค่ boolean `is_paid` — ไม่ transition)
+- **การผูกห้อง:** `booking_room_id` nullable FK→`booking_rooms` (restrict) — ใส่คู่ = จดต่อห้อง (REQ-042) · ใส่เดียว = รวมทั้ง booking · validate ลูก-พ่อ ใน FormRequest (422 ถ้าไม่ใช่ลูกของ `booking_id`)
+- **REQ-044 addon:** รวมกลไกเดียวกับ charges — `charge_type` เพิ่มค่า **`addon`** (เท่ากับ damage|rental|addon) · **ไม่แตะ**ตาราง `addons` fixed (เหตุผลปฏิเสธ "ย้ายไป addons": guard checked_in 422 + per-room เท่านั้น + JSON ไร้ FK — จดใน ticket 12)
+- **API:** CRUD เดิม (`POST/PATCH/DELETE /additional-charges`, admin+staff) + **`GET /api/v1/bookings/{bookingId}/additional-charges` ใหม่** — 🆕 **ปลดธรรมเนียม "charges ไม่มี GET อ่านผ่าน report อย่างเดียว"** เพราะยอดเงินของ booking ขึ้นกับ charges แล้ว หน้า front desk ต้องอ่านรายการ/ยอดได้ทันที · response ของ create/update/delete/list แนบ **snapshot เงิน booking** (`charges_total`/`outstanding_amount`/`booking_is_paid`/`booking_status`) ให้หน้างานอัปเดตรอบเดียว
+- **สถานะยืดหยุ่น (มติ 4a):** บันทึก charge ได้**ทุกสถานะ booking** — ไม่ guard checked_in ขึ้นไป (กันเคสพบความเสียหายทีหลัง checkout · staff คุมเอง)
+- **รายงาน:** `AdditionalChargesReportData` เพิ่ม filter หมวด **บริการเสริม (addon)** (template JSON + filterRules) · `DailyFinancialReportData` ไม่แก้ — เงินเก็บ charge ไหลเข้าเป็นแถว payments (เงินสด) เอง · `ManagerReportData` เป็น occupancy ล้วนไม่เกี่ยวเงิน
+- Tests: `tests/Feature/AdditionalChargeBookingTotalTest.php` (12 tests — per-room/per-booking + 422 ลูก-พ่อ + recompute is_paid ตอนแก้/ลบ + deposit ไม่ขยับ + recordPayment ของ staff + verify สลิปรวม charge + GET + สิทธิ์ + addon filter + daily-financial + regression ไม่มี charge)
+
 ## 📋 SRS v2 Gap Register — ของที่เหลือจาก SRS (srs_room_booking_v2.pdf) (2026-09-24)
 
 > owner ตรวจ PDF SRS v2 เทียบระบบ แล้วสั่ง: ทำข้อ 1/2/5/6 (+ต่อมาย้าย 7 มาจด) · เพิ่ม ticket ในแมปเปิดสำหรับ 8/9/11 · ที่เหลือ "take note" — รายการจด ณ วันที่ 24/09/26:
 
-1. **REQ-042/044/045 — ค่าเสียหาย/ค่าปรับ add-on ต่อห้อง-ต่อ booking + upgrade ห้องจ่ายส่วนต่าง:** ยังไม่มีทั้งโค้ด/แมป — งานใหญ่ ต้อง chart แมปใหม่ก่อนเขียนโค้ด (booking domain, ยุ่ง state machine + reconciliation)
+1. **REQ-042/044 — ค่าเสียหาย/ค่าปรับ/บริการเสริม (addon) ต่อห้อง-ต่อ booking:** ✅ **implemented แล้ว (2026-10-15)** — design ล็อกใน wayfinder `srs-v2-gap-closure` ticket [12](./wayfinder/srs-v2-gap-closure/tickets/12-charges-toward-total-grilling.md) + implement ticket [13](./wayfinder/srs-v2-gap-closure/tickets/13-charges-toward-total-impl.md) — ดูหัวข้อ "💸 Additional charges บวกยอดจริง" ด้านล่าง · REQ-045 (upgrade) = interpretation ใน deviation ledger ข้อ 7 แล้ว
 2. **REQ-020/040/009.2 — เอกสาร Quotation / ใบ confirm 2 รูปแบบ (แสดง/ไม่แสดงราคา) / Guest Folio:** PDF documents effort — excel-reports ตัดเป็น out-of-scope ไว้แล้ว ยังไม่มีใคร chart (จับคู่ roadmap "report templates + digital signature")
 3. **REQ-033 — ไฟล์หลักฐาน check-in (บัตรประชาชน/Registration/guest register/PDPA) เก็บ 1 ปี:** `images` table + private disk พร้อม (morph ได้กับ BookingRoom) แต่ยังไม่มี endpoint อัปโหลดหลักฐานตอน check-in + ไม่มี retention 1 ปีใน `app:cleanup-images` (ตอนนี้ sweep แค่ orphan + สลิป rejected 30 วัน) — owner สั่ง take note (24/09/26), ยังไม่ทำ
 4. **หมวด 3.8 ใบเสร็จรับเงิน (ต่อ booking, แบ่งราคา 1–3 คน / กรอกราคาเอง):** ชนกับ `receipts` FROZEN (2026-07-24) — ต้องตัดสิน unfreeze/ตารางใหม่ ตอน design เงินของแมป `booking-payment-types` จบ (มีจดใน "Not yet specified" ของแมปแล้ว — ตัวนี้ update ด้วย req เลข REQ-00x ของ SRS)
@@ -2331,10 +2343,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
    - **เหตุผล:** เมื่อผู้ใช้เริ่มทำการจอง ระบบจะสร้าง Booking ในสถานะ `draft` แบบ Real-time ทันที พร้อมทั้งสร้างรหัสการจอง (`confirmation` เช่น `BK...`) ผ่าน Atomic Sequence (`booking_sequences`) ตั้งแต่ตอนสร้าง เพื่อทำการกันห้อง (holding slot) 15 นาทีตาม payment deadline พฤติกรรมนี้ถือว่าครอบคลุมข้อกำหนด REQ-012 โดยสมบูรณ์และป้องกัน race condition ได้อย่างรัดกุม
    - **ทางกลับถ้ามี:** ไม่ต้องมีทางกลับ ถือเป็น core contract ของระบบการจอง
 
+9. **REQ-042 อนุประโยค "หลักฐานการจ่ายเงินตามห้องพัก" — ตีความเป็นบันทึกการชำระระดับ booking (ไม่มีรูปหลักฐานต่อ charge)**
+   - **REQ ID:** REQ-042 (อนุประโยคท้ายข้อกำหนด — มีอยู่ในตัวอักษรจริงของ SRS §3.3.6)
+   - **สถานะ:** `interpretation`
+   - **วันที่ตัดสิน:** 2026-10-15 (grilling กับ owner — wayfinder ticket [12](./wayfinder/srs-v2-gap-closure/tickets/12-charges-toward-total-grilling.md) ข้อ 5)
+   - **เหตุผล:** Owner ยืนยันเงินค่าปรับ/ค่าเสียหายเก็บหน้างานไม่มีรูปหลักฐาน และ REQ ไม่ได้หมายถึงรูปภาพ → "หลักฐานการจ่ายเงินตามห้องพัก" ตีความเป็น **บันทึกการชำระเงินระดับ booking** ที่ระบบมีอยู่แล้ว: `payments` ผ่าน `recordPayment` (amount/received_by/reference_number — ใส่เลขอ้างอิงใบเสร็จกระดาษนอกระบบได้) + สลิปฝั่ง user ที่ `booking_confirmations` · จึง **ไม่สร้างเจ้าที่ที่ 4 ให้ `images` table** (ไม่ morph `AdditionalCharge`) — จดไว้กัน QA ถามย้อนว่าทำไม charge ไม่มีรูปแนบ
+   - **ทางกลับถ้ามี:** เมื่อหน้างานมีเคสถ่ายรูปหลักฐานประจำ ให้เปิด ticket ใหม่ morph `AdditionalCharge` ตามแบบแผน tickets 05/06 (ลอกแบบ `images` + endpoint ของเจ้าของได้ตรง ๆ)
 
-### 4. ปิดด้วย Implementation (2026-10-14 — wayfinder tickets 02–07, dispatch ขนานผ่าน agent-hub/antigravity)
 
-> REQ กลุ่มนี้ไม่เคยติด ledger เป็น deviation — ปิดด้วยโค้ดจริงตาม decisions ที่ grill ล็อกกับ owner 2026-10-14 (suite 725 เขียว · merge ทั้งหมดบน `agust-11`)
+### 4. ปิดด้วย Implementation (2026-10-14 — wayfinder tickets 02–07, dispatch ขนานผ่าน agent-hub/antigravity · ต่อ 15/10/26 ticket 12+13)
+
+> REQ กลุ่มนี้ไม่เคยติด ledger เป็น deviation — ปิดด้วยโค้ดจริงตาม decisions ที่ grill ล็อกกับ owner 2026-10-14 (suite 725 เขียว · merge ทั้งหมดบน `agust-11` · ticket 13 เพิ่มภายหลัง suite 737 เขียว)
 
 | REQ | Ticket | สิ่งที่ implement | Decision ที่ล็อกเพิ่มตอนทำ |
 |---|---|---|---|
@@ -2342,5 +2361,6 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 | REQ-031 | 03 front-desk staff | `role:admin,staff` บน check-in/out + **payment + assign-rooms** | walk-in / mark-no-show คง admin-only · เพิ่ม `staff` ใน validTransitions ของ Booking/BookingRoom เฉพาะเส้นทางบริการ 24 ชม. |
 | REQ-023 | 04 auto-assign T-2 | `DailyRoomMaintenance` assign ล่วงหน้า 2 วัน ผ่าน RoomAllocator | fail-safe ต่อ booking (ห้องไม่พอ = log ทิ้งไว้ ไม่ crash) |
 | REQ-033 | 05 check-in evidence | `POST/GET /front-desk/booking-rooms/{id}/evidence` (morph `BookingRoom`) | state guard `confirmed/checked_in/checked_out` · retention 365 วัน ต่อ `app:cleanup-images` · เพิ่ม column `images.metadata` (JSON) |
+| REQ-042/044 | 12 (grill) + 13 (impl) — 15/10/26 | charges บวกยอดจริง: `charges_total` append + `outstanding/is_paid` รวม charges + `syncIsPaid()` recompute + `booking_room_id` nullable + `charge_type='addon'` + `GET /bookings/{id}/additional-charges` | `total_amount` คงค่าห้องล้วน · เก็บเงินผ่าน `recordPayment` เท่านั้น · ทุกสถานะ · ไม่มีรูปหลักฐาน (interpretation ข้อ 9) · deposit ไม่ขยับ |
 | REQ-048 | 06 housekeeping photos | `POST/GET /dashboard/tasks/{id}/photos` (morph `HousekeepingTask`) | drop ตาราง dead scaffold `housekeeping_photos` · เพิ่ม column `images.category` · cap before/after 5+5 · retention 90 วัน |
 | REQ-051/052 | 07 stock | CRUD `/stock` + derived status ok/low/out + `stock_movements` + `CleanupStockMovements` (03:00) | soft delete (คง audit trail 1 ปี) · housekeeping อ่านอย่างเดียว · เติม `SuppliesReportData` เต็ม |

@@ -199,9 +199,10 @@ class BookingConfirmationController extends Controller
                     'received_by' => $user->id,
                 ]);
 
-                // 💳 is_paid = SUM(payments) ≥ total (จ่ายครบจุดไหนจุดนั้น — deposit งวดแรกยัง false)
+                // 💳 is_paid = SUM(payments) ≥ total + charges (จ่ายครบจุดไหนจุดนั้น — deposit งวดแรกยัง false)
+                //    💸 (15/10/26, ticket 13): charges (ค่าปรับ/ค่าเสียหาย/addon) บวกยอดจริงแล้ว
                 //    full จ่ายเต็ม → true เหมือน flow เดิม (regression 0%)
-                $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount]);
+                $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount + $booking->charges_total]);
             }
 
             // 🌟 Refactor (25/08/26): pending → paid (ตอนนี้ 'paid' = admin ตรวจแล้ว + is_paid ตาม ledger)

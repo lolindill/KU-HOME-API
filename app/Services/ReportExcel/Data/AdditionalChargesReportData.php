@@ -8,8 +8,10 @@ use App\Services\ReportExcel\BaseReportData;
 /**
  * 💸 AdditionalChargesReportData — รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม (excel-reports spec §2.6)
  *
- *    แถว = additional_charges (ledger รายงานล้วน — ยอดไม่เข้า booking) ที่ transaction_date
- *    อยู่ในช่วง date_range · filter item_type: ทุกประเภท | ค่าเสียหาย (damage) | ค่ายืม (rental)
+ *    แถว = additional_charges ที่ transaction_date อยู่ในช่วง date_range
+ *    · filter item_type: ทุกประเภท | ค่าเสียหาย (damage) | ค่ายืม (rental) | บริการเสริม (addon — 15/10/26 ticket 13)
+ *    · 💳 (15/10/26, ticket 13) ยอดบวกยอดจริงที่ booking แล้ว (outstanding/is_paid) —
+ *      แถวยัง query ทาง booking_id เหมือนเดิม (charge ต่อห้องก็มี booking_id เสมอ)
  */
 class AdditionalChargesReportData extends BaseReportData
 {
@@ -22,7 +24,7 @@ class AdditionalChargesReportData extends BaseReportData
     {
         return array_merge(
             $this->dateRangeRules('date_from', 'date_to'),
-            $this->enumFilterRules('item_type', ['ทุกประเภท', 'ค่าเสียหาย', 'ค่ายืม'], 'ทุกประเภท'),
+            $this->enumFilterRules('item_type', ['ทุกประเภท', 'ค่าเสียหาย', 'ค่ายืม', 'บริการเสริม'], 'ทุกประเภท'),
         );
     }
 
@@ -36,6 +38,7 @@ class AdditionalChargesReportData extends BaseReportData
             ->whereDate('transaction_date', '<=', $filters['date_to'])
             ->when($itemType === 'ค่าเสียหาย', fn ($q) => $q->where('charge_type', AdditionalCharge::TYPE_DAMAGE))
             ->when($itemType === 'ค่ายืม', fn ($q) => $q->where('charge_type', AdditionalCharge::TYPE_RENTAL))
+            ->when($itemType === 'บริการเสริม', fn ($q) => $q->where('charge_type', AdditionalCharge::TYPE_ADDON))
             ->orderBy('transaction_date')
             ->get()
             ->map(fn (AdditionalCharge $charge) => [

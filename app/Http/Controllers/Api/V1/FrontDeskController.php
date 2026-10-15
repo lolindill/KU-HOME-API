@@ -513,11 +513,14 @@ class FrontDeskController extends Controller
             ]);
 
             // ✅ #18 Fixed: อัปเดต is_paid + booking status เมื่อชำระครบแล้ว
+            // 💸 (15/10/26, ticket 13): "ครบ" = total + charges (ค่าปรับ/ค่าเสียหาย/addon
+            //    บวกยอดจริง — เก็บส่วนต่าง charge ที่ front desk ตัวนี้)
+            $grandTotal = $booking->total_amount + $booking->charges_total;
             $totalPaid = Payment::where('booking_id', $booking->id)
                 ->where('status', 'completed')
                 ->sum('amount');
 
-            if ($totalPaid >= $booking->total_amount && ! $booking->is_paid) {
+            if ($totalPaid >= $grandTotal && ! $booking->is_paid) {
                 // 🌟 Fix H3 (03/07/26): unify is_paid write ให้เป็นวิธีเดียวกับ webhook
                 // ใช้ Eloquent update (PHP boolean) แทน DB::raw('TRUE') — portable ข้าม DB + trigger events
                 $booking->update(['is_paid' => true]);

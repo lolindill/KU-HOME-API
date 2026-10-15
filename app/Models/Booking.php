@@ -69,8 +69,9 @@ class Booking extends Model
      * 💳 (25/09/26) booking-payment-types — ยอดเงิน 2 ชั้น (ticket 04): ชั้น B derive จาก ledger ล้วน
      * payments = ledger เดียวของ "เงินที่เข้าจริง" (verify / recordPayment / QR — 3 จุดเขียนเท่านั้น)
      * ส่งทุก response ทุก role — ไม่มี column เก็บ จึงไม่มีทาง drift
+     * 💸 (15/10/26, ticket 13) เพิ่ม charges_total — Σ additional_charges (REQ-042/044)
      */
-    protected $appends = ['paid_amount', 'outstanding_amount'];
+    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total'];
 
     // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
     // ใช้สำหรับ Receipt billing_name และแสดงผล — สำรองด้วย user.name
@@ -119,8 +120,19 @@ class Booking extends Model
         return $this->hasMany(Payment::class);
     }
 
+    /**
+     * 💸 (15/10/26, srs-v2-gap-closure ticket 13 — REQ-042/044): charges ค่าปรับ/ค่าเสียหาย/addon
+     *    (เดิมเป็น ledger รายงานล้วน — ตอนนี้บวกยอดจริงผ่านปลายน้ำ accessors ด้านล่าง)
+     */
+    public function additionalCharges(): HasMany
+    {
+        return $this->hasMany(AdditionalCharge::class);
+    }
+
     // =========================================================
     // 💳 ยอดเงิน derive จาก ledger (booking-payment-types ticket 04/05 — 25/09/26)
+    // 💸 (15/10/26, ticket 13) ยอดรวม = total_amount + charges_total — charges บวกทุกสถานะ
+    //    แตะที่ total_amount ไม่ได้ (คง invariant Σ booking_rooms.amount == total_amount)
     // =========================================================
 
     /**
@@ -135,11 +147,20 @@ class Booking extends Model
     }
 
     /**
-     * 💰 outstanding_amount = total − paid (clamp 0 รองรับ overpay)
+     * 💸 charges_total = Σ additional_charges.price (ค่าเสียหาย/ค่ายืม/addon — กรอกเอง)
+     *    deposit 50% ไม่รวม (มัดจำผูกค่าห้อง — ค่าเสียหายยังไม่เกิดตอนจอง)
+     */
+    public function getChargesTotalAttribute(): int
+    {
+        return (int) $this->additionalCharges()->sum('price');
+    }
+
+    /**
+     * 💰 outstanding_amount = (total + charges) − paid (clamp 0 รองรับ overpay)
      */
     public function getOutstandingAmountAttribute(): int
     {
-        return max(0, $this->total_amount - $this->paid_amount);
+        return max(0, $this->total_amount + $this->charges_total - $this->paid_amount);
     }
 
     /**
@@ -175,6 +196,26 @@ class Booking extends Model
         }
 
         return $this->outstanding_amount;
+    }
+
+    /**
+     * 💸 (15/10/26, ticket 13) recompute is_paid ตามนิยาม paid ≥ total + charges —
+     *    เรียกหลัง charge เปลี่ยน (create/update/delete ใน AdditionalChargeController)
+     *    เพราะ is_paid เป็น column: สร้าง charge ทำยอดโตเกิน paid → false ·
+     *    ลบ/แก้ charge จน paid ครบอีกครั้ง → true คืน · **ไม่แตะ state machine** —
+     *    สถานะเดินด้วยเหตุการณ์เงินเท่านั้น (recordPayment/verify เป็นคน transition)
+     *
+     * @return bool ค่า is_paid ล่าสุดหลัง recompute
+     */
+    public function syncIsPaid(): bool
+    {
+        $expected = $this->paid_amount >= $this->total_amount + $this->charges_total;
+
+        if ((bool) $this->is_paid !== $expected) {
+            $this->update(['is_paid' => $expected]);
+        }
+
+        return $expected;
     }
 
     public function receipts(): HasMany

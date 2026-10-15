@@ -7,14 +7,17 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * 💸 AdditionalCharge — ledger ค่าเสียหาย / ค่ายืมอุปกรณ์ (excel-reports spec §2.6, ticket 11)
+ * 💸 AdditionalCharge — ledger ค่าปรับ/ค่าเสียหาย/บริการเสริม (REQ-042/044 · srs-v2-gap-closure ticket 12/13)
  *
- *    ⚠️ LEDGER รายงานล้วน — ยอดไม่เข้า booking:
- *    - invariant Σ booking_rooms.amount == total_amount + ชั้น A/B ของแมป booking-payment-types ไม่ถูกแตะ
- *    - ไม่ไหลเข้า payments (ledger นั้นนิยาม "เงินของ booking") — เก็บเงินสดเคาน์เตอร์แยกจาก booking
- *    - บันทึกอิสระทุกเมื่อ ไม่ผูก flow checked_out · สิทธิ์ admin + staff (default spec §9)
+ *    💳 (15/10/26 — ticket 13) ยอดบวกยอดจริงที่ booking แล้ว (เดิมเป็น ledger รายงานล้วน):
+ *    - total_amount คงค่าห้องล้วน (invariant Σ booking_rooms.amount == total_amount ไม่พัง)
+ *    - Booking::charges_total = Σ additional_charges.price → outstanding/is_paid คิดจากยอดรวม
+ *    - เก็บเงินหลังชำระ/เข้าพักผ่าน recordPayment (front desk) เท่านั้น — ไม่เปิดส่งสลิปเพิ่ม
+ *    - บันทึกอิสระทุกเมื่อ ไม่ guard สถานะ (มติ 4a — staff คุมความถูกต้องเอง)
+ *    - สิทธิ์ admin + staff · money = integer บาท (convention 2026-09-11)
  *
- *    money = integer บาท (convention 2026-09-11) · charge_type: damage | rental
+ *    booking_room_id nullable — ใส่คู่ booking_id = จดต่อห้อง · ใส่เดียว = รวมทั้ง booking
+ *    charge_type: damage | rental | addon (addon = หมวด free-text REQ-044 แยกในรายงาน)
  */
 class AdditionalCharge extends Model
 {
@@ -24,10 +27,13 @@ class AdditionalCharge extends Model
 
     public const TYPE_RENTAL = 'rental';
 
-    public const CHARGE_TYPES = [self::TYPE_DAMAGE, self::TYPE_RENTAL];
+    public const TYPE_ADDON = 'addon';
+
+    public const CHARGE_TYPES = [self::TYPE_DAMAGE, self::TYPE_RENTAL, self::TYPE_ADDON];
 
     protected $fillable = [
         'booking_id',
+        'booking_room_id',
         'transaction_date',
         'item_code',
         'item_name',
@@ -47,6 +53,14 @@ class AdditionalCharge extends Model
     public function booking(): BelongsTo
     {
         return $this->belongsTo(Booking::class);
+    }
+
+    /**
+     * 🛏️ ห้องที่ผูก (nullable — charge ระดับ booking ไม่มี)
+     */
+    public function bookingRoom(): BelongsTo
+    {
+        return $this->belongsTo(BookingRoom::class);
     }
 
     public function recorder(): BelongsTo

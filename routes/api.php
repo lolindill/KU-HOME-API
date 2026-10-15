@@ -267,10 +267,15 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where(['roomId' => '[0-9a-f\-]{36}', 'periodId' => '[0-9a-f\-]{36}']);
     });
 
-    // 💸 Additional charges (05/10/26 — excel-reports spec §2.6): ledger ค่าเสียหาย/ค่ายืม
-    //    **รายงานล้วน — ยอดไม่เข้า booking** (ไม่แตะ invariant/payments) · บันทึกอิสระทุกเมื่อ
-    //    · สิทธิ์ admin+staff (default §9 รอ sign-off) · ไม่มี GET — อ่านผ่าน report /reports/additional-charges/export
+    // 💸 Additional charges (05/10/26 — excel-reports spec §2.6 · แก้ 15/10/26 ticket 13):
+    //    ค่าปรับ/ค่าเสียหาย/บริการเสริม (addon) — **บวกยอดจริงที่ booking** (REQ-042/044):
+    //    charges_total → outstanding/is_paid คิดจากยอดรวม · เก็บเงินผ่าน recordPayment เท่านั้น
+    //    · บันทึกอิสระทุกเมื่อ · สิทธิ์ admin+staff (default §9 รอ sign-off)
+    //    GET /bookings/{id}/additional-charges — ปลดธรรมเนียม "ไม่มี GET" เพราะยอดเงิน
+    //    ของ booking ขึ้นกับ charges แล้ว หน้า front desk ต้องอ่านรายการได้ (เหตุผลใน cline.md)
     Route::middleware('role:admin,staff')->group(function () {
+        Route::get('/bookings/{bookingId}/additional-charges', [AdditionalChargeController::class, 'index'])
+            ->where('bookingId', '[0-9a-f\-]{36}');
         Route::post('/additional-charges', [AdditionalChargeController::class, 'store']);
         Route::patch('/additional-charges/{id}', [AdditionalChargeController::class, 'update'])
             ->where('id', '[0-9a-f\-]{36}');

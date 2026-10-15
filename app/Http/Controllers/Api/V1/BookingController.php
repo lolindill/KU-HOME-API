@@ -778,18 +778,20 @@ class BookingController extends Controller
 
                 // 💳 ticket 10 — downgrade guard: ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
                 //    (ticket 08 — ไม่มีการคืนเงินในระบบ จึงบล็อกส่วนต่างลดจนเกินยอดที่จ่ายไปแล้ว)
+                //    💸 (15/10/26, ticket 13): ยอดรวม = total + charges — charges หนุนยอดได้
+                $chargesTotal = (int) $locked->charges_total;
                 $newTotal = (int) $locked->fresh()->total_amount;
                 $paidAmount = $locked->paid_amount;
-                if ($newTotal < $paidAmount) {
+                if ($newTotal + $chargesTotal < $paidAmount) {
                     throw new \Exception(
-                        'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.$newTotal.' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                        'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
                         422
                     );
                 }
 
                 // 💳 ticket 10 — is_paid=true เดิม (จ่ายครบ) แต่ surcharge ทำให้ยอดค้างเกิด → reset false
-                //    (ตามนิยาม is_paid = SUM(payments) ≥ total — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
-                if ($locked->is_paid && $newTotal > $paidAmount) {
+                //    (ตามนิยาม is_paid = SUM(payments) ≥ total + charges — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
+                if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
                     $locked->update(['is_paid' => false]);
                 }
 

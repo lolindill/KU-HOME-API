@@ -3591,21 +3591,24 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/che
 | `extra-bed` | รายงานเตียงเสริม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน — **คอลัมน์ขยาย dynamic ตามคืนในช่วงวันที่**, ยอด inventory อิง config `reporting.extra_bed_fleet_size`) |
 | `supplies` | รายงานวัสดุสิ้นเปลือง | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `category` *(nullable, string, max:100)*: หมวดหมู่พัสดุ (แสดง minimal จาก `stock_inventories` ฟิลด์ที่ไม่มีตารางรองจะเว้นว่าง) |
 | `out-of-service-room` | รายงานห้องชำรุด/บำรุงรักษา | `admin`, `staff` | • `date_from` *(required, date)*: วันที่แจ้งซ่อมเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `work_type` *(nullable, in:ทุกประเภท,ไฟฟ้า,ประปา,งานระบบ)*: ประเภทงานซ่อม |
-| `additional-charges` | รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่ทำรายการเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `item_type` *(nullable, in:ทุกประเภท,ค่าเสียหาย,ค่ายืม)*: ประเภทรายการ |
+| `additional-charges` | รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่ทำรายการเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `item_type` *(nullable, in:ทุกประเภท,ค่าเสียหาย,ค่ายืม,บริการเสริม)*: ประเภทรายการ |
 | `manager` | รายงานผู้จัดการ (Manager Report) | `admin`, `staff` | • `date` *(required, date)*: วันที่ประจำรายงาน<br>• `mode` *(nullable, in:Complete,Week,Month)*: โหมดรายงาน (ค่าเริ่มต้นคือ 'Complete')<br>• `date_from` *(required_if:mode,Month, date)*: วันที่เริ่มต้นช่วงเดือนที่เลือก (เฉพาะเมื่อ `mode=Month`)<br>• `date_to` *(required_if:mode,Month, date, after_or_equal:date_from)*: วันสิ้นสุด (เฉพาะเมื่อ `mode=Month`, ช่วงห่าง ≤ 366 วัน) |
 
 ---
 
-### 2. Additional Charges CRUD (ค่าเสียหาย / ค่ายืมอุปกรณ์)
+### 2. Additional Charges CRUD (ค่าปรับ / ค่าเสียหาย / บริการเสริม — REQ-042/044)
 
-ตาราง `additional_charges` เป็น **Ledger สำหรับการออกรายงานโดยเฉพาะ (Report-only ledger)**
-- ⚠️ **หมายเหตุสำคัญ:** ยอดเงินในตารางนี้ **ไม่ไหลเข้าและไม่กระทบยอดรวมของ booking (`total_amount`) หรือยอดชำระเงินใน `payments`** (แยกการเก็บเงินสด/หน้าเคาน์เตอร์ออกจาก invariant บัญชีการจอง)
-- บันทึกได้อย่างอิสระทุกเมื่อ ไม่ผูกมัดกับสถานะ checked_out
-- **ไม่มี endpoint `GET`** ในกลุ่มนี้ — การตรวจสอบและดูรายการทั้งหมดให้ดูผ่าน Excel Report `GET /api/v1/reports/additional-charges/export`
-- **สิทธิ์:** `admin` และ `staff` เท่านั้น (ทั้ง POST, PATCH, DELETE)
+ตาราง `additional_charges` เป็น ledger ค่าปรับ/ค่าเสียหาย (damage), ค่ายืมอุปกรณ์ (rental) และบริการเสริมกรอกเอง (addon — REQ-044)
+
+> 💳 **อัปเดต 15/10/26 (srs-v2-gap-closure ticket 13) — ยอดบวกยอดจริงที่ booking แล้ว** (เดิมเป็น report-only ledger):
+> - `total_amount` ของ booking **คงค่าห้องล้วน** (invariant Σ `booking_rooms.amount` == `total_amount` ไม่เปลี่ยน) — booking ทุก response เพิ่ม append **`charges_total`** (Σ additional_charges)
+> - **`outstanding_amount` = total + charges_total − paid** · **`is_paid` = paid ≥ total + charges_total** — สร้าง/แก้/ลบ charge ระบบ recompute `is_paid` ให้อัตโนมัติ (เช่น ลบ charge แล้วเงินพอ → กลับมา `true`)
+> - `deposit_amount` (มัดจำ 50%) **ไม่ขยับ** — มัดจำผูกค่าห้อง ไม่รวมค่าเสียหายที่ยังไม่เกิด
+> - บันทึก charge ได้**ทุกสถานะ booking** — ยอดบวกจริงทันที · เก็บเงินหลังเข้าพักผ่าน **`POST /front-desk/{bookingId}/payment` (recordPayment) เท่านั้น** (admin+staff) — ไม่เปิดให้ user ส่งสลิปเพิ่มผ่าน confirm flow
+> - **สิทธิ์:** `admin` และ `staff` เท่านั้น (ทั้ง GET/POST/PATCH/DELETE)
 
 #### `POST /api/v1/additional-charges` (สร้างรายการ)
-สร้างรายการบันทึกค่าเสียหายหรือค่ายืมอุปกรณ์เพิ่มเติม
+สร้างรายการบันทึกค่าเสียหาย ค่ายืม หรือบริการเสริมเพิ่มเติม
 
 **Request Headers:**
 ```http
@@ -3618,15 +3621,16 @@ Accept: application/json
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `booking_id` | UUID | Yes | รหัสการจองที่ผูกรายการ (`exists:bookings,id`) |
+| `booking_room_id` | UUID | No | ห้องพักที่ผูก (nullable) — **ต้องเป็น booking_room ลูกของ `booking_id` เดียวกัน (422 ถ้าไม่ใช่)** · ใส่ = จดต่อห้อง (REQ-042) · เว้น = รวมทั้ง booking |
 | `transaction_date` | Date string | Yes | วันที่ทำรายการ รูปแบบ `YYYY-MM-DD` |
 | `item_code` | String | No | รหัสรายการ/สินค้า (nullable, สูงสุด 100 ตัวอักษร) |
-| `item_name` | String | Yes | ชื่อรายการ เช่น "ค่าเสียหาย ปลอกหมอน", "เตารีดไอน้ำ" (สูงสุด 255 ตัวอักษร) |
+| `item_name` | String | Yes | ชื่อรายการ เช่น "ค่าเสียหาย ปลอกหมอน", "บริการเสริม ตกแต่งห้อง" (สูงสุด 255 ตัวอักษร) |
 | `qty` | Integer | No | จำนวน (ขั้นต่ำ 1, ค่าเริ่มต้นคือ 1) |
 | `unit` | String | No | หน่วยนับ เช่น "ชิ้น", "อัน", "ครั้ง" (nullable, สูงสุด 50 ตัวอักษร) |
 | `price` | Integer | Yes | ราคารวมของรายการ หน่วยเป็น **จำนวนเต็มบาท (integer baht)** ขั้นต่ำ 0 |
-| `charge_type` | String | Yes | ประเภทรายการ: `damage` (ค่าเสียหาย) หรือ `rental` (ค่ายืม) |
+| `charge_type` | String | Yes | ประเภทรายการ: `damage` (ค่าเสียหาย), `rental` (ค่ายืม) หรือ `addon` (บริการเสริมกรอกเอง — REQ-044) |
 
-**Response (201 Created):**
+**Response (201 Created)** — แนบ snapshot เงินของ booking กลับมาให้หน้างานอัปเดตรอบเดียว:
 ```json
 {
   "status": "success",
@@ -3634,45 +3638,62 @@ Accept: application/json
   "additional_charge": {
     "id": "ac-uuid-here",
     "booking_id": "booking-uuid-here",
-    "transaction_date": "2026-10-05T00:00:00.000000Z",
-    "item_code": "DMG-001",
+    "booking_room_id": "booking-room-uuid-here",
+    "transaction_date": "2026-10-15T00:00:00.000000Z",
+    "item_code": null,
     "item_name": "ค่าเสียหาย แก้วน้ำแตก",
     "qty": 1,
     "unit": "ใบ",
-    "price": 150,
+    "price": 250,
     "charge_type": "damage",
     "recorded_by": "user-uuid-here",
-    "created_at": "2026-10-05T14:00:00.000000Z",
-    "updated_at": "2026-10-05T14:00:00.000000Z"
-  }
+    "created_at": "2026-10-15T14:00:00.000000Z",
+    "updated_at": "2026-10-15T14:00:00.000000Z"
+  },
+  "booking_id": "booking-uuid-here",
+  "total_amount": 1500,
+  "charges_total": 250,
+  "paid_amount": 1500,
+  "outstanding_amount": 250,
+  "booking_is_paid": false,
+  "booking_status": "confirmed"
+}
+```
+
+#### `GET /api/v1/bookings/{bookingId}/additional-charges` (รายการต่อ booking — ใหม่ 15/10/26)
+ดึงรายการค่าใช้จ่ายทั้งหมดของ booking (เรียงตาม `transaction_date`) พร้อม snapshot เงิน — ใช้หน้า front desk · 🆕 endpoint นี้ปลดธรรมเนียมเดิม "ไม่มี GET อ่านผ่าน report อย่างเดียว" เพราะยอดเงินของ booking ตอนนี้ขึ้นกับ charges แล้ว
+
+- URL Parameter: `bookingId` (UUID ของ booking) · **สิทธิ์:** `admin`, `staff`
+- แต่ละแถวมี relation `booking_room` (+ `room`) และ `recorder` ถ้ามี
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ดึงรายการค่าใช้จ่ายเรียบร้อยแล้วค่ะ",
+  "additional_charges": [ ... ],
+  "booking_id": "booking-uuid-here",
+  "total_amount": 1500,
+  "charges_total": 350,
+  "paid_amount": 1500,
+  "outstanding_amount": 350,
+  "booking_is_paid": false,
+  "booking_status": "confirmed"
 }
 ```
 
 #### `PATCH /api/v1/additional-charges/{id}` (แก้ไขรายการ)
-แก้ไขข้อมูลรายการตาม UUID (`UpdateAdditionalChargeRequest`)
+แก้ไขข้อมูลรายการตาม UUID (`UpdateAdditionalChargeRequest`) — validation เดียวกับ POST (รวม `booking_room_id` ต้องเป็นลูกของ `booking_id` — ถ้าไม่ส่ง `booking_id` มาด้วย ระบบเทียบกับ booking ปัจจุบันของรายการ) · แก้แล้ว recompute `is_paid` ให้อัตโนมัติ (ย้าย charge ข้าม booking จะ recompute ทั้งสองฝั่ง)
 
 - URL Parameter: `id` (UUID ของรายการ)
 - Request Body: ฟิลด์เหมือนกับ `POST` ทุกตัว แต่เป็น optional ทั้งหมด (`sometimes`)
-- **Response (200 OK):**
-```json
-{
-  "status": "success",
-  "message": "แก้ไขรายการเรียบร้อยแล้วค่ะ",
-  "additional_charge": { ... }
-}
-```
+- **Response (200 OK):** รูปแบบเดียวกับ POST (รายการ + snapshot เงิน booking)
 
 #### `DELETE /api/v1/additional-charges/{id}` (ลบรายการ)
-ลบรายการออกจาก ledger
+ลบรายการออกจาก ledger — ถ้าการลบทำให้ `paid ≥ total + charges` อีกครั้ง ระบบตั้ง `is_paid` กลับเป็น `true` ให้เอง (โดยไม่เปลี่ยนสถานะ booking)
 
 - URL Parameter: `id` (UUID ของรายการ)
-- **Response (200 OK):**
-```json
-{
-  "status": "success",
-  "message": "ลบรายการเรียบร้อยแล้วค่ะ"
-}
-```
+- **Response (200 OK):** `{"status":"success","message":"ลบรายการเรียบร้อยแล้วค่ะ 🗑️","additional_charge_id":"...","booking_id":"...","total_amount":1500,"charges_total":0,"paid_amount":1500,"outstanding_amount":0,"booking_is_paid":true,"booking_status":"confirmed"}`
 
 ---
 
