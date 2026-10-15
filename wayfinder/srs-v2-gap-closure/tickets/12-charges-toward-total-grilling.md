@@ -78,4 +78,11 @@ Owner ล็อกแล้ว (2026-10-14): ค่าปรับ/ค่าเ�
 
 **เคสตรวจสอบ (แก้วแตก 250 · org booking deferred หลัง check-in):** staff `POST /additional-charges` {booking_id, booking_room_id ห้อง 201, "ค่าเสียหาย แก้วแตก", qty 1, price 250, charge_type damage} → `outstanding_amount` +250 ทันที (accessor คำนวณสด) · ตอน org มาเบิก/checkout → admin `recordPayment` 250 → ครบเมื่อ `paid ≥ total + charges` → `is_paid` true
 
+**API surface ร่างสำหรับ ticket 13 (2026-10-15 — ตาม draft ข้างบน):**
+
+- **คงเดิม 3 endpoint** (`role:admin,staff` + defense-in-depth): `POST /api/v1/additional-charges` · `PATCH .../{id}` · `DELETE .../{id}` — เพิ่ม validation: `booking_room_id` nullable uuid **ต้องเป็นลูกของ `booking_id` ที่ส่งมาด้วย (422 ถ้าไม่ใช่)** · `charge_type` อาจเพิ่ม `addon` (รอมติข้อ 3 เสริม)
+- **ใหม่ — `GET /api/v1/bookings/{bookingId}/additional-charges`** (admin+staff): ลิสต์รายการต่อ booking สำหรับหน้า front desk — ปลดธรรมเนียม "ไม่มี GET อ่านผ่าน report อย่างเดียว" เพราะยอดเงินตอนนี้ขึ้นกับ charges แล้ว (จดเหตุผลนี้ใน cline.md)
+- **Envelope:** booking responses เพิ่ม append `charges_total` (เทียบแบบแผน `paid_amount`/`outstanding_amount`) · response ของ create/update/delete charge แนบ snapshot เงิน booking กลับไปด้วย (charges_total/outstanding_amount/is_paid) ให้หน้างานอัปเดตรอบเดียว
+- **ฝั่งชำระไม่มี endpoint ใหม่** — ใช้ `recordPayment` เดิม (มติข้อ 4) · 4a guard สถานะรอมติ
+
 **รายละเอียดที่ต้องล็อกต่อใน ticket 13 (ไม่ใช่คำถาม owner):** การแก้/ลบ charge หลัง `is_paid` เคยถูกตั้ง — is_paid เป็น column จึงต้องมีจุด recompute เมื่อ charge เปลี่ยน (ไม่งั้นลบ charge แล้ว paid ≥ ยอดใหม่แต่ is_paid ค้าง false)
