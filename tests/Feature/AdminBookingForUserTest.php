@@ -15,7 +15,8 @@ use Tests\TestCase;
 /**
  * 🏛️ Admin booking 2 โหมด — wayfinder/organization-bookings ticket 02/05
  *
- * โหมด A: admin ส่ง `user` UUID → booking user_id = target (draft-dedup/cap/ราคา ใช้ target)
+ * โหมด A: admin ส่ง `user` UUID → booking user_id = target (draft-dedup/ราคา ใช้ target —
+ *         room cap ใช้ role ผู้ล็อกอิน ตาม amendment 2026-10-20 · admin ไม่โดน cap ทุกโหมด)
  * โหมด B: admin ไม่ส่ง `user` → user_id = null เฮดเปล่า (ไม่มี dedup, ราคา daily, ไม่มี cap)
  * ไม่เพิ่ม `created_by` — trace จาก source='admin' + causer_id ของ transition
  */
@@ -297,12 +298,15 @@ class AdminBookingForUserTest extends TestCase
         ])->assertStatus(201);
     }
 
-    public function test_mode_a_room_cap_uses_target_role(): void
+    public function test_mode_a_admin_is_not_room_capped(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
         $target = User::factory()->create(['role' => 'user']);
 
         $roomType = $this->createRoomTypeWithRates();
+        for ($i = 0; $i < 5; $i++) {
+            $this->createRoom($roomType);
+        }
 
         $checkIn = Carbon::now()->addDays(5)->toDateString();
         $checkOut = Carbon::now()->addDays(6)->toDateString();
@@ -316,12 +320,16 @@ class AdminBookingForUserTest extends TestCase
             ];
         }
 
-        // 🏛️ cap ใช้ role ของ target (non-admin = 4 ห้อง) — 5 ห้อง → 422
-        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/bookings', [
+        // 🏛️ (amendment 2026-10-20) cap ใช้ role ผู้ล็อกอิน — admin จองแทน user 5 ห้องผ่าน
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/bookings', [
             'source' => 'admin',
             'user' => $target->id,
             'booking_rooms' => $rooms,
-        ])->assertStatus(422);
+        ]);
+        $response->assertStatus(201);
+        $booking = Booking::findOrFail($response->json('booking_id'));
+        $this->assertCount(5, $booking->bookingRooms);
+        $this->assertSame($target->id, $booking->user_id);
     }
 
     public function test_mode_b_admin_is_not_room_capped(): void

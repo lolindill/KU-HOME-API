@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests;
 
-use App\Models\User;
 use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -15,15 +14,11 @@ class StoreBookingRequest extends FormRequest
 
     public function rules(): array
     {
-        // 🏛️ (25/09/26, organization-bookings ticket 02): admin จองแทน (โหมด A ส่ง `user` UUID) —
-        //    room cap ใช้ role ของ target user ไม่ใช่ admin ผู้สร้าง (ticket 02 ตัดสิน)
-        $capUser = $this->user('sanctum');
-        if ($capUser && $capUser->role === 'admin' && $this->filled('user')) {
-            $capUser = User::find($this->input('user')) ?? $capUser;
-        }
-
+        // 🏛️ (20/10/26, amendment ของ organization-bookings ticket 02 — owner ตัดสินใหม่):
+        //    room cap ใช้ role ของผู้ล็อกอิน (auth) เสมอ — admin จองแทน user (โหมด A) ก็ไม่โดน cap
+        //    เดิม (25/09/26) คิดจาก role ของ target user · draft-dedup/ราคา daily_ku ยังใช้ target ตามเดิม
         $bookingRoomsRules = ['required', 'array'];
-        if ($roomCapRule = BookingRule::roomCapRule($capUser)) {
+        if ($roomCapRule = BookingRule::roomCapRule($this->user('sanctum'))) {
             $bookingRoomsRules[] = $roomCapRule;
         }
 

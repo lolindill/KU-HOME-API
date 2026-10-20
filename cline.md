@@ -2243,6 +2243,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Response ของ `PUT /bookings/{id}`** เพิ่ม 5 field: `user_id` / `organization_id` / `customer_name` / `customer_phone` / `customer_email`
 - Tests: `tests/Feature/BookingAttachCustomerTest.php` (12 เคส — attach user/org บนเฮดเปล่า · switch org→org→user แทนที่ทั้งชุด · detach null · contact-only patch · mutually exclusive · organize ไม่มี name · erp มั่ว/inactive · non-admin 403 · attach หลัง draft ได้แต่ payment fields 422 · complete/no_show 422 · reprice daily_ku↔daily สมมาตร)
 
+## 🏛️ Room cap amendment — ตัดสินจาก role ผู้ล็อกอิน ไม่ใช่ target user (2026-10-20, owner decision)
+
+> **Re-litigation ที่ owner สั่งเอง** ของมติ organization-bookings ticket 02 ข้อ 3 — เดิม (25/09/26) โหมด A admin จองแทน user นับ room cap จาก role ของ **target user** (ส่ง >4 ห้อง → 422 ตามสิทธิ์ user ปลายทาง)
+
+- **ที่มา:** ตรวจ prod (commit `9cd2050`) ด้วย `test_scripts/test_admin_booking_remote.php` — admin ส่ง 5 ห้องโหมด A โดน 422 `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง"` ขณะที่โหมด B 5 ห้องผ่าน → owner ตัดสินให้ cap ใช้ role ผู้ล็อกอินทุกโหมด (front desk ทำงานแทนลูกค้า ไม่ควรโดนเพดานของลูกค้า)
+- **แก้จุดเดียว:** `StoreBookingRequest::rules()` — ลบ `$capUser` (resolve target user) เหลือ `BookingRule::roomCapRule($this->user('sanctum'))` ตรง ๆ · guard ตอน `POST /bookings/{id}/rooms` (`BookingController`) เดิมใช้ `BookingRule::isAdmin($user)` = auth อยู่แล้ว ไม่แตะ
+- **คงเดิม:** โหมด A อื่น ๆ — draft-dedup นับที่ target · ราคา daily_ku ใช้ role target · ownership = target · non-admin ทุกกรณียังโดน cap 4 (config `booking.max_rooms_per_booking`)
+- **Docs:** `docs/api_guide.md` — เติม amendment ใต้หัว Room Cap Rule (16/09/26) + แก้ bullet โหมด A/กติกา 3 โหมด
+- **Wayfinder record:** amendment จดท้าย `wayfinder/organization-bookings/tickets/02-*.md` (map ปิดแล้ว — ไฟล์เฉพาะเครื่อง dev นี้)
+- Tests: `AdminBookingForUserTest::test_mode_a_admin_is_not_room_capped` (flip จากเดิม 422 → 201 + assert 5 ห้อง + user_id = target) · suite เต็ม 737 ผ่าน
+
 ## 📊 ระบบรายงาน Excel 15 ฉบับ & Additional Charges (05/10/26, wayfinder/excel-reports)
 
 > ระบบรายงาน Excel 15 ฉบับ (`phpoffice/phpspreadsheet` 5.x) แบบ Hybrid Renderer + Ledger ค่าปรับ/ค่ายืมอุปกรณ์ `additional_charges` + Reshape Addons รายคืน/แยกชุด (wayfinder map `excel-reports` — tickets 01–11, IMPL-01–08)
