@@ -51,7 +51,10 @@ total = (a + b) × monthly_rate + c × (daily|group rate)
 
 **ตัดสินด้วย role ของ "ผู้สร้างบิล" (sanctum user ณ ตอน create/reprice) — 2 เส้นทาง:**
 
-1. **เส้นทาง user (creator ≠ admin — user/guest/ku_member/staff จองตัวเอง):** **daily เส้นตรงเท่านั้น** — `amount = x × effective_daily_rate` ทุกจำนวนคืน · **ไม่มี**บล็อกเดือน **ไม่มี** group (จองยาวได้ไม่จำกัด แต่ไม่ได้ราคายาว/หมู่) · ku_member ยังได้ `daily_ku` ตามมติ 2026-09-07 เดิม
+1. **เส้นทาง user (creator ≠ admin — user/guest/ku_member/staff จองตัวเอง):** **daily เส้นตรงเฉพาะ x < 30 คืน** — `amount = x × effective_daily_rate` · ku_member ยังได้ `daily_ku` ตามมติ 2026-09-07 เดิม · **เขตของ admin = reject ทิ้ง ไม่ใช่คิด daily แทน** *(amendment รอบสอง 2026-10-20 — owner: "user can't จองแบบเขตของ admin group and monthly → booking are reject")*:
+   - ห้องไหน **x ≥ 30 คืน → 422 reject ทั้งบิล** ("จองรายเดือน/ระยะยาวต้องทำผ่านแอดมิน") — user จอง 20–29 คืนได้ (daily เส้นตรง)
+   - **≥5 ห้อง** → โดน cap เดิมอยู่แล้ว (`BookingRule` non-admin = `booking.max_rooms_per_booking` = 4 → 422) — group เข้าไม่ได้ตั้งแต่ต้น ไม่ต้องเพิ่ม guard ใหม่
+   - guard ต้องครอบทุก write path ที่จำนวนคืนเปลี่ยนได้: create + batch edit + single edit ของ booking_rooms (draft)
 2. **เส้นทาง admin (creator = admin — ครอบ mode A จองแทน / mode B เฮดเปล่า / org booking):**
    - **ชั้นจำนวนห้อง:** นับ booking_rooms ทั้งบิล — ≥10 ห้อง → เรท `group` code `min_10_rooms` · ≥5 ห้อง → `min_5_rooms` (ใช้แถว rate ของ room_type นั้น ๆ ต่อห้อง) · ต่ำกว่า 5 ห้อง → เรทรายวัน
    - **ชั้นจำนวนคืน (ต่อ `booking_room` — x = คืนของห้องนั้น):** ถ้า **x ≥ 30** → **สูตร hybrid**: `a = floor(x/30) · y = x%30 · b = floor(y/20) · c = y%20` → `amount = (a+b) × month_rate + c × เรทรายวันที่ได้จากชั้นจำนวนห้อง` · ถ้า **x < 30** → `amount = x × เรท (group|daily)` เส้นตรง
@@ -72,7 +75,9 @@ total = (a + b) × monthly_rate + c × (daily|group rate)
 
 | เคส | คำนวณ | ยอด |
 |---|---|---|
-| user จองเอง 100 คืน | daily เส้นตรง (ไม่มีสิทธิ์ hybrid) | 100 × 1,000 = **100,000** |
+| user จองเอง 25 คืน | daily เส้นตรง (< 30 — ยังไม่เขต admin) | 25 × 1,000 = **25,000** |
+| user จองเอง 100 คืน | x ≥ 30 → **422 reject** (เขต monthly เป็นของ admin) | — |
+| user จอง 6 ห้อง | โดน cap `max_rooms_per_booking` = 4 → 422 อยู่แล้ว | — |
 | ku_member จองเอง 10 คืน | daily_ku เส้นตรง | 10 × 800 = **8,000** |
 | admin 1 ห้อง 45 คืน | a=1, y=15, b=0, c=15 | 15,000 + 15×1,000 = **30,000** |
 | admin 1 ห้อง 33 คืน (target ku_member) | a=1, y=3, c=3 × daily_ku 800 | 15,000 + 2,400 = **17,400** |
