@@ -2421,6 +2421,91 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 
 ---
 
+### Organization Management Endpoints (Admin only) 🏛️
+
+> 🏛️ **ที่มา (25/09/26, wayfinder/organization-bookings ticket 01/05):** ตาราง `organizations` = master data หน่วยงาน/องค์กรที่ admin ใช้จองแทน (โหมด C — ส่ง `organize` = erp code บน `POST /bookings` ดูหัวข้อ Bookings) · `erp` คือ key กลางสำหรับ map ไปยัง organization-data API ภายนอกในอนาคต (replaceability contract)
+
+🔒 **Admin only** · ไม่มี throttle เพิ่ม (precedent กลุ่ม admin `/discounts`) · controller มี re-check `role:admin` อีกชั้น (defense-in-depth)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/organizations` | List all organizations (optional `?is_active=true/false`, `?search=TERM` — ค้น `name` หรือ `erp` แบบ partial match) |
+| `GET` | `/organizations/{id}` | Get organization by UUID (`404` ถ้าไม่พบ — route รับ UUID เท่านั้น) |
+| `POST` | `/organizations` | Create a new organization (`201 Created`) |
+| `PUT` | `/organizations/{id}` | Update organization attributes (partial — `sometimes`) |
+| `PATCH` | `/organizations/{id}/toggle` | Toggle `is_active` status |
+
+> ❄️ **Note:** ไม่มี `DELETE /organizations/{id}` ตาม precedent discounts — เลิกใช้องค์กร = `PATCH .../toggle` (ปิดแล้ว booking ใหม่ที่อ้างผ่าน `organize` โดน `422` แต่ booking เก่าไม่กระทบ เพราะอ่าน snapshot `customer_*` + FK `organization_id` ของตัวเอง; `bookings.organization_id` เป็น FK `restrictOnDelete` กันลบทิ้งอีกชั้น)
+
+**Organization object:**
+```json
+{
+  "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+  "erp": "ORG-KU-001",
+  "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+  "is_active": true,
+  "created_at": "2026-09-25T11:00:00.000000Z",
+  "updated_at": "2026-09-25T11:00:00.000000Z"
+}
+```
+
+---
+
+#### POST `/organizations` — Create organization 🏛️
+
+**Request Body:**
+```json
+{
+  "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+  "erp": "ORG-KU-001"
+}
+```
+
+| Field | Rules |
+|---|---|
+| `name` | **required**, string, max 255 |
+| `erp` | nullable, string, max 100, **unique** — เช็คซ้ำแบบ trim ก่อนเทียบ (ส่งซ้ำ → `422`) · เว้นได้สำหรับองค์กรที่ยังไม่มีรหัส ERP |
+
+**Response `201`:** `{ "status": "success", "message": ..., "organization": { ... } }`
+
+---
+
+#### PUT `/organizations/{id}` — Update organization 🏛️
+
+Partial update — ส่งเฉพาะ field ที่ต้องการแก้ (`name` ใช้กฎ `sometimes|required`; `erp` ใช้กฎ `sometimes|nullable`):
+
+> 🛡️ **`erp` update rules:** ส่งค่าเดิมกลับมา หรือส่งค่าว่าง/ช่องว่างล้วน = **no-op อนุญาต** (ไม่ error) · ส่งค่าใหม่ที่ชนองค์กรอื่น → `422` · ค่าที่ validate ผ่านจะถูก trim ก่อนบันทึกเสมอ
+
+**Response `200`:** `{ "status": "success", "message": ..., "organization": { ... } }`
+
+---
+
+#### PATCH `/organizations/{id}/toggle` — Toggle active 🏛️
+
+สลับ `is_active` (true ↔ false) — ไม่ต้องส่ง body:
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "เปลี่ยนสถานะองค์กรเรียบร้อยแล้วค่ะ! ✨",
+  "organization": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "erp": "ORG-KU-001",
+    "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+    "is_active": false,
+    "created_at": "2026-09-25T11:00:00.000000Z",
+    "updated_at": "2026-09-25T11:05:00.000000Z"
+  }
+}
+```
+
+> 🔗 **ผลของ `is_active = false`:** `POST /bookings` โหมด C ที่ส่ง `organize` = erp ขององค์กรนี้ → `422` (ไม่เจอ/inactive) · `PUT /bookings/{id}` attach org ก็โดน `422` เช่นกัน — ดูรายละเอียด flow ในหัวข้อ Bookings (3 โหมด admin) และ 💳 Payment types
+
+**Error responses (ทุก endpoint ในหมวดนี้):** `401` (ยังไม่ล็อกอิน) · `403` (ไม่ใช่ admin) · `404` (ไม่พบองค์กร หรือ `{id}` ไม่ใช่รูปแบบ UUID — route constraint) · `422` (validation: `name` หาย/`erp` ซ้ำ)
+
+---
+
 ## Front Desk Operations
 
 > All endpoints in this section are **Admin only**.
