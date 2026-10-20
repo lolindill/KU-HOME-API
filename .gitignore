@@ -62,5 +62,15 @@ api_bin_output.txt
 /storage/input.jpg
 /storage/respon.jpg
 
+# 🗺️ Wayfinder maps ที่ปิดแล้ว (status: closed / COMPLETED) — เลิก track ออกจาก repo (ไฟล์ยังอยู่บนเครื่อง) · map ที่ยังเปิด track ตามปกติ
+/wayfinder/booking-room-amount/
+/wayfinder/room-type-rates/
+/wayfinder/booking-create-rules/
+/wayfinder/ku-sso/
+/wayfinder/organization-bookings/
+/wayfinder/booking-payment-types/
+/wayfinder/reserved-room-pool/
+/wayfinder/room-state-periods/
+
 # Local git worktrees (nested checkouts — never commit)
 /.worktree/
