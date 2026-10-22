@@ -50,6 +50,30 @@ class BookingController extends Controller
             $checkOut = $request->query('check_out');
             // 🏛️ organization-bookings ticket 08 — admin filter ตามองค์กร (UUID ตรงตาม FK)
             $organizationId = $request->query('organization_id');
+            // 📋 status filter — container states เท่านั้น ค่าเดียวหรือ comma-separated
+            //    (เช่น status=pending หรือ status=pending,verify_error — BR-level states
+            //    checked_in/checked_out/no_show ไม่อยู่ในนี้)
+            $statusParam = $request->query('status');
+            $statuses = [];
+            if ($statusParam !== null && $statusParam !== '') {
+                $statuses = collect(explode(',', $statusParam))
+                    ->map(fn ($s) => trim($s))
+                    ->filter(fn ($s) => $s !== '')
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $invalid = array_diff($statuses, [
+                    'draft', 'pending', 'verify_error', 'paid', 'confirmed', 'complete',
+                ]);
+                if ($invalid !== []) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'status filter ไม่ถูกต้อง: '.implode(', ', $invalid)
+                            .' (ใช้ได้: draft, pending, verify_error, paid, confirmed, complete) ค่ะนายท่าน 📋',
+                    ], 422);
+                }
+            }
 
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
             // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
@@ -83,6 +107,9 @@ class BookingController extends Controller
             if ($roomTypeId !== 'all') {
                 $query = $this->applyRoomTypeFilter($query, $roomTypeId);
             }
+            if ($statuses !== []) {
+                $query->whereIn('status', $statuses);
+            }
 
             $perPage = $request->query('per_page', 15);
             $bookings = $query->orderBy('created_at', 'desc')->paginate($perPage);
@@ -97,6 +124,7 @@ class BookingController extends Controller
                     'check_out' => $checkOut,
                     'room_type' => $roomTypeId,
                     'organization_id' => $organizationId,
+                    'status' => $statusParam,
                 ],
                 'bookings' => $bookings->items(),
                 'pagination' => [

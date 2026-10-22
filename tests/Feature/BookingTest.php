@@ -364,6 +364,70 @@ class BookingTest extends TestCase
     }
 
     // ============================================
+    // ✅ Booking list: status filter (GET /bookings?status=)
+    // ============================================
+
+    public function test_admin_can_filter_bookings_by_status(): void
+    {
+        $this->actingAsAdmin();
+        $pending = $this->createBooking(['status' => 'pending']);
+        $this->createBooking(['status' => 'draft']);
+        $this->createBooking(['status' => 'confirmed']);
+
+        $response = $this->getJson('/api/v1/bookings?status=pending');
+        $response->assertStatus(200);
+        $response->assertJsonPath('search_criteria.status', 'pending');
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($pending->id, $bookingIds);
+        $this->assertCount(1, $bookingIds, 'ต้องเห็นเฉพาะ booking status=pending');
+    }
+
+    public function test_admin_can_filter_bookings_by_multiple_statuses(): void
+    {
+        $this->actingAsAdmin();
+        $pending = $this->createBooking(['status' => 'pending']);
+        $verifyError = $this->createBooking(['status' => 'verify_error']);
+        $this->createBooking(['status' => 'draft']);
+
+        $response = $this->getJson('/api/v1/bookings?status=pending,verify_error');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEqualsCanonicalizing(
+            [$pending->id, $verifyError->id],
+            $bookingIds->all(),
+            'comma-separated ต้องได้ทั้ง 2 สถานะ'
+        );
+    }
+
+    public function test_bookings_status_filter_rejects_invalid_status(): void
+    {
+        $this->actingAsAdmin();
+        $this->createBooking();
+
+        // ❌ cancelled ไม่มีแล้วใน container state machine — ต้อง 422 ไม่ใช่เงียบ ๆ คืน [] ค่ะ
+        $response = $this->getJson('/api/v1/bookings?status=cancelled');
+        $response->assertStatus(422);
+        $response->assertJsonPath('status', 'error');
+    }
+
+    public function test_user_can_filter_own_bookings_by_status(): void
+    {
+        $user = User::factory()->create();
+        $pending = $this->createBooking(['user_id' => $user->id, 'status' => 'pending']);
+        $this->createBooking(['user_id' => $user->id, 'status' => 'draft']);
+
+        // 🛡️ status filter ใช้ได้กับ user ทั่วไป — scope ที่ booking ของตัวเองเสมอ
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/bookings?status=pending');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEquals([$pending->id], $bookingIds->all());
+    }
+
+    // ============================================
     // ✅ Booking validation
     // ============================================
 
