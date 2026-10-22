@@ -17,6 +17,10 @@ use Illuminate\Foundation\Http\FormRequest;
  * 💳 (08/10/26, owner): amount กลับเป็น nullable — user ไม่แจ้งยอดก็ส่งสลิปได้
  *    (admin verify เทียบ expected vs claimed แล้วตัดสินเอง — ระบบไม่ hard-reject ·
  *     verify ไม่แตะ is_paid/ledger เมื่อไม่มีการแจ้งยอด)
+ *
+ * 💳 (22/10/26, owner — bug fix "บิล full ยังค้างชำระหลัง verify"): สลิปไม่แจ้งยอดบนบิล
+ *    payment_type = full → verify ถือเป็น "จ่ายครบ" — เขียน ledger ยอดคงค้าง ณ ตอนนั้น
+ *    (deposit ยังคงไม่แตะ ledger/is_paid — ดู BookingConfirmationController::verify)
  */
 class ConfirmBookingRequest extends FormRequest
 {

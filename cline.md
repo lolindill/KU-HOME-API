@@ -2185,6 +2185,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Regression ตั้งใจ 1 จุด:** `BookingTest::test_update_room_blocked_when_booking_not_draft` เดิมคาด 422 (user แก้ booking paid) — ใหม่เป็น **403** ตามสิทธิ์ admin-only ที่ชัดเจนขึ้น
 - Tests: `tests/Feature/BookingSurchargeAfterPaymentTest.php` (10 — surcharge deposit/full + reset is_paid + downgrade บล็อก/ยอม + 403 + pending 422 + availability 422 + room_id 422 + checked_in 422 + draft regression) · docs: `docs/api_guide.md` หัวข้อ "💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10)" + หัวข้อ endpoint PUT rooms
 
+## 💳 Verify สลิปไม่แจ้งยอดของบิล full = จ่ายครบ (2026-10-22 — bug fix "บิล self-book ยังค้างชำระหลัง verify")
+
+> owner รายงาน bug: user self-book (บิล `full`) ส่งสลิปโดยไม่แจ้ง `amount` (nullable ตั้งแต่ 08/10/26) → admin verify ผ่าน → booking `confirmed` แต่ **ไม่มี payments ledger row** → `paid_amount = 0` · `outstanding_amount = เต็ม` · `is_paid = false` ค้าง · owner ตัดสินใหม่ **ทับกติกา 08/10/26 เฉพาะจุด** (revise โดย owner เอง — ไม่ใช่ agent re-litigate)
+
+- **กติกาใหม่ (ใน `BookingConfirmationController::verify`):** สลิปไม่แจ้งยอด + `payment_type = 'full'` → verify = admin ยืนยัน "จ่ายครบ" → เขียน ledger row = **ยอดคงค้าง ณ ตอน verify** (`outstanding_amount` = total + charges − จ่ายมาแล้ว — กันซ้ำเกินเมื่อมีเงินเข้าก่อนหน้า) + recompute `is_paid` ตามสูตร → full จ่ายครบ → `is_paid = true` · `outstanding = 0` อยู่แล้วไม่เขียน ledger (0 บาทไม่ใช่เหตุการณ์เงิน)
+- **`deposit` คง soft เดิม 08/10/26 ทุกอย่าง** — สลิปไม่แจ้งยอด → ไม่เขียน ledger + ไม่แตะ `is_paid` (ไม่เดายอดงวด — admin ตัดสินจากภาพสลิป + เก็บส่วนที่เหลือผ่าน `recordPayment`)
+- **ไม่แตะ `confirmation.amount`** — column นั้นคือ "ยอดที่ user แจ้ง" (claimed) คง null; ยอดจริงที่บันทึกอยู่ใน payments row (`reference_number` = confirmation UUID เดิม — ยังเขียน payments ที่ 3 จุดเดิมเท่านั้น)
+- **ที่มาของ bug (จดไว้กันงง):** `payment_type` ตั้งที่ `POST /bookings` (คุม role — non-admin ได้ `full` เสมอ, ส่ง payment fields = 403) และ admin แก้ผ่าน `PUT /bookings/{id}` — endpoint confirm/verify **อ่านอย่างเดียวไม่ตั้ง** · ช่องโหว่เดิมคือ verify เขียน ledger เฉพาะเมื่อ `confirmation->amount !== null` จึงเกิด "confirmed แต่ค้างชำระเต็ม" เมื่อ frontend ไม่ส่ง amount
+- Tests: `BookingPaymentTypeTest` (รื้อ `test_slip_without_amount_verifies_without_ledger_or_is_paid` → `test_full_slip_without_amount_verifies_as_paid_in_full` + เพิ่ม `test_full_slip_without_amount_records_total_plus_charges` (total 1500 + charge 200 → ledger 1700) + `test_deposit_slip_without_amount_still_skips_ledger` (regression deposit)) · `BookingConfirmationTest::test_admin_can_verify_confirmation` (สลิป legacy ไม่มียอดบนบิล full → ตอนนี้ ledger 4500 + is_paid true) · suite **764 เขียว**
+- docs: `docs/api_guide.md` (หัวข้อ verify + ชั้น A) · docblock `ConfirmBookingRequest` + `BookingConfirmationController::verify`
+
 ## 🏛️ Organizations + Admin จองแทน user — 2 โหมดบน POST /bookings (2026-09-25, wayfinder/organization-bookings — ticket 05)
 
 > implement ตาม resolution ticket 01 (ตาราง organizations) + ticket 02 (admin booking 2 โหมด) · ticket 03/06 (org fields `organization_id` + snapshot บน bookings) **ยังไม่รวมในชุดนี้** — รอ ticket 03 ปิดก่อน

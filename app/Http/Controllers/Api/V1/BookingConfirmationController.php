@@ -189,11 +189,23 @@ class BookingConfirmationController extends Controller
             //    💳 (08/10/26, owner): amount เป็น nullable — สลิปที่ user ไม่แจ้งยอด:
             //    ไม่เขียน ledger (0 บาท ไม่ใช่เหตุการณ์เงิน) + **ไม่แตะ is_paid** (คงค่าเดิม —
             //    is_paid ตรวจเฉพาะเมื่อมีการแจ้งยอดเท่านั้น; admin ตัดสินจากภาพสลิปเอง)
+            //
+            //    💳 (22/10/26, owner — bug fix "บิล full ยังค้างชำระหลัง verify"): type **full**
+            //    + สลิปไม่แจ้งยอด → verify = admin ยืนยันว่า "จ่ายครบ" → เขียน ledger = ยอดคงค้าง
+            //    ณ ตอน verify (total + charges − จ่ายมาแล้ว — ไม่ซ้ำเกินเมื่อมีเงินเข้าก่อนหน้า)
+            //    · outstanding = 0 อยู่แล้วไม่เขียน (0 บาทไม่ใช่เหตุการณ์เงิน) · **deposit
+            //    คง soft เดิม** — ไม่เดายอดงวด (admin ตัดสินจากภาพสลิป + เก็บส่วนที่เหลือ
+            //    ผ่าน recordPayment ภายหลัง)
+            $ledgerAmount = $confirmation->amount;
+            if ($ledgerAmount === null && $booking->payment_type === 'full' && $booking->outstanding_amount > 0) {
+                $ledgerAmount = $booking->outstanding_amount;
+            }
+
             $payment = null;
-            if ($confirmation->amount !== null) {
+            if ($ledgerAmount !== null) {
                 $payment = Payment::create([
                     'booking_id' => $booking->id,
-                    'amount' => $confirmation->amount,
+                    'amount' => $ledgerAmount,
                     'status' => 'completed',
                     'reference_number' => $confirmation->id,
                     'received_by' => $user->id,
@@ -227,7 +239,7 @@ class BookingConfirmationController extends Controller
                 // 💳 (25/09/26, ticket 05 หัวข้อ 4): expected vs claimed (soft — admin ตัดสินเอง)
                 'expected_amount' => $freshBooking->expected_amount,
                 'claimed_amount' => $confirmation->amount,
-                // 💳 ledger row ที่เพิ่งเขียน (null สำหรับสลิปเก่าก่อน deploy — ไม่มียอดแจ้ง)
+                // 💳 ledger row ที่เพิ่งเขียน (null เมื่อไม่มีเหตุการณ์เงิน — เช่น deposit สลิปไม่แจ้งยอด)
                 'payment_recorded' => $payment?->fresh(),
                 'booking_status' => $freshBooking->status,
                 'booking_is_paid' => $freshBooking->is_paid,

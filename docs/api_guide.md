@@ -1943,7 +1943,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed`
 
-💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount + charges_total` (💸 15/10/26 — charges ค่าปรับ/ค่ายืม/addon บวกยอดจริง · full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · 💳 **(08/10/26)** สลิปที่ **ไม่แจ้งยอด (amount = null)** → **ไม่เขียน ledger และไม่แตะ `is_paid`** (คงค่าเดิม — is_paid ตรวจเฉพาะเมื่อมีการแจ้งยอด · admin เก็บเงินเพิ่มผ่าน `recordPayment` ภายหลังได้)
+💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount + charges_total` (💸 15/10/26 — charges ค่าปรับ/ค่ายืม/addon บวกยอดจริง · full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · 💳 **(08/10/26)** สลิปที่ **ไม่แจ้งยอด (amount = null)** → เดิมไม่เขียน ledger · 💳 **(22/10/26 — bug fix "บิล full ยังค้างชำระหลัง verify")**: ถ้า `payment_type = full` → verify = ยืนยัน "จ่ายครบ" → **เขียน ledger = ยอดคงค้าง ณ ตอน verify** (`total + charges − จ่ายมาแล้ว`; outstanding = 0 อยู่แล้วไม่เขียน) + `is_paid` ตามสูตร · **`deposit` คงพฤติกรรม 08/10/26 เดิม** — ไม่เดายอดงวด (admin ตัดสินจากภาพสลิป + เก็บส่วนที่เหลือผ่าน `recordPayment` ภายหลังได้)
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
@@ -2822,7 +2822,7 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 }
 ```
 
-- **ชั้น A** — `booking_confirmations.amount` (บาท, **nullable** — 08/10/26, ≥ 1 ถ้าส่ง): ยอดที่ user แจ้งต่อครั้งส่งสลิป · ไม่แจ้ง = null → verify **ไม่เขียน ledger + ไม่แตะ `is_paid`**
+- **ชั้น A** — `booking_confirmations.amount` (บาท, **nullable** — 08/10/26, ≥ 1 ถ้าส่ง): ยอดที่ user แจ้งต่อครั้งส่งสลิป · ไม่แจ้ง = null → verify บิล **`full`** ถือเป็น "จ่ายครบ" (**เขียน ledger ยอดคงค้าง + `is_paid` ตามสูตร — 22/10/26**) · บิล **`deposit`** ยังไม่เขียน ledger + ไม่แตะ `is_paid` (ไม่เดายอดงวด)
 - **ชั้น B** — ภาพรวมจ่ายแล้ว/ค้าง **derive จาก ledger ล้วน ไม่มี column** — `payments` = ledger เดียวของ "เงินที่เข้าจริง" · **เขียนได้ 3 จุดเท่านั้น:** ① `PUT /booking-confirmations/{id}/verify` (สลิปผ่าน) ② `POST /front-desk/{id}/payment` (เงินสด) ③ `POST /payments` (mock QR)
 - **`is_paid`** = `SUM(payments) ≥ total_amount + charges_total` — "จ่ายครบ" เท่านั้น (💸 15/10/26 — `charges_total` (Σ `additional_charges`) append มากับ booking ทุก response เสมอ · deposit งวดแรกผ่าน ≠ is_paid) · ตั้งจริงตอน verify / recordPayment / QR · สร้าง/แก้/ลบ charge → recompute อัตโนมัติ (`Booking::syncIsPaid()`)
 - **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`

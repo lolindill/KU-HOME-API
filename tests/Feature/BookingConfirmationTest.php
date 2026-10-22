@@ -288,10 +288,15 @@ class BookingConfirmationTest extends TestCase
         ]);
         $this->assertNotNull($confirmation->fresh()->reviewed_by);
 
-        // 💳 (08/10/26): confirmation นี้ไม่มี amount (ไม่แจ้งยอด) → verify ไม่แตะ is_paid/ledger
-        //    (is_paid ตรวจเฉพาะสลิปที่แจ้งยอด — ดู BookingPaymentTypeTest)
-        $this->assertFalse($booking->fresh()->is_paid);
-        $this->assertDatabaseMissing('payments', ['booking_id' => $booking->id]);
+        // 💳 (22/10/26): confirmation นี้ไม่มี amount (ไม่แจ้งยอด) แต่ booking เป็น full →
+        //    verify = ยืนยัน "จ่ายครบ" → ledger row = ยอดคงค้าง (4500) + is_paid true
+        //    (ดูกติกาครบใน BookingPaymentTypeTest — deposit ยังคงไม่แตะ ledger)
+        $this->assertTrue($booking->fresh()->is_paid);
+        $this->assertDatabaseHas('payments', [
+            'booking_id' => $booking->id,
+            'amount' => 4500,
+            'reference_number' => $confirmation->id,
+        ]);
     }
 
     public function test_full_flow_confirm_then_verify_confirms_booking(): void

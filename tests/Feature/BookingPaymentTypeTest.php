@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdditionalCharge;
 use App\Models\Booking;
 use App\Models\BookingConfirmation;
 use App\Models\GlobalRate;
@@ -164,16 +165,21 @@ class BookingPaymentTypeTest extends TestCase
 
     // =========================================================
     // 💳 สลิปไม่แจ้งยอด (amount nullable — 08/10/26)
+    //    💳 (22/10/26, owner — bug fix "บิล full ยังค้างชำระหลัง verify"):
+    //    verify บิล full ที่สลิปไม่แจ้งยอด = ยืนยัน "จ่ายครบ" → เขียน ledger
+    //    ยอดคงค้าง ณ ตอนนั้น + is_paid ตามสูตร · deposit คง soft เดิม (ไม่เดายอดงวด)
     // =========================================================
 
-    public function test_slip_without_amount_verifies_without_ledger_or_is_paid(): void
+    public function test_full_slip_without_amount_verifies_as_paid_in_full(): void
     {
         $roomType = $this->roomTypeSetup();
         $user = User::factory()->create(['role' => 'user']);
 
+        // self-book — user จองเอง (ไม่ส่ง payment_type → full เสมอ)
         $created = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
-        $created->assertStatus(201);
+        $created->assertStatus(201)
+            ->assertJsonPath('payment_type', 'full');
         $booking = Booking::findOrFail($created->json('booking_id'));
 
         // ส่งสลิปโดยไม่ส่ง amount → 201 (echo amount = null · expected ยังคำนวณให้)
@@ -189,19 +195,90 @@ class BookingPaymentTypeTest extends TestCase
         $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
         $this->assertNull($confirmation->amount);
 
-        // verify ผ่าน → confirmed แต่ "ไม่แตะ ledger และ is_paid" (เช็คเฉพาะสลิปที่แจ้งยอด)
+        // verify ผ่าน → confirmed + ledger "จ่ายครบ" ณ ยอดคงค้าง + is_paid true
         $this->actingAs($this->admin(), 'sanctum')
             ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
             ->assertStatus(200)
             ->assertJsonPath('booking_status', 'confirmed')
             ->assertJsonPath('claimed_amount', null)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('booking_is_paid', true);
+
+        $this->assertDatabaseHas('payments', [
+            'booking_id' => $booking->id,
+            'amount' => 1500,
+            'status' => 'completed',
+            'reference_number' => $confirmation->id,
+        ]);
+        $this->assertTrue($booking->fresh()->is_paid, 'verify บิล full (สลิปไม่แจ้งยอด) = จ่ายครบ → is_paid true');
+    }
+
+    public function test_full_slip_without_amount_records_total_plus_charges(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $user = User::factory()->create(['role' => 'user']);
+        $admin = $this->admin();
+
+        $created = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // charge เกิดก่อน verify (เช่น admin จดค่าเสียหายระหว่างรอตรวจสลิป)
+        AdditionalCharge::create([
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'ผ้าปูที่นอนเปื้อน',
+            'price' => 200,
+            'charge_type' => 'damage',
+            'recorded_by' => $admin->id,
+        ]);
+
+        ($this->actingAs($user, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201);
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+
+        // ledger = total + charges ณ ตอน verify (1500 + 200) → ครบยอด is_paid true
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('paid_amount', 1700)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('booking_is_paid', true);
+    }
+
+    public function test_deposit_slip_without_amount_still_skips_ledger(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deposit']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        ($this->actingAs($admin, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201);
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+
+        // deposit ไม่เดายอดงวด — verify ไม่มี ledger + is_paid คง false (คง soft เดิม 08/10/26)
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('booking_status', 'confirmed')
             ->assertJsonPath('payment_recorded', null)
             ->assertJsonPath('paid_amount', 0)
             ->assertJsonPath('outstanding_amount', 1500)
             ->assertJsonPath('booking_is_paid', false);
 
-        $this->assertSame(0, Payment::where('booking_id', $booking->id)->count(), 'สลิปไม่แจ้งยอด = ไม่มี ledger row');
-        $this->assertFalse($booking->fresh()->is_paid, 'is_paid ต้องคง false — verify ไม่มีสิทธิ์ตั้ง true เองเมื่อไม่มียอดแจ้ง');
+        $this->assertSame(0, Payment::where('booking_id', $booking->id)->count(), 'deposit สลิปไม่แจ้งยอด = ไม่มี ledger row');
+        $this->assertFalse($booking->fresh()->is_paid);
     }
 
     public function test_slip_amount_zero_still_rejected_422(): void
