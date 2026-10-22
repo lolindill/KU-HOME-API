@@ -3022,7 +3022,7 @@ Creates a `pending` payment and returns a mock payment URL.
 ```
 
 > ⚠️ **Consistency rule (บังคับที่ server):** `rate_type` กับ `code`/`room_type_id` ต้องสอดคล้องกัน —
-> `addon` → ต้องมี `code`, server force `room_type_id = null` · `group` → ต้องมี `room_type_id` + `code` (`min_5_rooms` / `min_10_rooms`) · `daily` / `daily_ku` / `month` → ต้องมี `room_type_id`, server force `code = null`
+> `addon` → ต้องมี `code`, server force `room_type_id = null` · `group` → ต้องมี `room_type_id` + `code` (`min_5_rooms` / `min_10_rooms`) · `daily` / `daily_ku` / `month` → ต้องมี `room_type_id`, server force `code` = ชื่อ rate_type (22/10/26 — เลิกใช้ `null`, backfill ด้วย migration 2026_10_22_131500)
 
 **Response `200`:**
 ```json
@@ -3239,11 +3239,12 @@ Returns tasks with status `pending` or `in_progress`.
 > 💡 **Room Rates & Money Policy (03/09/26):**
 > - **Money Policy:** Database storage and API wire use **integer baht, non-decimal** (e.g. `1200` = 1,200 THB) — มาตรฐานใหม่ 11/09/26 (เดิม integer satang + baht string ที่ขอบ API). ทุก rate value, `extra_bed_price`, `total_amount`, `booking_rooms.amount`, addons, discounts อยู่หน่วยเดียวกันทั้งระบบ
 > - **Rate Types in `global_rates`:**
->   - `daily` (code `null`): Daily rate for general guests (`rates.daily.general`)
->   - `daily_ku` (code `null`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
+>   - `daily` (code `daily`): Daily rate for general guests (`rates.daily.general`)
+>   - `daily_ku` (code `daily_ku`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
 >   - `group` (code `min_5_rooms`): Group rate for 5+ rooms (`rates.group.min_5_rooms`)
 >   - `group` (code `min_10_rooms`): Group rate for 10+ rooms (`rates.group.min_10_rooms`)
->   - `month` (code `null`): Long-stay monthly rate (`rates.monthly`)
+>   - `month` (code `month`): Long-stay monthly rate (`rates.monthly`)
+>   - 🌟 **(22/10/26):** room rate rows เก็บ `code` = ชื่อ `rate_type` เสมอ (เลิก `code: null`) — แถว `group` คง `min_5_rooms`/`min_10_rooms` ตามเดิม · `GET /global-rates` จึงไม่มี `code: null` ให้ frontend ต้องเช็คอีกต่อไป
 > - The legacy virtual field `daily_rate` is deprecated and dropped from JSON serialization in favor of `rates`.
 
 **Relationships:**

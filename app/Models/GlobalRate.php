@@ -17,7 +17,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *   - rate_type = 'group'   → room rate สำหรับ group booking ผูกกับ room_type_id
  *   - rate_type = 'month'   → room rate รายเดือน ผูกกับ room_type_id
  *
- * room rate rows จะมี code = NULL และ room_type_id = <id>
+ * 🌟 (22/10/26): room rate rows เก็บ code = ชื่อ rate_type เสมอ (daily/daily_ku/month →
+ * code = rate_type เดียวกัน · group → min_5_rooms/min_10_rooms) และ room_type_id = <id>
  * addon rate rows จะมี code = <slug> และ room_type_id = NULL
  */
 class GlobalRate extends Model
@@ -107,7 +108,12 @@ class GlobalRate extends Model
         if ($code !== null) {
             $query->where('code', $code);
         } else {
-            $query->whereNull('code');
+            // 🌟 (22/10/26): convention ใหม่ — code = ชื่อ rate_type (migration 2026_10_22_131500)
+            // ยังรับแถว code NULL เดิมด้วย (tolerant) — กันช่วง transition ระหว่าง deploy โค้ดใหม่
+            // ก่อน migrate ไม่งั้นราคาคิดได้ 0
+            $query->where(function ($q) use ($rateType) {
+                $q->where('code', $rateType)->orWhereNull('code');
+            });
         }
 
         $rate = $query->first();

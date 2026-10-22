@@ -78,7 +78,8 @@ class RoomSeederTest extends TestCase
         $this->assertSame(27000, GlobalRate::getRoomRate($suite, 'month'));
 
         // ---------------------------------------------------------------------
-        // 5. Assert code column: populated for group rates, null for others
+        // 5. Assert code column: 🌟 (22/10/26) ทุกแถวมี code — daily/daily_ku/month
+        //    ใช้ชื่อ rate_type เป็น code (เลิก null), group คง min_5/min_10
         // ---------------------------------------------------------------------
         foreach ([$superior, $deluxe, $suite] as $rt) {
             $rates = GlobalRate::where('room_type_id', $rt->id)->get();
@@ -86,11 +87,11 @@ class RoomSeederTest extends TestCase
 
             $daily = $rates->firstWhere('rate_type', 'daily');
             $this->assertNotNull($daily);
-            $this->assertNull($daily->code);
+            $this->assertSame('daily', $daily->code);
 
             $dailyKu = $rates->firstWhere('rate_type', 'daily_ku');
             $this->assertNotNull($dailyKu);
-            $this->assertNull($dailyKu->code);
+            $this->assertSame('daily_ku', $dailyKu->code);
 
             $groupMin5 = $rates->first(fn ($r) => $r->rate_type === 'group' && $r->code === 'min_5_rooms');
             $this->assertNotNull($groupMin5);
@@ -102,8 +103,11 @@ class RoomSeederTest extends TestCase
 
             $month = $rates->firstWhere('rate_type', 'month');
             $this->assertNotNull($month);
-            $this->assertNull($month->code);
+            $this->assertSame('month', $month->code);
         }
+
+        // No room-rate row keeps the legacy NULL code (backfill migration 2026_10_22_131500)
+        $this->assertSame(0, GlobalRate::whereNull('code')->whereIn('rate_type', ['daily', 'daily_ku', 'month'])->count());
 
         // Total rate rows across all 3 room types = 15
         $this->assertSame(15, GlobalRate::whereNotNull('room_type_id')->count());

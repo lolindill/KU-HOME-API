@@ -2375,3 +2375,18 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 | REQ-042/044 | 12 (grill) + 13 (impl) — 15/10/26 | charges บวกยอดจริง: `charges_total` append + `outstanding/is_paid` รวม charges + `syncIsPaid()` recompute + `booking_room_id` nullable + `charge_type='addon'` + `GET /bookings/{id}/additional-charges` | `total_amount` คงค่าห้องล้วน · เก็บเงินผ่าน `recordPayment` เท่านั้น · ทุกสถานะ · ไม่มีรูปหลักฐาน (interpretation ข้อ 9) · deposit ไม่ขยับ |
 | REQ-048 | 06 housekeeping photos | `POST/GET /dashboard/tasks/{id}/photos` (morph `HousekeepingTask`) | drop ตาราง dead scaffold `housekeeping_photos` · เพิ่ม column `images.category` · cap before/after 5+5 · retention 90 วัน |
 | REQ-051/052 | 07 stock | CRUD `/stock` + derived status ok/low/out + `stock_movements` + `CleanupStockMovements` (03:00) | soft delete (คง audit trail 1 ปี) · housekeeping อ่านอย่างเดียว · เติม `SuppliesReportData` เต็ม |
+
+## 🌟 Global Rates — เลิกใช้ `code: null` ใช้ `code = rate_type` ทุกแถว (2026-10-22)
+
+- **แรงจูงใจ:** wire format ของ `GET /global-rates` มี `code: null` ในแถว room rate (daily/daily_ku/month) ให้ frontend ต้องเช็ค null · หลังเติม 12 แถว rate บน prod ตามตารางราคาทางการ (22/10/26 — ทำผ่าน API + tinker ฝั่ง server) owner สั่งปรับ convention ให้ทุกแถวมี code (เลือกทาง "backfill เต็มรูปแบบ" จาก 3 ทางเลือก)
+- **Convention ใหม่:** ทุกแถวมี `code` เสมอ — `daily`→`'daily'`, `daily_ku`→`'daily_ku'`, `month`→`'month'` (code = ชื่อ rate_type เป๊ะ ๆ) · `group` คง `'min_5_rooms'`/`'min_10_rooms'` · `addon` คง slug เดิม (`breakfast_100`, `extra_bed`, ...)
+- **จุดแก้ 6 จุด:**
+  - migration `2026_10_22_131500_backfill_global_rates_code_for_room_rates` — backfill `code = rate_type` เฉพาะแถว NULL ของ 3 type (down: คืน null เฉพาะที่ `code = rate_type` พอดี)
+  - `GlobalRate::getRoomRate()` — lookup แบบ **tolerant**: `code = rate_type OR NULL` · ตั้งใจคงไว้ถาวร เพื่อ (1) กันช่วง deploy โค้ดใหม่ก่อน migrate — lookup เก่า `whereNull` กับข้อมูลใหม่จะมองไม่เห็น → ราคาคิด 0 (2) รับ fixture เทส/test script ที่ยังสร้างแถว code null
+  - `GlobalRateController::update()` — guard force `code = $effectiveRateType` สำหรับ daily/daily_ku/month (เดิม force `null`) — admin ยิง PUT อย่างไร code ก็ถูก normalize
+  - `RoomSeeder` — seed 9 แถว room rate ด้วย code ใหม่ (`GlobalRateSeeder` เป็น addon-only ไม่โดน)
+  - `docs/api_guide.md` — consistency rule (PUT) + ตาราง Rate Types อัปเดต + หมายเหตุ 22/10/26
+  - `RoomSeederTest` §5 — assert `code === rate_type` + ไม่เหลือแถว NULL
+- **Test:** suite 737 passed (3,047 assertions) · Pint clean
+- **Prod rollout (ยังไม่ทำ — ต้อง deploy ก่อน):** ต้อง **deploy โค้ดใหม่ก่อน แล้วจึง `php artisan migrate --force`** บน server — ลำดับนี้ปลอดภัยทั้งสองช่วงเพราะ lookup ใหม่ tolerant · **ห้าม migrate ก่อน deploy** (lookup เก่าบน prod จะมองไม่เห็นแถวที่เติม code → ราคา 0 ทันที) · local (SQLite) migrate แล้วเรียบร้อย
+- ปัจจุบัน prod มี 21 แถว = 20 ตามมาตรฐาน + แถว `breakfast` เก่า inactive (addon — ไม่อยู่ใน scope นี้ ทิ้งไว้ตามธรรมเนียมไม่ลบ)

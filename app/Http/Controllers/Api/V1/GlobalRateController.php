@@ -63,14 +63,14 @@ class GlobalRateController extends Controller
         // 🌟 Validation: rate_type กับ code/room_type_id ต้องสอดคล้องกัน
         // addon → ต้องมี code, ห้ามมี room_type_id
         // group → ต้องมี room_type_id, code เก็บ min_5_rooms / min_10_rooms
-        // daily/daily_ku/month → ต้องมี room_type_id, code ไม่ใช้ (null)
+        // daily/daily_ku/month → ต้องมี room_type_id, code บังคับ = ชื่อ rate_type (22/10/26 — เลิกใช้ null)
         $effectiveRateType = $validated['rate_type'] ?? $rate->rate_type;
         if ($effectiveRateType === 'addon') {
             $validated['room_type_id'] = null;
         } elseif ($effectiveRateType === 'group') {
             // keep code and room_type_id
         } else {
-            $validated['code'] = null;
+            $validated['code'] = $effectiveRateType;
         }
 
         $rate->update($validated);
