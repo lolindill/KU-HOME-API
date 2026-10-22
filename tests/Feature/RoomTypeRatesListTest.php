@@ -145,6 +145,7 @@ class RoomTypeRatesListTest extends TestCase
                 'min_10_rooms' => 950,
             ],
             'monthly' => 20000,
+            'monthly_per_day' => 666,
         ], $fullItem['rates']);
 
         // Verify fallback to 0 for Standard Single (partial rates)
@@ -161,6 +162,7 @@ class RoomTypeRatesListTest extends TestCase
                 'min_10_rooms' => 0,
             ],
             'monthly' => 0,
+            'monthly_per_day' => 0,
         ], $partialItem['rates']);
     }
 
@@ -300,6 +302,7 @@ class RoomTypeRatesListTest extends TestCase
                 'min_10_rooms' => 950,
             ],
             'monthly' => 20000,
+            'monthly_per_day' => 666,
         ], $fullItem['rates']);
         $this->assertSame(500, $fullItem['room_type']['extra_bed_price']);
 
@@ -316,6 +319,7 @@ class RoomTypeRatesListTest extends TestCase
                 'min_10_rooms' => 0,
             ],
             'monthly' => 0,
+            'monthly_per_day' => 0,
         ];
         $this->assertSame($expectedPartialRates, $partialItem['rates']);
         $this->assertSame($expectedPartialRates, $partialItem['room_type']['rates']);
@@ -372,6 +376,7 @@ class RoomTypeRatesListTest extends TestCase
                 'min_10_rooms' => 0,
             ],
             'monthly' => 0,
+            'monthly_per_day' => 0,
         ];
 
         $this->assertSame($expectedZeroRates, $item['rates']);

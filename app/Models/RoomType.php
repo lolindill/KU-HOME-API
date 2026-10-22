@@ -78,6 +78,10 @@ class RoomType extends Model
                 'min_10_rooms' => (int) $groupMin10,
             ],
             'monthly' => (int) $monthly,
+            // 🌙 (22/10/26, srs-v2-gap-closure ticket 09): ราคาต่อวันแบบรายเดือน (month ÷ 30) —
+            //    ใช้เป็นเรทของ "เศษวันที่เหลือ" ในสัญญารายเดือน · frontend คำนวณยอดก่อนส่งได้
+            //    จากแหล่งเดียวกับ server: room_amount = intdiv(x × monthly, 30) เมื่อ x >= 20 คืน
+            'monthly_per_day' => $monthly > 0 ? intdiv((int) $monthly, 30) : 0,
         ];
     }
 

@@ -2390,3 +2390,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Test:** suite 737 passed (3,047 assertions) · Pint clean
 - **Prod rollout (ยังไม่ทำ — ต้อง deploy ก่อน):** ต้อง **deploy โค้ดใหม่ก่อน แล้วจึง `php artisan migrate --force`** บน server — ลำดับนี้ปลอดภัยทั้งสองช่วงเพราะ lookup ใหม่ tolerant · **ห้าม migrate ก่อน deploy** (lookup เก่าบน prod จะมองไม่เห็นแถวที่เติม code → ราคา 0 ทันที) · local (SQLite) migrate แล้วเรียบร้อย
 - ปัจจุบัน prod มี 21 แถว = 20 ตามมาตรฐาน + แถว `breakfast` เก่า inactive (addon — ไม่อยู่ใน scope นี้ ทิ้งไว้ตามธรรมเนียมไม่ลบ)
+
+## 🌙 Pricing Tier v2 — กติกาเลือกเรท 2 เส้นทาง + สูตรรายเดือน intdiv(x × month, 30) (2026-10-22, srs-v2-gap-closure tickets 08/09)
+
+- **มติ owner 2026-10-22 (เอกสารหลักเกณฑ์ราคาของโรงแรม) supersede สูตร hybrid amendment 2026-10-20 ของ ticket 08 ใน 2 จุด:**
+  1. **เรทของ "เศษวัน" ในสัญญาเดือน = month÷30** (ราคาต่อวันแบบรายเดือนของตาราง — เช่น Deluxe 18,000÷30 = 600) ไม่ใช่ daily ปกติ → ผลพลอยได้: **กฎ `b = floor(y/20)` (เศษ ≥20 คืน ยกบล็อกเดือน) หมดประโยชน์และถูกถอด** — พอส่วนเศษถูกลง กฎ b ทำราคา non-monotonic (49 คืน = 29,400 แต่ 50 คืน = 36,000) · สูตรใหม่เรียบต่อเนื่องทุกคืน
+  2. **month ไม่มี/inactive → fallback daily เส้นตรง** (ระบบไม่สะดุดตอน prod ยังไม่ seed เรทเดือน — ปัจจุบัน prod seed ครบแล้วตามหัวข้อ Global Rates 2026-10-22)
+- **สูตรสุดท้าย (chokepoint เดียว `DiscountService::reprice()`):**
+  - non-admin (sanctum role): daily เส้นตรงเฉพาะ x < 20 · ห้อง x ≥ 20 → **422** (เขตรายเดือน admin-only) · ≥5 ห้องโดน cap 4 เดิม
+  - admin: ห้อง x ≥ 20 → **`intdiv(x × month_rate, 30)`** ≡ เดือนเต็ม + เศษ×(month÷30) ตรงกันเป๊ะ (เช่น Deluxe 45 คืน = 18,000 + 15×600 = 27,000 ตามเอกสาร) · x < 20 → เส้นตรงตามชั้นจำนวนห้อง (≥10 → group min_10 · ≥5 → min_5 · น้อยกว่า → daily/daily_ku ของเจ้าของบิล) · group ใช้กับบิลสั้นเท่านั้น + เป็นเรท fallback ของเขตเดือนเมื่อไม่มี month
+  - `set_room_price` ชนะเด็ดขาดข้ามสูตร — net = set_price × x ตรง ๆ · percent/fixed คิดจากยอด prorate แล้ว · ปัด `RoundToTen` ที่ `amount` จุดเดิม · invariant Σ amount = total_amount คงอยู่
+- **config:** `booking.block_min_nights` **21 → 20** (มติ ticket 08) — เป็นทั้งป้าย `stay_type='block'` และประตูเขตรายเดือน (pricing) · `monthly_min_nights=30` คงเป็นแค่ป้าย `stay_type='monthly'`
+- **guard 422 (ครบ 4 write paths):** `BookingRule::monthlyNightsCap()` (non-admin = block_min_nights, admin = ∞) + `guardMonthlyNights()` ใน `withValidator` ของ `StoreBookingRequest` / `AddBookingRoomsRequest` / `UpdateBookingRoomRequest` / `UpdateBookingRoomsRequest` — edit ตรวจเฉพาะ payload ที่แตะวันที่ (merge กับค่าเดิมของ BR ก่อนคิดคืน) · แก้ addon/guests อย่างเดียวไม่เข้าเขตตรวจ
+- **🌙 pricing path ยึด "เส้นทางที่บิลเกิด" ไม่ใช่แค่ actor:** `$isAdminPath = BookingRule::isAdmin() || source==='admin' || user_id===null` — กันเจ้าของ non-admin แก้ addon ทีหลังบิล mode-A/org แล้วราคาเด้งขึ้นเงียบ ๆ (month 27,000 → daily 54,000) · spoof `source='admin'` ไม่มีประโยชน์ — guard 422 คืน/จำนวนห้องใช้ sanctum role เสมอ ส่วน daily_ku หายคือโดนแพงขึ้นเอง (อนุญาตให้คง convention "ห้ามใช้ source ตัดสินสิทธิ์" — ที่นี่ใช้เพื่อคง pricing เดิม ไม่ใช่ปลดล็อกสิทธิ์)
+- **wire format:** `RoomType::rates` เพิ่ม **`monthly_per_day`** = intdiv(monthly, 30) (0 เมื่อไม่มีเรทเดือน) — กระจายอัตโนมัติทุก endpoint ที่ใช้ rates object (room-types/availability/calendar) · เอกสาร: `docs/api_guide.md` ท้ายไฟล์หัวข้อ Ticket 08/09
+- **⚠️ Finding (บั๊กเดิม ไม่ได้แก้ — รอ owner):** บิล admin/userless (`user_id=null`) + `discount_code` ตอน create → **500** (`discount_redemptions.user_id` NOT NULL) — มีมาก่อน ticket นี้ แค่ไม่เคยมีเคสทดสอบ · ทางเลือก: 422 reject หรือ nullable + ข้ามโควตา per-user · tests ใหม่จึงใช้บิล mode A (มี target user) ตอนทดสอบส่วนลด
+- **Test:** suite **758 passed** (3,099 assertions · เดิม 737) — ใหม่ `PricingTierMonthlyTest` 18 เคส + `BookingLongStayTest` รื้อเป็น v2 (user 30/60 คืน → 422) + rate-wire tests เติม `monthly_per_day` · Pint clean

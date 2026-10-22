@@ -139,6 +139,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $row['rates']);
 
         // Assert existing structure is preserved: date keys exist
@@ -180,6 +181,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $row['rates']);
 
         // Assert existing structure is preserved: intervals array exists
@@ -221,6 +223,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $row['rates']);
 
         // Assert existing structure is preserved: unavailable_dates array exists
@@ -260,6 +263,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $row['rates']);
 
         $this->assertArrayHasKey('intervals', $row);
@@ -312,6 +316,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $row['rates']);
 
         // Assert interval generated for sold-out room
@@ -354,6 +359,7 @@ class RoomTypeRatesCalendarTest extends TestCase
                 'min_10_rooms' => 0,
             ],
             'monthly' => 0,
+            'monthly_per_day' => 0,
         ];
 
         $this->assertSame($expectedZero, $row['rates']);

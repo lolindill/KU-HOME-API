@@ -171,6 +171,7 @@ class RoomTest extends TestCase
                 'min_10_rooms' => 750,
             ],
             'monthly' => 18000,
+            'monthly_per_day' => 600,
         ], $data['rates']);
 
         // 🛡️ Invariants: daily_rate dropped, relations hidden
@@ -216,6 +217,7 @@ class RoomTest extends TestCase
                 'min_10_rooms' => 0,
             ],
             'monthly' => 0,
+            'monthly_per_day' => 0,
         ], $data['rates']);
     }
 

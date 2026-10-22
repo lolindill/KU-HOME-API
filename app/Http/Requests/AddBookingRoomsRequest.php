@@ -97,6 +97,26 @@ class AddBookingRoomsRequest extends FormRequest
     }
 
     /**
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามเพิ่มห้องที่
+     *    จำนวนคืน >= block_min_nights (20) → 422 (เขตรายเดือนเป็นเขตของ admin)
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            BookingRule::guardMonthlyNights(
+                $validator,
+                $this->user('sanctum'),
+                collect($this->input('booking_rooms', []))
+                    ->map(fn ($room) => [
+                        'check_in' => $room['check_in'] ?? null,
+                        'check_out' => $room['check_out'] ?? null,
+                    ])
+                    ->all()
+            );
+        });
+    }
+
+    /**
      * 🌟 ข้อความแจ้งเตือนภาษาไทย
      */
     public function messages(): array

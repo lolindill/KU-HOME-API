@@ -8,6 +8,7 @@ use App\Models\Discount;
 use App\Models\DiscountRedemption;
 use App\Models\GlobalRate;
 use App\Services\Addon\AddonPricing;
+use App\Support\BookingRule;
 use App\Support\RoundToTen;
 use Carbon\Carbon;
 use Exception;
@@ -128,10 +129,16 @@ class DiscountService
 
     /**
      * คำนวณส่วนลดสำหรับ 1 ห้อง (เฉพาะค่าห้อง ไม่รวม addon)
+     *
+     * $rate = เรทต่อคืนอ้างอิง · $roomBase = ยอดค่าห้องจริงของห้องนี้ (🌙 เขตรายเดือน
+     * คิดแบบ prorate แล้ว — intdiv(x × month, 30)) · ไม่ส่ง $roomBase = $rate × $nights ตามเดิม
+     *
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 08 edge 2): set_room_price ชนะเด็ดขาดข้ามสูตร
+     *    รายเดือน — net = set_price × x ตรง ๆ (แต่ไม่ขยับราคาขึ้นเกินยอดค่าห้องเดิม)
      */
-    public function computeForRoom(Discount $d, int $rate, int $nights): int
+    public function computeForRoom(Discount $d, int $rate, int $nights, ?int $roomBase = null): int
     {
-        $roomBase = $rate * $nights;
+        $roomBase ??= $rate * $nights;
 
         if ($d->type === 'percent') {
             $amt = intdiv($roomBase * $d->value, 100);
@@ -144,10 +151,7 @@ class DiscountService
         }
 
         if ($d->type === 'set_room_price') {
-            $diff = $rate - min($d->value, $rate);
-            $amt = $diff * $nights;
-
-            return max($amt, 0);
+            return max($roomBase - min($d->value * $nights, $roomBase), 0);
         }
 
         return 0;
@@ -158,6 +162,19 @@ class DiscountService
      * 🧾 (03/09/26) chokepoint เดียวที่เขียน `amount` (net ต่อห้อง) — walk-in ก็เรียก method นี้
      * 📊 (05/10/26, excel-reports ticket 10) addon คิดจาก canonical fields ผ่าน AddonPricing —
      *    breakfast × คืน (แก้ undercharge เดิม) · extra-bed รายคืน · snapshot ทุกตัวเขียนที่นี่
+     *
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09 — มติ owner 2026-10-22) pricing 2 เส้นทาง:
+     *    ตัดสินจาก **role ผู้ล็อกอิน (sanctum)** ของ write ที่เรียก method นี้ (ตรงกับ guard
+     *    422 ใน Form Requests — ห้ามใช้ field 'source'):
+     *    - non-admin: daily เส้นตรงเฉพาะ x < block_min_nights (20) — ห้อง x ≥ 20 โดน 422 ที่
+     *      request layer ก่อนถึงจุดนี้ (ku_member → daily_ku ตามเรท effective)
+     *    - admin: ชั้นจำนวนห้อง (นับ booking_rooms ทั้งบิล — ≥10 → group min_10 · ≥5 → min_5
+     *      · ต่ำกว่า → เรทรายวัน effective ของเจ้าของบิล) ใช้กับบิลสั้น (< 20 คืน) และเป็นเรท
+     *      fallback เมื่อไม่มีเรท month · ชั้นจำนวนคืน: ห้อง x ≥ 20 → คิดแบบรายเดือน
+     *      `intdiv(x × month_rate, 30)` = เดือนเต็ม (30 วัน) + เศษคิดรายวันแบบเดือน (month÷30)
+     *      ตามเอกสารหลักเกณฑ์ของโรงแรม (เช่น Deluxe month 18,000 → 45 คืน = 18,000 + 15×600
+     *      = 27,000) · สูตรนี้ monotonic ทุกคืน — ไม่มี cliff (supersede กฎ b=floor(y/20)
+     *      ของ amendment 2026-10-20)
      */
     public function reprice(Booking $booking): Booking
     {
@@ -166,6 +183,16 @@ class DiscountService
         $user = $booking->user;
         // 📊 เรท addon อ่านครั้งเดียวต่อ booking — pricing source = global_rates เท่านั้น
         $rates = GlobalRate::getPrices(['breakfast_100', 'breakfast_200', 'extra_bed', 'early_checkin', 'late_checkout']);
+        // 🌙 pricing 2 เส้นทาง — เขตรายเดือน/group เป็น pricing ของเส้นทาง admin:
+        //    actor เป็น admin หรือ **บิลที่เกิดจากเส้นทาง admin** (source='admin' หรือ userless/org)
+        //    ใช้เส้นทาง admin เสมอ — กันเจ้าของ non-admin แก้ addon ทีหลังแล้วราคาเด้งขึ้นเงียบ ๆ
+        //    (spoof 'source'='admin' ไม่มีประโยชน์: 422 guard คืน/จำนวนห้องตัดสินจาก sanctum role
+        //    เสมอ — ส่วนลด daily_ku หาย = โดนแพงขึ้นเอง)
+        $isAdminPath = BookingRule::isAdmin()
+            || $booking->source === 'admin'
+            || $booking->user_id === null;
+        $monthlyGate = (int) config('booking.block_min_nights', 20);
+        $billRoomCount = $booking->bookingRooms()->count();
         $total = 0;
 
         foreach ($booking->bookingRooms()->with(['addon', 'roomType'])->get() as $br) {
@@ -173,12 +200,38 @@ class DiscountService
             //    (Carbon 3 คืน float เมื่อ input เป็น datetime เช่น 1.5 คืน — จองครึ่งคืนไม่มีในโดเมนนี้)
             $nights = (int) Carbon::parse($br->check_in)->startOfDay()
                 ->diffInDays(Carbon::parse($br->check_out)->startOfDay()) ?: 1;
-            $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
-            $roomAmount = $rate * $nights;
+
+            // 🌙 เขตรายเดือน (admin + x ≥ gate + มีเรท month) — ไม่เข้าเงื่อนไข = เรทรายวัน
+            //    (ไม่มีเรท month → fallback daily เส้นตรงตามมติ owner 2026-10-22)
+            $monthRate = GlobalRate::getRoomRate($br->roomType, 'month');
+            $isMonthly = $isAdminPath && $nights >= $monthlyGate && $monthRate > 0;
+
+            if ($isMonthly) {
+                // เดือนเต็ม + เศษคิดรายวันแบบเดือน (month÷30) — intdiv(x × month, 30) คิดตรง
+                // กันพอดี (a×month + intdiv(c×month, 30)) โดยไม่เกิดเศษเพนนี
+                $roomAmount = intdiv($nights * $monthRate, 30);
+                $rate = intdiv($roomAmount, $nights); // เรทเฉลี่ย/คืน — อ้างอิงฐานส่วนลด
+            } else {
+                $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
+
+                // ชั้นจำนวนห้อง (admin เท่านั้น) — group ทับ daily/daily_ku ทั้งบิลสั้นและ
+                // เคส fallback รายเดือนที่ไม่มีเรท month · org booking (userless) → daily
+                if ($isAdminPath) {
+                    $groupCode = $billRoomCount >= 10 ? 'min_10_rooms' : ($billRoomCount >= 5 ? 'min_5_rooms' : null);
+                    if ($groupCode !== null) {
+                        $groupRate = GlobalRate::getRoomRate($br->roomType, 'group', $groupCode);
+                        if ($groupRate > 0) {
+                            $rate = $groupRate;
+                        }
+                    }
+                }
+
+                $roomAmount = $rate * $nights;
+            }
 
             $isHeld = $holds->contains('booking_room_id', $br->id);
             $discountAmount = ($discount && $isHeld && $this->isEligible($discount, $br))
-                ? $this->computeForRoom($discount, $rate, $nights)
+                ? $this->computeForRoom($discount, $rate, $nights, $roomAmount)
                 : 0;
 
             // 📊 addon totals จาก canonical fields (สูตรอยู่ที่ AddonPricing จุดเดียว)

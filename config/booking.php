@@ -44,10 +44,16 @@ return [
     // 🗓️ Long stay (จองรายเดือน / จองเหมา — SRS v2 REQ-026/027, 2026-09-24)
     //    stay_type ของ booking_room (derived — ไม่มี column):
     //    nights >= monthly_min_nights (30) = 'monthly' (จองรายเดือน)
-    //    nights >= block_min_nights (21)  = 'block' (จองเหมา — กติกาตามรายเดือน)
+    //    nights >= block_min_nights (20)   = 'block' (จองเหมา — กติกาตามรายเดือน)
     //    อื่น ๆ = 'daily'
+    //
+    //    🌙 (22/10/26, srs-v2-gap-closure ticket 09): block_min_nights 21 → 20 ตามมติ
+    //    ticket 08 — ค่านี้เป็นทั้งป้าย stay_type='block' และ **ประตูเขตราคารายเดือน**:
+    //    - non-admin: ห้อง x >= 20 คืน → 422 reject (เขตรายเดือนเป็นของ admin)
+    //    - admin: ห้อง x >= 20 คืน → คิดราคาแบบรายเดือน intdiv(x × month_rate, 30)
+    //      (เดือนเต็ม + เศษคิดรายวันแบบเดือน month÷30 — ดู DiscountService::reprice)
     // =========================================================
     'monthly_min_nights' => (int) env('BOOKING_MONTHLY_MIN_NIGHTS', 30),
-    'block_min_nights' => (int) env('BOOKING_BLOCK_MIN_NIGHTS', 21),
+    'block_min_nights' => (int) env('BOOKING_BLOCK_MIN_NIGHTS', 20),
 
 ];

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\BookingRoom;
 use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -134,5 +135,32 @@ class UpdateBookingRoomsRequest extends FormRequest
             'booking_rooms.*.addons.late_hours.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
             'booking_rooms.*.addons.late_hours.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
         ];
+    }
+
+    /**
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามแก้วันที่แถวไหนให้
+     *    จำนวนคืน (final หลัง merge กับค่าเดิมของแถวนั้น) >= block_min_nights (20) → 422
+     *    guard เฉพาะแถวที่ payload แตะวันที่ — แถวไม่ส่งวันที่ = จำนวนคืนคงเดิม ไม่เข้าเขตตรวจ
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $pairs = collect($this->input('booking_rooms', []))
+                ->filter(fn ($room) => isset($room['check_in']) || isset($room['check_out']))
+                ->map(function ($room) {
+                    $existing = isset($room['booking_room_id'])
+                        ? BookingRoom::find($room['booking_room_id'])
+                        : null;
+
+                    return [
+                        'check_in' => $room['check_in'] ?? $existing?->check_in,
+                        'check_out' => $room['check_out'] ?? $existing?->check_out,
+                    ];
+                })
+                ->values()
+                ->all();
+
+            BookingRule::guardMonthlyNights($validator, $this->user('sanctum'), $pairs);
+        });
     }
 }

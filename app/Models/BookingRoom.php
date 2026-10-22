@@ -151,7 +151,7 @@ class BookingRoom extends Model
             return 'monthly';
         }
 
-        if ($nights >= (int) config('booking.block_min_nights', 21)) {
+        if ($nights >= (int) config('booking.block_min_nights', 20)) {
             return 'block';
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\BookingRoom;
 use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -102,6 +103,27 @@ class UpdateBookingRoomRequest extends FormRequest
                 },
             ],
         ];
+    }
+
+    /**
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามแก้วันที่ให้
+     *    จำนวนคืน (final หลัง merge กับค่าเดิม) >= block_min_nights (20) → 422
+     *    guard เฉพาะเมื่อ payload แตะวันที่ — แก้ addon/guests อย่างเดียว = จำนวนคืนคงเดิม ไม่เข้าเขตตรวจ
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if (! $this->has('check_in') && ! $this->has('check_out')) {
+                return;
+            }
+
+            $existing = BookingRoom::find($this->route('bookingRoomId'));
+
+            BookingRule::guardMonthlyNights($validator, $this->user('sanctum'), [[
+                'check_in' => $this->input('check_in') ?? $existing?->check_in,
+                'check_out' => $this->input('check_out') ?? $existing?->check_out,
+            ]], '');
+        });
     }
 
     /**

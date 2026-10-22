@@ -4539,4 +4539,53 @@ Accept: application/json
 
 ---
 
-*Last updated: 2026-10-14 · KU HOME API v1*
+## API Documentation Handoff — Ticket 08/09: 🌙 Pricing Tier v2 — กติกาเลือกเรท 2 เส้นทาง + สูตรรายเดือน (REQ-004/015/016) — 22/10/26
+
+> implement ตาม Resolution ของ [ticket 08](../wayfinder/srs-v2-gap-closure/tickets/08-pricing-tier-grilling.md) + มติ owner 2026-10-22 (เอกสารหลักเกณฑ์ราคาของโรงแรม) · chokepoint เดียว = `DiscountService::reprice()` · chokepoint guard = `BookingRule::guardMonthlyNights()` ใน Form Requests ทั้ง 4
+
+### 🌙 กติกาเลือกเรท (สรุปสำหรับ frontend)
+
+ตัวแปร: **x** = จำนวนคืนของแต่ละ booking_room (คืนเต็ม) · ประตูเขตรายเดือน = `booking.block_min_nights` = **20 คืน** (เดิม 21)
+
+**เส้นทาง user จองเอง (role ผู้ล็อกอิน ≠ admin):**
+- x < 20 คืน → ราคาเส้นตรง `x × daily` (ku_member → `daily_ku` อัตโนมัติ)
+- ห้องไหน **x ≥ 20 คืน → 422 reject ทั้งบิล** — การจองรายเดือน/จองเหมาเป็นเขตบริการของ admin · guard ครอบทุก write path: create (`POST /bookings`), เพิ่มห้อง (`POST /bookings/{id}/rooms`), แก้รายห้อง (`PUT .../rooms/{bookingRoomId}`), batch edit (`PUT .../rooms`) · guard ตรวจเฉพาะ payload ที่แตะวันที่ (แก้ addon/guests อย่างเดียวไม่โดน)
+- ≥ 5 ห้อง → 422 ผ่าน cap เดิม (`max_rooms_per_booking` = 4)
+
+**เส้นทาง admin (จองแทน/เฮดเปล่า/org booking):**
+- **ห้อง x ≥ 20 คืน → สูตรรายเดือน** `room_amount = intdiv(x × month_rate ÷ 30, 1)` หรือ `intdiv(x × month_rate, 30)` — เดือนเต็ม (30 วัน) + เศษคิดรายวันแบบเดือน (`month ÷ 30`) ตามเอกสารโรงแรม · สูตร monotonic ทุกคืน (ไม่มี cliff)
+- ห้อง x < 20 คืน → เส้นตรงตาม**ชั้นจำนวนห้องของบิล**: ≥10 ห้อง → `group min_10_rooms` · ≥5 → `min_5_rooms` · ต่ำกว่า → เรทรายวัน effective ของเจ้าของบิล (`daily_ku` ถ้าเป้าเป็น ku_member, org booking userless → `daily`)
+- **ไม่มีแถว `month` (หรือ inactive)** → fallback ราคาเส้นตรงรายวัน (ชั้นจำนวนห้องยังทำงาน) — มติ owner 2026-10-22
+- `set_room_price` (โค้ดราคาสัญญา) ชนะเด็ดขาดข้ามสูตรรายเดือน: net = `set_price × x` ตรง ๆ (ไม่ขยับราคาขึ้น)
+- ส่วนลด `percent`/`fixed` คิดจาก**ยอด prorate แล้ว** (ฐานส่วนลด = room_amount ใหม่)
+
+**บิลที่เกิดจากเส้นทาง admin (`source='admin'` หรือ userless/org) คง pricing ของ admin ตลอดอายุบิล** แม้เจ้าของ (non-admin) จะมาแก้ addon/guests ทีหลัง — กันราคาเด้งขึ้นเงียบ ๆ (การ spoof `source='admin'` ไม่มีประโยชน์ — guard 422 คืน/จำนวนห้องตัดสินจาก sanctum role เสมอ)
+
+### ตารางตัวอย่าง (Deluxe: daily 1,200 · daily_ku 1,000 · group 900/750 · month 18,000 → 600/วัน)
+
+| เคส | คำนวณ | ยอดค่าห้อง |
+|---|---|---|
+| user จองเอง 19 คืน | daily เส้นตรง | 19 × 1,200 = **22,800** |
+| user จองเอง 25 / 45 คืน | ห้อง x ≥ 20 → **422** | — |
+| admin 1 ห้อง 45 คืน | intdiv(45 × 18,000, 30) = 18,000 + 15×600 | **27,000** |
+| admin 1 ห้อง 25 คืน | intdiv(25 × 18,000, 30) | **15,000** |
+| admin 1 ห้อง 50 คืน | intdiv(50 × 18,000, 30) | **30,000** (เรียบ ไม่มี cliff) |
+| admin 1 ห้อง 19 คืน | ต่ำกว่าประตู → daily | 19 × 1,200 = **22,800** |
+| admin 6 ห้อง 3 คืน | group min_5 | ห้องละ 900 × 3 = **2,700** |
+| admin 11 ห้อง 3 คืน | group min_10 | ห้องละ 750 × 3 = **2,250** |
+| admin 45 คืน + set_room_price 500 | ชนะข้ามสูตร | 500 × 45 = **22,500** |
+| admin 45 คืน (เรท month ยังไม่ตั้ง) | fallback daily | 45 × 1,200 = **54,000** |
+
+### การเปลี่ยนแปลง wire format
+
+- `RoomType::rates` object (room-types, availability, calendar ทุก endpoint) เพิ่ม key ใหม่: **`monthly_per_day`** = `intdiv(monthly, 30)` (0 เมื่อไม่มีเรทเดือน) — frontend ใช้คำนวณยอดก่อนส่งจากแหล่งเดียวกับ server
+- 422 message ตัวอย่าง: `"การจองตั้งแต่ 20 คืนขึ้นไป (จองรายเดือน/จองเหมา — ห้องนี้ 45 คืน) เป็นเขตบริการของผู้ดูแลระบบ กรุณาติดต่อผู้ดูแลค่ะ 🌙"`
+- `stay_type` derived: `block` เริ่มที่ 20 คืน (เดิม 21) — `monthly` คง 30 คืน
+
+### ⚠️ Finding (บั๊กเดิม พบตอน implement — รอ owner ตัดสิน)
+
+บิล admin/userless (`user_id = null`) ที่ใส่ `discount_code` ตอน create จะโดน **500** — `discount_redemptions.user_id` เป็น NOT NULL แต่บิลไม่มีเจ้าของ (โค้ดเดิมก่อน ticket 09 ก็เป็นแบบนี้ แค่ไม่เคยมีเคสทดสอบ) · ทางเลือก: 422 reject "โค้ดส่วนลดต้องมี user เจ้าของบิล" หรือทำ column nullable + ข้ามโควตา per-user — **ยังไม่แก้ใน ticket นี้** (out of scope)
+
+---
+
+*Last updated: 2026-10-22 · KU HOME API v1*

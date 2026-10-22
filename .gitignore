@@ -74,3 +74,4 @@ api_bin_output.txt
 
 # Local git worktrees (nested checkouts — never commit)
 /.worktree/
+/wayfinder/srs-v2-gap-closure/

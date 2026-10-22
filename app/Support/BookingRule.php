@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Validator;
 
 /**
  * 🏨 Helper กลางสำหรับกฎการจอง (advance notice rule & room cap rule)
@@ -75,6 +76,64 @@ class BookingRule
         $max = (int) config('booking.max_rooms_per_booking', 4);
 
         return "สามารถจองได้สูงสุด {$max} ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ";
+    }
+
+    // =========================================================
+    // 🌙 เขตราคารายเดือน (srs-v2-gap-closure ticket 08/09 — 22/10/26)
+    //    การจองรายเดือน/จองเหมา (>= block_min_nights คืน) เป็นเขตบริการของ admin
+    //    — non-admin จอง/แก้ห้องให้คืนถึงเพดานนี้ไม่ได้ → 422 (ราคาเดือนคิดโดย admin เท่านั้น)
+    // =========================================================
+
+    /**
+     * เพดานจำนวนคืนของ non-admin (admin = PHP_INT_MAX, non-admin = config block_min_nights = 20)
+     * ใช้ค่าเดียวกับประตูเขตรายเดือนฝั่ง pricing (DiscountService::reprice)
+     */
+    public static function monthlyNightsCap(?User $user = null): int
+    {
+        if (static::isAdmin($user)) {
+            return PHP_INT_MAX;
+        }
+
+        return (int) config('booking.block_min_nights', 20);
+    }
+
+    /**
+     * 🌙 Guard เขตรายเดือน — เติม validation error ถ้า non-admin ส่งห้องที่จำนวนคืน (final) >= cap
+     *
+     * $pairs = รายการ ['check_in' => 'Y-m-d', 'check_out' => 'Y-m-d'] ที่ merge กับค่าเดิมแล้ว
+     *          (create/addRooms = จาก payload · edit = payload ?? ค่าเดิมของ booking_room)
+     *          แถวที่วันที่ไม่ครบ/parse ไม่ได้ → ข้าม (กฎ required/after จับแยกต่างหาก)
+     *
+     * @param  Validator  $validator
+     * @param  array<int, array{check_in?: mixed, check_out?: mixed}>  $pairs
+     */
+    public static function guardMonthlyNights($validator, ?User $user, array $pairs, string $prefix = 'booking_rooms'): void
+    {
+        $cap = static::monthlyNightsCap($user);
+        if ($cap === PHP_INT_MAX) {
+            return;
+        }
+
+        foreach ($pairs as $i => $pair) {
+            if (empty($pair['check_in']) || empty($pair['check_out'])) {
+                continue;
+            }
+
+            try {
+                $nights = (int) Carbon::parse($pair['check_in'])->startOfDay()
+                    ->diffInDays(Carbon::parse($pair['check_out'])->startOfDay());
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($nights >= $cap) {
+                $key = $prefix === '' ? 'check_out' : "{$prefix}.{$i}.check_out";
+                $validator->errors()->add(
+                    $key,
+                    "การจองตั้งแต่ {$cap} คืนขึ้นไป (จองรายเดือน/จองเหมา — ห้องนี้ {$nights} คืน) เป็นเขตบริการของผู้ดูแลระบบ กรุณาติดต่อผู้ดูแลค่ะ 🌙"
+                );
+            }
+        }
     }
 
     /**
