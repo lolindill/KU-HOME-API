@@ -52,7 +52,8 @@ class BookingController extends Controller
             $organizationId = $request->query('organization_id');
 
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
-            $query = Booking::with('bookingRooms.addon')
+            // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
+            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage'])
                 ->when($user && $user->role === 'admin', function ($q) {
                     // 🏛️ ticket 08 — admin เห็น object organization คู่กับ user (org booking ไม่มีเจ้าของ user)
                     $q->with('user')->with('organization');
@@ -152,7 +153,7 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ใส่โค้ดส่วนลดเรียบร้อยแล้วค่ะ! 🎟️',
-                'booking' => $updatedBooking->fresh(['bookingRooms.addon']),
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon', 'confirmations.slipImage']),
             ], 200);
 
         } catch (ValidationException $e) {
@@ -213,7 +214,7 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ลบโค้ดส่วนลดออกจากการจองเรียบร้อยแล้วค่ะ 🎟️',
-                'booking' => $updatedBooking->fresh(['bookingRooms.addon']),
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon', 'confirmations.slipImage']),
             ], 200);
 
         } catch (\Exception $e) {
@@ -1707,7 +1708,7 @@ class BookingController extends Controller
 
                 DB::commit();
 
-                $fresh = $locked->fresh(['bookingRooms.addon']);
+                $fresh = $locked->fresh(['bookingRooms.addon', 'confirmations.slipImage']);
 
                 return response()->json([
                     'status' => 'success',
@@ -1981,7 +1982,8 @@ class BookingController extends Controller
             }
 
             // 🏛️ ticket 08 — admin เห็น object organization (org booking ดูได้เฉพาะ admin อยู่แล้ว)
-            $booking = Booking::with(['user', 'bookingRooms.addon'])
+            // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking
+            $booking = Booking::with(['user', 'bookingRooms.addon', 'confirmations.slipImage'])
                 ->when($user->role === 'admin', function ($q) {
                     $q->with('organization');
                 })
@@ -2110,7 +2112,8 @@ class BookingController extends Controller
                 'status' => 'success',
                 'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
                 // 🌟 (26/08/26): load addon ให้ format booking_rooms เหมือนกับ endpoint อื่นๆ
-                'booking' => $booking->load('bookingRooms.addon'),
+                // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking
+                'booking' => $booking->load(['bookingRooms.addon', 'confirmations.slipImage']),
                 // 🏨 debug info: algorithm ที่ชนะ + cluster cost
                 'allocation' => [
                     'winner' => $result->winner,
