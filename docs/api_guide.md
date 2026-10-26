@@ -1201,6 +1201,7 @@ curl -s -H "Accept: application/json" \
 | `room_type`       | uuid   | Filter by room type (or `all` for no filter — default)|
 | `organization_id` | uuid   | 🏛️ Filter ตามองค์กร (admin เท่านั้น — ไม่ใช่ UUID → 422; org booking จาก ticket 03) |
 | `status`          | string | 📋 Filter ตาม container state — ค่าเดียวหรือ comma-separated เช่น `pending` หรือ `pending,verify_error` · ใช้ได้: `draft, pending, verify_error, paid, confirmed, complete` · ค่าอื่น → 422 · ไม่ใส่ = ทุกสถานะ (22/10/26) |
+| `payment_type`    | string | 💳 Filter ตามประเภทการชำระ — ค่าเดียวหรือ comma-separated เช่น `deposit` หรือ `deposit,deferred` · ใช้ได้: `full, deposit, deferred` · ค่าอื่น → 422 · ไม่ใส่ = ทุกประเภท · ใช้ได้ทุก role (user เห็นเฉพาะบิลตัวเอง) · combine กับ `status` ได้ (AND) (26/10/26) |
 | `per_page`        | int    | Items per page (default: 15)                         |
 
 > 🏛️ **Org booking response (2026-09-25, ticket 08):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — `organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email` serialize ตาม booking ปกติ · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter

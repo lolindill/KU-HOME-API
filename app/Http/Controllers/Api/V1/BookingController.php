@@ -75,6 +75,28 @@ class BookingController extends Controller
                 }
             }
 
+            // 💳 payment_type filter — ค่าเดียวหรือ comma-separated (เช่น payment_type=deposit
+            //    หรือ payment_type=deposit,deferred) — อ่านอย่างเดียว ไม่เกี่ยวกับการตั้ง type
+            $paymentTypeParam = $request->query('payment_type');
+            $paymentTypes = [];
+            if ($paymentTypeParam !== null && $paymentTypeParam !== '') {
+                $paymentTypes = collect(explode(',', $paymentTypeParam))
+                    ->map(fn ($t) => trim($t))
+                    ->filter(fn ($t) => $t !== '')
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $invalidTypes = array_diff($paymentTypes, ['full', 'deposit', 'deferred']);
+                if ($invalidTypes !== []) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'payment_type filter ไม่ถูกต้อง: '.implode(', ', $invalidTypes)
+                            .' (ใช้ได้: full, deposit, deferred) ค่ะนายท่าน 💳',
+                    ], 422);
+                }
+            }
+
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
             // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
             $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage'])
@@ -110,6 +132,9 @@ class BookingController extends Controller
             if ($statuses !== []) {
                 $query->whereIn('status', $statuses);
             }
+            if ($paymentTypes !== []) {
+                $query->whereIn('payment_type', $paymentTypes);
+            }
 
             $perPage = $request->query('per_page', 15);
             $bookings = $query->orderBy('created_at', 'desc')->paginate($perPage);
@@ -125,6 +150,7 @@ class BookingController extends Controller
                     'room_type' => $roomTypeId,
                     'organization_id' => $organizationId,
                     'status' => $statusParam,
+                    'payment_type' => $paymentTypeParam,
                 ],
                 'bookings' => $bookings->items(),
                 'pagination' => [

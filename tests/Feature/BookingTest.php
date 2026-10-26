@@ -428,6 +428,77 @@ class BookingTest extends TestCase
     }
 
     // ============================================
+    // ✅ Booking list: payment_type filter (GET /bookings?payment_type=)
+    // ============================================
+
+    public function test_admin_can_filter_bookings_by_payment_type(): void
+    {
+        $this->actingAsAdmin();
+        $deposit = $this->createBooking(['payment_type' => 'deposit', 'status' => 'confirmed']);
+        $this->createBooking(['payment_type' => 'full', 'status' => 'confirmed']);
+        $this->createBooking(['payment_type' => 'full']);
+
+        $response = $this->getJson('/api/v1/bookings?payment_type=deposit');
+        $response->assertStatus(200);
+        $response->assertJsonPath('search_criteria.payment_type', 'deposit');
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($deposit->id, $bookingIds);
+        $this->assertCount(1, $bookingIds, 'ต้องเห็นเฉพาะ booking payment_type=deposit');
+
+        // 💳 combine กับ status filter ได้ (AND) — deposit ที่ confirmed ต้องหายเมื่อกรอง status=draft
+        $combined = $this->getJson('/api/v1/bookings?payment_type=deposit&status=draft');
+        $combined->assertStatus(200);
+        $this->assertCount(0, collect($combined->json('bookings')));
+    }
+
+    public function test_admin_can_filter_bookings_by_multiple_payment_types(): void
+    {
+        $this->actingAsAdmin();
+        $deposit = $this->createBooking(['payment_type' => 'deposit']);
+        $deferred = $this->createBooking(['payment_type' => 'deferred']);
+        $this->createBooking(['payment_type' => 'full']);
+
+        $response = $this->getJson('/api/v1/bookings?payment_type=deposit,deferred');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEqualsCanonicalizing(
+            [$deposit->id, $deferred->id],
+            $bookingIds->all(),
+            'comma-separated ต้องได้ทั้ง 2 type'
+        );
+    }
+
+    public function test_bookings_payment_type_filter_rejects_invalid_value(): void
+    {
+        $this->actingAsAdmin();
+        $this->createBooking();
+
+        // ❌ partial ไม่มีใน payment type enum — ต้อง 422 ไม่ใช่เงียบ ๆ คืน [] ค่ะ
+        $response = $this->getJson('/api/v1/bookings?payment_type=partial');
+        $response->assertStatus(422);
+        $response->assertJsonPath('status', 'error');
+    }
+
+    public function test_user_can_filter_own_bookings_by_payment_type(): void
+    {
+        $user = User::factory()->create();
+        $deposit = $this->createBooking(['user_id' => $user->id, 'payment_type' => 'deposit']);
+        $this->createBooking(['user_id' => $user->id, 'payment_type' => 'full']);
+        // บิล deposit ของคนอื่น — ห้ามโผล่แม้ filter ตรง
+        $this->createBooking(['payment_type' => 'deposit']);
+
+        // 🛡️ payment_type filter ใช้ได้กับ user ทั่วไป — scope ที่ booking ของตัวเองเสมอ
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/bookings?payment_type=deposit');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEquals([$deposit->id], $bookingIds->all());
+    }
+
+    // ============================================
     // ✅ Booking validation
     // ============================================
 
