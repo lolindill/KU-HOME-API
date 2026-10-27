@@ -544,6 +544,64 @@ final class BookingAutoAssignRoomsTest extends TestCase
     }
 
     /**
+     * ⏱️ (2026-10-27) Overlap exclusion: ห้องที่ถูกยึดโดย BR status='draft' ของ container status='paid'
+     * แม้ payment_deadline จะหมดเวลาในอดีตแล้ว (fix slot leak) ระบบต้องไม่เลือกห้องที่ชน
+     */
+    public function test_overlap_exclusion_avoids_draft_br_in_paid_booking_with_expired_deadline(): void
+    {
+        $this->actingAsAdmin();
+
+        // Suite มี 10 ห้องใน topology (ชั้น 5-9 ละ 2 ห้อง: 07, 18)
+        // เก็บห้อง 507 (Room A) และ 518 (Room B) ไว้ นอกนั้นปิดด้วย maintenance period
+        $roomA = Room::where('room_type_id', $this->typeIds['Suite'])->where('room_number', '507')->firstOrFail();
+        $roomB = Room::where('room_type_id', $this->typeIds['Suite'])->where('room_number', '518')->firstOrFail();
+
+        Room::where('room_type_id', $this->typeIds['Suite'])
+            ->whereNotIn('id', [$roomA->id, $roomB->id])
+            ->get()
+            ->each(fn (Room $room) => RoomStatePeriod::create([
+                'room_id' => $room->id,
+                'kind' => 'maintenance',
+                'start_date' => '2026-01-01',
+                'end_date' => null,
+            ]));
+
+        // บิลอื่น container='paid' แต่ห้องค้าง draft + payment_deadline ในอดีต
+        $otherBooking = $this->createBooking([
+            'status' => 'paid',
+            'is_paid' => true,
+            'payment_deadline' => now()->subHour(),
+        ]);
+        $this->createBookingRoom(
+            $otherBooking,
+            'Suite',
+            room: $roomA,
+            checkIn: '2026-11-10',
+            checkOut: '2026-11-14',
+            status: 'draft'
+        );
+
+        // Target booking ต้องการ Suite 1 ห้องในช่วง 2026-11-11 ถึง 2026-11-13 (overlap)
+        $targetBooking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $targetBr = $this->createBookingRoom(
+            $targetBooking,
+            'Suite',
+            room: null,
+            checkIn: '2026-11-11',
+            checkOut: '2026-11-13',
+            status: 'confirmed'
+        );
+
+        $response = $this->putJson("/api/v1/bookings/{$targetBooking->id}/assign-rooms");
+
+        $response->assertStatus(200)->assertJson(['status' => 'success']);
+
+        $assignedRoomId = (string) $targetBr->fresh()->room_id;
+        $this->assertSame((string) $roomB->id, $assignedRoomId);
+        $this->assertNotSame((string) $roomA->id, $assignedRoomId);
+    }
+
+    /**
      * ✅ 14. Partial assignment: บุ๊กกิ้งมี 2 ห้อง โดยห้องหนึ่งมี room_id แล้ว
      *        ระบบต้อง assign เฉพาะห้องที่ยังไม่มี room_id และไม่เปลี่ยนห้องที่ระบุไว้ก่อนหน้า
      */

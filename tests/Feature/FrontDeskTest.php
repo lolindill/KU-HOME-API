@@ -722,4 +722,63 @@ class FrontDeskTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    public function test_mark_no_show_allows_draft_br_in_confirmed_booking(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    public function test_mark_no_show_allows_draft_br_in_paid_booking_and_auto_promotes_container(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        // container โดน promote เป็น confirmed ก่อน แล้วจบที่ complete เมื่อ mark ครบ
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    public function test_check_in_assigned_rooms_rejects_overlapping_room_holding_slot(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+
+        // บิลแรกจอง room นี้ไว้และถือ slot อยู่ (confirmed) ช่วงวันที่เดียวกัน
+        $bookingA = $this->createBooking(['status' => 'confirmed', 'is_paid' => true]);
+        $this->createBookingRoom($bookingA, $roomType, $room, 'confirmed');
+
+        // บิลที่สองต้องการเช็คอินเข้าห้องเดียวกันวันทับซ้อนกัน ด้วย assigned_rooms
+        $bookingB = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $this->createBookingRoom($bookingB, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$bookingB->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('มีการจองอื่นทับช่วงเข้าพัก', $response->json('message'));
+    }
 }

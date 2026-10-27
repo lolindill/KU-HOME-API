@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Booking;
 use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
@@ -149,5 +150,94 @@ class DraftSlotReleaseTest extends TestCase
         $this->artisan('app:cleanup-expired-drafts')->assertSuccessful();
 
         $this->assertDatabaseMissing('bookings', ['id' => $bookingId]);
+    }
+
+    public function test_pending_booking_holds_slot_after_deadline(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes();
+
+        $booking->transitionStatus('pending', 'admin');
+
+        // B จองวันทับ/type เดิม → 422
+        $this->actingAs($this->userB, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload())
+            ->assertStatus(422);
+
+        // availability ไม่เพิ่ม (ยังเป็น 0)
+        $this->getJson($this->availabilityUrl())
+            ->assertStatus(200)
+            ->assertJsonPath('room_types.0.available_rooms', 0);
+    }
+
+    public function test_paid_booking_holds_slot_after_deadline(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes();
+
+        $booking->transitionStatus('paid', 'admin');
+
+        $this->actingAs($this->userB, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload())
+            ->assertStatus(422);
+    }
+
+    public function test_confirmed_booking_holds_slot_after_deadline(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes();
+
+        $booking->transitionStatus('confirmed', 'admin');
+
+        $this->actingAs($this->userB, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload())
+            ->assertStatus(422);
+    }
+
+    public function test_verify_error_booking_holds_slot_after_deadline(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes();
+
+        $booking->transitionStatus('pending', 'admin');
+        $booking->transitionStatus('verify_error', 'admin');
+
+        $this->actingAs($this->userB, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload())
+            ->assertStatus(422);
+    }
+
+    public function test_complete_booking_releases_slot_after_deadline(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes();
+
+        $booking->transitionStatus('confirmed', 'admin');
+        $booking->transitionStatus('complete', 'admin');
+
+        // complete ปล่อย slot คืน pool → จองทับซ้ำได้ 201
+        $this->actingAs($this->userB, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload())
+            ->assertStatus(201);
     }
 }

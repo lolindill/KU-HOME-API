@@ -176,6 +176,12 @@ class BookingRoom extends Model
      * แม้ payment_deadline ผ่านไปแล้ว — จุดประสงค์ของ deferred คือการันตีห้องให้องค์กร
      * ก่อนชำระ (ถ้าปล่อย slot การยกเว้น CleanupExpiredDrafts ก็ไร้ความหมาย) —
      * draft deferred สร้าง/ดูแลโดย admin เท่านั้น จึงมีคนรับผิดชอบเก็บกวาดเสมอ
+     *
+     * ⏱️ (2026-10-27, fix slot leak): บิลที่ container เลย draft แล้ว
+     * (pending/verify_error/paid/confirmed) ห้อง draft ยึด slot เสมอ — ไม่สน deadline
+     * เพราะ verify สลิป / updateStatus ไม่ได้ย้ายสถานะห้อง ทำให้ห้องค้าง draft ตลอดชีวิตบิล
+     * · complete ไม่อยู่ในลิสต์ — บิลจบแล้วห้องควรคืน pool
+     * · บิล container draft คงพฤติกรรมเดิมทุกอย่าง (เกิน 15 นาทีปล่อย / null หรือ deferred ยึด)
      */
     public function scopeHoldingSlot($query)
     {
@@ -188,7 +194,14 @@ class BookingRoom extends Model
                                 $w->whereNull('payment_deadline')
                                     ->orWhere('payment_deadline', '>', now())
                                     // 💳 draft deferred — ยึด slot จน admin confirm หรือลบ
-                                    ->orWhere('payment_type', 'deferred');
+                                    ->orWhere('payment_type', 'deferred')
+                                    // ⏱️ (2026-10-27) fix slot leak: บิลที่ container เลย draft แล้ว
+                                    //    (pending/verify_error/paid/confirmed) ห้อง draft ยึด slot เสมอ —
+                                    //    verify/updateStatus ไม่ได้ย้ายสถานะห้อง ห้องค้าง draft ตลอดชีวิตบิล
+                                    //    เดิมเงื่อนไขดูแค่ payment_deadline ทำให้บิลที่จ่าย/ยืนยันแล้วหลุด
+                                    //    จากการนับ slot หลัง 15 นาที → overbooking (เหตุการณ์ห้อง 508 บน prod)
+                                    //    · complete ไม่อยู่ในลิสต์ — บิลจบแล้วห้องควรคืน pool
+                                    ->orWhereIn('status', ['pending', 'verify_error', 'paid', 'confirmed']);
                             }));
                     });
             });

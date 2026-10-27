@@ -848,7 +848,16 @@ Tests ใหม่ครอบคลุม: state machine lifecycle + terminal l
 - **#41: Room model redundant UUID config** — ✅ แก้แล้ว
   - ปัญหา: `Room` model มีทั้ง `HasUuids` trait และ manual `$incrementing = false`, `$keyType = 'string'`, `$guarded = []` → redundant
   - แก้: ลบ manual config ที่ซ้ำซ้อน เพราะ `HasUuids` trait จัดการให้อยู่แล้ว
-  - ไฟล์: `app/Models/Room.php`
+
+- **#48: Slot leak — ห้อง draft ของบิลที่เลย draft แล้ว หลุดจากการนับ slot (overbooking)** — ✅ แก้แล้ว (2026-10-27)
+  - **ปัญหา / Root Cause:** `BookingRoom::scopeHoldingSlot()` นับห้อง `draft` เฉพาะเมื่อ `payment_deadline` ของบิลแม่ยังไม่ผ่าน (15 นาที) แต่ flow ออนไลน์ (verify สลิป / `PUT /bookings/update/{id}`) เดินเฉพาะสถานะ container บิลแม่ โดยไม่ได้ย้ายสถานะห้องออกจาก `draft` เลย ทำให้บิลที่ container เป็น `pending/verify_error/paid/confirmed` ค้างห้อง `draft` ตลอดชีวิตบิล และเมื่อเกิน deadline 15 นาที ห้องจะหลุดจากการนับ slot ทันที ส่งผลให้ห้องถูกมองเป็นห้องว่างและเกิด overbooking จริง
+  - **หลักฐานบน Production (ku-home.ku.ac.th ตรวจ 2026-10-27):** ตรวจพบ 37 บิล / 50 ห้อง มีห้องค้าง `draft` 100% (`confirmed×draft` 22, `pending×draft` 25, `paid×draft` 1, `draft×draft` 2) และเกิด overbooking จริงที่ห้อง 508 วันที่ 24–25 ต.ค. ถูก assign ซ้ำ 2 บิล (`202610-00099` + `202610-00093`) โดย `CleanupExpiredDrafts` ลบเฉพาะ container draft จึงไม่กวาดบิลเหล่านี้
+  - **การตัดสินใจ 4 ข้อ (owner decision 2026-10-27):**
+    1. แก้ที่ `scopeHoldingSlot()` เท่านั้น — ไม่ sync สถานะห้อง draft→confirmed ตอน verify/updateStatus เพื่อเลี่ยง migration และ regression
+    2. ห้อง `draft` ยึด slot เมื่อ container ∈ `pending, verify_error, paid, confirmed` — ไม่สน deadline และไม่รวม `complete` (บิลจบ = คืนห้องเข้า pool) ส่วนบิล container `draft` คงพฤติกรรมเดิมทุกอย่าง (เกิน 15 นาทีปล่อย / deadline null หรือ deferred ยึด)
+    3. `markNoShow` ยอมรับห้อง `draft` หรือ `confirmed` (guard 2) และเพิ่ม promotion สองสเต็ป `draft → confirmed → no_show` ก่อน mark
+    4. `checkIn` ด้วยมือ (`assigned_rooms`) เพิ่ม overlap guard ป้องกัน assign ห้องที่มี BR อื่น (holdingSlot) ยึดทับช่วงพัก (HTTP 422)
+  - **ไฟล์ที่แก้:** `app/Models/BookingRoom.php`, `app/Http/Controllers/Api/V1/FrontDeskController.php`, tests 3 ไฟล์ (`DraftSlotReleaseTest`, `BookingAutoAssignRoomsTest`, `FrontDeskTest`), docs 3 ไฟล์ (`AGENTS.md`, `docs/api_guide.md`, `cline.md`)
 
 - **#30: Payment/Receipt amount type mismatch** — ✅ แก้แล้ว
   - ปัญหา: `Booking.total_amount` cast เป็น `integer` แต่ `Payment.amount` เป็น `decimal:2`, `Receipt.amount` ไม่มี cast → เวลา `$totalPaid >= $booking->total_amount` เปรียบเทียบข้าม type

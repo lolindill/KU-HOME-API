@@ -189,6 +189,23 @@ class FrontDeskController extends Controller
                         );
                     }
 
+                    // ⏱️ (2026-10-27) overlap guard — ห้าม assign ห้องที่มี BR อื่น (holdingSlot) ยึดทับช่วงพัก
+                    //    ปิดช่องจองซ้ำตอนเช็คอินด้วยมือ (auto-assign มี allocator กันให้อยู่แล้ว)
+                    $overlap = $assignedRoom->bookingRooms()
+                        ->where('booking_rooms.id', '!=', $bRoom->id)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $bRoom->check_out)
+                        ->where('check_out', '>', $bRoom->check_in)
+                        ->exists();
+                    if ($overlap) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
+                            "({$bRoom->check_in->toDateString()} – {$bRoom->check_out->toDateString()}) ".
+                            'ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาเลือกห้องอื่นด้วย assigned_rooms นะคะ',
+                            422
+                        );
+                    }
+
                     $bRoom->update(['room_id' => $assignedRooms[$index]]);
                 }
 
@@ -426,13 +443,14 @@ class FrontDeskController extends Controller
                 throw new \Exception('ไม่พบห้องที่ระบุในรายการจองนี้ค่ะนายท่าน');
             }
 
-            // 🛡️ Guard 2: ทุกห้องที่จะ mark ต้องเป็น confirmed เท่านั้น
-            // (draft ยังไม่ยืนยัน / checked_in เข้าพักแล้ว / checked_out / no_show จบไปแล้ว)
+            // 🛡️ Guard 2: ทุกห้องที่จะ mark ต้องเป็น draft หรือ confirmed เท่านั้น
+            // (⏱️ 2026-10-27: ยอมรับ draft เพราะ verify ไม่ได้ย้ายสถานะห้อง — ห้องบน prod ค้าง draft ทั้งหมด)
+            // (checked_in เข้าพักแล้ว / checked_out / no_show จบไปแล้ว → ยัง reject)
             foreach ($targetRooms as $bRoom) {
-                if ($bRoom->status !== 'confirmed') {
+                if (! in_array($bRoom->status, ['draft', 'confirmed'], true)) {
                     throw new \Exception(
                         "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ '{$bRoom->status}' ".
-                        "(ต้องเป็น 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
+                        "(ต้องเป็น 'draft' หรือ 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
                     );
                 }
             }
@@ -444,7 +462,11 @@ class FrontDeskController extends Controller
             }
 
             // Mark no-show ทีละห้อง (ใช้ BR state machine)
+            // ⏱️ (2026-10-27) ห้องค้าง draft → ยืนยันก่อน (สองสเต็ปตาม state machine เหมือน checkIn)
             foreach ($targetRooms as $bRoom) {
+                if ($bRoom->status === 'draft') {
+                    $bRoom->transitionStatus('confirmed', 'admin');
+                }
                 $bRoom->transitionStatus('no_show', 'admin');
             }
 
