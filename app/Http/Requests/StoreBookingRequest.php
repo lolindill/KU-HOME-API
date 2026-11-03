@@ -12,6 +12,14 @@ class StoreBookingRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $user = $this->user('sanctum');
+        if ((! $user || $user->role !== 'admin') && $this->input('source') === 'admin') {
+            $this->merge(['source' => 'online']);
+        }
+    }
+
     public function rules(): array
     {
         // 🏛️ (20/10/26, amendment ของ organization-bookings ticket 02 — owner ตัดสินใหม่):

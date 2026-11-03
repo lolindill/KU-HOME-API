@@ -182,10 +182,9 @@ class RoomController extends Controller
         $bedType = $request->query('bed_type');
 
         $availableRoomTypes = RoomType::withCount(['rooms' => function ($query) use ($checkIn, $checkOut) {
-            // 🗓️ (24/09/26) room-state-periods: sellable pool = status available +
+            // 🗓️ (24/09/26) room-state-periods: sellable pool = กายภาพทั้งหมด
             //    ไม่มี period (reserved/maintenance) ทับช่วง [checkIn, checkOut)
-            $query->where('status', 'available')
-                ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+            $query->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
                 ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED);
         }])
             ->withCount(['bookingRooms as booked_rooms_count' => function ($query) use ($checkIn, $checkOut) {
@@ -200,8 +199,7 @@ class RoomController extends Controller
             // 🏨 (24/09/26) ticket 01: admin flag → นับห้องสำรอง (reserved period ช่วงทับ) แยกไว้โชว์ breakdown
             //    🗓️ maintenance period absolute — ห้องที่ทับ maintenance ไม่กลับมาแม้ส่ง flag
             ->when($includeReserved, fn ($query) => $query->withCount(['rooms as reserved_rooms_count' => function ($query) use ($checkIn, $checkOut) {
-                $query->where('status', 'available')
-                    ->blockedByPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
+                $query->blockedByPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
                     ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE);
             }]))
             // 🌟 (09/09/26) bed_type=king_size → เพิ่ม 2 counters สำหรับมิติห้อง king

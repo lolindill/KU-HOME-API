@@ -337,6 +337,52 @@ class DiscountTest extends TestCase
         $response->assertStatus(401);
     }
 
+    public function test_non_admin_gets_404_for_inactive_discount(): void
+    {
+        $discount = Discount::create([
+            'code' => 'INACTIVECODE',
+            'type' => 'percent',
+            'value' => 20,
+            'is_active' => false,
+            'max_uses' => 10,
+        ]);
+
+        $user = $this->makeUser('user');
+        $admin = $this->makeUser('admin');
+
+        // Non-admin gets 404
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/discounts/INACTIVECODE')
+            ->assertStatus(404);
+
+        // Admin gets 200 with full model
+        $response = $this->actingAs($admin, 'sanctum')
+            ->getJson('/api/v1/discounts/INACTIVECODE');
+        $response->assertStatus(200);
+        $this->assertEquals(10, $response->json('discount.max_uses'));
+    }
+
+    public function test_non_admin_response_hides_sensitive_quota_fields(): void
+    {
+        $discount = Discount::create([
+            'code' => 'SECRETQUOTA',
+            'type' => 'percent',
+            'value' => 20,
+            'is_active' => true,
+            'max_uses' => 50,
+            'max_uses_per_user' => 1,
+        ]);
+
+        $user = $this->makeUser('user');
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/v1/discounts/SECRETQUOTA');
+
+        $response->assertStatus(200);
+        $data = $response->json('discount');
+        $this->assertEquals('SECRETQUOTA', $data['code']);
+        $this->assertArrayNotHasKey('max_uses', $data);
+        $this->assertArrayNotHasKey('max_uses_per_user', $data);
+    }
+
     // =========================================================================
     // 🛡️ Validation Tests
     // =========================================================================

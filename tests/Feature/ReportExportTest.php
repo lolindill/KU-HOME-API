@@ -3,7 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\AdditionalCharge;
+use App\Models\Addon;
 use App\Models\Booking;
+use App\Models\BookingRoom;
+use App\Models\Room;
+use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -271,5 +275,159 @@ class ReportExportTest extends TestCase
                 @unlink($tempFile);
             }
         }
+    }
+
+    public function test_extra_bed_report_excludes_expired_draft_addons(): void
+    {
+        $user = User::factory()->create();
+        $roomType = RoomType::create([
+            'id' => Str::uuid(),
+            'name_en' => 'Deluxe',
+            'name_th' => 'ดีลักซ์',
+            'max_guests' => 2,
+        ]);
+        $room = Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '101',
+            'status' => 'available',
+        ]);
+
+        // Active draft
+        $activeBooking = Booking::create([
+            'id' => Str::uuid(),
+            'booking_number' => 'BK-ACT-001',
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 1000,
+            'payment_deadline' => now()->addMinutes(15),
+            'payment_type' => 'promptpay',
+        ]);
+        $activeBR = BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $activeBooking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room->id,
+            'status' => 'draft',
+            'check_in' => '2026-10-02',
+            'check_out' => '2026-10-04',
+            'num_guests' => 2,
+            'amount' => 1000,
+        ]);
+        Addon::create([
+            'booking_room_id' => $activeBR->id,
+            'extra_beds_by_night' => ['2026-10-02' => 1, '2026-10-03' => 1],
+        ]);
+
+        // Expired draft
+        $expiredBooking = Booking::create([
+            'id' => Str::uuid(),
+            'booking_number' => 'BK-EXP-002',
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 1000,
+            'payment_deadline' => now()->subMinutes(30),
+            'payment_type' => 'promptpay',
+        ]);
+        $expiredBR = BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $expiredBooking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room->id,
+            'status' => 'draft',
+            'check_in' => '2026-10-02',
+            'check_out' => '2026-10-04',
+            'num_guests' => 2,
+            'amount' => 1000,
+        ]);
+        Addon::create([
+            'booking_room_id' => $expiredBR->id,
+            'extra_beds_by_night' => ['2026-10-02' => 1, '2026-10-03' => 1],
+        ]);
+
+        $report = app(\App\Services\ReportExcel\Data\ExtraBedReportData::class);
+        $rows = iterator_to_array($report->rows(['date_from' => '2026-10-01', 'date_to' => '2026-10-05']));
+
+        $this->assertCount(1, $rows);
+        $this->assertEquals($activeBooking->booking_number, $rows[0]['booking_no']);
+    }
+
+    public function test_breakfast_report_excludes_expired_draft_addons(): void
+    {
+        $user = User::factory()->create();
+        $roomType = RoomType::create([
+            'id' => Str::uuid(),
+            'name_en' => 'Deluxe',
+            'name_th' => 'ดีลักซ์',
+            'max_guests' => 2,
+        ]);
+        $room = Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '102',
+            'status' => 'available',
+        ]);
+
+        // Active draft
+        $activeBooking = Booking::create([
+            'id' => Str::uuid(),
+            'booking_number' => 'BK-ACT-003',
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 1000,
+            'payment_deadline' => now()->addMinutes(15),
+            'payment_type' => 'promptpay',
+        ]);
+        $activeBR = BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $activeBooking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room->id,
+            'status' => 'draft',
+            'check_in' => '2026-10-02',
+            'check_out' => '2026-10-04',
+            'num_guests' => 2,
+            'amount' => 1000,
+        ]);
+        Addon::create([
+            'booking_room_id' => $activeBR->id,
+            'breakfast_set_100' => 2,
+        ]);
+
+        // Expired draft
+        $expiredBooking = Booking::create([
+            'id' => Str::uuid(),
+            'booking_number' => 'BK-EXP-004',
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 1000,
+            'payment_deadline' => now()->subMinutes(30),
+            'payment_type' => 'promptpay',
+        ]);
+        $expiredBR = BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $expiredBooking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room->id,
+            'status' => 'draft',
+            'check_in' => '2026-10-02',
+            'check_out' => '2026-10-04',
+            'num_guests' => 2,
+            'amount' => 1000,
+        ]);
+        Addon::create([
+            'booking_room_id' => $expiredBR->id,
+            'breakfast_set_100' => 2,
+        ]);
+
+        $report = app(\App\Services\ReportExcel\Data\BreakfastReportData::class);
+        $rows = iterator_to_array($report->rows(['date' => '2026-10-03']));
+
+        $this->assertCount(1, $rows);
+        $this->assertEquals($activeBooking->booking_number, $rows[0]['booking_no']);
     }
 }

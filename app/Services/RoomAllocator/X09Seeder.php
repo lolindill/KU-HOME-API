@@ -59,6 +59,9 @@ final class X09Seeder
             if ($room->hasOverlap($brs[$idx]->checkIn, $brs[$idx]->checkOut)) {
                 continue;
             }
+            if (! $brs[$idx]->matchesBedPreference($room)) {
+                continue;
+            }
             $candidates[] = $room;
         }
         if (empty($candidates)) {

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * 🧹 Housekeeping Task (Phase A refactor — 15/07/26)
@@ -142,6 +143,18 @@ class HousekeepingTask extends Model
         }
 
         $this->save();
+
+        // 📝 Audit log: เก็บประวัติการเปลี่ยนสถานะของ housekeeping task
+        $causerId = $userId ?? Auth::id();
+        StatusChangeLog::create([
+            'entity_type' => 'housekeeping_task',
+            'entity_id' => $this->id,
+            'from_status' => $currentStatus,
+            'to_status' => $newStatus,
+            'role' => $causerId ? (User::find($causerId)?->role ?? 'system') : 'system',
+            'causer_id' => $causerId,
+            'note' => null,
+        ]);
 
         return true;
     }

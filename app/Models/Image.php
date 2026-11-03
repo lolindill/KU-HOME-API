@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\URL;
  * - ผูกกับเจ้าของรูปผ่าน polymorphic imageable (BookingConfirmation slip วันนี้,
  *   HousekeepingTask รูปก่อน/หลังเก็บห้อง ในอนาคต)
  * - ดูรูปผ่าน signed URL อายุ SIGNED_URL_TTL_MINUTES นาที (route images.file)
- *   URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์เท่านั้น (เจ้าของ booking / admin)
+ *   🔐 (26/10/26) route ต้องส่ง Sanctum token + ผู้ขอต้องเป็นเจ้าของรูป (ตาม imageable)
+ *   หรือ admin เท่านั้น — ดู ImageController::show
  * - ลบ row = ลบไฟล์บน disk อัตโนมัติ (hook deleting — ทุก call site ไม่ต้องจำ)
  */
 class Image extends Model
@@ -43,6 +44,20 @@ class Image extends Model
 
     protected $casts = [
         'metadata' => 'array',
+    ];
+
+    /**
+     * 🔐 (26/10/26) ซ่อน field ภายในออกจาก JSON — เหลือ id/mime_type/size/original_name/
+     * category/timestamps + appended url · path/disk ยังใช้ได้ปกติฝั่ง server
+     * (hook deleting, ImageController, CleanupImages — $hidden กระทบเฉพาะ serialization)
+     */
+    protected $hidden = [
+        'path',
+        'disk',
+        'imageable_id',
+        'imageable_type',
+        'uploaded_by',
+        'metadata',
     ];
 
     protected $appends = ['url'];

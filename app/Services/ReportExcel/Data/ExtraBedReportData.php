@@ -64,7 +64,7 @@ class ExtraBedReportData extends BaseReportData
                 // ครอบคืนใดคืนหนึ่งในช่วง [from, to] (รวมปลาย — night key = วันเริ่มคืน)
                 $q->where('check_in', '<=', $to)
                     ->where('check_out', '>', $from)
-                    ->whereIn('status', ['draft', 'confirmed', 'checked_in']);
+                    ->holdingSlot();
             })
             ->get()
             ->filter(fn (Addon $addon) => $addon->extra_beds_total > 0);

@@ -236,33 +236,38 @@ class StockController extends Controller
         $validated = $request->validated();
         $user = $request->user('sanctum');
 
-        $item = StockInventory::findOrFail($id);
+        try {
+            [$item, $movement] = DB::transaction(function () use ($id, $validated, $user) {
+                $item = StockInventory::where('id', $id)->lockForUpdate()->firstOrFail();
 
-        $delta = null;
-        if (isset($validated['delta'])) {
-            $delta = (int) $validated['delta'];
-            $newQuantity = $item->quantity + $delta;
-        } else {
-            $newQuantity = (int) $validated['quantity'];
-            $delta = $newQuantity - $item->quantity;
-        }
+                if (isset($validated['delta'])) {
+                    $delta = (int) $validated['delta'];
+                    $newQuantity = $item->quantity + $delta;
+                } else {
+                    $newQuantity = (int) $validated['quantity'];
+                    $delta = $newQuantity - $item->quantity;
+                }
 
-        if ($newQuantity < 0) {
+                if ($newQuantity < 0) {
+                    throw new \InvalidArgumentException('จำนวนสินค้าคงเหลือไม่สามารถติดลบได้ค่ะนายท่าน 🥺');
+                }
+
+                $movement = $item->recordMovement(
+                    delta: $delta,
+                    reason: $validated['reason'],
+                    housekeepingTaskId: $validated['housekeeping_task_id'] ?? null,
+                    userId: $user?->id,
+                    notes: $validated['notes'] ?? null
+                );
+
+                return [$item, $movement];
+            });
+        } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'จำนวนสินค้าคงเหลือไม่สามารถติดลบได้ค่ะนายท่าน 🥺',
+                'message' => $e->getMessage(),
             ], 422);
         }
-
-        $movement = DB::transaction(function () use ($item, $delta, $validated, $user) {
-            return $item->recordMovement(
-                delta: $delta,
-                reason: $validated['reason'],
-                housekeepingTaskId: $validated['housekeeping_task_id'] ?? null,
-                userId: $user?->id,
-                notes: $validated['notes'] ?? null
-            );
-        });
 
         return response()->json([
             'status' => 'success',

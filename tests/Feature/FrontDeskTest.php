@@ -205,6 +205,40 @@ class FrontDeskTest extends TestCase
         $this->assertEquals('draft', $br->fresh()->status);
     }
 
+    public function test_check_in_rejects_pending_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'pending']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_check_in_rejects_verify_error_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'verify_error']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertEquals('verify_error', $booking->fresh()->status);
+    }
+
     // ============================================
     // ✅ Check-out
     // ============================================
@@ -240,6 +274,45 @@ class FrontDeskTest extends TestCase
         $this->assertEquals('complete', $booking->fresh()->status);
         // 🌟 BR-level = checked_out
         $this->assertEquals('checked_out', $br->fresh()->status);
+    }
+
+    public function test_check_out_rejects_when_additional_charges_unpaid(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'occupied');
+        $booking = $this->createBooking([
+            'status' => 'confirmed',
+            'is_paid' => true,
+            'total_amount' => 3000,
+        ]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
+
+        Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 3000,
+            'status' => 'completed',
+        ]);
+
+        \App\Models\AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => $admin->id,
+        ]);
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(400);
+        $this->assertEquals('checked_in', $br->fresh()->status);
     }
 
     /**
@@ -641,6 +714,32 @@ class FrontDeskTest extends TestCase
         $this->assertSame('CASH-STAFF-001', $payment->reference_number);
     }
 
+    public function test_staff_can_record_payment_on_pending_booking(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'pending', 'total_amount' => 1500, 'is_paid' => false]);
+        $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+            'amount' => 1500,
+            'reference_number' => 'CASH-STAFF-PENDING-001',
+            'received_by' => $staff->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_is_paid' => true,
+            'booking_status' => 'paid',
+        ]);
+
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
+        $this->assertSame('paid', $booking->fresh()->status);
+    }
+
     public function test_staff_can_auto_assign_rooms(): void
     {
         $staff = $this->createStaff();
@@ -780,5 +879,27 @@ class FrontDeskTest extends TestCase
         $response->assertStatus(422);
         $response->assertJson(['status' => 'error']);
         $this->assertStringContainsString('มีการจองอื่นทับช่วงเข้าพัก', $response->json('message'));
+    }
+
+    public function test_walk_in_rejects_overlapping_room_holding_slot(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+
+        // Existing booking holds slot for today to tomorrow
+        $booking = $this->createBooking(['status' => 'confirmed', 'is_paid' => true]);
+        $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        $response = $this->postJson('/api/v1/front-desk/walk-in', [
+            'verified_by' => $admin->id,
+            'nights' => 1,
+            'room_id' => $room->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('overlapping', $response->json('message'));
     }
 }

@@ -150,6 +150,38 @@ class DraftSlotReleaseTest extends TestCase
         $this->artisan('app:cleanup-expired-drafts')->assertSuccessful();
 
         $this->assertDatabaseMissing('bookings', ['id' => $bookingId]);
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking',
+            'entity_id' => $bookingId,
+            'from_status' => 'draft',
+            'to_status' => 'deleted',
+        ]);
+    }
+
+    public function test_cleanup_command_skips_draft_with_additional_charges(): void
+    {
+        $created = $this->actingAs($this->userA, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload());
+        $created->assertStatus(201);
+        $bookingId = $created->json('booking_id');
+
+        \App\Models\AdditionalCharge::create([
+            'id' => \Illuminate\Support\Str::uuid(),
+            'booking_id' => $bookingId,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => $this->userA->id,
+        ]);
+
+        $this->travel(16)->minutes();
+
+        $this->artisan('app:cleanup-expired-drafts')->assertSuccessful();
+
+        // Booking must NOT be deleted because it has additional charges
+        $this->assertDatabaseHas('bookings', ['id' => $bookingId]);
     }
 
     public function test_pending_booking_holds_slot_after_deadline(): void

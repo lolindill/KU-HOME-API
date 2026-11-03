@@ -211,9 +211,15 @@ class DashboardController extends Controller
         }
 
         try {
+            $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
+
+            // แม่บ้านไม่สามารถ accept งานที่ถูก assign ให้แม่บ้านคนอื่นไปแล้วได้
+            if ($user->role === 'housekeeping' && $task->assigned_to !== null && $task->assigned_to !== $user->id) {
+                return $this->forbidden('ไม่มีสิทธิ์รับงานนี้เนื่องจากมอบหมายให้ผู้อื่นแล้วค่ะ');
+            }
+
             DB::beginTransaction();
 
-            $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
             $task->transitionStatus('accepted', $user->id);
 
             DB::commit();
@@ -266,10 +272,15 @@ class DashboardController extends Controller
         ]);
 
         try {
-            DB::beginTransaction();
-
             // Fix S-B2: ใช้ task_id แทน room_id — ไม่มี first() ที่จะเลือกผิด
             $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
+
+            // แม่บ้านอัปเดตสถานะได้เฉพาะงานที่ได้รับมอบหมายเท่านั้น (คนอื่น 403)
+            if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+                return $this->forbidden('ไม่มีสิทธิ์อัปเดตสถานะสำหรับงานนี้ค่ะ');
+            }
+
+            DB::beginTransaction();
 
             // 📊 (05/10/26, excel-reports spec §2.4): tick ล้วน = บันทึกประกอบ ไม่ผูก done
             $hasChecklist = false;
@@ -291,11 +302,15 @@ class DashboardController extends Controller
                 // Fix L3 (เขียนใหม่): guard done→* อยู่ใน transitionStatus() แล้ว — ทำงานจริง
                 $task->transitionStatus($status);
 
-                // ถ้างาน done → เปลี่ยนสถานะห้อง → available ผ่าน state machine
+                // ถ้างาน done → เปลี่ยนสถานะห้อง → available เฉพาะสถานะห้องที่พร้อมกลับมาว่าง (ไม่เปลี่ยนห้อง occupied)
                 if ($status === 'done' && $task->room_id) {
                     $room = Room::findOrFail($task->room_id);
-                    $room->transitionStatusTo('available', $user->id);
-                    $roomStatus = $room->status;
+                    if (in_array($room->status, ['checkout_makeup', 'dirty', 'prep_checkin'], true)) {
+                        $room->transitionStatusTo('available', $user->id);
+                        $roomStatus = $room->status;
+                    } else {
+                        $roomStatus = $room->status;
+                    }
                 }
             }
 

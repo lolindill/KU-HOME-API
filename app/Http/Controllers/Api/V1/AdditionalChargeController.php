@@ -85,13 +85,20 @@ class AdditionalChargeController extends Controller
 
             $validated = $request->validated();
 
+            $booking = Booking::findOrFail($validated['booking_id']);
+            if ($booking->status === 'draft') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot add additional charges to a draft booking',
+                ], 422);
+            }
+
             $charge = AdditionalCharge::create(array_merge($validated, [
                 'qty' => $validated['qty'] ?? 1,
                 'recorded_by' => $user->id,
             ]));
 
             // 💸 charge ทำยอดรวมโตเกิน paid → is_paid ต้องหลุดเป็น false ทันที
-            $booking = Booking::findOrFail($validated['booking_id']);
             $booking->syncIsPaid();
 
             return response()->json(array_merge([

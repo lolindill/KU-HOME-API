@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -27,11 +29,18 @@ class OrganizationController extends Controller
         }
     }
 
-    private function errorResponse(\Exception $e): JsonResponse
+    private function errorResponse(\Throwable $e): JsonResponse
     {
         // 🛡️ validation error ปล่อยให้ Laravel render 422 มาตรฐาน (errors per field)
         if ($e instanceof ValidationException) {
             throw $e;
+        }
+
+        if ($e instanceof ModelNotFoundException) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูลองค์กรที่ระบุค่ะ 🔎',
+            ], 404);
         }
 
         $code = $e->getCode();
@@ -42,10 +51,14 @@ class OrganizationController extends Controller
             ], $code);
         }
 
+        Log::error('OrganizationController error: '.$e->getMessage(), [
+            'exception' => $e,
+        ]);
+
         return response()->json([
             'status' => 'error',
-            'message' => 'ไม่พบข้อมูลองค์กรที่ระบุค่ะ 🔎',
-        ], 404);
+            'message' => 'เกิดข้อผิดพลาดในการประมวลผลข้อมูลองค์กรค่ะ 🥺',
+        ], 500);
     }
 
     /**
@@ -78,7 +91,7 @@ class OrganizationController extends Controller
                 'message' => 'ดึงข้อมูลองค์กรเรียบร้อยแล้วค่ะ ✨',
                 'organizations' => $organizations,
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $this->errorResponse($e);
         }
     }
@@ -98,7 +111,7 @@ class OrganizationController extends Controller
                 'message' => 'ดึงข้อมูลองค์กรเรียบร้อยแล้วค่ะ ✨',
                 'organization' => $organization,
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $this->errorResponse($e);
         }
     }
@@ -137,7 +150,7 @@ class OrganizationController extends Controller
                 'message' => 'สร้างองค์กรเรียบร้อยแล้วค่ะ! ✨',
                 'organization' => $organization->fresh(),
             ], 201);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $this->errorResponse($e);
         }
     }
@@ -183,7 +196,7 @@ class OrganizationController extends Controller
                 'message' => 'แก้ไของค์กรเรียบร้อยแล้วค่ะ! ✨',
                 'organization' => $organization->fresh(),
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $this->errorResponse($e);
         }
     }
@@ -207,7 +220,7 @@ class OrganizationController extends Controller
                 'message' => 'เปลี่ยนสถานะองค์กรเรียบร้อยแล้วค่ะ! ✨',
                 'organization' => $organization->fresh(),
             ], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $this->errorResponse($e);
         }
     }

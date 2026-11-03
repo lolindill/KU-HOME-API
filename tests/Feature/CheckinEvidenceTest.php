@@ -30,10 +30,15 @@ class CheckinEvidenceTest extends TestCase
     use RefreshDatabase;
 
     protected User $admin;
+
     protected User $staff;
+
     protected User $user;
+
     protected User $housekeeping;
+
     protected RoomType $roomType;
+
     protected Room $room;
 
     protected function setUp(): void
@@ -349,9 +354,9 @@ class CheckinEvidenceTest extends TestCase
         $this->assertSame('id_card', $evidences[0]['type']);
         $this->assertNotEmpty($evidences[0]['url']);
 
-        // ทดสอบเปิด signed URL ผ่าน route images.file โดยตรง (ไม่ต้องมี sanctum token)
+        // 🔐 (26/10/26) เปิดไฟล์ต้องส่ง token — เจ้าของ booking (หรือ admin) เท่านั้น
         $signedUrl = $evidences[0]['url'];
-        $streamResponse = $this->get($signedUrl);
+        $streamResponse = $this->actingAs($this->user, 'sanctum')->get($signedUrl);
         $streamResponse->assertStatus(200);
         $streamResponse->assertHeader('Content-Type', 'image/jpeg');
     }

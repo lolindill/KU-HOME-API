@@ -8,6 +8,7 @@ use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Models\StatusChangeLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -155,12 +156,13 @@ class HousekeepingTaskTest extends TestCase
     public function test_update_status_done_makes_room_available(): void
     {
         // room ใน checkout_makeup → task done → room available
+        $hk = $this->createHousekeeping();
         $room = $this->makeRoom('checkout_makeup');
         $task = $this->makeTask($room, 'unassigned');
-        $task->transitionStatus('accepted');
+        $task->transitionStatus('accepted', $hk->id);
         $task->transitionStatus('in_progress');
 
-        $this->actingAsHousekeeping();
+        $this->actingAs($hk, 'sanctum');
         $response = $this->patchJson("/api/v1/dashboard/tasks/{$task->id}/status", [
             'status' => 'done',
         ]);
@@ -170,15 +172,68 @@ class HousekeepingTaskTest extends TestCase
         $this->assertEquals('available', $room->fresh()->status);
     }
 
-    public function test_update_status_cannot_be_called_on_done_task(): void
+    public function test_update_status_done_on_occupied_room_keeps_room_occupied(): void
     {
+        // 🏨 M6: task done บนห้อง occupied ต้องไม่เปลี่ยนสถานะเป็น available
+        $hk = $this->createHousekeeping();
+        $room = $this->makeRoom('occupied');
+        $task = $this->makeTask($room, 'unassigned');
+        $task->transitionStatus('accepted', $hk->id);
+        $task->transitionStatus('in_progress');
+
+        $this->actingAs($hk, 'sanctum');
+        $response = $this->patchJson("/api/v1/dashboard/tasks/{$task->id}/status", [
+            'status' => 'done',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('new_room_status', 'occupied');
+        $this->assertEquals('occupied', $room->fresh()->status);
+    }
+
+    public function test_housekeeper_cannot_update_status_of_other_housekeeper_task(): void
+    {
+        // 🛡️ M7 IDOR: แม่บ้าน B ไม่สามารถ update status งานของแม่บ้าน A ได้
+        $hkA = $this->createHousekeeping();
+        $hkB = $this->createHousekeeping();
         $room = $this->makeRoom('checkout_makeup');
         $task = $this->makeTask($room, 'unassigned');
-        $task->transitionStatus('accepted');
+        $task->transitionStatus('accepted', $hkA->id);
+        $task->transitionStatus('in_progress');
+
+        $this->actingAs($hkB, 'sanctum');
+        $response = $this->patchJson("/api/v1/dashboard/tasks/{$task->id}/status", [
+            'status' => 'done',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_housekeeper_cannot_accept_task_assigned_to_someone_else(): void
+    {
+        // 🛡️ M7 IDOR: แม่บ้าน B ไม่สามารถ accept งานที่ assign ให้แม่บ้าน A แล้วได้
+        $hkA = $this->createHousekeeping();
+        $hkB = $this->createHousekeeping();
+        $room = $this->makeRoom('checkout_makeup');
+        $task = $this->makeTask($room, 'unassigned');
+        $task->transitionStatus('accepted', $hkA->id);
+
+        $this->actingAs($hkB, 'sanctum');
+        $response = $this->postJson("/api/v1/dashboard/tasks/{$task->id}/accept");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_update_status_cannot_be_called_on_done_task(): void
+    {
+        $hk = $this->createHousekeeping();
+        $room = $this->makeRoom('checkout_makeup');
+        $task = $this->makeTask($room, 'unassigned');
+        $task->transitionStatus('accepted', $hk->id);
         $task->transitionStatus('in_progress');
         $task->transitionStatus('done');
 
-        $this->actingAsHousekeeping();
+        $this->actingAs($hk, 'sanctum');
         $response = $this->patchJson("/api/v1/dashboard/tasks/{$task->id}/status", [
             'status' => 'in_progress',
         ]);
@@ -378,5 +433,24 @@ class HousekeepingTaskTest extends TestCase
         $this->assertEquals('checkout_then_in', $task->fresh()->task_type);
 
         Carbon::setTestNow();
+    }
+
+    public function test_transition_status_writes_status_change_log(): void
+    {
+        $hk = $this->createHousekeeping();
+        $room = $this->makeRoom('checkout_makeup');
+        $task = $this->makeTask($room, 'unassigned');
+
+        $task->transitionStatus('accepted', $hk->id);
+
+        $log = StatusChangeLog::where('entity_type', 'housekeeping_task')
+            ->where('entity_id', $task->id)
+            ->first();
+
+        $this->assertNotNull($log);
+        $this->assertEquals('unassigned', $log->from_status);
+        $this->assertEquals('accepted', $log->to_status);
+        $this->assertEquals($hk->id, $log->causer_id);
+        $this->assertEquals('housekeeping', $log->role);
     }
 }

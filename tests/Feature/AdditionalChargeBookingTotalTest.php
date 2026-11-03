@@ -285,47 +285,14 @@ class AdditionalChargeBookingTotalTest extends TestCase
         $this->assertEquals(1750, $fresh->paid_amount);
     }
 
-    public function test_verify_slip_amount_includes_charges(): void
+    public function test_cannot_add_additional_charges_to_draft_booking(): void
     {
-        // charge เกิดตอน draft ได้ (ทุกสถานะ) → ยอดสลิปควรรวม charge
-        $bookingWithCharge = $this->createBooking(1500, 'full');
-        $this->storeCharge($bookingWithCharge, ['booking_room_id' => $bookingWithCharge->bookingRooms()->first()->id])
-            ->assertStatus(201);
-
-        $admin = $this->admin();
-        $this->actingAs($admin, 'sanctum')
-            ->postJson("/api/v1/bookings/{$bookingWithCharge->id}/confirm", [
-                'slip_image' => UploadedFile::fake()->image('slip.jpg'),
-                'amount' => 1750, // 1500 ห้อง + 250 charge
-            ])->assertStatus(201);
-
-        $confirmation = BookingConfirmation::where('booking_id', $bookingWithCharge->id)->firstOrFail();
-        $this->actingAs($admin, 'sanctum')
-            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
-            ->assertStatus(200)
-            ->assertJsonPath('booking_is_paid', true);
-
-        $this->assertTrue($bookingWithCharge->fresh()->is_paid);
-
-        // สลิปยอดเดิม (ไม่รวม charge) → is_paid ยัง false · outstanding คือ charge
-        $bookingShort = $this->createBooking(1500, 'full');
-        $this->storeCharge($bookingShort)->assertStatus(201);
-
-        $this->actingAs($admin, 'sanctum')
-            ->postJson("/api/v1/bookings/{$bookingShort->id}/confirm", [
-                'slip_image' => UploadedFile::fake()->image('slip.jpg'),
-                'amount' => 1500,
-            ])->assertStatus(201);
-
-        $confirmation2 = BookingConfirmation::where('booking_id', $bookingShort->id)->firstOrFail();
-        $this->actingAs($admin, 'sanctum')
-            ->putJson("/api/v1/booking-confirmations/{$confirmation2->id}/verify")
-            ->assertStatus(200)
-            ->assertJsonPath('booking_is_paid', false);
-
-        $fresh = $bookingShort->fresh();
-        $this->assertFalse($fresh->is_paid);
-        $this->assertEquals(250, $fresh->outstanding_amount);
+        // 🔒 D3: ไม่อนุญาตให้เพิ่ม additional charges บน draft booking
+        $draftBooking = $this->createBooking(1500, 'full');
+        $res = $this->storeCharge($draftBooking, ['booking_room_id' => $draftBooking->bookingRooms()->first()->id]);
+        $res->assertStatus(422)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonPath('message', 'Cannot add additional charges to a draft booking');
     }
 
     // =========================================================
@@ -368,7 +335,7 @@ class AdditionalChargeBookingTotalTest extends TestCase
 
     public function test_charge_write_requires_admin_or_staff(): void
     {
-        $booking = $this->createBooking(1500);
+        $booking = $this->paidBooking(1500);
 
         $this->storeCharge($booking, [], User::factory()->create(['role' => 'housekeeping']))
             ->assertStatus(403);
@@ -387,7 +354,7 @@ class AdditionalChargeBookingTotalTest extends TestCase
 
     public function test_addon_charge_separated_in_report_filter(): void
     {
-        $booking = $this->createBooking(1500);
+        $booking = $this->paidBooking(1500);
         $today = now()->toDateString();
 
         $this->storeCharge($booking, ['item_name' => 'ค่าเสียหาย ผ้าปูที่นอน', 'charge_type' => 'damage'])->assertStatus(201);

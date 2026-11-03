@@ -263,7 +263,7 @@ class Booking extends Model
                 'confirmed' => ['admin'], // walk-in by admin (skip paid)
             ],
             'pending' => [
-                'paid' => ['admin'], // admin verify สลิปผ่าน
+                'paid' => ['admin', 'staff'], // admin verify สลิปผ่าน หรือ front-desk staff รับชำระ
                 'verify_error' => ['admin'], // admin reject สลิป — รอ user ส่งสลิปใหม่
             ],
             'verify_error' => [

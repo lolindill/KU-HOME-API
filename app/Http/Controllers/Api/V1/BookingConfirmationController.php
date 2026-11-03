@@ -96,6 +96,20 @@ class BookingConfirmationController extends Controller
         try {
             DB::beginTransaction();
 
+            $booking = Booking::with('bookingRooms')->where('id', $bookingId)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($booking->status, ['draft', 'verify_error'], true)) {
+                throw new \Exception("ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' (รับเฉพาะ draft หรือ verify_error เท่านั้น)", 422);
+            }
+
+            $existingPending = BookingConfirmation::where('booking_id', $booking->id)
+                ->where('status', 'pending')
+                ->lockForUpdate()
+                ->exists();
+            if ($existingPending) {
+                throw new \Exception('มีหลักฐานการชำระที่รอตรวจสอบอยู่แล้ว — รอแอดมินตรวจสอบก่อนค่ะนายท่าน', 422);
+            }
+
             // 🖼️ (19/08/26): เก็บไฟล์ slip บน private disk (storage/app/private/slips — เว็บเปิดตรงๆ ไม่ได้)
             //    ดูรูปได้ผ่าน signed URL อายุ 15 นาทีเท่านั้น (เจ้าของ booking / admin)
             $slipFile = $request->file('slip_image');
@@ -172,6 +186,15 @@ class BookingConfirmationController extends Controller
 
         try {
             DB::beginTransaction();
+
+            $confirmation = BookingConfirmation::with('booking')
+                ->where('id', $id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($confirmation->status !== 'pending') {
+                throw new \Exception("Confirmation is already {$confirmation->status}", 422);
+            }
 
             $confirmation->transitionStatus('verified', $user->role);
             $confirmation->update([
@@ -271,6 +294,15 @@ class BookingConfirmationController extends Controller
 
         try {
             DB::beginTransaction();
+
+            $confirmation = BookingConfirmation::with('booking')
+                ->where('id', $id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($confirmation->status !== 'pending') {
+                throw new \Exception("Confirmation is already {$confirmation->status}", 422);
+            }
 
             $confirmation->transitionStatus('rejected', $user->role);
             $confirmation->update([

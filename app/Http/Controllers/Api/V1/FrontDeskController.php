@@ -16,6 +16,7 @@ use App\Services\Discount\DiscountService;
 use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -77,6 +78,16 @@ class FrontDeskController extends Controller
                 throw new \Exception("Room number {$room->room_number} is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน");
             }
 
+            // ⏱️ overlap guard — ห้าม walk-in ทับห้องที่มี BR อื่น (holdingSlot) ยึดทับช่วงพัก
+            $overlap = $room->bookingRooms()
+                ->holdingSlot()
+                ->where('check_in', '<', $checkOut)
+                ->where('check_out', '>', $checkIn)
+                ->exists();
+            if ($overlap) {
+                throw new \Exception("Room number {$room->room_number} has overlapping booking.", 422);
+            }
+
             $confirmationNo = Booking::generateUniqueConfirmation();
 
             $booking = Booking::create([
@@ -129,13 +140,7 @@ class FrontDeskController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Walk-in failed: '.$e->getMessage());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], 400);
+            return $this->handleCatch('Walk-in', $e);
         }
     }
 
@@ -261,8 +266,12 @@ class FrontDeskController extends Controller
                 );
             } elseif ($booking->status === 'paid') {
                 $booking->transitionStatus('confirmed', $userRole);
+            } elseif ($booking->status !== 'confirmed') {
+                throw new \Exception(
+                    "ไม่สามารถเช็คอินได้ค่ะนายท่าน สถานะการจองปัจจุบันคือ '{$booking->status}' (ต้องเป็น paid หรือ confirmed เท่านั้นนะคะ)",
+                    422
+                );
             }
-            // confirmed: ไม่ต้อง transition อะไรเพิ่ม
 
             DB::commit();
 
@@ -284,15 +293,7 @@ class FrontDeskController extends Controller
             ], 404);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Check-in failed: '.$e->getMessage());
-            $statusCode = $e->getCode();
-            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], $statusCode);
+            return $this->handleCatch('Check-in', $e);
         }
     }
 
@@ -329,8 +330,10 @@ class FrontDeskController extends Controller
                 ->where('status', 'completed')
                 ->sum('amount');
 
-            if ($totalPaid < $booking->total_amount) {
-                $pendingAmount = $booking->total_amount - $totalPaid;
+            $grandTotal = $booking->total_amount + $booking->charges_total;
+
+            if ($totalPaid < $grandTotal) {
+                $pendingAmount = $grandTotal - $totalPaid;
                 throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
             }
 
@@ -395,13 +398,7 @@ class FrontDeskController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Check-out failed: '.$e->getMessage());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], 400);
+            return $this->handleCatch('Check-out', $e);
         }
     }
 
@@ -494,15 +491,7 @@ class FrontDeskController extends Controller
             ], 404);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Mark no-show failed: '.$e->getMessage());
-            $statusCode = $e->getCode();
-            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], $statusCode);
+            return $this->handleCatch('Mark no-show', $e);
         }
     }
 
@@ -547,8 +536,8 @@ class FrontDeskController extends Controller
                 // ใช้ Eloquent update (PHP boolean) แทน DB::raw('TRUE') — portable ข้าม DB + trigger events
                 $booking->update(['is_paid' => true]);
 
-                // 🌟 Refactor (25/06/26): draft → paid (container)
-                if ($booking->status === 'draft') {
+                // 🌟 Refactor (25/06/26): draft | pending → paid (container)
+                if (in_array($booking->status, ['draft', 'pending'], true)) {
                     $booking->transitionStatus('paid', $user->role);
                 }
 
@@ -575,13 +564,7 @@ class FrontDeskController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Record payment failed: '.$e->getMessage());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], 400);
+            return $this->handleCatch('Record payment', $e);
         }
     }
 
@@ -744,5 +727,28 @@ class FrontDeskController extends Controller
                 'message' => 'เกิดข้อผิดพลาดในการดึงข้อมูลหลักฐานค่ะ 🥺',
             ], 500);
         }
+    }
+
+    private function handleCatch(string $action, \Exception $e): JsonResponse
+    {
+        DB::rollBack();
+
+        if ($e instanceof \Illuminate\Database\QueryException || $e instanceof \PDOException) {
+            Log::error("{$action} database error: ".$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => "เกิดข้อผิดพลาดในการดำเนินการ {$action} กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭",
+            ], 500);
+        }
+
+        Log::error("{$action} failed: ".$e->getMessage());
+        $statusCode = $e->getCode();
+        $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+        ], $statusCode);
     }
 }

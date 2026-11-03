@@ -3,9 +3,11 @@
 use App\Http\Middleware\CheckRole;
 use App\Http\Middleware\RequireJsonAccept;
 use Composer\Autoload\ClassLoader;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
 $baseDir = dirname(__DIR__);
 $_ENV['APP_BASE_PATH'] = $baseDir;
@@ -51,7 +53,23 @@ return Application::configure(basePath: $baseDir)
         $middleware->api(prepend: [
             RequireJsonAccept::class,
         ]);
+
+        // 🔐 (26/10/26) API-only — ไม่มี route 'login' ให้ redirect: guest ที่ไม่ยอมรับ JSON
+        //    (เช่น request รูปที่ส่ง Accept: image/* ผ่าน route images.file ที่ exempt
+        //    RequireJsonAccept) ต้องโดน AuthenticationException → 401 JSON ด้านล่าง
+        //    ไม่ใช่ 500 RouteNotFoundException
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // 🔐 (26/10/26) unauthenticated บน /api/* → 401 JSON ตาม error shape ของระบบเสมอ
+        //    (ปกติ RequireJsonAccept คอย default Accept: application/json ให้ — จุดเดียวที่
+        //    ลุยถึงตรงนี้ได้คือ route ที่ exempt เช่น images.file)
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!',
+                ], 401);
+            }
+        });
     })->create();

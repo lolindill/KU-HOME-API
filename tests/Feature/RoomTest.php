@@ -245,6 +245,29 @@ class RoomTest extends TestCase
             'Available rooms should reflect the room we just created');
     }
 
+    public function test_availability_counts_occupied_room_that_is_free_on_requested_dates(): void
+    {
+        $roomType = $this->createRoomType();
+        $room = Room::create([
+            'id' => Str::uuid(),
+            'room_type_id' => $roomType->id,
+            'room_number' => '202',
+            'status' => 'occupied', // Currently occupied today
+        ]);
+
+        // Future dates where room has no bookings
+        $response = $this->getJson('/api/v1/availability?'.http_build_query([
+            'check_in' => now()->addDays(5)->toDateString(),
+            'check_out' => now()->addDays(7)->toDateString(),
+        ]));
+        $response->assertStatus(200);
+
+        $roomTypes = $response->json('room_types') ?? [];
+        $found = collect($roomTypes)->firstWhere('room_type_id', $roomType->id);
+        $this->assertNotNull($found);
+        $this->assertSame(1, $found['available_rooms'] ?? 0);
+    }
+
     // ============================================
     // 🔐 Admin: Room status update
     // ============================================

@@ -431,7 +431,7 @@ class HousekeepingPhotoTest extends TestCase
     // 4) Signed URL และอายุ 15 นาที
     // ============================================
 
-    public function test_signed_url_serves_housekeeping_photo_without_auth_and_expires_after_15_minutes(): void
+    public function test_signed_url_serves_housekeeping_photo_for_assignee_and_expires_after_15_minutes(): void
     {
         $hk = $this->createHousekeeping();
         $task = $this->makeTask($hk);
@@ -445,18 +445,18 @@ class HousekeepingPhotoTest extends TestCase
         $signedUrl = $uploadResponse->json('photo.url');
         $this->assertNotEmpty($signedUrl);
 
-        // 1. เปิดดูรูปภาพโดยไม่ต้องส่ง auth token เลย (signature ยืนยันสิทธิ์แทน)
-        $fileResponse = $this->get($signedUrl);
+        // 1. 🔐 (26/10/26) เจ้าของ task (assigned_to) ส่ง token แล้วเปิดรูปได้
+        $fileResponse = $this->actingAs($hk, 'sanctum')->get($signedUrl);
         $fileResponse->assertStatus(200);
         $this->assertStringContainsString('image/jpeg', $fileResponse->headers->get('Content-Type'));
 
         // 2. ลายเซ็นถูกดัดแปลง → 403
         $tamperedUrl = str_replace('signature=', 'signature=fake', $signedUrl);
-        $this->get($tamperedUrl)->assertStatus(403);
+        $this->actingAs($hk, 'sanctum')->get($tamperedUrl)->assertStatus(403);
 
         // 3. หลัง 16 นาที (เกิน TTL 15 นาที) → 403
         $this->travel(16)->minutes();
-        $this->get($signedUrl)->assertStatus(403);
+        $this->actingAs($hk, 'sanctum')->get($signedUrl)->assertStatus(403);
     }
 
     // ============================================

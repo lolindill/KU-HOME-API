@@ -287,6 +287,18 @@ final class RoomStatePeriodService
         foreach (array_keys($draftBookingIds) as $bookingId) {
             if ($this->deleteDraftBooking($bookingId, $kind, $causer)) {
                 $deletedDrafts[] = $bookingId;
+            } else {
+                $bk = Booking::with('bookingRooms')->find($bookingId);
+                if ($bk && ! isset($affectedBookings[$bookingId])) {
+                    $firstBr = $bk->bookingRooms->first();
+                    $affectedBookings[$bookingId] = [
+                        'booking_id' => $bk->id,
+                        'confirmation_number' => $bk->confirmation,
+                        'status' => $firstBr?->status ?? 'draft',
+                        'check_in' => $firstBr?->check_in?->toDateString(),
+                        'check_out' => $firstBr?->check_out?->toDateString(),
+                    ];
+                }
             }
         }
 
@@ -303,6 +315,10 @@ final class RoomStatePeriodService
 
         if ($locked === null || $locked->status !== 'draft') {
             return false; // โดน race (เช่น verify พร้อมกัน) — ปล่อยเป็น affected รอบหน้า
+        }
+
+        if ($locked->additionalCharges()->exists()) {
+            return false;
         }
 
         foreach ($locked->bookingRooms as $br) {

@@ -292,6 +292,31 @@ class BookingTest extends TestCase
         $this->assertEquals('Mr. Somchai Prasert', $bookingRoom->primary_guest_name);
     }
 
+    public function test_non_admin_cannot_spoof_source_admin(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $payload = [
+            'source' => 'admin',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(5)->toDateString(),
+                    'check_out' => now()->addDays(7)->toDateString(),
+                    'guests' => [['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH']],
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', $payload);
+        $response->assertStatus(201);
+
+        $booking = Booking::findOrFail($response->json('booking_id'));
+        $this->assertSame('online', $booking->source);
+    }
+
     // ============================================
     // ✅ Get own bookings
     // ============================================
@@ -644,8 +669,19 @@ class BookingTest extends TestCase
         );
 
         $this->assertNotNull($route, 'Route for createBooking should exist');
-        $this->assertNotContains('throttle:5,1', $route->gatherMiddleware(),
-            'POST /bookings should not have throttle:5,1 middleware while paused');
+        $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
+            'POST /bookings should have throttle:5,1 middleware');
+    }
+
+    public function test_add_rooms_route_has_rate_limiting(): void
+    {
+        $route = Route::getRoutes()->getByAction(
+            'App\Http\Controllers\Api\V1\BookingController@addRooms'
+        );
+
+        $this->assertNotNull($route, 'Route for addRooms should exist');
+        $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
+            'POST /bookings/{bookingId}/rooms should have throttle:5,1 middleware');
     }
 
     // ============================================
@@ -747,6 +783,57 @@ class BookingTest extends TestCase
             ->deleteJson('/api/v1/bookings/'.Str::uuid());
 
         $response->assertStatus(404);
+    }
+
+    public function test_cannot_delete_booking_with_additional_charges(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(); // draft booking
+        \App\Models\AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => User::factory()->create()->id,
+        ]);
+
+        $response = $this->deleteJson("/api/v1/bookings/{$booking->id}");
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_owner_cannot_delete_deferred_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $booking->update(['payment_type' => 'deferred']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_owner_cannot_delete_admin_sourced_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $booking->update(['source' => 'admin']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
     }
 
     // ============================================

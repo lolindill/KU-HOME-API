@@ -225,9 +225,9 @@ erDiagram
 
     IMAGES {
         uuid id PK
-        string url
-        uuid imageable_id "nullable, polymorphic"
-        string imageable_type "nullable, polymorphic"
+        string url "appended attribute — signed URL 15 นาที (ไม่ใช่ column)"
+        uuid imageable_id "nullable, polymorphic — $hidden จาก JSON (26/10/26)"
+        string imageable_type "nullable, polymorphic — $hidden จาก JSON (26/10/26)"
         timestamp created_at
         timestamp updated_at
     }

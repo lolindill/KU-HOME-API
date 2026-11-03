@@ -41,7 +41,7 @@ class BreakfastReportData extends BaseReportData
             ->whereHas('bookingRoom', function ($q) use ($eatDay) {
                 $q->where('check_in', '<', $eatDay->copy()->addDay())
                     ->where('check_out', '>=', $eatDay)
-                    ->whereIn('status', ['draft', 'confirmed', 'checked_in']);
+                    ->holdingSlot();
             })
             ->where(function ($q) {
                 $q->where('breakfast_set_100', '>', 0)->orWhere('breakfast_set_200', '>', 0);

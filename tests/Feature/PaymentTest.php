@@ -29,10 +29,10 @@ class PaymentTest extends TestCase
     }
 
     // ============================================
-    // 🔐 Admin: Request payment
+    // ❄️ FROZEN: Request payment deprecated (410 Gone)
     // ============================================
 
-    public function test_admin_can_request_payment(): void
+    public function test_request_payment_returns_410_gone(): void
     {
         $this->actingAsAdmin();
         $booking = $this->createBooking();
@@ -41,11 +41,7 @@ class PaymentTest extends TestCase
             'booking_id' => $booking->id,
             'amount' => 4500,
         ]);
-        $response->assertStatus(200);
-        $this->assertDatabaseHas('payments', [
-            'booking_id' => $booking->id,
-            'amount' => 4500,
-        ]);
+        $response->assertStatus(410);
     }
 
     public function test_non_admin_cannot_request_payment(): void
@@ -69,35 +65,6 @@ class PaymentTest extends TestCase
     // — tests เดิม (webhook_can_update / 422_unknown / receipt_idempotent / does_not_crash_when_paid)
     //   ถูกลบออกเพราะ flow deprecated แล้ว
 
-    // ============================================
-    // 🌟 Fix H5 (03/07/26): Payment = 1 per booking (QR scenario)
-    // ============================================
-
-    public function test_request_payment_rejects_when_pending_exists(): void
-    {
-        $this->actingAsAdmin();
-        $booking = $this->createBooking();
-
-        // สร้าง pending payment แรกไปแล้ว
-        Payment::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'amount' => 4500,
-            'status' => 'pending',
-        ]);
-
-        // ยิง request อีกครั้ง → ต้อง reject (กัน orphan pending payments)
-        $response = $this->postJson('/api/v1/payments', [
-            'booking_id' => $booking->id,
-            'amount' => 4500,
-        ]);
-
-        $response->assertStatus(422);
-        $this->assertStringContainsString('รอดำเนินการ', $response->json('message'));
-        // ต้องมี payment เดียว (ไม่สร้างซ้ำ)
-        $this->assertEquals(1, Payment::where('booking_id', $booking->id)->count());
-    }
-
     // 🌟 Refactor (18/06/26): requestPaymentForGuest route ถูกลบแล้ว — non-member ไม่สามารถจอง/ชำระได้โดยตรง
-    // ทุกคนต้อง login และใช้ POST /payments (admin) หรือ POST /front-desk/{id}/payment
+    // ทุกคนต้อง login และใช้ POST /bookings/{id}/confirm หรือ POST /front-desk/{id}/payment
 }

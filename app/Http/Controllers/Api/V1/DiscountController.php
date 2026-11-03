@@ -143,7 +143,7 @@ class DiscountController extends Controller
     /**
      * 👥 Admin: แสดงรายละเอียดโค้ดส่วนลด (ค้นหาด้วย Code Name หรือ UUID)
      */
-    public function show(string $code): JsonResponse
+    public function show(Request $request, string $code): JsonResponse
     {
         $code = trim($code);
         $discount = Str::isUuid($code)
@@ -157,10 +157,41 @@ class DiscountController extends Controller
             ], 404);
         }
 
+        $user = $request->user('sanctum');
+
+        if ($user?->role === 'admin') {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨',
+                'discount' => $discount,
+            ], 200);
+        }
+
+        // Non-admin or guest: if inactive, return 404
+        if (! $discount->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "ไม่พบโค้ดส่วนลด {$code} ค่ะ 🔎",
+            ], 404);
+        }
+
+        $safeDiscount = [
+            'id' => $discount->id,
+            'code' => $discount->code,
+            'type' => $discount->type,
+            'value' => $discount->value,
+            'start_date' => $discount->usable_from?->toISOString(),
+            'end_date' => $discount->usable_until?->toISOString(),
+            'usable_from' => $discount->usable_from,
+            'usable_until' => $discount->usable_until,
+            'stay_from' => $discount->stay_from,
+            'stay_until' => $discount->stay_until,
+        ];
+
         return response()->json([
             'status' => 'success',
             'message' => 'ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨',
-            'discount' => $discount,
+            'discount' => $safeDiscount,
         ], 200);
     }
 

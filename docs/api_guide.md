@@ -1927,7 +1927,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 }
 ```
 
-> 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — frontend ใช้ `<img src>` ตรงๆ ได้ทันที หมดอายุต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
+> 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — 🔐 (26/10/26) การเปิดไฟล์ต้องส่ง `Authorization: Bearer <token>` ด้วย (เจ้าของ booking / admin เท่านั้น — ดู `GET /images/{id}/file`) · frontend ใช้ `fetch` + header แล้วแปลงเป็น blob URL (`URL.createObjectURL`) แทน `<img src>` ตรงๆ · หมดอายุ/พ้น response ต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
 > 💳 `expected_amount` = ยอดที่ระบบคาดว่าต้องชำระ ณ ตอนนี้ (deposit งวดแรก = ยอดมัดจำ, กรณีอื่น = `outstanding_amount`) · 4 field `payment_type/deposit_amount/paid_amount/outstanding_amount` ส่งทุก response ของ booking ทุก role
 
 **Guards** (422 on failure):
@@ -1948,7 +1948,9 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "path": "slips/...", "url": "<signed URL 15 นาที>", ... } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "id": "...", "url": "<signed URL 15 นาที>", "mime_type": "image/jpeg", "size": 184320, "original_name": "slip.jpg", "category": "slip" } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
+
+> 🖼️ **(26/10/26)** `slip_image` JSON ซ่อน field ภายในแล้ว (`path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` ไม่ serialize) — เหลือ `id`, `mime_type`, `size`, `original_name`, `category`, timestamps, `url`
 
 > 💳 `expected_amount` (ระบบคำนวณ) vs `claimed_amount` (ยอด user แจ้ง) = คู่เทียบแบบ **soft** — ระบบไม่ hard-reject ยอดไม่ตรง (เผื่อค่าโอน) admin ตัดสินเอง
 
@@ -1978,24 +1980,33 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 ### GET `/images/{id}/file` — Serve image via signed URL
 
-🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
+🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป / check-in evidence / รูป housekeeping) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
 
-🔓 **ไม่มี auth:sanctum โดยตั้งใจ** — `signature` ใน query string เป็นตัวยืนยันแทน · **Throttle**: `10,1`
+🔐 **(26/10/26) ต้องส่ง `Authorization: Bearer <token>`** — token + signature คุมคู่กัน (2 ชั้น) · ผู้ขอต้องเป็น:
+- **admin** — เห็นได้ทุกรูป
+- **เจ้าของรูปตาม imageable** — สลิป (`BookingConfirmation`) / check-in evidence (`BookingRoom`) → เจ้าของ booking (org booking `user_id = null` → admin เท่านั้น) · รูป housekeeping (`HousekeepingTask`) → แม่บ้านที่ถูก `assigned_to`
+- type แปลกปลอม → admin เท่านั้น (fail-closed)
 
-- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ (เจ้าของ booking / admin) เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending
-- ⚠️ Route นี้ **exempt `RequireJsonAccept`** เฉพาะจุดเดียวในระบบ — เพื่อให้ `<img Accept: image/*>` ของ browser โหลดได้ (มิฉะนั้นโดน 406) — เหตุผลถูกบันทึกใน `cline.md`
+**Throttle**: `10,1`
+
+- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending
+- ⚠️ Route นี้ **exempt `RequireJsonAccept`** เฉพาะจุดเดียวในระบบ — เพื่อให้ fetch รูปที่ส่ง `Accept: image/*` โหลดได้ (มิฉะนั้นโดน 406) — เหตุผลถูกบันทึกใน `cline.md`
 - ไฟล์จริงอยู่ที่ `storage/app/private/slips/...` — ไม่มี symlink สาธารณะ
 
 **Example**:
 ```bash
-curl "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signature=abc123..."
+curl -H "Authorization: Bearer <TOKEN>" \
+  "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signature=abc123..."
 ```
 
 **Response 200**: ไฟล์ภาพ stream inline (`Content-Type: image/jpeg` ฯลฯ)
 
 **Errors**:
-- `403` — ลายเซ็นไม่ถูกต้อง / ถูกแกะ / หมดอายุ (เกิน 15 นาที)
+- `401` — ไม่ส่ง token / token หมดอายุ (ตรวจก่อน signature)
+- `403` — ล็อกอินแล้วแต่ไม่ใช่เจ้าของรูป/admin · หรือลายเซ็นไม่ถูกต้อง / ถูกแกะ / หมดอายุ (เกิน 15 นาที)
 - `404` — Image row มีแต่ไฟล์ถูกลบไปแล้ว (เช่น ผ่านรอบ cleanup)
+
+> 💡 **Frontend pattern**: `<img src>` ใส่ header ไม่ได้ — ให้ `fetch(url, { headers: { Authorization: Bearer } })` → `response.blob()` → `URL.createObjectURL(blob)` แล้วค่อยใส่ใน `<img src>`
 
 **Retention (cleanup รอบ 02:30 ทุกวัน — `app:cleanup-images`)**:
 - สลิปของ confirmation `rejected` เก่ากว่า `SLIP_RETENTION_DAYS` (default 30) วัน → ลบรูป (คง confirmation row ตาม audit trail)
@@ -3409,6 +3420,7 @@ Returns tasks with status `pending` or `in_progress`.
 **Relationships:** `morphTo imageable` · `belongsTo User` (uploader)
 
 **พฤติกรรมพิเศษ:** serialize แล้วมี appended `url` (signed URL อายุ 15 นาที) · ลบ row = ลบไฟล์บน disk อัตโนมัติ (hook `deleting`)
+🖼️ **(26/10/26)** — field ภายใน `path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` ถูก `$hidden` ออกจาก JSON output ทั้งหมด (ยังใช้ได้ปกติฝั่ง server) — JSON เหลือ `id`, `mime_type`, `size`, `original_name`, `category`, timestamps, `url` · การเปิดไฟล์ต้องส่ง Bearer token + เป็นเจ้าของรูป/admin (ดู `GET /images/{id}/file`)
 
 ---
 
@@ -4177,8 +4189,8 @@ Accept: application/json
 
 - **Method:** `GET`
 - **URL:** `/api/v1/images/{image}/file?expires=...&signature=...`
-- **Auth:** ไม่ต้องส่ง Sanctum Token (ใช้ Laravel Temporary Signed URL ยืนยันสิทธิ์ มีอายุ 15 นาที)
-- **Exempt:** ยกเว้น `RequireJsonAccept` เพื่อให้บราวเซอร์ใช้ `<img src="...">` หรือดาวน์โหลดไฟล์ตรงได้ทันที
+- **Auth:** 🔐 (26/10/26) ต้องส่ง Sanctum Token — เฉพาะเจ้าของ booking หรือ admin (staff ไม่มีสิทธิ์เปิดไฟล์โดยตรง) + Laravel Temporary Signed URL ยืนยันอีกชั้น (มีอายุ 15 นาที) — รายละเอียดกติกาสิทธิ์ดูหัวข้อ `GET /images/{id}/file`
+- **Exempt:** ยกเว้น `RequireJsonAccept` เพื่อให้ fetch รูปที่ส่ง `Accept: image/*` โหลดได้ (frontend: `fetch` + Authorization header + blob URL)
 
 
 ---
@@ -4321,8 +4333,8 @@ Accept: application/json
 ### 3. การแสดงผลรูปภาพและความปลอดภัย (Signed URL)
 
 - URL ของรูปภาพ (`url`) เป็น Temporary Signed Route ของ `GET /api/v1/images/{id}/file` อายุ **15 นาที**
-- ผู้ใช้ปลายทาง (Browser/App) สามารถใช้ `<img src="url">` ได้โดยตรงโดยไม่ต้องแนบ Sanctum Token (ลายเซ็นใน URL ทำหน้าที่ยืนยันสิทธิ์แทน)
-- หากลายเซ็นหมดอายุหรือถูกแก้ไข ระบบจะปฏิเสธด้วย `403 Invalid signature`
+- 🔐 (26/10/26) การเปิดไฟล์ต้องแนบ Sanctum Token ด้วย — เฉพาะแม่บ้านที่ถูก assign task (`assigned_to`) หรือ admin · frontend ใช้ `fetch` + Authorization header แล้วแปลงเป็น blob URL (`<img src>` ใส่ header ไม่ได้)
+- หากลายเซ็นหมดอายุหรือถูกแก้ไข ระบบจะปฏิเสธด้วย `403 Invalid signature` · ไม่ส่ง token = `401` · ไม่ใช่เจ้าของ/admin = `403`
 - การลบงานทำความสะอาด (`HousekeepingTask::delete()`) จะลบแถวรูปภาพในตาราง `images` และลบไฟล์จริงออกจาก Storage โดยอัตโนมัติ
 
 ---

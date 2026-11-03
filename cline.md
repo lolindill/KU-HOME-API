@@ -212,7 +212,7 @@ These routes exist but are **not for production use**:
 - `RoomController` — rooms & room types listing, availability, per-day availability calendar, status updates
 - `PaymentController` — ❄️ webhook frozen (410), requestPayment (admin walk-in)
 - `FrontDeskController` — walk-in bookings, check-in, check-out, record payments
-- `ImageController` — 🖼️ (19/08/26) serve image file ผ่าน signed URL — ไม่มี auth:sanctum (signature ยืนยันแทน) + exempt RequireJsonAccept
+- `ImageController` — 🖼️ (19/08/26) serve image file ผ่าน signed URL · 🔐 (26/10/26) เพิ่ม `auth:sanctum` + ownership check (เจ้าของรูปตาม imageable / admin — ดูหัวข้อ "ระบบรูปจริงจัง") + exempt RequireJsonAccept
 - `DashboardController` — housekeeping dashboard (cleaning tasks, status updates)
 
 ### Request Validation
@@ -1250,7 +1250,9 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 
 > **สลิปเลิกเก็บบน public disk + path column แล้ว** — ย้ายมาเป็นระบบรูปกลางที่ปลอดภัยและขยายได้
 >
-> **Decisions (นายท่านเลือก):** Disk + `images` table polymorphic (ไม่เอา BLOB ใน DB — เหตุผล: มือใหม่ฝั่ง server + deploy บน company server, DB ต้องเบา, ย้ายไป S3/Supabase ภายหลังได้โดยไม่แก้ schema) · สลิปเป็น **private + ดูผ่าน signed URL อายุ 15 นาที** (frontend `<img src>` ตรงๆ ได้) · ขอบเขตแบบเต็ม (ถอด draft `/upload-image`) · มี cleanup
+> **Decisions (นายท่านเลือก):** Disk + `images` table polymorphic (ไม่เอา BLOB ใน DB — เหตุผล: มือใหม่ฝั่ง server + deploy บน company server, DB ต้องเบา, ย้ายไป S3/Supabase ภายหลังได้โดยไม่แก้ schema) · สลิปเป็น **private + ดูผ่าน signed URL อายุ 15 นาที** · ขอบเขตแบบเต็ม (ถอด draft `/upload-image`) · มี cleanup
+>
+> 🔐 **Amendment (26/10/26)** — เพิ่ม `auth:sanctum` + ownership check + `$hidden` (นายท่านสั่ง) — ดูท้ายหัวข้อนี้
 
 ### 🎯 การเปลี่ยนแปลงหลัก
 
@@ -1265,10 +1267,23 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 | Cleanup | ไม่มี (ไฟล์สะสม) | **`app:cleanup-images`** รอบ 02:30: ไฟล์กำพร้า → ลบ · row กำพร้า → ลบ · rejected เกิน `SLIP_RETENTION_DAYS` (default 30) → ลบรูปคง confirmation · **verified ห้ามลบ** (หลักฐานการเงิน) |
 
 ### 🔐 RequireJsonAccept exemption (จุดเดียวในระบบ — บันทึกตามกติกา AGENTS.md)
-`GET /images/{id}/file` ใช้ `->withoutMiddleware([RequireJsonAccept::class])` เพราะ browser `<img>` ส่ง `Accept: image/avif,image/webp,...` (ไม่มี JSON/wildcard) — ไม่ exempt แล้วรูปทุกใบโดน 406 ตอน frontend ฝัง tag · route ยังมี `signed` + `throttle:10,1` คุมอยู่ · ผ่าน test `test_signed_url_accepts_image_accept_header` กัน regression
+`GET /images/{id}/file` ใช้ `->withoutMiddleware([RequireJsonAccept::class])` เพราะ frontend fetch รูปส่ง `Accept: image/avif,image/webp,...` (ไม่มี JSON/wildcard) — ไม่ exempt แล้วรูปทุกใบโดน 406 · route มี `auth:sanctum` + `signed` + `throttle:10,1` คุม · ผ่าน test `test_signed_url_accepts_image_accept_header` กัน regression
+
+### 🔐 Amendment (26/10/26) — auth:sanctum + ownership check + $hidden
+
+> **ที่มา:** owner ทบทวน design พบว่า "signed URL ออกให้เฉพาะผู้มีสิทธิ์" เป็นการคุมแบบ soft — URL ที่หลุด (log/cache) ใครก็เปิดได้ใน 15 นาที → นายท่านสั่งเพิ่ม token auth จริง + ซ่อน field ภายใน
+
+- **กติกาสิทธิ์ `GET /images/{id}/file` (นายท่านเลือก "เก็บ signed URL + เพิ่ม auth" / "owner ตาม type"):**
+  - `admin` ผ่านทุกประเภท · **เจ้าของตาม imageable:** `BookingConfirmation` (สลิป) / `BookingRoom` (evidence) → `booking.user_id` · `HousekeepingTask` (รูปเก็บห้อง) → `assigned_to` · type ไม่รู้จัก → **admin เท่านั้น (fail-closed)** · org booking (`user_id = null`) → admin เท่านั้น (เดียวกับ `showById`)
+  - Response: ไม่มี token = **401** (ตรวจก่อน signature ตาม middleware priority) · token ถูกแต่ไม่ใช่เจ้าของ = **403** · signature พัง/หมดอายุ (login แล้ว) = **403** เหมือนเดิม
+  - **ผลข้างเคียงที่ owner รับทราบ:** staff ยัง list evidence ได้ (role:admin,staff) แต่**เปิดไฟล์เองไม่ได้** — ถ้าหน้างาน staff ต้องเปิด ให้กลับมาเพิ่ม `staff` ใน allowed ที่ `ImageController::show`
+- **`Image` model เพิ่ม `$hidden = [path, disk, imageable_id, imageable_type, uploaded_by, metadata]`** — JSON เหลือ `id/mime_type/size/original_name/category/timestamps/url` · `$hidden` กระทบเฉพาะ serialization — hook `deleting`, ImageController, `CleanupImages`, hand-built payload ใน FrontDesk/Dashboard controllers ใช้ attribute ตรง ๆ ไม่กระทบ
+- **Frontend (repo ku-home) ต้องแก้ตาม:** เลิก `<img src="{url}">` → `fetch(url, { headers: { Authorization: Bearer } })` → `blob()` → `URL.createObjectURL` — `<img>` แนบ header ไม่ได้
+- **bootstrap/app.php เพิ่ม 2 จุด (26/10/26):** `$middleware->redirectGuestsTo(fn () => null)` + `$exceptions->render(AuthenticationException → 401 JSON สำหรับ /api/*)` — เพราะ route นี้ exempt RequireJsonAccept ทำให้ request anonymous ที่ส่ง `Accept: image/*` ลุยถึง `Authenticate` แล้วเดิมพยายาม redirect `route('login')` (ไม่มีจริง) → 500 — ตอนนี้เป็น 401 JSON ตาม error shape ของระบบ
+- **Signed URL ยังอยู่ครบ** (15 นาที, `SIGNED_URL_TTL_MINUTES`) — กลายเป็นชั้นที่ 2 เสริม token · test `BookingConfirmationTest` ที่ assert `signature=` ยังผ่าน
 
 ### 🧠 พฤติกรรมสำคัญที่ต้องจำ
-- **`Image` model**: serialize แล้วมี appended `url` (signed URL สดทุกครั้ง) · **ลบ row = ลบไฟล์อัตโนมัติ** (hook `deleting`) — call site ไหนลบ Image ไม่ต้องลบไฟล์เอง
+- **`Image` model**: serialize แล้วมี appended `url` (signed URL สดทุกครั้ง) + field ภายในถูก `$hidden` (26/10/26) · **ลบ row = ลบไฟล์อัตโนมัติ** (hook `deleting`) — call site ไหนลบ Image ไม่ต้องลบไฟล์เอง
 - `confirm()` เก็บไฟล์ใน transaction แต่ไฟล์ไม่ transactional → catch มี best-effort delete + command 02:30 เก็บรอยสอดคล้องอีกชั้น
 - ไม่มี generic upload endpoint โดยตั้งใจ — รูปเกิดจาก flow ของเจ้าของเสมอ (วันนี้คือ confirm) เพื่อกันอัปโหลดอิสระแบบ draft เดิม
 - **ทางไปต่อ:** `HousekeepingPhoto` (draft ลอย — มี model/migration/requests แต่ไม่มี route) ควรย้ายมาใช้ `images` table (morph `HousekeepingTask`) แล้ว drop ตาราง `housekeeping_photos` — ยังไม่ทำในรอบนี้

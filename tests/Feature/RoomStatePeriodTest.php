@@ -366,6 +366,42 @@ class RoomStatePeriodTest extends TestCase
         ]);
     }
 
+    public function test_store_does_not_delete_overlapping_draft_with_additional_charges_and_reports_as_affected(): void
+    {
+        $this->actingAsAdmin();
+        $room = $this->createRoom($this->createRoomType());
+        $draft = $this->createBookingWithRoom(
+            $room,
+            bookingStatus: 'draft',
+            brStatus: 'draft',
+            checkIn: now()->addDays(1)->toDateString(),
+            checkOut: now()->addDays(3)->toDateString(),
+            paymentDeadline: now()->addMinutes(15),
+        );
+
+        \App\Models\AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $draft->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Damage deposit note',
+            'qty' => 1,
+            'price' => 200,
+            'charge_type' => 'damage',
+            'recorded_by' => $draft->user_id,
+        ]);
+
+        $response = $this->postJson("/api/v1/rooms/{$room->id}/periods", [
+            'kind' => 'maintenance',
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addDays(5)->toDateString(),
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertEmpty($response->json('deleted_drafts'));
+        $this->assertContains($draft->id, collect($response->json('affected_bookings'))->pluck('booking_id')->all());
+        $this->assertDatabaseHas('bookings', ['id' => $draft->id]);
+    }
+
     public function test_store_reports_affected_confirmed_bookings_without_touching_them(): void
     {
         $this->actingAsAdmin();

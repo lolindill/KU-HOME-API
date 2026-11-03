@@ -534,6 +534,14 @@ class BookingController extends Controller
                 ], 403);
             }
 
+            // 🔒 Mode A / Deferred guard (m8): ผู้ใช้ทั่วไปไม่สามารถลบ draft ที่เป็น deferred หรือสร้างโดยแอดมินได้
+            if ($user->role !== 'admin' && ($booking->payment_type === 'deferred' || $booking->source === 'admin')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่สามารถลบการจองนี้ได้ — รายการจองแบบ deferred หรือสร้างโดยเจ้าหน้าที่ ต้องให้แอดมินเป็นผู้ยกเลิกค่ะ',
+                ], 403);
+            }
+
             // 🔒 Draft guard — ลบได้เฉพาะ draft เท่านั้น
             if ($booking->status !== 'draft') {
                 throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
@@ -546,12 +554,20 @@ class BookingController extends Controller
                 throw new \Exception('ไม่สามารถลบได้ — การจองนี้มีรายการชำระเงินบันทึกไว้แล้วค่ะ (ให้แอดมินตัดสินใจที่ front-desk) 💳', 422);
             }
 
+            if ($booking->additionalCharges()->exists()) {
+                throw new \Exception('Cannot delete booking with existing additional charges', 422);
+            }
+
             DB::beginTransaction();
             try {
                 // 🌟 lock + re-check กัน race กับ confirm/verify ที่กำลัง draft→paid พร้อมกัน
                 $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
                 if ($locked->status !== 'draft') {
                     throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+                }
+
+                if ($locked->additionalCharges()->exists()) {
+                    throw new \Exception('Cannot delete booking with existing additional charges', 422);
                 }
 
                 foreach ($locked->bookingRooms as $br) {
@@ -1226,6 +1242,10 @@ class BookingController extends Controller
                 throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
             }
 
+            if ($bookingRoom->additionalCharges()->exists()) {
+                throw new \Exception('Cannot delete room with existing additional charges', 422);
+            }
+
             DB::beginTransaction();
             try {
                 // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างลบ
@@ -1456,6 +1476,11 @@ class BookingController extends Controller
 
             $confirmationNo = Booking::generateUniqueConfirmation();
 
+            $source = $validated['source'];
+            if (! $isAdmin && $source === 'admin') {
+                $source = 'online';
+            }
+
             $booking = Booking::create([
                 'confirmation' => $confirmationNo,
                 // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A = target user ·
@@ -1467,7 +1492,7 @@ class BookingController extends Controller
                 'customer_name' => $customerName,
                 'customer_phone' => $customerPhone,
                 'customer_email' => $customerEmail,
-                'source' => $validated['source'],
+                'source' => $source,
                 'status' => 'draft',
 
                 // 🌟 Refactor (25/06/26): ย้าย check_in/check_out ไปที่ booking_rooms แล้ว

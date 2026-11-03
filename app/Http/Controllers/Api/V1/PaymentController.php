@@ -12,62 +12,14 @@ use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
-    // 🌸 สร้างรายการชำระเงิน (Request Payment)
-    public function requestPayment(StorePaymentRequest $request)
+    // ❄️ FROZEN (2026-11-03): Mock QR deprecated — webhook เป็น 410 แล้ว
+    //    ใช้ POST /api/v1/bookings/{id}/confirm หรือ front-desk recordPayment แทน
+    public function requestPayment(Request $request)
     {
-        $validated = $request->validated();
-
-        $booking = Booking::findOrFail($validated['booking_id']);
-
-        if ($booking->is_paid) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'This booking is already paid.',
-            ], 400);
-        }
-
-        // 🌟 Fix H5 (03/07/26): Payment = 1 per booking (QR scenario)
-        // ถ้ามี payment pending อยู่แล้ว → reject ไม่สร้างซ้ำ (กัน orphan pending payments)
-        $existingPending = Payment::where('booking_id', $booking->id)
-            ->where('status', 'pending')
-            ->exists();
-        if ($existingPending) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'มีรายการชำระเงินที่รอดำเนินการอยู่แล้วค่ะนายท่าน กรุณารอให้รายการเดิมเสร็จสิ้นก่อนนะคะ',
-            ], 422);
-        }
-
-        try {
-            DB::beginTransaction();
-
-            $payment = Payment::create([
-                'booking_id' => $booking->id,
-                'amount' => $booking->total_amount,
-                'status' => 'pending',
-            ]);
-
-            DB::commit();
-
-            $paymentUrl = 'https://gateway.mockbank.com/pay/'.$payment->id;
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Payment request created',
-                'payment_id' => $payment->id,
-                'amount' => $payment->amount,
-                'payment_url' => $paymentUrl,
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Payment request failed: '.$e->getMessage());
-
-            return response()->json([
-                'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในการสร้างรายการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
-            ], 500);
-        }
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Mock QR payment request deprecated (410 Gone) — ใช้ POST /api/v1/bookings/{id}/confirm หรือ front-desk recordPayment แทนค่ะนายท่าน',
+        ], 410);
     }
 
     // 🌟 Refactor (18/06/26): ลบ requestPaymentForGuest() ออก — non member/guest ใช้งานไม่ได้แล้ว ต้อง login ทุกกรณี

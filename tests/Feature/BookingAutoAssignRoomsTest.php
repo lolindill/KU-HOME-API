@@ -179,7 +179,7 @@ final class BookingAutoAssignRoomsTest extends TestCase
         Addon::create([
             'id' => Str::uuid()->toString(),
             'booking_room_id' => $br->id,
-            'extra_bed' => $extraBeds,
+            'extra_beds_by_night' => $extraBeds > 0 ? [$checkIn => $extraBeds] : [],
         ]);
 
         return $br;
@@ -451,6 +451,60 @@ final class BookingAutoAssignRoomsTest extends TestCase
         $assignedRoom = Room::findOrFail($br->fresh()->room_id);
         $this->assertSame('king_size', $assignedRoom->bed_type);
         $this->assertSame(8, $assignedRoom->floor);
+    }
+
+    /**
+     * ✅ 11b. bed_preference + extra_beds: X09Seeder pin ต้องเคารพ bed_preference (ไม่ตอกห้องชั้นต่ำสุดที่เป็น twin)
+     */
+    public function test_x09_seeder_respects_bed_preference_with_extra_beds(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+
+        $br = $this->createBookingRoom(
+            $booking,
+            'Deluxe',
+            checkIn: '2026-11-10',
+            checkOut: '2026-11-12',
+            bedPreference: 'king_size',
+            extraBeds: 1
+        );
+
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/assign-rooms");
+
+        $response->assertStatus(200)->assertJson(['status' => 'success']);
+
+        $assignedRoom = Room::findOrFail($br->fresh()->room_id);
+        $this->assertSame('king_size', $assignedRoom->bed_type);
+        $this->assertSame(8, $assignedRoom->floor);
+        $this->assertSame('809', $assignedRoom->room_number);
+    }
+
+    /**
+     * ✅ 11c. bed_preference twin + extra_beds: X09Seeder pin เลือก X09 ชั้นต่ำสุดที่เป็น twin (509)
+     */
+    public function test_x09_seeder_picks_lowest_twin_when_bed_preference_twin(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+
+        $br = $this->createBookingRoom(
+            $booking,
+            'Deluxe',
+            checkIn: '2026-11-10',
+            checkOut: '2026-11-12',
+            bedPreference: 'twin',
+            extraBeds: 1
+        );
+
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/assign-rooms");
+
+        $response->assertStatus(200)->assertJson(['status' => 'success']);
+
+        $assignedRoom = Room::findOrFail($br->fresh()->room_id);
+        $this->assertSame('twin', $assignedRoom->bed_type);
+        $this->assertSame(5, $assignedRoom->floor);
+        $this->assertSame('509', $assignedRoom->room_number);
     }
 
     /**

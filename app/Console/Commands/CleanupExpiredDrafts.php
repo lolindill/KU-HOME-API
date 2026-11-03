@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Booking;
+use App\Models\StatusChangeLog;
 use Carbon\Carbon;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -38,6 +39,15 @@ class CleanupExpiredDrafts extends Command
         $cleaned = 0;
         foreach ($expiredDrafts as $booking) {
             try {
+                if ($booking->additionalCharges()->exists()) {
+                    $this->warn("  ✗ Skipped draft {$booking->confirmation}: has additional charges");
+                    Log::warning('Skipped cleanup of expired draft booking with existing additional charges', [
+                        'booking_id' => $booking->id,
+                        'confirmation' => $booking->confirmation,
+                    ]);
+                    continue;
+                }
+
                 // 🌟 Refactor (29/06/26): Hard delete cascade — ไม่มี 'cancelled' state แล้ว
                 // Final plan: Delete all (BR + Addon + Payment ลบทิ้งหมด)
                 DB::transaction(function () use ($booking) {
@@ -52,6 +62,18 @@ class CleanupExpiredDrafts extends Command
                     // 🖼️ (19/08/26) ลบรูปสลิปก่อน booking หายไป — morph ไม่ cascade เอง
                     //    (defense-in-depth: draft แทบไม่มี confirmation แต่กันเหนียวเหมือน destroyBooking)
                     $booking->confirmations->each(fn ($confirmation) => $confirmation->slipImage?->delete());
+
+                    // 📝 Audit log (m1) — บันทึกก่อนลบแถว booking
+                    StatusChangeLog::create([
+                        'entity_type' => 'booking',
+                        'entity_id' => $booking->id,
+                        'from_status' => 'draft',
+                        'to_status' => 'deleted',
+                        'role' => 'system',
+                        'causer_id' => null,
+                        'note' => 'CleanupExpiredDrafts command deleted expired draft booking',
+                    ]);
+
                     // ลบ Booking container เป็นอันดับสุดท้าย
                     $booking->delete();
                 });
