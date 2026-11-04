@@ -1566,7 +1566,7 @@ curl -s -H "Accept: application/json" \
 
 **Constraints:**
 - โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
-- โหมด surcharge 💳: Booking `paid|confirmed` + BR `draft|confirmed` (BR `checked_in/checked_out/no_show` = `422`) · BR ที่มี `room_id` ถูกจัดแล้ว **เปลี่ยน `room_type_id`/วันที่ไม่ได้** → `422` (ปลดการจัดห้องก่อน) · reprice ผ่าน `reprice()` เดิม (กติกาปัดสิบไหลตาม) · **ยอดรวมใหม่ต้อง ≥ เงินที่เข้า ledger แล้ว** — ต่ำกว่า = `422` (ticket 08: ไม่มีการคืนเงินในระบบ) · `deposit_amount` คงเดิมไม่ย้อน · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset เป็น `false` (เก็บครบแล้ว set คืนโดย recordPayment)
+- โหมด surcharge 💳: Booking `paid|confirmed` + BR `draft|confirmed` (BR `checked_in/checked_out/no_show` = `422`) · 🎫 **(2026-11-04 อัปเดตกติกา)** BR ที่มี `room_id` ถูกจัดแล้ว: **เปลี่ยนวันที่ → ยัง `422`** (ปลดการจัดห้องก่อน) แต่ **เปลี่ยน `room_type_id` ได้เมื่อ type ใหม่แพงกว่าเท่านั้น (upgrade-only)** → ระบบจะ **ปลด `room_id = null` ให้ auto-assign จัด type ใหม่** (เรียก `PUT /bookings/{id}/assign-rooms` ต่อ) · ประเภทถูกกว่า = `422` · reprice ผ่าน `reprice()` เดิม (กติกาปัดสิบไหลตาม) · **ยอดรวมใหม่ต้อง ≥ เงินที่เข้า ledger แล้ว** — ต่ำกว่า = `422` (ticket 08: ไม่มีการคืนเงินในระบบ) · 🎫 upgrade แล้วยอดรวมต้องไม่ต่ำกว่ายอดเดิมด้วย (กัน group/month tier พายอดตก) · `deposit_amount` คงเดิมไม่ย้อน · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset เป็น `false` (เก็บครบแล้ว set คืนโดย recordPayment) · การปลดห้องเพื่อ upgrade เขียน audit `status_change_logs` note row ("ปลดห้อง X · upgrade type → Y รอจัดห้องใหม่")
 - แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
@@ -2702,6 +2702,66 @@ Requires all payments to be completed. Auto-creates housekeeping tasks.
 
 ---
 
+### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` — In-stay room move (ย้ายห้องหลัง check-in)
+
+🚪 **(2026-11-04)** — ย้ายแขกไปห้องจริง (room_id) ใหม่ **กลางทาง** หลังเช็คอินแล้ว พร้อมเปลี่ยนประเภทห้องได้ในคราวเดียว
+
+🔒 **Admin + Staff only** (`role:admin,staff` + re-check ใน controller)
+
+**เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
+- Booking container ต้องเป็น `confirmed` · BR ต้องเป็น `checked_in` **และมี `room_id` แล้ว** (ย้ายได้เฉพาะหลังเช็คอิน — เคส pre-check-in ใช้ `PUT /bookings/{id}/rooms/{brId}` แทน)
+- ห้องใหม่ ≠ ห้องปัจจุบัน · ห้องใหม่สถานะ `available|prep_checkin`
+- ห้องใหม่ไม่ติด **maintenance period** ทับช่วงพัก (reserved ผ่าน — ธรรมเนียมเดียวกับ check-in) · ไม่มี BR อื่น `holdingSlot()` ทับช่วงเข้าพักของ BR นี้
+- จำนวนแขกเดิม ≤ `max_guests` ของ type ใหม่
+- 🎫 **กติกา upgrade-only:** ถ้า type ใหม่ ≠ เดิม → เรทรายวัน effective ของ **เจ้าของบิล** (ku_member ใช้ `daily_ku`) ต้อง **แพงกว่าหรือเท่ากัน** — ถูกกว่า = `422` · หลัง reprice ยอดรวมต้องไม่ต่ำกว่ายอดเดิมด้วย (กัน group/month tier พายอดตก)
+
+**ผลลัพธ์ (ใน transaction เดียว):** BR คงสถานะ `checked_in` แต่ชี้ `room_id`/`room_type_id` ใหม่ · ห้องเก่า → `checkout_makeup` + สร้างงานแม่บ้าน `checkout` (duplicate-guard) · ห้องใหม่ → `occupied` · 💰 **reprice ทั้งบิล (full-stay)** ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน front-desk / ดักที่ check-out · money guards เดียวกับ surcharge (ยอดใหม่+charges ≥ paid, `is_paid` reset เมื่อเกิดค้าง) · audit: room transitions ×2 ผ่าน `Room::transitionStatusTo` + **note row ของ BR** (`entity_type='booking_room'`, from=to=`checked_in`, note "ย้ายห้อง X → Y")
+
+**Request Body:**
+```json
+{
+  "room_id": "new-room-uuid",
+  "notes": "Guest asked for higher floor (optional)"
+}
+```
+
+**Response `200` (upgrade example):**
+```json
+{
+  "status": "success",
+  "message": "ย้ายห้องเรียบร้อยแล้วค่ะนายท่าน 🚪✨ (201 → 305) อัปเกรดประเภทห้องเป็น Deluxe — ส่วนต่างเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳",
+  "booking_id": "booking-uuid",
+  "booking_room_id": "br-uuid",
+  "old_room_number": "201",
+  "new_room_number": "305",
+  "room_type_changed": true,
+  "old_room_type": "Standard Double",
+  "new_room_type": "Deluxe",
+  "previous_total_amount": 3000,
+  "total_amount": 5000,
+  "surcharge_amount": 2000,
+  "paid_amount": 3000,
+  "outstanding_amount": 2000,
+  "housekeeping_task_id": "task-uuid"
+}
+```
+
+**Response `422` (downgrade / ห้องไม่พร้อม):**
+```json
+{
+  "status": "error",
+  "message": "เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน (Standard 1500 → Deluxe 1200 บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫"
+}
+```
+
+| Code | เมื่อ |
+|---|---|
+| `403` | ไม่ใช่ admin/staff |
+| `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบห้อง |
+| `422` | ผิดเงื่อนไขใด ๆ ด้านบน (BR ไม่ `checked_in`, ห้องไม่พร้อม, overlap, maintenance, guests เกิน, downgrade, ยอดต่ำกว่า paid) |
+
+---
+
 ### POST `/front-desk/{bookingId}/mark-no-show` — Mark guest as no-show
 
 🔒 **Admin only**
@@ -3542,6 +3602,12 @@ Returns tasks with status `pending` or `in_progress`.
 > 🌟 **(17/08/26) Draft-editable window:** ถ้า parent booking เป็น `draft` และ BR เป็น `draft` —
 > แก้ไขห้องได้ทุก field ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` (เช็ค availability + คิดราคาใหม่ที่ server)
 > และลบห้องออกได้ผ่าน `DELETE /bookings/{bookingId}/rooms/{bookingRoomId}` (ห้องสุดท้ายลบไม่ได้ — ให้ลบทั้ง booking)
+>
+> 🚪 **(2026-11-04) In-stay move window:** BR `checked_in` ย้ายห้องจริง (`room_id`) ได้ผ่าน
+> `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` (admin+staff) — พร้อมเปลี่ยน
+> `room_type_id` ได้เมื่อ type ใหม่ **แพงกว่าเท่านั้น** (upgrade-only) · BR **คงสถานะ `checked_in`**
+> (การย้ายไม่ใช่ transition — จด audit ผ่าน note row ใน `status_change_logs`) · ห้องเก่า
+> `occupied → checkout_makeup` + งานแม่บ้าน · ห้องใหม่ `→ occupied` · รายละเอียด endpoint ดูหัว Front Desk Operations
 
 ---
 

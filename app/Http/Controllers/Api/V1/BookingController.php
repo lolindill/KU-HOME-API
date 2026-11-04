@@ -11,6 +11,7 @@ use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
@@ -762,10 +763,36 @@ class BookingController extends Controller
                     || isset($dirtyFields['check_in'])
                     || isset($dirtyFields['check_out']);
 
-                // 💳 ticket 10 — surcharge: BR ที่ถูกจัดเลขห้องแล้วเปลี่ยนประเภท/วันที่ไม่ได้
-                //    (room_id ผูกกับ type เดิม — ให้ปลดการจัดห้องก่อน จึงจะเปลี่ยน shape ได้)
+                // 💳 ticket 10 + 🎫 (2026-11-04) surcharge: BR ที่ถูกจัดเลขห้องแล้ว
+                //    - เปลี่ยนวันที่ (check_in/check_out) → ยัง 422 (ห้อง pinned ผูก overlap กับ window เดิม)
+                //    - เปลี่ยนประเภทห้อง (room_type_id) → อนุญาตแบบ **upgrade-only** (type ใหม่แพงกว่า
+                //      เท่านั้น) แล้วปลด room_id = null ให้ auto-assign จัด type ใหม่
+                //      (ห้องเก่า pre-check-in ไม่ได้ occupied — ไม่แตะ room status / ไม่สร้าง task)
+                $releaseRoom = false;
+                $oldRoomNumber = null;
+                $newRoomTypeName = null;
                 if ($postPayment && $bookingRoom->room_id && $shapeChanged) {
-                    throw new \Exception('ห้องนี้ถูกจัดเลขห้องจริงแล้ว ไม่สามารถเปลี่ยนประเภทห้องหรือวันที่ได้ — ให้ปลดการจัดห้องก่อนค่ะ 🏨', 422);
+                    if (isset($dirtyFields['check_in']) || isset($dirtyFields['check_out'])) {
+                        throw new \Exception('ห้องนี้ถูกจัดเลขห้องจริงแล้ว ไม่สามารถเปลี่ยนวันที่เข้าพักได้ — ให้ปลดการจัดห้องก่อนค่ะ 🏨', 422);
+                    }
+
+                    // 🎫 upgrade-only — เทียบ effective daily rate ของเจ้าของบิล (บริบทเดียวกับ reprice)
+                    $oldTypeForRate = RoomType::findOrFail($bookingRoom->room_type_id);
+                    $newTypeForRate = RoomType::findOrFail($effectiveTypeId);
+                    $oldRateForUpgrade = GlobalRate::getEffectiveDailyRate($oldTypeForRate, $locked->user);
+                    $newRateForUpgrade = GlobalRate::getEffectiveDailyRate($newTypeForRate, $locked->user);
+                    if ($newRateForUpgrade < $oldRateForUpgrade) {
+                        throw new \Exception(
+                            'เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน '.
+                            "({$oldTypeForRate->name_en} {$oldRateForUpgrade} → {$newTypeForRate->name_en} {$newRateForUpgrade} บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫",
+                            422
+                        );
+                    }
+
+                    // 🚪 จับหมายเลขห้องเดิมไว้ทำ audit note ก่อนปลด
+                    $releaseRoom = true;
+                    $oldRoomNumber = Room::find($bookingRoom->room_id)?->room_number;
+                    $newRoomTypeName = $newTypeForRate->name_en;
                 }
 
                 if ($shapeChanged) {
@@ -788,6 +815,11 @@ class BookingController extends Controller
                 }
 
                 if (! empty($dirtyFields)) {
+                    // 🚪 (2026-11-04) upgrade type บนห้องที่ถูกจัดแล้ว → ปลด room_id ให้ auto-assign
+                    //    (PUT /bookings/{id}/assign-rooms หรือ app:daily-room-maintenance) จัด type ใหม่
+                    if ($releaseRoom) {
+                        $dirtyFields['room_id'] = null;
+                    }
                     $bookingRoom->update($dirtyFields);
                 }
 
@@ -864,6 +896,30 @@ class BookingController extends Controller
                 //    (ตามนิยาม is_paid = SUM(payments) ≥ total + charges — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
                 if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
                     $locked->update(['is_paid' => false]);
+                }
+
+                // 🎫 (2026-11-04) airtight — surcharge upgrade type แล้วยอดรวมต้องไม่ต่ำกว่าเดิม
+                //    (กัน group/month tier พายอดตก แม้เรทรายวันของ type ใหม่จะแพงขึ้น)
+                if ($releaseRoom && $newTotal < $previousTotal) {
+                    throw new \Exception(
+                        "อัปเกรดประเภทห้องแล้วยอดรวมต้องไม่ต่ำกว่าเดิมค่ะ ({$previousTotal} → {$newTotal} บาท) กรุณาตรวจสอบเรทของประเภทห้องนะคะ",
+                        422
+                    );
+                }
+
+                // 📝 (2026-11-04) Audit — note row ของการปลดห้องเพื่อ upgrade type
+                //    (สถานะ BR ไม่เปลี่ยน จึงเขียนตรงไม่ผ่าน transitionStatus — from=to=สถานะเดิม
+                //    · convention extension เดียวกับ FrontDeskController::changeRoom)
+                if ($releaseRoom) {
+                    StatusChangeLog::create([
+                        'entity_type' => 'booking_room',
+                        'entity_id' => $bookingRoom->id,
+                        'from_status' => $bookingRoom->status,
+                        'to_status' => $bookingRoom->status,
+                        'role' => $user->role,
+                        'causer_id' => $user->id,
+                        'note' => 'ปลดห้อง '.$oldRoomNumber.' · upgrade type → '.$newRoomTypeName.' รอจัดห้องใหม่',
+                    ]);
                 }
 
                 DB::commit();

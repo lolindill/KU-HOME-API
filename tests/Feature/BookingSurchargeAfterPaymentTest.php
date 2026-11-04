@@ -292,7 +292,7 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $this->assertEquals(1500, $booking->fresh()->total_amount);
     }
 
-    public function test_assigned_room_blocks_shape_change(): void
+    public function test_assigned_room_upgrade_type_releases_room(): void
     {
         $typeB = $this->roomTypeSetup(2500, 1, 'Deluxe');
         $booking = $this->paidBooking(1500, 'full'); // จ่ายเต็ม → confirmed
@@ -301,13 +301,18 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $this->actingAs($this->admin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/assign-rooms")
             ->assertStatus(200);
-        $this->assertNotNull($booking->bookingRooms()->first()->fresh()->room_id);
-
-        // เปลี่ยน room type หลังถูกจัดห้อง = 422
         $br = $booking->bookingRooms()->first();
+        $this->assertNotNull($br->fresh()->room_id);
+
+        // 🎫 (2026-11-04 เปลี่ยนสัญญา) type ใหม่แพงกว่า (upgrade-only) → 200
+        //    + ปลด room_id = null รอ auto-assign จัด type ใหม่ (เคสถูกกว่า = 422 ดู ChangeRoomTest)
         $this->actingAs($this->admin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", ['room_type_id' => $typeB->id])
-            ->assertStatus(422);
+            ->assertStatus(200);
+
+        $br = $br->fresh();
+        $this->assertNull($br->room_id);
+        $this->assertEquals($typeB->id, $br->room_type_id);
     }
 
     public function test_checked_in_room_is_blocked(): void

@@ -91,11 +91,17 @@ class Room extends Model
      *    ถูกถอดออกทั้งคู่ — "ห้องสำรอง" และ "ซ่อมแซม" เป็นช่วงเวลาบน room_state_periods
      *    (derived ตอน query) ไม่ใช่สถานะ — lifecycle ของห้องวิ่งแค่ 5 สถานะนี้
      *
-     * available → checkout_makeup, dirty, prep_checkin
-     * occupied → available, prep_checkin
-     * checkout_makeup → occupied
-     * dirty → available, checkout_makeup
-     * prep_checkin → available, dirty
+     * 🧭 (2026-11-04 แก้ docblock ให้ตรงโค้ด) — ทรานสิชันจริง อ่านเป็น "source → target"
+     *    (อ้างอิง $allowedTransitions ด้านล่างซึ่ง key = target status, value = allowed sources)
+     *
+     * available → occupied, dirty, prep_checkin
+     * occupied → checkout_makeup, prep_checkin
+     * checkout_makeup → occupied, available, prep_checkin
+     * dirty → available, prep_checkin
+     * prep_checkin → occupied, available, dirty
+     *
+     * ⚠️ ห้าม occupied → available ตรง ๆ — ห้องที่แขกออกต้องผ่าน checkout_makeup/dirty
+     *    (งานแม่บ้าน done แล้วจึงกลับ available ผ่าน DashboardController::updateStatus)
      */
     public function transitionStatusTo(string $newStatus, ?string $updatedByUserId = null)
     {
