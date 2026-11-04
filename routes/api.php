@@ -65,8 +65,10 @@ Route::prefix('v1')->group(function () {
     Route::get('/unavailable-ranges', [RoomController::class, 'unavailableRanges']);
 
     // 🚧 DRAFT / TESTING — mock sold-out ranges สำหรับ frontend test (ไม่อ่าน DB, วันที่สัมพัทธ์ today)
+    //    🔒 Gate ด้วย MOCK_ROUTES_ENABLED (config/booking.php — default false, prod-safe
+    //    ไม่ผูกกับ APP_ENV) — เปิดเฉพาะเครื่อง dev ผ่าน .env เท่านั้น
     // 🗑️ DELETION PLAN: ลบ route นี้ (พร้อม MockController + tests + docs) เมื่อ frontend ย้ายไปใช้ /availability-ranges จริง — อย่าปล่อยขึ้น prod
-    if (app()->environment('local', 'testing')) {
+    if (config('booking.mock_routes_enabled')) {
         Route::get('/mock/availability-ranges', [MockController::class, 'availabilityRanges']);
     }
 

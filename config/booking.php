@@ -56,4 +56,13 @@ return [
     'monthly_min_nights' => (int) env('BOOKING_MONTHLY_MIN_NIGHTS', 30),
     'block_min_nights' => (int) env('BOOKING_BLOCK_MIN_NIGHTS', 20),
 
+    // =========================================================
+    // 🚧 Mock Routes (DRAFT / TESTING — branch split main/dev, 2026-11-04)
+    //    เปิด register route /api/v1/mock/* สำหรับ frontend test
+    //    default false = prod-safe ตาม DELETION PLAN ของ MockController —
+    //    ไม่ผูกกับ APP_ENV อีกต่อไป (เดิมใช้ app()->environment('local','testing')
+    //    ซึ่งพังถ้า prod ตั้ง APP_ENV ผิด) · เปิดเฉพาะเครื่อง dev ผ่าน .env
+    // =========================================================
+    'mock_routes_enabled' => (bool) env('MOCK_ROUTES_ENABLED', false),
+
 ];

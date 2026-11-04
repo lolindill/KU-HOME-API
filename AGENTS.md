@@ -11,6 +11,16 @@
 - **DB (current `.env`):** **SQLite** is active locally — `DB_CONNECTION=sqlite`, `DB_DATABASE=database/database.sqlite`. PostgreSQL configs (Supabase `aws-1-ap-northeast-2.pooler.supabase.com`, and the org server `dbc.ku.ac.th`) are **commented out** in `.env`. PostgreSQL is still the **prod target** — never write code that relies on SQLite-only quirks. **Tests:** SQLite in-memory.
 - **API-only** — no Blade views. Vite is minimal (frontend is a separate repo).
 
+## Branch strategy (2026-11-04 — branch split main/dev)
+
+- **`dev` = ฉบับพัฒนาเต็ม** (source of truth) — มีทุกอย่าง: `tests/`, `docs/`, `wayfinder/`, `report-samples/`, `postman/`, `process/`, ไฟล์ planning (`AGENTS.md`, `cline.md`, `house_keep_plan.md`) · งานใหม่ทำบน feature branch แล้ว merge เข้า `dev` (จากเดิมทำบน `agust-11` — เก็บไว้เป็น history ไม่ลบ)
+- **`main` = backend-only release tree** (ไว้ deploy/prod) — ได้มาจาก dev โดย **ตัดไฟล์ dev-only ออก**: `tests/`, `phpunit.xml`, `docs/`, `wayfinder/`, `report-samples/`, `postman/`, `process/`, `scripts/`, `AGENTS.md`, `cline.md`, `house_keep_plan.md`, `ReadMeToSetup.txt`, `.zcodeignore`
+- **Sync dev → main ได้เฉพาะผ่าน `bash scripts/sync-main.sh [--push]`** (merge + scrub อัตโนมัติ — รายการไฟล์ที่ตัดอยู่ใน `EXCLUDED` บนหัว script)
+- 🚫 **ห้าม merge dev → main ผ่านปุ่ม PR ของ GitHub** — ไฟล์ test/doc จะไหลกลับเข้า main ทั้งชุด
+- 🚫 **ห้าม force-push `main`** — script merge จาก dev เสมอ จึงเดินหน้าได้อย่างเดียว
+- Deploy จาก main: `composer install --no-dev` (composer.json/lock เหมือนกันทั้งสอง branch ตั้งใจไว้)
+- 🚧 Mock route `/api/v1/mock/*` gate ด้วย `MOCK_ROUTES_ENABLED` (config/booking.php, default **false** — prod-safe ตาม DELETION PLAN ใน MockController) · เครื่อง dev เปิดผ่าน `.env`, tests ใช้ค่าจาก `phpunit.xml`
+
 ## Commands
 
 ```bash
