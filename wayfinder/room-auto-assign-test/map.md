@@ -24,7 +24,7 @@ status: open
 
 ## Not yet specified
 
-- ชะตา findings 3 ข้อ (catch-all 422 / dead-code owner path / ไม่มี audit trail ตอน assign) — รอ owner ตัดสินว่าจะเปิด fix หรือปล่อยเป็น baseline behavior (findings #3 น่าจับคู่กับ ticket 04 ของ reserved-room-pool)
+- ~~ชะตา findings 3 ข้อ (catch-all 422 / dead-code owner path / ไม่มี audit trail ตอน assign) — รอ owner ตัดสินว่าจะเปิด fix หรือปล่อยเป็น baseline behavior (findings #3 น่าจับคู่กับ ticket 04 ของ reserved-room-pool)~~ *(graduated 2026-11-04: แตกเป็น ticket จริงที่ [tickets/02-owner-decision-findings.md](tickets/02-owner-decision-findings.md) — line refs อัปเดตตาม HEAD `3feacd2` แล้ว · เดิมแขวนเป็น prose ทำให้ monitor มองไม่เห็น frontier)*
 
 ## Out of scope
 
