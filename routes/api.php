@@ -256,6 +256,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
             Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
+
+            // 🚪 In-stay room move (2026-11-04) — ย้ายห้องจริงหลัง check-in + เปลี่ยนประเภทห้องแบบ upgrade-only
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [FrontDeskController::class, 'changeRoom'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
         });
     });
 

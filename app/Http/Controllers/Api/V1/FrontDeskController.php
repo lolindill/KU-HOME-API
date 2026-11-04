@@ -7,15 +7,19 @@ use App\Http\Requests\StorePaymentRequest;
 use App\Http\Requests\UploadCheckinEvidenceRequest;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
+use App\Models\RoomType;
+use App\Models\StatusChangeLog;
 use App\Models\User;
 use App\Services\Discount\DiscountService;
 use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -294,6 +298,242 @@ class FrontDeskController extends Controller
 
         } catch (\Exception $e) {
             return $this->handleCatch('Check-in', $e);
+        }
+    }
+
+    // 🚪 2.5 Change Room (In-stay room move, BR-level) — 2026-11-04
+    //    ย้ายห้องจริง (room_id) หลัง check-in ได้ · เปลี่ยน room_type_id ได้เมื่อ type ใหม่แพงกว่า
+    //    เท่านั้น (upgrade-only) · ห้องเก่า → checkout_makeup + งานแม่บ้าน (mirror checkOut)
+    public function changeRoom(Request $request, $bookingId, $bookingRoomId)
+    {
+        // 🌟 Defense-in-depth: ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'staff'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นถึงจะย้ายห้องได้ค่ะนายท่าน',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'room_id' => 'required|uuid|exists:rooms,id',
+            'notes' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+
+            // 🛡️ Guard: booking ต้อง confirmed (BR checked_in มาจาก flow check-in เสมอ)
+            if ($booking->status !== 'confirmed') {
+                throw new \Exception(
+                    "ย้ายห้องได้เฉพาะรายการจองที่เข้าพักแล้ว (confirmed) เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$booking->status}'",
+                    422
+                );
+            }
+
+            // 🛡️ Guard: BR ต้อง checked_in — ย้ายได้เฉพาะกลางทางเท่านั้น
+            if ($bookingRoom->status !== 'checked_in') {
+                throw new \Exception(
+                    "ย้ายห้องได้เฉพาะห้องที่เช็คอินแล้ว (checked_in) เท่านั้นค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}'",
+                    422
+                );
+            }
+
+            if (! $bookingRoom->room_id) {
+                throw new \Exception('ห้องนี้ยังไม่มีเลขห้องจริงที่จัดไว้ จึงไม่มีห้องให้ย้ายออกค่ะนายท่าน', 422);
+            }
+
+            if ((string) $validated['room_id'] === (string) $bookingRoom->room_id) {
+                throw new \Exception('แขกอยู่ห้องนี้อยู่แล้วค่ะนายท่าน กรุณาระบุห้องใหม่ที่ต่างจากเดิมนะคะ', 422);
+            }
+
+            // 🌟 lock ทั้งบิล + ห้องเก่า + ห้องใหม่ แล้ว re-check กัน race กับ check-in/check-out พร้อมกัน
+            $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'confirmed') {
+                throw new \Exception(
+                    "ย้ายห้องได้เฉพาะรายการจองที่เข้าพักแล้ว (confirmed) เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$locked->status}'",
+                    422
+                );
+            }
+
+            $oldRoom = Room::lockForUpdate()->findOrFail($bookingRoom->room_id);
+            $newRoom = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
+
+            // 🛡️ ห้องใหม่ต้องพร้อมเข้าพัก — transition → occupied ถูกกฎ state machine เสมอ
+            if (! in_array($newRoom->status, ['available', 'prep_checkin'])) {
+                throw new \Exception(
+                    "ห้องหมายเลข {$newRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$newRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน",
+                    422
+                );
+            }
+
+            // 🗓️ (24/09/26) room-state-periods: maintenance period ทับช่วงพักของ BR → reject
+            //    (reserved period ไม่บล็อก — ตามธรรมเนียม check-in ของ admin/staff)
+            if (RoomStatePeriod::where('room_id', $newRoom->id)
+                ->overlapping($bookingRoom->check_in, $bookingRoom->check_out, RoomStatePeriod::KIND_MAINTENANCE)
+                ->exists()) {
+                throw new \Exception(
+                    "ห้อง {$newRoom->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
+                    "({$bookingRoom->check_in->toDateString()} – {$bookingRoom->check_out->toDateString()}) ".
+                    'ไม่สามารถย้ายเข้าได้ค่ะนายท่าน',
+                    422
+                );
+            }
+
+            // ⏱️ overlap guard — ห้ามย้ายทับห้องที่มี BR อื่น (holdingSlot) ยึดช่วงเดียวกัน
+            //    (pattern เดียวกับ check-in assigned_rooms — ตัดตัวเองออก)
+            $overlap = $newRoom->bookingRooms()
+                ->where('booking_rooms.id', '!=', $bookingRoom->id)
+                ->holdingSlot()
+                ->where('check_in', '<', $bookingRoom->check_out)
+                ->where('check_out', '>', $bookingRoom->check_in)
+                ->exists();
+            if ($overlap) {
+                throw new \Exception(
+                    "ห้องหมายเลข {$newRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
+                    "({$bookingRoom->check_in->toDateString()} – {$bookingRoom->check_out->toDateString()}) ".
+                    'ไม่สามารถย้ายเข้าได้ค่ะนายท่าน กรุณาเลือกห้องอื่นนะคะ',
+                    422
+                );
+            }
+
+            $newRoomType = $newRoom->roomType;
+            $oldRoomType = RoomType::findOrFail($bookingRoom->room_type_id);
+            $typeChanged = (string) $newRoom->room_type_id !== (string) $bookingRoom->room_type_id;
+            $previousTotal = (int) $locked->total_amount;
+
+            // 👥 guests cap — จำนวนแขกเดิมต้องไม่เกิน max_guests ของ type ใหม่
+            $guests = $bookingRoom->guests;
+            if (! empty($guests) && is_array($guests) && $newRoomType && count($guests) > $newRoomType->max_guests) {
+                throw new \Exception(
+                    'ผู้เข้าพัก '.count($guests).' คนเกินจำนวนสูงสุด '.$newRoomType->max_guests.' คนของห้องประเภทนี้ค่ะ 🥺',
+                    422
+                );
+            }
+
+            // 🎫 กติกา upgrade-only — type ใหม่ต้องแพงกว่าหรือเท่ากัน
+            //    เทียบ effective daily rate ของเจ้าของบิล (บริบทเดียวกับ reprice — ku_member ใช้ daily_ku)
+            if ($typeChanged) {
+                $oldRate = GlobalRate::getEffectiveDailyRate($oldRoomType, $locked->user);
+                $newRate = GlobalRate::getEffectiveDailyRate($newRoomType, $locked->user);
+                if ($newRate < $oldRate) {
+                    throw new \Exception(
+                        'เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน '.
+                        "({$oldRoomType->name_en} {$oldRate} → {$newRoomType->name_en} {$newRate} บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫",
+                        422
+                    );
+                }
+            }
+
+            // 🚪 Commit การย้าย — BR คงสถานะ checked_in (สถานะไม่เปลี่ยน จึงไม่ผ่าน transitionStatus)
+            $bookingRoom->update([
+                'room_id' => $newRoom->id,
+                'room_type_id' => $newRoom->room_type_id,
+            ]);
+
+            // 🧹 ห้องเก่า → checkout_makeup + งานแม่บ้าน (mirror checkOut — แขกย้ายออก = ห้องต้องเก็บ)
+            //    duplicate-guard: ถ้ามี active task อยู่แล้วไม่สร้างซ้ำ (Fix S-B2 pattern)
+            $oldRoom->transitionStatusTo('checkout_makeup', $user->id);
+            $activeExists = HousekeepingTask::where('room_id', $oldRoom->id)
+                ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                ->exists();
+
+            $housekeepingTaskId = null;
+            if (! $activeExists) {
+                $task = HousekeepingTask::create([
+                    'id' => Str::uuid(),
+                    'room_id' => $oldRoom->id,
+                    'task_type' => 'checkout',
+                    'status' => 'unassigned',
+                    'notes' => $validated['notes'] ?? ('Auto-generated from room change ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'),
+                ]);
+                $housekeepingTaskId = $task->id;
+            }
+
+            // 🌟 ห้องใหม่ → occupied
+            $newRoom->transitionStatusTo('occupied', $user->id);
+
+            // 💰 Reprice ทั้งบิล (full-stay) — chokepoint เดียวกับ surcharge (ticket 10)
+            //    type ใหม่แพงขึ้น = ส่วนต่างเข้า outstanding เก็บต่อผ่าน front-desk / check-out
+            app(DiscountService::class)->reprice($locked);
+
+            // 🎫 airtight — type เปลี่ยนแล้วยอดรวมต้องไม่ต่ำกว่าเดิม (กัน group/month tier พายอดตก
+            //    แม้เรทรายวันแพงขึ้น)
+            $newTotal = (int) $locked->fresh()->total_amount;
+            if ($typeChanged && $newTotal < $previousTotal) {
+                throw new \Exception(
+                    "อัปเกรดประเภทห้องแล้วยอดรวมต้องไม่ต่ำกว่าเดิมค่ะ ({$previousTotal} → {$newTotal} บาท) กรุณาตรวจสอบเรทของประเภทห้องนะคะ",
+                    422
+                );
+            }
+
+            // 💳 money guards — pattern เดียวกับ updateRoom (ticket 10 + ticket 13):
+            //    ยอดรวมใหม่ (รวม charges) ต้องไม่ต่ำกว่าเงินที่เข้า ledger · is_paid=true เดิม
+            //    แต่เกิดยอดค้าง → reset false (recordPayment/check-out เก็บส่วนต่างต่อ)
+            $chargesTotal = (int) $locked->charges_total;
+            $paidAmount = $locked->paid_amount;
+            if ($newTotal + $chargesTotal < $paidAmount) {
+                throw new \Exception(
+                    'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                    422
+                );
+            }
+            if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
+                $locked->update(['is_paid' => false]);
+            }
+
+            // 📝 Audit — note row ของ BR (from=to=checked_in · note เล่าการย้าย)
+            //    (2026-11-04) convention extension: row นี้เขียนตรงใน controller ไม่ผ่าน
+            //    transitionStatus เพราะสถานะ BR ไม่เปลี่ยน — note column ถูกใช้เป็นครั้งแรก
+            //    · room transitions ถูก log เองผ่าน Room::transitionStatusTo (entity_type=room)
+            StatusChangeLog::create([
+                'entity_type' => 'booking_room',
+                'entity_id' => $bookingRoom->id,
+                'from_status' => 'checked_in',
+                'to_status' => 'checked_in',
+                'role' => $user->role,
+                'causer_id' => $user->id,
+                'note' => 'ย้ายห้อง '.$oldRoom->room_number.' → '.$newRoom->room_number
+                    .($typeChanged ? ' · type '.$oldRoomType->name_en.' → '.$newRoomType->name_en : ''),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ย้ายห้องเรียบร้อยแล้วค่ะนายท่าน 🚪✨ ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'
+                    .($typeChanged ? ' อัปเกรดประเภทห้องเป็น '.$newRoomType->name_en.' — ส่วนต่างเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳' : ''),
+                'booking_id' => $booking->id,
+                'booking_room_id' => $bookingRoom->id,
+                'old_room_number' => $oldRoom->room_number,
+                'new_room_number' => $newRoom->room_number,
+                'room_type_changed' => $typeChanged,
+                'old_room_type' => $oldRoomType->name_en,
+                'new_room_type' => $newRoomType->name_en,
+                'previous_total_amount' => $previousTotal,
+                'total_amount' => $newTotal,
+                'surcharge_amount' => $newTotal - $previousTotal,
+                'paid_amount' => $paidAmount,
+                'outstanding_amount' => $locked->fresh()->outstanding_amount,
+                'housekeeping_task_id' => $housekeepingTaskId,
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+            $modelName = class_basename($e->getModel());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน",
+            ], 404);
+
+        } catch (\Exception $e) {
+            return $this->handleCatch('Change-room', $e);
         }
     }
 
@@ -733,7 +973,7 @@ class FrontDeskController extends Controller
     {
         DB::rollBack();
 
-        if ($e instanceof \Illuminate\Database\QueryException || $e instanceof \PDOException) {
+        if ($e instanceof QueryException || $e instanceof \PDOException) {
             Log::error("{$action} database error: ".$e->getMessage());
 
             return response()->json([
