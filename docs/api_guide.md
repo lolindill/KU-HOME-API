@@ -14,12 +14,15 @@
 4. [Rooms & Room Types](#rooms--room-types)
 5. [Bookings](#bookings-core)
 6. [Front Desk Operations](#front-desk-operations)
-7. [Payments & Webhooks](#payments--webhooks)
-8. [Addon Rates](#addon-rates)
-9. [Dashboard / Housekeeping](#dashboard--housekeeping)
-10. [DB Models Reference](#db-models-reference)
-11. [State Machines](#state-machines)
-12. [Appendix](#appendix)
+7. [💳 Payment types (เต็มจำนวน/มัดจำ/ค้างชำระ)](#-payment-types-เต็มจำนวน--มัดจำ--ค้างชำระ--250926)
+8. [Payments & Webhooks](#payments--webhooks)
+9. [Global Rates](#global-rates)
+10. [Dashboard / Housekeeping](#dashboard--housekeeping)
+11. [DB Models Reference](#db-models-reference)
+12. [State Machines](#state-machines)
+13. [Appendix](#appendix)
+14. [📊 Reports & Additional Charges (ระบบรายงาน Excel 15 ฉบับ)](#-reports--additional-charges-ระบบรายงาน-excel-15-ฉบับ--051026)
+15. [🧩 SRS v2 Gap Closure (REQ-007/019/023/031/033/048/051/052)](#-srs-v2-gap-closure-tickets-0107--141026)
 
 ---
 
@@ -28,7 +31,7 @@
 ### Base URL
 
 ```
-http://localhost/api/v1
+https://ku-home.ku.ac.th/backend/api/v1
 ```
 
 ### Authentication
@@ -40,6 +43,8 @@ Authorization: Bearer <access_token>
 ```
 
 Tokens are issued by `POST /api/v1/login` or `POST /api/v1/register` via Laravel Sanctum.
+
+> ⏱️ **Token lifetime = 8 ชั่วโมง** (SRS v2 REQ-001.4, 2026-09-24): token ที่ออกไปแล้วนานเกิน 8 ชม. (config: `sanctum.expiration`, env `SANCTUM_TOKEN_EXPIRATION_MINUTES`) จะถูกปฏิเสธด้วย `401` — client ต้องพาผู้ใช้ล็อกอินใหม่. เป็น hard expiry นับจากเวลาที่ออก token (ไม่ใช่ sliding inactivity) · token แต่ละ device หมดอายุอิสระจากกัน (multi-device semantics เดิม)
 
 ### Standard Response Format
 
@@ -103,10 +108,15 @@ Used by `GET /bookings` and `GET /users`:
 
 ### Roles
 
-| Role   | Description                                |
-|--------|--------------------------------------------|
-| `admin`| Full access — manage users, bookings, rooms |
-| `user` | Member — book & manage own bookings         |
+| Role          | Description                                                |
+|---------------|------------------------------------------------------------|
+| `admin`       | Full access — manage users, bookings, rooms, housekeeping  |
+| `user`        | Member — book & manage own bookings                        |
+| `guest`       | Guest — limited access (legacy/transient)                  |
+| `ku_member`   | KU member — eligible for member rates                      |
+| `staff`       | Staff — operational access                                 |
+| `housekeeping`| Housekeeping team — cleaning task access                   |
+| `system`      | System role — automated transitions (e.g. webhook, cron)   |
 
 > ⚠️ **Note**: Guests/non-members can **no longer** use the booking system. All users must login.
 
@@ -142,8 +152,8 @@ Used by `GET /bookings` and `GET /users`:
 | Field                   | Rule                                    |
 |-------------------------|-----------------------------------------|
 | `name`                  | required, string, max 255               |
-| `email`                 | required, email, unique:users           |
-| `password`              | required, string, min 8, confirmed      |
+| `email`                 | required, email, unique ต่อ provider (scope `auth_provider=password` — email เดียวกันมี account แยกต่อ provider ได้ ตาม split-user model ของ KU SSO) |
+| `password`              | required, string, min 8                    |
 
 ---
 
@@ -176,6 +186,84 @@ Used by `GET /bookings` and `GET /users`:
   "message": "อีเมลหรือรหัสผ่านไม่ถูกต้องค่ะ"
 }
 ```
+
+---
+
+### POST `/auth/sso/exchange` — KU SSO login (Keycloak)
+
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/ku-sso` (decision-lock ครบ) · 📘 คู่มือฝั่ง frontend (React/TypeScript + PKCE ตัวอย่างโค้ดครบ): [`docs/sso-frontend-guide.md`](./sso-frontend-guide.md)
+
+> Flow: SPA เปิด KU authorization endpoint รับ `code` (state ฝั่ง SPA · PKCE: SPA สร้าง code_verifier/code_challenge เอง — backend เป็นแค่ relay code_verifier ตอน exchange; live-verify 2026-09-08: KU enforce S256) → ส่ง `code` + `code_verifier` มาที่นี่ → backend แลก code + client_secret (server-to-server) → ดึง userinfo → find-or-create User (`auth_provider=ku_sso`, role `ku_member` ตอนสร้างใหม่) → ออก Sanctum token
+> KU tokens **ทิ้งหมดไม่เก็บ** · Sanctum token นโยบายเดียวกับ login เดิม (ไม่ revoke ของเดิม — multi-device) · v1 ไม่มี END_SESSION
+
+**Request Body:**
+```json
+{
+  "code": "authorization-code-from-ku-redirect",
+  "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+}
+```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `code` | required, string |
+| `code_verifier` | required, string, 43–128 ตัวอักษร charset `[A-Za-z0-9-._~]` ตาม RFC 7636 §4.1 |
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "KU SSO login successful",
+  "access_token": "12|abcdef1234567890...",
+  "token_type": "Bearer",
+  "user": { ...user object (role: ku_member)... },
+  "id_token": "eyJhbGciOi..."
+}
+```
+
+**Error Map:**
+| HTTP | สถานการณ์ |
+|------|-----------|
+| `422` | validation ของ `code` หรือ `code_verifier` (หาย / สั้น-ยาวเกิน / ตัวอักษรนอก charset) |
+| `422` | `invalid_grant` — code หมดอายุ (~60 วิ)/ใช้แล้ว → SPA ต้องเริ่ม login flow ใหม่ (ห้าม retry) |
+| `422` | userinfo ไม่คืน `email` (fail-closed — ไม่เดา identity จาก claim อื่น) |
+| `500` | `invalid_client` — `KU_SSO_CLIENT_ID/SECRET` ใน `.env` พัง (log ไว้ ไม่ expose) |
+| `502` | Keycloak ล่ม / timeout / ตอบผิดปกติ |
+
+---
+
+### POST `/auth/sso/google/exchange` — Google login (Google Identity / OIDC)
+
+🔒 **Public** · ⏱ Rate-limited: 5 requests/minute · 🎫 Design: `wayfinder/google-integration` (contract sign-off 2026-10-06, ticket 06) · sibling ของ KU SSO — mirror ทุกอย่างยกเว้น role
+
+> Flow: SPA เปิด `https://accounts.google.com/o/oauth2/v2/auth` รับ `code` (scope `openid email profile` · state ฝั่ง SPA · PKCE S256 ฝั่ง SPA สร้างเอง — Google ไม่ enforce สำหรับ web client แต่ SPA ส่ง S256 เป็น hardening) → ส่ง `code` + `code_verifier` มาที่นี่ → backend แลก code + client_secret (`client_secret_post`, `redirect_uri` จาก `GOOGLE_SSO_REDIRECT_URI` — ต้องตรง Authorized redirect URI ใน Cloud Console ทุก byte) → ดึง userinfo → find-or-create User (`auth_provider=google`, **role `user` เสมอ** — Google ไม่พิสูจน์สถานะ มก. ป้องกันส่วนลด `daily_ku` หลุด; ต่างจาก KU SSO ที่ได้ `ku_member`) → ออก Sanctum token
+> Google access token ใช้ยิง userinfo รอบเดียวแล้วทิ้ง (ไม่ขอ `access_type=offline` — ไม่มี refresh token) · logout เป็น purely local (Google ไม่มี END_SESSION endpoint)
+
+**Request Body:** เหมือน KU SSO — `{ "code": "...", "code_verifier": "..." }` (rule 43–128 ตัวอักษร charset `[A-Za-z0-9-._~]`)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Google login successful",
+  "access_token": "13|abcdef1234567890...",
+  "token_type": "Bearer",
+  "user": { ...user object (role: user)... },
+  "id_token": "eyJhbGciOi..."
+}
+```
+
+**Error Map:**
+| HTTP | สถานการณ์ |
+|------|-----------|
+| `422` | validation ของ `code` หรือ `code_verifier` (หาย / สั้น-ยาวเกิน / ตัวอักษรนอก charset) |
+| `422` | `invalid_grant` — code หมดอายุ/ใช้แล้ว (single-use) → SPA เริ่ม login flow ใหม่ (ห้าม retry) |
+| `422` | ไม่มี claim `email` หรือ `email_verified !== true` (fail-closed — Google ยืนยันอีเมลได้จริง ต่างจาก KU SSO) |
+| `500` | `invalid_client` — `GOOGLE_SSO_CLIENT_ID/SECRET` ใน `.env` พัง (log ไว้ ไม่ expose) |
+| `500` | `redirect_uri_mismatch` ที่ token endpoint — config ไม่ตรงกันระหว่าง SPA/API (ไม่ใช่ความผิด user) |
+| `502` | Google ล่ม / timeout / ตอบผิดปกติ |
 
 ---
 
@@ -251,6 +339,9 @@ Revokes the current access token.
 
 **Query Params:**
 - Pagination automatic (15 per page)
+- `auth_provider` (optional) — กรองเฉพาะ provider (`password` | `ku_sso` | `google`) · 🎫 split-user model: email เดียวมีได้หลาย account ข้าม provider (2026-09-07)
+
+> ทุก user object serialize รวม field `auth_provider` (`password` เริ่มต้นสำหรับ user เก่า · `ku_sso` สำหรับ account ที่เกิดจาก KU SSO login · `google` สำหรับ account ที่เกิดจาก Google login)
 
 **Response `200`:**
 ```json
@@ -395,11 +486,16 @@ Revokes the current access token.
       "room_type_id": "uuid",
       "room_type_name": "Standard",
       "status": "available",
+      "active_periods": [
+        { "id": "uuid", "kind": "maintenance", "start_date": "2026-09-24", "end_date": null }
+      ],
       "status_updated_at": "2026-06-19T08:00:00.000000Z"
     }
   ]
 }
 ```
+
+> 🗓️ **(2026-09-24 — room-state-periods):** ⚠️ key `is_reserved` ถูกถอดพร้อม column — badge "ห้องสำรอง/ซ่อมแซม" ใช้ **`active_periods`** (period active **วันนี้** เท่านั้น · อ่านรายทั้งหมดได้ที่ `GET /rooms/{id}/periods`)
 
 ---
 
@@ -408,7 +504,7 @@ Revokes the current access token.
 🔒 **Public**
 
 **Query Params:**
-- `status` (optional) — Filter by status: `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+- `status` (optional) — Filter by status: `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty` *(🗓️ 2026-09-24: `maintenance`/`reserved_closed` ถูกถอดออกจาก state machine — จัดการผ่าน periods)*
 
 **Response `200`:**
 ```json
@@ -444,12 +540,83 @@ Revokes the current access token.
     "room_type_id": "uuid",
     "room_type_name": "Standard",
     "status": "available",
+    "active_periods": [],
     "status_updated_at": "2026-06-19T08:00:00.000000Z"
   }
 }
 ```
 
 **Response `404`:** Room not found
+
+---
+
+### 🗓️ Room state periods — ห้องสำรอง/ซ่อมแซม เป็นช่วงเวลา (2026-09-24)
+
+"ห้องสำรอง" (kind=`reserved`) และ "ซ่อมแซม" (kind=`maintenance`) เป็น **ช่วงวันที่** บนตาราง `room_state_periods` — ไม่ใช่สถานะ (สถานะ `maintenance`/`reserved_closed` ถูกถอดจาก machine แล้ว) · derived ตอน query ไม่มี sweep · `end_date` **nullable** (เปิดปลาย) และ **exclusive** เหมือน `check_out` · กฎเหล็ก: maintenance period ตัดเด็ดขาดทุก path · reserved period override ได้ด้วย flag `include_reserved` (admin) · spec ครบที่ `wayfinder/room-state-periods/spec.md`
+
+| Endpoint | สิทธิ์ |
+|---|---|
+| `GET /rooms/{roomId}/periods` | admin + staff (เห็นทุก kind) |
+| `POST /rooms/{roomId}/periods` | kind=`maintenance`: admin+staff · kind=`reserved`: **admin เท่านั้น** (staff → 403) |
+| `PATCH /rooms/{roomId}/periods/{periodId}` | เช่นเดียวกัน (แก้ได้เฉพาะ `start_date`/`end_date` — **kind immutable**) |
+| `DELETE /rooms/{roomId}/periods/{periodId}` | เช่นเดียวกัน — hard delete + audit log |
+
+**Body (POST):** `{ "kind": "reserved|maintenance", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD|null" }` — `start_date` ย้อนอดีตได้ · เมื่อใส่ `end_date` ต้อง `>= วันนี้` และ `> start_date` (ห้าม period หมดทั้งช่วง)
+
+**กฎหลัก:**
+- **same-kind overlap → auto-merge:** row เดิมถูกขยายครอบ union (id/created_by คงเดิม) · ซ้อนข้างในไม่ขยาย = ตอบ row เดิมตามสภาพ · ชน row เปิดปลาย = ยังเปิดปลาย · PATCH ใช้กฎเดียวกัน
+- **ต่าง kind ร่วมอยู่ได้** — ช่วงทับ maintenance ชนะทุก semantics (availability/check-in/include_reserved)
+- **ผลต่อ booking (POST และ PATCH — เฉพาะวันที่ครอบใหม่):** draft booking ที่ BR ของห้องนี้ overlap → **ลบทันที** + audit `draft → deleted` · confirmed/checked_in → ไม่แตะ แค่รายงาน · PATCH หดวัน = ไม่แตะ booking ในช่วงเดิม
+- **Audit:** ทุกเหตุการณ์เขียน `status_change_logs` entity_type `room_state_period` (from/to = ช่วงวันที่ `YYYY-MM-DD..YYYY-MM-DD|NULL`, note = created/merged/extended/shortened/deleted)
+- **ผลต่อ availability:** summary ตัดห้องที่ period ทับช่วงที่ขอ · per-day calendar ยัด period เข้า occupied matrix รายวัน · allocator ไม่ assign ห้องติด period ในช่วง · check-in reject ห้องติด **maintenance** period ทับช่วงพัก (reserved ผ่าน) · walk-in: maintenance → reject เสมอ, reserved → ผ่านเมื่อ admin ส่ง `include_reserved`
+
+**Response `201` (POST) / `200` (PATCH):**
+```json
+{
+  "status": "success",
+  "message": "Room state period created successfully",
+  "period": { "id": "uuid", "room_id": "uuid", "kind": "maintenance", "start_date": "2026-09-24", "end_date": null, "created_by": "uuid", "created_at": "...", "updated_at": "..." },
+  "merged": false,
+  "deleted_drafts": ["booking-uuid"],
+  "affected_bookings": [
+    { "booking_id": "uuid", "confirmation_number": "KU-2026-000123", "status": "confirmed", "check_in": "2026-09-25", "check_out": "2026-09-27" }
+  ]
+}
+```
+
+---
+
+### 🏨 Flag `include_reserved` — ใช้ห้องสำรอง (reserved period) ครบ 5 surfaces (2026-09-24)
+
+Admin ส่ง flag `include_reserved=true` เพื่อให้ pool ต่าง ๆ รวม **ห้องติด reserved period** (นิยามดูหัวข้อ Room state periods ด้านบน) — กฎหัวใจ: **maintenance period ถูกตัดเสมอทุกกรณี** flag ขยาย pool เฉพาะกลุ่ม reserved · spec ครบที่ `wayfinder/reserved-room-pool/spec.md`
+
+**สัญญาของ param (ทุก surface กฎเดียวกัน — single source of truth ที่ `App\Support\IncludeReservedGate`):**
+- boolean, **request-scoped** — query param บน GET / body field บน POST/PUT · **ไม่ persist ลง booking ใด ๆ** (flag มีชีวิตเท่า request เดียว)
+- มีผล **เฉพาะ role `admin`** (ตรวจใน controller — routes availability เป็น public ไม่มี role middleware ให้ยืม)
+- **Non-admin / anonymous ส่งมา → เมยายีเงียบ ๆ ไม่ 403** — response เหมือนไม่ส่ง flag ทุกไบต์ · ค่าที่ไม่ใช่ boolean ถือว่าไม่ได้ส่ง (จึงไม่เคยได้ 422 จาก flag นี้)
+- ไม่มีใครส่ง flag → ทุก response **byte-identical** กับเดิม (backward compatible)
+
+**5 surfaces:**
+
+| # | Surface | พฤติกรรมใต้ flag (admin) |
+|---|---|---|
+| 1 | `GET /availability` (summary + king) | `available_rooms` **ถูกแทนที่** ด้วย extended pool (sellable + reserved − booked) + ฟิลด์โปร่งใส `sellable_rooms` / `reserved_rooms` + `search_criteria.include_reserved: true` · king counters กฎเดียวกัน |
+| 2 | Calendar 4 endpoints (`/availability-per-day`, `/availability-ranges`, `/unavailable-dates`, `/unavailable-ranges`) | occupied matrix รายวันนับ **เฉพาะ maintenance period** — วันที่ reserved period ครอบ ห้องกลับมาขายได้ · response เพิ่ม `search_criteria.include_reserved: true` (top-level คู่ `start_date`/`end_date`) |
+| 3 | Booking capacity checks 4 จุด (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`) | denominator = **sellable pool ต่อช่วงเข้าพักของแต่ละ BR** — flag ขยายเป็น sellable + reserved (และคือ bug fix ด้านล่าง) |
+| 4 | `PUT /bookings/{bookingId}/assign-rooms` (auto-assign → allocator) | allocator โหลด pool ตัดเฉพาะ maintenance — ห้องติด reserved period ถูก assign เข้า booking ได้ |
+| 5 | `POST /front-desk/walk-in` | ห้องที่มี reserved period ทับช่วงเข้าพัก → ผ่านได้ (route admin-only อยู่แล้ว — maintenance period ยัง reject เสมอ) |
+
+**🐛 Bug fix denominator (มาพร้อมกัน — ไม่ต้องส่ง flag ก็ได้ผล):** เดิม booking capacity checks นับ **ห้องกายภาพทั้ง type** เป็น denominator — รวมห้องที่ติด period ซึ่งจองแล้วจะ assign ห้องไม่ได้ → user จองทะลุ capacity ที่ขายได้จริงแล้วไปตันตอน assign วันนี้ทั้ง 4 จุดนับจาก **sellable pool ต่อช่วงเข้าพักจริงของแต่ละ BR** (ตัด maintenance เสมอ + ตัด reserved เว้นแต่ admin ส่ง flag · draft ที่หมดเวลาไม่ถูกนับ — `holdingSlot()`) — ปิดช่อง overbooking-past-sellable ตั้งแต่หน้าจอง
+
+**พฤติกรรมที่ตั้งใจไว้:**
+- assign / walk-in แตะแค่ `booking_rooms.room_id` — สถานะกายภาพของห้อง + period row **ไม่ถูกแตะ** (ห้องสำรองวิ่ง lifecycle ปกติ ไม่มี auto-flip)
+- ไม่ persist: create ด้วย flag แต่ assign-rooms ภายหลังไม่ส่ง flag → อาจ 422 เมื่อเหลือแต่ห้องสำรอง (**fail-safe** — ระบบไม่ดึงห้องสำรองเอง)
+- การเพิ่ม/ถอดห้องเข้า pool สำรองทำผ่าน CRUD `/rooms/{roomId}/periods` เท่านั้น — flag ไม่เปลี่ยน pool membership ถาวร
+
+**🎟️ Runbook ห้องสำรอง (Operations — front desk / admin):**
+- **ทางเลือก 1 — กันห้องไว้เป็นช่วง (pool membership):** สร้าง reserved period ด้วย `POST /rooms/{roomId}/periods` (`kind: "reserved"` — admin เท่านั้น) แล้วถอดด้วย `PATCH` / `DELETE .../periods/{periodId}` เมื่อจะปล่อยขาย — auto-merge ถ้าช่วงทับกันเอง ดูรายละเอียดหัวข้อ Room state periods ด้านบน
+- **ทางเลือก 2 — ใช้ห้องสำรองทันที (ภายใต้ period ที่มีอยู่):** ส่ง `include_reserved=true` บน walk-in หรือ assign-rooms (ดูเลข mobilizable ก่อนได้จาก `GET /availability` ใต้ flag)
+- อย่าแก้สถานะกายภาพห้องเพื่อ "หลอก" pool — period เป็น single source of truth ของห้องสำรอง (โมเดลเต็ม: `wayfinder/room-state-periods/`)
 
 ---
 
@@ -462,21 +629,21 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 **Request Body:**
 ```json
 {
-  "status": "maintenance"
+  "status": "prep_checkin"
 }
 ```
 
-**Allowed `status` values:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+**Allowed `status` values:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty` *(🗓️ 2026-09-24: `maintenance`/`reserved_closed` ถูกถอด — "ซ่อมแซม/ห้องสำรอง" จัดการผ่าน `/rooms/{id}/periods` แทน)*
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "Room status updated to 'maintenance' successfully!",
+  "message": "Room status updated to 'prep_checkin' successfully!",
   "room_id": "uuid",
   "room_number": "101",
   "old_status": "available",
-  "new_status": "maintenance",
+  "new_status": "prep_checkin",
   "status_updated_at": "2026-06-19T10:30:00.000000Z",
   "status_updated_by": "admin-uuid"
 }
@@ -493,16 +660,28 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 {
   "status": "success",
   "message": "All room types fetched successfully",
-  "total_types": 5,
+  "total_types": 3,
   "room_types": [
     {
       "id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
-      "rate_daily_general": 1200,
-      "rate_daily_ku": 900,
-      "max_occupancy": 2,
-      "builtin_extra_beds": 1,
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "description": "ห้องซูพีเรียร์ขนาด 28 ตร.ม.",
+      "max_guests": 2,
+      "extra_bed_enabled": false,
+      "max_extra_beds": 0,
+      "extra_bed_price": "0.00",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
       "created_at": "...",
       "updated_at": "..."
     }
@@ -521,7 +700,29 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 {
   "status": "success",
   "message": "Room type fetched successfully",
-  "room_type": { ...room type object... }
+  "room_type": {
+    "id": "uuid",
+    "name_en": "Deluxe",
+    "name_th": "ห้องดีลักซ์",
+    "description": "ห้องดีลักซ์",
+    "max_guests": 2,
+    "extra_bed_enabled": true,
+    "max_extra_beds": 1,
+    "extra_bed_price": "500.00",
+    "rates": {
+      "daily": {
+        "general": "1200.00",
+        "ku_member": "1000.00"
+      },
+      "group": {
+        "min_5_rooms": "900.00",
+        "min_10_rooms": "750.00"
+      },
+      "monthly": "18000.00"
+    },
+    "created_at": "...",
+    "updated_at": "..."
+  }
 }
 ```
 
@@ -534,6 +735,22 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 **Query Params:**
 - `check_in` (optional, date, ≥ today) — default: today
 - `check_out` (optional, date, > check_in) — default: tomorrow
+- `max_guests` (optional, integer, ≥ 1) — กรองเอาเฉพาะ room type ที่รองรับจำนวนแขก >= ค่าที่ส่ง (เทียบกับคอลัมน์ `max_guests` ของ room type)
+- `bed_type` (optional, in: `king_size`) — 🌟 (09/09/26) ส่ง `bed_type=king_size` เพื่อนับ availability เฉพาะ**ห้องเตียง king** (ชั้น 8) — ส่งค่าอื่น → `422`. ไม่ส่ง → พฤติกรรมเดิมทุกอย่าง
+- 🏨 `include_reserved` (optional, boolean) — (24/09/26) admin เท่านั้น — pool รวมห้องติด reserved period ของช่วง (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" ด้านบน): `available_rooms` ถูกแทนด้วย extended pool + ฟิลด์ `sellable_rooms`/`reserved_rooms` + `search_criteria.include_reserved: true` · non-admin/anonymous ส่ง = เมยายีเงียบ ๆ (ไม่ 422) · maintenance period ถูกตัดเสมอ
+
+**Semantics:**
+- `available_rooms` = `max(0, rooms_count − booked_rooms_count)`
+  - `rooms_count` = ห้องที่ `status='available'` ของ room type นั้น (snapshot ณ ตอนนี้)
+  - `booked_rooms_count` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap `[check_in, check_out)` — half-open `check_in < checkOut AND check_out > checkIn`
+- 🌟 **`bed_type=king_size` mode (09/09/26):** `available_rooms` เปลี่ยนความหมายเป็น `max(0, king_total_rooms − king_occupied)` และ response เพิ่ม 2 ฟิลด์โปร่งใส:
+  - `king_total_rooms` = ห้อง `bed_type='king_size'` ที่ **ไม่ติด period** (maintenance period ตัดเสมอ · reserved period ตัดเว้นแต่ admin ส่ง `include_reserved` — 🗓️ 2026-09-24 room-state-periods; เดิมกรอง `status NOT IN (maintenance, reserved_closed)`) — lifecycle status ไม่ถูกกรอง (คง semantics เดิม)
+  - `king_occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) + overlap ช่วงค้น โดย **hybrid ตาม lifecycle** (เพราะ `room_id` ถูก assign เฉพาะหลัง booking `paid`/`confirmed`):
+    - ก่อน assign: BR `bed_preference='king_size'` และ `room_id` ยัง null → นับ (allocator บังคับห้อง king — hard constraint)
+    - หลัง assign: BR ที่ห้องที่ assign จริงมี `bed_type='king_size'` → นับ (BR no-preference อาจลง king ได้)
+    - BR ลอย (ไม่มี preference และยังไม่ assign) ไม่นับเป็น king — allocator อาจจัด twin ก็ได้
+  - `search_criteria` เพิ่ม `bed_type: "king_size"` echo กลับ
+- `room_type` object embed ฟิลด์เต็ม (`max_guests`, `extra_bed_*`, `rates`) เพื่อให้ frontend มีข้อมูลครบโดยไม่ต้องเรียก `/room-types` แยก (ทั้ง top-level และ embedded `room_type` มี `rates` object ในรูป baht string ทศนิยม 2 ตำแหน่ง)
 
 **Response `200`:**
 ```json
@@ -543,16 +760,424 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
   "room_types": [
     {
       "room_type_id": "uuid",
-      "name_en": "Standard",
-      "name_th": "ห้องมาตรฐาน",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
       "available_rooms": 8,
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "room_type": {
+        "id": "uuid",
+        "name_en": "Superior",
+        "name_th": "ห้องซูพีเรียร์",
+        "max_guests": 2,
+        "extra_bed_enabled": false,
+        "max_extra_beds": 0,
+        "extra_bed_price": "0.00",
+        "rates": {
+          "daily": {
+            "general": "1000.00",
+            "ku_member": "800.00"
+          },
+          "group": {
+            "min_5_rooms": "750.00",
+            "min_10_rooms": "750.00"
+          },
+          "monthly": "15000.00"
+        }
+      },
       "search_criteria": {
         "check_in": "2026-06-19",
-        "check_out": "2026-06-20"
+        "check_out": "2026-06-20",
+        "max_guests": 2
       }
     }
   ]
 }
+```
+> 💡 `max_guests` ใน `search_criteria` เป็น `null` ถ้าไม่ได้ส่งมา
+> 🗓️ **(2026-09-24 room-state-periods):** `rooms_count` = ห้อง `status='available'` **ที่ไม่ติด period** (maintenance/reserved) ทับช่วง `[check_in, check_out)` ที่ขอ — pool เป็นช่วงวันที่แล้ว ไม่ใช่ snapshot ถาวรอีกต่อไป
+
+**Response `200` (โหมด `bed_type=king_size` — ฟิลด์ที่ต่างจากปกติ):**
+```json
+{
+  "room_type_id": "uuid",
+  "name_en": "Superior",
+  "available_rooms": 4,
+  "king_total_rooms": 5,
+  "king_occupied": 1,
+  "search_criteria": {
+    "check_in": "2026-09-10",
+    "check_out": "2026-09-12",
+    "max_guests": null,
+    "bed_type": "king_size"
+  }
+}
+```
+> 💡 ไม่ส่ง `bed_type` → ไม่มี `king_total_rooms`/`king_occupied` และ `search_criteria` ไม่มี `bed_type` (payload เหมือนเดิมทุกไบต์). Endpoints availability อื่นๆ (`/availability-per-day`, `/availability-ranges`, `/unavailable-*`) ยัง**ไม่รองรับ** `bed_type` — ขยายภายหลังถ้า frontend ต้องการ
+
+**Response `200` (admin ส่ง `include_reserved=true` — ฟิลด์ที่ต่างจากปกติ, 🏨 24/09/26):**
+```json
+{
+  "room_type_id": "uuid",
+  "name_en": "Superior",
+  "available_rooms": 9,
+  "sellable_rooms": 8,
+  "reserved_rooms": 2,
+  "search_criteria": {
+    "check_in": "2026-09-24",
+    "check_out": "2026-09-26",
+    "max_guests": null,
+    "include_reserved": true
+  }
+}
+```
+> 💡 `available_rooms` = `sellable_rooms + reserved_rooms − booked` (extended pool) — ไม่ใช่ `max(0, sellable − booked)` แบบปกติ · `reserved_rooms` = ห้อง `status='available'` ที่มี reserved period ทับช่วง (ห้องที่ทับ maintenance period ด้วย **ไม่ถูกนับ** — กฎเหล็ก) · ไม่ส่ง flag → ไม่มี `sellable_rooms`/`reserved_rooms` และ `search_criteria` ไม่มี `include_reserved` (byte-identical) · non-admin ส่ง flag → payload เท่าไม่ส่ง · ใช้คู่ `bed_type=king_size` ได้ (king_total สะท้อน extended pool ให้)
+
+---
+
+### GET `/availability-per-day` — Per-day availability calendar
+
+🔒 **Public**
+
+คืนจำนวนห้องว่างรายวัน × ทุก room type สำหรับทำ calendar view (แต่ละค่า = จำนวนห้องที่ขายได้ "คืนนั้น"). ทำงานคู่กับ `/availability` ที่คืนเลขเดียวต่อ range.
+
+**Query Params:**
+- `start_date` (optional, date, ≥ today) — default: `today`
+- `end_date` (optional, date, ≥ start_date) — default: `start_date + 6 เดือน` (~183 วัน)
+- 🛡️ Cap: `(end_date − start_date) ≤ 365 คืน` (สูงสุด 366 วัน) — เกินปฏิเสธด้วย `422`
+- 🏨 `include_reserved` (optional, boolean) — (24/09/26) admin เท่านั้น (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" ด้านบน) — occupied matrix รายวันนับเฉพาะ **maintenance period** (ห้องติด reserved period กลับมาขายในวันที่ period ครอบ) · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level · non-admin ส่ง = เมยายีเงียบ ๆ · ไม่ส่ง flag → byte-identical
+
+**Semantics:**
+- แต่ละค่า = `max(0, total_rooms − occupied)` ของคืนนั้น
+- `total_rooms` = **ห้องกายภาพทั้งหมดของ type** (🗓️ 2026-09-24: เดิมกรอง `status NOT IN (maintenance, reserved_closed)` — วันนี้ห้องที่ติด period ถูกตัดที่ `occupied` รายวันแทน)
+- `occupied` = booking_rooms ที่ status ∈ (draft, confirmed, checked_in) และ overlap คืนนั้น — half-open `check_in ≤ D < check_out` (วัน check-out ว่างเสมอ) **+ room_state_periods ที่ครอบคืนนั้น (ทุก kind)** — วันไหน period ครอบ วันนั้นห้องหาย วันอื่นขายปกติ
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Per-day availability fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-12",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "2026-08-10": 39,
+      "2026-08-11": 39,
+      "2026-08-12": 40
+    },
+    {
+      "room_type_id": "uuid",
+      "name_en": "Deluxe",
+      "name_th": "ห้องดีลักซ์",
+      "rates": {
+        "daily": {
+          "general": "1200.00",
+          "ku_member": "1000.00"
+        },
+        "group": {
+          "min_5_rooms": "900.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "18000.00"
+      },
+      "2026-08-10": 50,
+      "2026-08-11": 50,
+      "2026-08-12": 50
+    }
+  ]
+}
+```
+> 💡 Key รายวัน (`YYYY-MM-DD`) เป็น dynamic ตามช่วงที่ส่งมา
+
+**Response `422`:**
+```json
+// start_date ก่อนวันนี้ หรือ format วันที่ไม่ถูกต้อง
+{
+  "status": "error",
+  "message": "The start date field must be a date after or equal to today.",
+  "errors": { "start_date": ["The start date field must be a date after or equal to today."] }
+}
+
+// ช่วงเกิน 365 คืน
+{
+  "status": "error",
+  "message": "Date range cannot exceed 366 days"
+}
+```
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/availability-per-day?start_date=2026-08-10&end_date=2026-08-12"
+```
+
+> 🌟 **อัปเดต 2026-09-24 (room-state-periods):** ข้อจำกัดเดิมเรื่อง maintenance schedule หายไปแล้ว — วันนี้ calendar **future-aware จริง** เพราะ period (reserved/maintenance) เข้า occupied matrix รายวัน: วันไหน period ครอบ วันนั้นห้องหาย วันที่หลัง period จบขายปกติ → ตรงกับการกดจองจริง ป้องกัน over-promise
+
+---
+
+### GET `/availability-ranges` — Sold-out intervals per room type
+
+🔒 **Public**
+
+คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start_date, end_date}`. เบากว่า `/availability-per-day` เพราะไม่คืนจำนวนห้องว่างรายวัน — ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
+
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน · 🏨 รวม `include_reserved` — admin เท่านั้น: interval sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period ห้องสำรองจึงไม่ทำวันเป็น sold-out · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Availability ranges fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-20",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "intervals": [
+        { "start_date": "2026-08-12", "end_date": "2026-08-13" }
+      ]
+    }
+  ]
+}
+```
+> 💡 `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out ที่นี่ → คืน `intervals: []` (frontend มัก disable เฉพาะวันที่เคยมีห้องแต่หมดแล้ว)
+
+---
+
+### GET `/unavailable-dates` — Flat list วันที่ sold-out ราย room type
+
+🔒 **Public**
+
+คืน flat list วันที่ **sold-out** **แยกราย room_type**. เหมือน `/availability-ranges` ทุกอย่าง ยกเว้น (1) คืนวันราบไม่กลุ่มติดกันเป็น interval. ใช้สำหรับปฏิทิน frontend disable วันที่จองไม่ได้เฉพาะประเภทนั้น.
+
+> ⚠️ **BREAKING (2026-08-23):** เดิมคืน flat list `unavailable_dates` วันที่ **ทุก room type เต็มพร้อมกัน** (รวมทุกประเภทเป็น list เดียว) — ตอนนี้แยกราย room type ผ่าน `room_types[]` แทน ถ้า frontend อยากได้พฤติกรรมเดิม (วันที่จองไม่ได้เลย) ให้ intersect `unavailable_dates` ของทุก type ที่มีห้องขายฝั่ง client เอง
+
+**Query Params:** เหมือน `/availability-per-day` (`start_date`/`end_date` optional — default `today` → `+6 เดือน`, cap 365 คืน · 🏨 รวม `include_reserved` — admin เท่านั้น: วัน sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period ห้องสำรองจึงไม่ถูกนับเป็นวันจองไม่ได้ · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level)
+
+**Semantics:**
+- วัน "จองไม่ได้" ของ type = `total_rooms > 0 && occupied >= total_rooms` (sold-out logic เหมือน `/availability-ranges` เป๊ะ)
+- `total_rooms` / `occupied` semantics เหมือน `/availability-per-day` ทุกอย่าง
+- `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out → คืน `unavailable_dates: []` (เหมือน `intervals: []` ของ `/availability-ranges`)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Unavailable dates fetched successfully",
+  "start_date": "2026-08-10",
+  "end_date": "2026-08-20",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "unavailable_dates": ["2026-08-12", "2026-08-13"]
+    }
+  ]
+}
+```
+
+**Response `422`:** validation errors — เหมือน `/availability-per-day`
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/unavailable-dates?start_date=2026-08-10&end_date=2026-08-20"
+```
+
+---
+
+### GET `/unavailable-ranges` — Sold-out intervals ราย room type (auto window)
+
+🔒 **Public**
+
+คืน intervals (ช่วงติดกัน) ของวันที่ห้องเต็ม (sold-out) **แยกราย room_type** ในรูป `{start, end}` — เหมือน `/availability-ranges` แต่ **ไม่รับ query param**: endpoint คำนวณช่วงสแกนเอง ใช้สำหรับ frontend โหลด "วันที่จองไม่ได้" ทั้งระบบโดยไม่ต้องรู้ช่วงล่วงหน้า.
+
+**Query Params:** ❌ ไม่รับ param ช่วงวัน — ช่วงสแกนคำนวณอัตโนมัติ · 🏨 (24/09/26) รับได้เพียง `include_reserved` (boolean, admin เท่านั้น — วัน sold-out คำนวณจาก matrix ที่นับเฉพาะ maintenance period · response เพิ่ม `search_criteria: { "include_reserved": true }` top-level ทั้ง branch มีผลและ early-return ว่าง · non-admin = เมยายีเงียบ ๆ)
+- `start` = `today + 3 วัน`
+- `end` = `max(check_out)` จาก `booking_rooms` ที่ `status IN (draft, confirmed, checked_in)` (booking ที่ยัง active — ชุดเดียวกับที่นับลด availability)
+- **DoS guard:** ถ้า `end` ไกลเกินไป จะถูก clamp ที่ `start + 365 วัน` (กัน booking ปีหน้าทำให้ลูปสแกนยาว)
+
+**Semantics:**
+- ต่างจาก `/availability-ranges` ตรงที่ (1) ไม่รับ input, (2) key ของ interval เป็น **`{start, end}`** (ไม่ใช่ `{start_date, end_date}`)
+- sold-out logic เหมือน `/availability-ranges` เป๊ะ: `total_rooms > 0 && occupied >= total_rooms`
+- `total_rooms` / `occupied` semantics เหมือน `/availability-per-day` ทุกอย่าง
+- **Edge case — ไม่มี booking เลย:** ไม่สามารถ lock `end` ของ window ได้ → คืน `start: null`, `end: null`, และ `intervals: []` ทุก room type
+- **Edge case — ทุก booking checkout ก่อน today+3:** window กลายเป็น `end < start` → `CarbonPeriod` ว่าง → `intervals: []` โดยธรรมชาติ (คืน `start`/`end` ตามจริง)
+
+**Response `200` (มี booking):**
+```json
+{
+  "status": "success",
+  "message": "Unavailable ranges fetched successfully",
+  "start": "2026-08-17",
+  "end": "2026-09-05",
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "intervals": [
+        { "start": "2026-08-20", "end": "2026-08-22" },
+        { "start": "2026-08-25", "end": "2026-08-27" }
+      ]
+    }
+  ]
+}
+```
+
+**Response `200` (ไม่มี booking เลย):**
+```json
+{
+  "status": "success",
+  "message": "Unavailable ranges fetched successfully",
+  "start": null,
+  "end": null,
+  "room_types": [
+    {
+      "room_type_id": "uuid",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "rates": {
+        "daily": {
+          "general": "1000.00",
+          "ku_member": "800.00"
+        },
+        "group": {
+          "min_5_rooms": "750.00",
+          "min_10_rooms": "750.00"
+        },
+        "monthly": "15000.00"
+      },
+      "intervals": []
+    }
+  ]
+}
+```
+> 💡 `total_rooms = 0` (type ที่ไม่มีห้องขาย) ไม่ถือว่า sold-out → คืน `intervals: []` เสมอ (เหมือน `/availability-ranges`)
+> ⚠️ ไม่มี response `422` เพราะไม่มี input ให้ validate
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/unavailable-ranges"
+```
+
+---
+
+### GET `/mock/availability-ranges` — Mock sold-out intervals (Frontend testing)
+
+🚧 **DRAFT / TESTING** · 🔒 **Public**
+
+> 🗑️ **Deletion plan:** ลบ endpoint นี้ (route + `MockController` + tests + section นี้) เมื่อ frontend ย้ายไปใช้ `/availability-ranges` จริงแล้ว — **อย่าปล่อยขึ้น production**
+
+Mock data ของ sold-out intervals ราย room type สำหรับ frontend นำไปใช้พัฒนา/ทดสอบ UI ปฏิทินโดยไม่ต้องเซ็ตอัป DB หรือสร้าง booking ล่วงหน้า. วันที่คำนวณสัมพันธ์กับ `today` เสมอ (ไม่มีวันหมดอายุ).
+
+**Query Params:** ❌ ไม่รับ — ข้อมูลถูกจำลองคงที่
+
+**Mock Data Scenario:**
+- Window: `start_date` = `today`, `end_date` = `today + 30 วัน`
+- **Superior** (`00000000-0000-4000-8000-000000000001`): 2 intervals → `[today+5, today+8]`, `[today+15, today+18]`
+- **Deluxe** (`00000000-0000-4000-8000-000000000002`): 1 interval → `[today+10, today+12]`
+- **Suite** (`00000000-0000-4000-8000-000000000003`): 0 intervals → `[]` (จำลองกรณีห้องว่างตลอดทั้งเดือน)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Availability ranges fetched successfully",
+  "start_date": "2026-08-24",
+  "end_date": "2026-09-23",
+  "room_types": [
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000001",
+      "name_en": "Superior",
+      "name_th": "ห้องซูพีเรียร์",
+      "intervals": [
+        { "start_date": "2026-08-29", "end_date": "2026-09-01" },
+        { "start_date": "2026-09-08", "end_date": "2026-09-11" }
+      ]
+    },
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000002",
+      "name_en": "Deluxe",
+      "name_th": "ห้องดีลักซ์",
+      "intervals": [
+        { "start_date": "2026-09-03", "end_date": "2026-09-05" }
+      ]
+    },
+    {
+      "room_type_id": "00000000-0000-4000-8000-000000000003",
+      "name_en": "Suite",
+      "name_th": "ห้องสวีท",
+      "intervals": []
+    }
+  ]
+}
+```
+
+**ตัวอย่าง curl:**
+```bash
+curl -s -H "Accept: application/json" \
+  "http://localhost:8000/api/v1/mock/availability-ranges"
 ```
 
 ---
@@ -568,13 +1193,20 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 
 **Query Params:**
 
-| Param       | Type   | Description                                          |
-|-------------|--------|------------------------------------------------------|
-| `term`      | string | Search by user name, UUID, or guest name             |
-| `check_in`  | date   | Filter start date                                    |
-| `check_out` | date   | Filter end date                                      |
-| `room_type` | uuid   | Filter by room type (or `all` for no filter — default)|
-| `per_page`  | int    | Items per page (default: 15)                         |
+| Param             | Type   | Description                                          |
+|-------------------|--------|------------------------------------------------------|
+| `term`            | string | Search by user name, UUID, guest name, or `customer_name` (org booking / เฮดเปล่า — 2026-09-25) |
+| `check_in`        | date   | Filter start date                                    |
+| `check_out`       | date   | Filter end date                                      |
+| `room_type`       | uuid   | Filter by room type (or `all` for no filter — default)|
+| `organization_id` | uuid   | 🏛️ Filter ตามองค์กร (admin เท่านั้น — ไม่ใช่ UUID → 422; org booking จาก ticket 03) |
+| `status`          | string | 📋 Filter ตาม container state — ค่าเดียวหรือ comma-separated เช่น `pending` หรือ `pending,verify_error` · ใช้ได้: `draft, pending, verify_error, paid, confirmed, complete` · ค่าอื่น → 422 · ไม่ใส่ = ทุกสถานะ (22/10/26) |
+| `payment_type`    | string | 💳 Filter ตามประเภทการชำระ — ค่าเดียวหรือ comma-separated เช่น `deposit` หรือ `deposit,deferred` · ใช้ได้: `full, deposit, deferred` · ค่าอื่น → 422 · ไม่ใส่ = ทุกประเภท · ใช้ได้ทุก role (user เห็นเฉพาะบิลตัวเอง) · combine กับ `status` ได้ (AND) (26/10/26) |
+| `per_page`        | int    | Items per page (default: 15)                         |
+
+> 🏛️ **Org booking response (2026-09-25, ticket 08):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — `organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email` serialize ตาม booking ปกติ · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter
+
+> 💳 **(22/10/26):** booking ทุกตัวใน `bookings[]` แนบ `confirmations` (array ประวัติส่งสลิป 1:N + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
 
 **Response `200`:**
 ```json
@@ -586,7 +1218,9 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
     "term": null,
     "check_in": null,
     "check_out": null,
-    "room_type": "all"
+    "room_type": "all",
+    "organization_id": null,
+    "status": null
   },
   "bookings": [
     {
@@ -595,8 +1229,6 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
       "confirmation": "202606-00001",
       "source": "online",
       "status": "draft",
-      "check_in": "2026-06-20",
-      "check_out": "2026-06-22",
       "total_amount": 2400,
       "is_paid": false,
       "payment_deadline": "2026-06-19T11:00:00.000000Z",
@@ -608,12 +1240,13 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
           "booking_id": "booking-uuid",
           "room_type_id": "rt-uuid",
           "room_id": null,
+          "check_in": "2026-06-20",
+          "check_out": "2026-06-22",
           "guests": [
-            { "title": "Mr.", "name": "Somchai", "nationality": "Thai", "is_ku_member": false }
+            { "title": "Mr.", "name": "Somchai", "nationality": "Thai" }
           ],
-          "children": 0,
-          "room_type": { ...room type... },
-          "room": null,
+          "billing_address": null,
+          "billing_comment": null,
           "addon": { ...addon... }
         }
       ],
@@ -641,54 +1274,99 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 ```json
 {
   "source": "online",
-  "check_in": "2026-06-20",
-  "check_out": "2026-06-22",
   "booking_rooms": [
     {
       "room_type_id": "rt-uuid",
-      "quantity": 1,
-      "extra_beds": 0,
+      "check_in": "2026-06-20",
+      "check_out": "2026-06-22",
       "guests": [
         {
           "title": "Mr.",
-          "name": "Somchai Jaidee",
-          "nationality": "Thai",
-          "is_ku_member": false
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
+          "nationality": "Thai"
         }
       ],
-      "children": 0,
+      "billing_address": null,
+      "billing_comment": null,
+      "bed_preference": "king_size",
       "addons": {
+        "extra_bed": 0,
         "breakfast": 2,
-        "early_checkin": false,
-        "late_checkout": false
+        "early_checkin": 2,
+        "late_checkout": 0
       }
+    },
+    {
+      "room_type_id": "rt-uuid",
+      "check_in": "2026-06-21",
+      "check_out": "2026-06-23"
     }
   ]
 }
 ```
+
+> 🌟 **Refactor (02/07/26)**: `check_in`/`check_out` moved from booking-level to **per-room** (`booking_rooms.*`). Each room can now have its own dates. To book multiple rooms with identical dates, set the same dates on each entry.  
+> 🌟 **Refactor (20/08/26)**: Guest names support `firstName` and `lastName` (or `first_name`/`last_name`), alongside optional `email` and `phone`.  
+> 🏨 **Phase 1**: `bed_preference` รองรับ `king_size` หรือ `null` (default: any) — เป็น hard constraint สำหรับ allocation algorithm (`king_size` = ห้องชั้น 8; 🌟 rename 27/08/26 เดิม `twin`)  
+> 🕐 **(27/08/26)**: `early_checkin` และ `late_checkout` เปลี่ยนเป็น **integer (0–7 ชม.)** คิดราคาแบบรายชั่วโมง (ราคา = ชม. × rate/ชม., สูงสุด 7 ชม.).  
+> ⚠️ **Breaking Change**: การส่ง boolean `true`/`false` จะได้ `422 Unprocessable Content`. ค่า boolean บน booking_room response ถูกยกเลิก — ดูจาก `addon.early_hours` / `addon.late_hours` แทน  
+> 🔧 **(01/09/26)**: รับ alias `addons.early_hours` / `addons.late_hours` (ชื่อ column ใน DB — frontend ส่งมาแบบนี้) แล้ว `early_checkin`/`late_checkout` ชนะเสมอถ้าส่งทั้งคู่. ส่ง `addons` มาแบบ partial (ไม่ส่ง key ไหน) = key นั้น **คงค่าเดิม** จากแถว addon ไม่ reset เป็น 0. ราคาที่ client ส่งมา (`early_checkIn_price` ฯลฯ) ถูก ignore และคิดใหม่ฝั่ง server เสมอ
+> 🛏️ **(04/09/26) Input format = Output format**: เตียงเสริมย้ายเข้า `addons` object — canonical คือ `booking_rooms.*.addons.extra_bed` (ตรงกับ `addon.extra_bed` ตอน response). `booking_rooms.*.extra_beds` (หัวห้อง) ยังส่งได้ในฐานะ **legacy alias** (backward-compat) แต่ถ้าส่งมาทั้งคู่ **canonical ชนะเสมอ**. ราคา (`extra_bed_price`) server คิดจาก `global_rates` เสมอ — client ส่งราคาไม่ได้  
+> 📅 **(16/09/26) Advance Notice Rule**: การจองห้องต้องจองล่วงหน้าอย่างน้อย **2 วัน** (calendar days ใน timezone `Asia/Bangkok`, config: `booking.min_advance_days`) สำหรับผู้ใช้ทุก role ยกเว้น `admin` (admin exempt — สามารถจองสำหรับวันนี้ได้แต่ห้ามเป็นวันในอดีต). กฎนี้บังคับใช้กับทั้ง 4 write paths (`POST /bookings`, `POST /bookings/{id}/rooms`, `PUT /bookings/{id}/rooms/{roomId}`, `PUT /bookings/{id}/rooms`). หากเช็คอินก่อนกำหนดจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"วันที่เช็คอินต้องจองล่วงหน้าอย่างน้อย 2 วันค่ะ"` (สำหรับ admin หากเลือกวันในอดีตจะได้ `"วันที่เช็คอินต้องไม่เป็นวันในอดีต"`)  
+> 🚪 **(16/09/26) Room Cap Rule**: การจองห้องจำกัดสูงสุด **4 ห้องต่อ 1 booking** (config: `booking.max_rooms_per_booking`) สำหรับผู้ใช้ non-admin (admin exempt — สามารถจองได้มากกว่า 4 ห้อง ตัดสินจาก Sanctum login role เท่านั้น). กฎนี้บังคับใช้ใน (a) การสร้างการจอง (`POST /bookings`) โดยนับจำนวนห้องในอาร์เรย์ `booking_rooms` (ตรวจที่ FormRequest layer) และ (b) การเพิ่มห้องเข้า draft (`POST /bookings/{id}/rooms`) โดยนับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (ตรวจที่ controller guard ก่อน `DB::beginTransaction()`). หากเกินเพดานจะได้ HTTP `422 Unprocessable Content` พร้อมข้อความ `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
+> 🔄 **(20/10/26) Room Cap amendment — ตัดสินจาก role ผู้ล็อกอินเสมอ**: เดิม (25/09/26, organization-bookings ticket 02) โหมด A admin จองแทน user จะนับ cap จาก role ของ **target user** (user ปลายทางโดน cap 4) — owner ตัดสินใหม่ให้ **cap ใช้ role ของผู้ล็อกอินทุกโหมด** → admin จองแทน user >4 ห้องได้ (draft-dedup/ราคา daily_ku ยังใช้ target ตามเดิม) · non-admin ทุกกรณียังโดน cap 4 เหมือนเดิม
+> ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline). **(2026-10-27 fix slot leak / overbooking):** สำหรับบิลที่ container เลย draft แล้ว (`pending`, `verify_error`, `paid`, `confirmed`) ห้อง `draft` จะ**ยึด slot เสมอโดยไม่สน deadline** (เพราะ flow ออนไลน์ verify สลิป / updateStatus ไม่ได้ย้ายสถานะห้อง ห้องจึงค้าง draft ตลอดชีวิตบิล · `complete` ไม่ยึด slot คืนห้องเข้า pool)
+> 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
+> 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
+> 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้นหลักสิบ) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
+
+> 🏛️ **(25/09/26) Admin booking 3 โหมด (organization-bookings)**: admin ใช้ `POST /bookings` เดิมจองได้ 3 แบบ —
+> **(A) จองแทน user**: ส่ง `user` = UUID ปลายทาง → `user_id` = target (**draft-dedup / ราคา daily_ku ใช้ role ของ target — UUID ไม่เจอ 422** · 🔄 room cap ย้ายมาใช้ role ผู้ล็อกอินแล้ว — ดู Room Cap Rule amendment 20/10/26) ·
+> **(B) เฮดเปล่า**: ไม่ส่ง `user`/`organize` → `user_id = null` (ส่ง `customer_name` เพิ่มได้ = ระบุผู้ติดต่อ/ผู้เข้าพัก) ·
+> **(C) จองให้องค์กร**: ส่ง `organize` = **erp code** → server lookup ตาราง `organizations` เป็น FK `organization_id` (ไม่เจอ/inactive → 422) + **บังคับ `customer_name`** (phone/email nullable) → `user_id = null` + snapshot `customer_name`/`customer_phone`/`customer_email` บน bookings ·
+> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap (ทุกโหมด — 🔄 amendment 20/10/26: cap ตัดสินจาก Sanctum login role แม้โหมด A) · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · response เพิ่ม `organization_id` + `customer_name`/`customer_phone`/`customer_email`
 
 **Validation Rules:**
 
 | Field                                       | Rule                                          |
 |---------------------------------------------|-----------------------------------------------|
 | `source`                                    | required, in: `online`, `admin`, `line`       |
-| `check_in`                                  | required, date, ≥ today                       |
-| `check_out`                                 | required, date, > check_in                    |
-| `booking_rooms`                             | required, array                               |
+| `user` 🏛️                                   | nullable, uuid, exists in users — จองแทน user (โหมด A) — admin เท่านั้น (non-admin 403) |
+| `organize` 🏛️                               | nullable, string, max 100 — erp code ขององค์กร (โหมด C) — admin + `source='admin'` เท่านั้น · lookup ไม่เจอ/inactive 422 · ห้ามส่งคู่กับ `user` |
+| `customer_name` 🏛️                          | nullable, string, max 255 — บังคับเมื่อส่ง `organize` · โดยลำพัง = เฮดเปล่าระบุผู้ติดต่อ (โหมด B) |
+| `customer_phone` 🏛️                         | nullable, string, max 50                      |
+| `customer_email` 🏛️                         | nullable, string, email, max 255              |
+| `payment_type` 💳                           | nullable, in: `full`, `deposit`, `deferred` — admin/system เท่านั้น (non-admin 403) |
+| `deposit_amount` 💳                         | nullable, integer, min 1 — คู่กับ `payment_type=deposit` เท่านั้น (422 ถ้า type อื่น) |
+| `booking_rooms`                             | required, array, สูงสุด 4 ห้องสำหรับทั่วไป (admin exempt: ไม่จำกัด) |
 | `booking_rooms.*.room_type_id`              | required, uuid, exists in room_types          |
-| `booking_rooms.*.quantity`                  | required, integer, min 1                      |
-| `booking_rooms.*.extra_beds`                | nullable, integer, min 0                      |
+| `booking_rooms.*.check_in`                  | required, date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
+| `booking_rooms.*.check_out`                 | required, date, > booking_rooms.*.check_in    |
+| `booking_rooms.*.addons.extra_bed`          | nullable, integer, min 0 (canonical 🛏️)       |
+| `booking_rooms.*.extra_beds`                | nullable, integer, min 0 (⚠️ legacy alias — canonical ชนะ) |
 | `booking_rooms.*.guests`                    | nullable, array                               |
 | `booking_rooms.*.guests.*.title`            | nullable, string, max 50                      |
-| `booking_rooms.*.guests.*.name`             | nullable, string, max 255                     |
+| `booking_rooms.*.guests.*.firstName`        | nullable, string, max 255 (or `first_name`)   |
+| `booking_rooms.*.guests.*.lastName`         | nullable, string, max 255 (or `last_name`)    |
+| `booking_rooms.*.guests.*.name`             | nullable, string, max 255 (legacy fallback)   |
+| `booking_rooms.*.guests.*.email`            | nullable, string, email, max 255              |
+| `booking_rooms.*.guests.*.phone`            | nullable, string, max 50                      |
 | `booking_rooms.*.guests.*.nationality`      | nullable, string, max 100                     |
-| `booking_rooms.*.guests.*.is_ku_member`     | nullable, boolean                             |
-| `booking_rooms.*.children`                  | nullable, integer, min 0                      |
+| `booking_rooms.*.bed_preference`            | nullable, in: `king_size` (ห้องชั้น 8)        |
+| `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
+| `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
 | `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
-| `booking_rooms.*.addons.early_checkin`      | nullable, boolean                             |
-| `booking_rooms.*.addons.late_checkout`      | nullable, boolean                             |
+| `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–7)                       |
+| `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–7)                       |
+| `booking_rooms.*.addons.early_hours`        | nullable, integer (0–7) — alias ของ `early_checkin` |
+| `booking_rooms.*.addons.late_hours`         | nullable, integer (0–7) — alias ของ `late_checkout` |
 
-> 💡 **Pricing**: Server calculates all prices from `room_types.rate_daily_*` and `addon_rates.default_price`. Client **cannot** send prices (prevents manipulation). `booking_rooms.*.quantity` is the requested count — server creates that many identical BookingRoom rows.
+> 💡 **Pricing**: Server calculates all prices from `global_rates` and `global_rates.default_price` for addons. Client **cannot** send prices (prevents manipulation). Each entry in `booking_rooms` = exactly 1 room (no `quantity` multiplier — to book N identical rooms, send N entries).
+>
+> 🌟 **KU Member Pricing (07/09/26)**: สำหรับผู้ใช้ที่มี role `ku_member` ระบบจะใช้เรท `rate_type='daily_ku'` จาก `global_rates` คิดเงินโดยอัตโนมัติ (หากไม่มีหรือ inactive จะ fallback ไป `daily`) ส่วนผู้ใช้ทั่วไปจะใช้เรท `rate_type='daily'`. (`group` / `monthly` ยังคงเป็น display-only)
 
 **Response `201`:**
 ```json
@@ -696,9 +1374,61 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
   "status": "success",
   "message": "Booking and Add-ons created successfully",
   "booking_id": "booking-uuid",
-  "total_amount": 2400,
+  "confirmation": "202608-00001",
+  "total_amount": 2600,
+  "payment_type": "full",
+  "deposit_amount": null,
+  "paid_amount": 0,
+  "outstanding_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
-  "user_id": "user-uuid"
+  "user_id": "user-uuid",
+  "organization_id": null,
+  "customer_name": null,
+  "customer_phone": null,
+  "customer_email": null,
+  "booking_rooms": [
+    {
+      "id": "br-uuid",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid",
+      "room_id": null,
+      "check_in": "2026-06-20",
+      "check_out": "2026-06-22",
+      "status": "draft",
+      "bed_preference": "king_size",
+      "guests": [
+        {
+          "title": "Mr.",
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
+          "nationality": "Thai"
+        }
+      ],
+      "billing_address": null,
+      "billing_comment": null,
+      "room_amount": 2000,
+      "discount_amount": 0,
+      "amount": 2600,
+      "created_at": "2026-06-19T11:00:00.000000Z",
+      "updated_at": "2026-06-19T11:00:00.000000Z",
+      "addon": {
+        "id": "addon-uuid",
+        "booking_room_id": "br-uuid",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkIn_price": 200,
+        "early_hours": 2,
+        "late_checkOut_price": 0,
+        "late_hours": 0,
+        "extra_bed_price": 0,
+        "breakfast_price": 400,
+        "created_at": "2026-06-19T11:00:00.000000Z",
+        "updated_at": "2026-06-19T11:00:00.000000Z"
+      }
+    }
+  ]
 }
 ```
 
@@ -719,11 +1449,579 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
 
 ---
 
+### POST `/bookings/{bookingId}/rooms` — Add rooms to an existing booking
+
+🌟 **(10/08/26)**: เพิ่มห้องเข้า booking ที่สร้างไว้แล้ว (**เฉพาะ `draft` state**) — reuse logic จาก `POST /bookings` (availability check + pricing + create BookingRoom/Addons) แต่ไม่สร้าง Booking ใหม่
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status` ต้องเป็น `draft` เท่านั้น (จ่ายเงิน/confirm ไปแล้วเพิ่มไม่ได้) → `422`
+- Availability check นับที่ BR-level (`draft`/`confirmed`/`checked_in` ที่ overlap) — **รวมห้องที่อยู่ใน booking นี้แล้วด้วย** กันจองเกิน capacity ตอนเพิ่มซ้ำ · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** (ตัดห้องติด period — maintenance เสมอ, reserved เว้นแต่ admin ส่ง `include_reserved=true` — ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
+- ไม่เรียก `RoomAllocator` — ห้องใหม่ถูกสร้างด้วย `room_id = null`, `status = 'draft'` (initial state รอจ่ายห้องตอน assign/check-in)
+- `payment_deadline` **ไม่เปลี่ยน** (คง deadline เดิมของ booking) · `total_amount` **accumulate** (ยอดเดิม + ราคาห้องใหม่)
+
+**Request Body** — โครงสร้างเหมือน `POST /bookings` เป๊ะ ยกเว้น**ไม่มี field `source`** (booking สร้างไปแล้ว):
+```json
+{
+  "booking_rooms": [
+    {
+      "room_type_id": "rt-uuid",
+      "check_in": "2026-08-20",
+      "check_out": "2026-08-22",
+      "bed_preference": "king_size",
+      "guests": [
+        {
+          "title": "Mr.",
+          "name": "Somchai Jaidee",
+          "nationality": "Thai"
+        }
+      ],
+      "billing_address": null,
+      "billing_comment": null,
+      "addons": {
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkin": 0,
+        "late_checkout": 0
+      }
+    }
+  ]
+}
+```
+
+**Validation Rules:** เหมือน `POST /bookings` ทุก field ของ `booking_rooms.*` (ดูตารางด้านบน) — 1 array entry = 1 ห้อง (ไม่มี `quantity`) · `check_in` ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) · `check_out > check_in` (รายห้อง)
+
+> 🚪 **(16/09/26) Room Cap**: เมื่อเพิ่มห้องใหม่ ระบบจะนับจำนวนห้องเดิมใน booking รวมกับห้องใหม่ที่ขอเพิ่ม ต้องไม่เกิน **4 ห้อง** สำหรับ non-admin (admin ไม่จำกัด). หากรวมแล้วเกินเพดาน จะได้ HTTP `422 Unprocessable Content` พร้อม message `"สามารถจองได้สูงสุด 4 ห้องต่อการจอง หากต้องการจองมากกว่านี้ กรุณาติดต่อผู้ดูแลค่ะ"`
+
+> 💡 **Pricing**: Server คำนวณราคาจาก `global_rates` ทั้งหมด — client ส่งราคาเองไม่ได้ (เหมือน createBooking)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "booking_rooms": [
+    {
+      "id": "new-br-uuid",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid",
+      "room_id": null,
+      "check_in": "2026-08-20",
+      "check_out": "2026-08-22",
+      "status": "draft",
+      "guests": [
+        {
+          "title": "Mr.",
+          "firstName": "Somchai",
+          "lastName": "Jaidee",
+          "email": "somchai.j@ku.th",
+          "phone": "0812345678",
+          "nationality": "Thai"
+        }
+      ],
+      "room_amount": 2000,
+      "discount_amount": 0,
+      "amount": 2400,
+      "addon": {
+        "id": "addon-uuid",
+        "booking_room_id": "new-br-uuid",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkIn_price": 0,
+        "early_hours": 0,
+        "late_checkOut_price": 0,
+        "late_hours": 0,
+        "breakfast_price": 400
+      }
+    }
+  ],
+  "added_amount": 2400,
+  "total_amount": 4800,
+  "payment_deadline": "2026-08-17 18:00:00"
+}
+```
+
+**Errors:**
+
+| Code | Cause                                              |
+|------|----------------------------------------------------|
+| 401  | ไม่ได้ล็อกอิน                                       |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin (`คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ`) |
+| 404  | ไม่พบ booking ที่ระบุ                                |
+| 422  | Booking ไม่ได้อยู่ในสถานะ draft / ห้องเต็มในช่วงวันนั้น   |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`)          |
+
+---
+
+### PUT `/bookings/{bookingId}/rooms/{bookingRoomId}` — Update a booking room
+
+🌟 **(17/08/26)**: แก้ไข booking room **รายห้อง** — สองโหมดตาม parent booking:
+
+1. **แก้ไขปกติ (draft)** — ใช้ได้เมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` (เจ้าของหรือ admin)
+2. 💳 **Surcharge หลังจ่าย (25/09/26, ticket 10)** — parent booking เป็น `paid|confirmed` → **admin เท่านั้น** (user เจ้าของ = `403`) · แก้ห้องแล้วราคาเปลี่ยน ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่)
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** (โหมด surcharge: **admin only**) · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- โหมด surcharge 💳: Booking `paid|confirmed` + BR `draft|confirmed` (BR `checked_in/checked_out/no_show` = `422`) · BR ที่มี `room_id` ถูกจัดแล้ว **เปลี่ยน `room_type_id`/วันที่ไม่ได้** → `422` (ปลดการจัดห้องก่อน) · reprice ผ่าน `reprice()` เดิม (กติกาปัดสิบไหลตาม) · **ยอดรวมใหม่ต้อง ≥ เงินที่เข้า ledger แล้ว** — ต่ำกว่า = `422` (ticket 08: ไม่มีการคืนเงินในระบบ) · `deposit_amount` คงเดิมไม่ย้อน · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset เป็น `false` (เก็บครบแล้ว set คืนโดย recordPayment)
+- แก้ได้ทุก field ของห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus)
+- ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
+- **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
+- ⚡ **Smart Diffing**: ตรวจสอบ field ที่เปลี่ยนจริง (รวมถึง date casts/boolean casts) — ถ้าวันที่และประเภทห้องเหมือนเดิมในฐานข้อมูล จะข้ามการเช็ค availability อันหนักหน่วง และจะสั่ง Execute SQL เฉพาะเมื่อมีข้อมูลเปลี่ยนแปลงจริง (ลดภาระ DB)
+- `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
+- BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
+
+**Request Body** (flat — แก้ทีละห้อง, ส่งเฉพาะ field ที่จะแก้):
+```json
+{
+  "check_in": "2026-08-22",
+  "check_out": "2026-08-25",
+  "guests": [
+    { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
+  ],
+  "bed_preference": "king_size",
+  "billing_address": null,
+  "billing_comment": null,
+  "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
+}
+```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `room_type_id` | `sometimes` uuid exists:room_types,id |
+| `check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
+| `check_out` | `sometimes` date `after:check_in` |
+| `addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
+| `extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
+| `guests.*` | เหมือน `POST /bookings` |
+| `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
+| `billing_address` / `billing_comment` | nullable string ≤ 255 |
+| `addons.breakfast` | nullable integer ≥ 0 |
+| `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–7) |
+| `addons.early_hours` / `addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
+
+> 🔧 **(01/09/26)** Update semantics เป็น key-level PATCH: ส่ง `addons` มาเฉพาะบาง key = key ที่ไม่ส่ง **คงค่าเดิม** จากแถว addon (ไม่ reset เป็น 0) — จะปิด addon ต้องส่ง `0` ชัดๆ
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "booking_room": {
+    "id": "br-uuid-1",
+    "booking_id": "booking-uuid",
+    "room_type_id": "rt-uuid-1",
+    "room_id": null,
+    "check_in": "2026-08-22T00:00:00.000000Z",
+    "check_out": "2026-08-25T00:00:00.000000Z",
+    "guests": [
+      {
+        "title": "Mr.",
+        "name": "Somchai Jaidee",
+        "nationality": "Thai"
+      }
+    ],
+    "billing_address": null,
+    "billing_comment": null,
+    "status": "draft",
+    "bed_preference": "king_size",
+    "created_at": "2026-08-19T02:23:13.000000Z",
+    "updated_at": "2026-08-19T02:23:13.000000Z",
+    "addon": {
+      "id": "addon-uuid-1",
+      "booking_room_id": "br-uuid-1",
+      "extra_bed": 1,
+      "breakfast": 2,
+      "early_checkIn_price": 0,
+      "early_hours": 0,
+      "late_checkOut_price": 0,
+      "late_hours": 0,
+      "extra_bed_price": 300,
+      "breakfast_price": 300,
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  },
+  "total_amount": 4900,
+  "previous_total_amount": 4400,
+  "surcharge_amount": 500,
+  "payment_type": "deposit",
+  "deposit_amount": 2200,
+  "paid_amount": 2200,
+  "outstanding_amount": 2700
+}
+```
+
+> 💳 **(25/09/26, ticket 10)** — response เพิ่ม 6 field เสมอ (draft mode ด้วย): `previous_total_amount` (ยอดก่อนแก้), `surcharge_amount` (ส่วนต่าง — ติดลบได้เมื่อลดแต่ยัง ≥ paid), `payment_type`, `deposit_amount` (effective), `paid_amount`, `outstanding_amount` — โดย surcharge ยอด `total_amount` ใหม่ไหลเข้า `outstanding_amount` เก็บต่อผ่าน recordPayment
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin · 💳 โหมด surcharge (booking `paid|confirmed`) โดยไม่ใช่ admin |
+| 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR ไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ / 💳 BR checked_in ไปแล้ว / 💳 เปลี่ยน shape ทั้งที่มี room_id / 💳 ยอดรวมใหม่ต่ำกว่าเงินที่ชำระแล้ว / validation |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### PUT `/bookings/{bookingId}/rooms` — Batch update booking rooms
+
+🌟 **(19/08/26)**: แก้ไข booking room **หลายห้องพร้อมกัน** — payload ต่างกันได้รายห้อง (1 array entry = การแก้ 1 ห้อง ระบุ `booking_room_id` ของตัวเอง) · **all-or-nothing**: ห้องใดห้องหนึ่ง fail = rollback ทั้งชุด
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+> 🌟 Route นี้ (path ลงท้าย `/rooms` ไม่มี id) อยู่คู่กับ `PUT .../rooms/{bookingRoomId}` แบบรายห้อง ซึ่งยังใช้งานเหมือนเดิม
+
+**Constraints:**
+- Booking `status = 'draft'` + **ทุก** BookingRoom ใน batch เป็น `draft` เท่านั้น → `422`
+- แก้ได้ทุก field เหมือนรายห้อง (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` / `status`
+- `booking_room_id` ซ้ำใน batch เดียวกันไม่ได้ (validation `distinct`) → `422`
+- ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (top-level body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
+- วันที่ตรวจจาก **effective values** (ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม) — ส่งแต่ `check_in` ทับ `check_out` เดิม (หรือกลับกัน) ก็ถูกจับ → `422`
+- **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว)
+- ⚡ **Smart Diffing**: เทียบข้อมูลใหม่กับ DB จริง (รวม cast วันที่/boolean) — ห้องที่ข้อมูลไม่ต่างจากเดิมจะไม่เรียก SQL Update เลย, และถ้าไม่มีการเปลี่ยน shape (วันที่/ห้อง) ในทั้งชุด ก็จะข้ามการเช็ค availability
+- `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
+- ทุก BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่นสักอันเดียว = `404` ทั้ง batch (ไม่มีอะไรถูกแก้)
+
+**Request Body** (ส่งเฉพาะ field ที่จะแก้รายห้อง):
+```json
+{
+  "booking_rooms": [
+    {
+      "booking_room_id": "br-uuid-1",
+      "check_in": "2026-08-22",
+      "check_out": "2026-08-25"
+    },
+    {
+      "booking_room_id": "br-uuid-2",
+      "guests": [
+        { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
+      ],
+      "addons": { "breakfast": 2 }
+    }
+  ]
+}
+```
+
+**Validation Rules:**
+
+| Field | Rule |
+|-------|------|
+| `booking_rooms` | required, array, ≥ 1 entry |
+| `booking_rooms.*.booking_room_id` | required, uuid, **distinct** (ห้ามซ้ำใน batch) |
+| `booking_rooms.*.room_type_id` | `sometimes` uuid exists:room_types,id |
+| `booking_rooms.*.check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
+| `booking_rooms.*.check_out` | `sometimes` date `after:booking_rooms.*.check_in` (+ effective-dates guard ใน controller ครอบเคส partial update) |
+| `booking_rooms.*.addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
+| `booking_rooms.*.extra_beds` | nullable integer ≥ 0 (⚠️ legacy alias — canonical ชนะ) |
+| `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
+| `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
+| `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
+| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
+| `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–7) |
+| `booking_rooms.*.addons.early_hours` / `booking_rooms.*.addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
+
+> 🔧 **(01/09/26)** เหมือนรายห้อง: รับ alias hours + key-level PATCH (key ที่ไม่ส่งใน `addons` = คงค่าเดิม)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "แก้ไขห้องเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "booking_rooms": [
+    {
+      "id": "br-uuid-1",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid-1",
+      "room_id": null,
+      "check_in": "2026-08-22T00:00:00.000000Z",
+      "check_out": "2026-08-25T00:00:00.000000Z",
+      "guests": [ ... ],
+      "billing_address": null,
+      "billing_comment": null,
+      "status": "draft",
+      "bed_preference": "king_size",
+      "created_at": "...",
+      "updated_at": "...",
+      "addon": {
+        "id": "addon-uuid-1",
+        "booking_room_id": "br-uuid-1",
+        "extra_bed": 1,
+        "breakfast": 0,
+        "early_checkIn_price": 0,
+        "early_hours": 0,
+        "late_checkOut_price": 0,
+        "late_hours": 0,
+        "extra_bed_price": 300,
+        "breakfast_price": 0,
+        "created_at": "...",
+        "updated_at": "..."
+      }
+    },
+    {
+      "id": "br-uuid-2",
+      "booking_id": "booking-uuid",
+      "room_type_id": "rt-uuid-2",
+      "room_id": null,
+      "check_in": "2026-08-22T00:00:00.000000Z",
+      "check_out": "2026-08-23T00:00:00.000000Z",
+      "guests": [ ... ],
+      "billing_address": null,
+      "billing_comment": null,
+      "status": "draft",
+      "bed_preference": null,
+      "created_at": "...",
+      "updated_at": "...",
+      "addon": {
+        "id": "addon-uuid-2",
+        "booking_room_id": "br-uuid-2",
+        "extra_bed": 0,
+        "breakfast": 2,
+        "early_checkIn_price": 0,
+        "early_hours": 0,
+        "late_checkOut_price": 0,
+        "late_hours": 0,
+        "extra_bed_price": 0,
+        "breakfast_price": 300,
+        "created_at": "...",
+        "updated_at": "..."
+      }
+    }
+  ],
+  "total_amount": 7600
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking / มี BR อย่างน้อย 1 อันที่ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR บางห้องไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ (final state ทั้ง batch) / `booking_room_id` ซ้ำ / validation |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### DELETE `/bookings/{bookingId}/rooms/{bookingRoomId}` — Remove a booking room
+
+🌟 **(17/08/26)**: ลบห้องออกจาก draft booking — hard delete BR + Addon แล้วคำนวณ `total_amount` ใหม่
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
+- **ห้องสุดท้ายของ booking ลบไม่ได้** → `422` (ให้ใช้ `DELETE /bookings/{bookingId}` ลบทั้ง booking แทน — กันเกิด draft เปล่าที่ไปล็อกโควตา "มี draft ค้าง" ของผู้ใช้)
+- เขียน audit log `booking_room: draft → deleted` ใน `status_change_logs` ก่อนลบ
+- BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบห้องออกจากการจองเรียบร้อยแล้วค่ะ",
+  "booking_id": "booking-uuid",
+  "remaining_rooms": 1,
+  "total_amount": 3000
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
+| 422  | Booking หรือ BR ไม่ใช่ draft / เป็นห้องสุดท้ายของ booking |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### DELETE `/bookings/{bookingId}` — Delete a draft booking
+
+🌟 **(17/08/26)**: เจ้าของ (หรือ admin) ลบ draft booking ของตัวเองได้ — hard delete cascade แบบเดียวกับ `CleanupExpiredDrafts` (Addon ทุกห้อง → BookingRoom ทุกห้อง → payments → confirmations → Booking)
+
+🔒 **Auth required** · Ownership: **booking owner** or **admin** · ⏱ Rate-limited: 5 requests/minute
+
+**Constraints:**
+- Booking `status = 'draft'` เท่านั้น (จ่ายเงิน/ยืนยันแล้วลบไม่ได้) → `422`
+- เป็น **hard delete** ไม่ใช่ transition ใหม่ใน state machine (ไม่มี `cancelled` เหมือนเดิม) — แต่เขียน audit log `booking: draft → deleted` เก็บไว้ใน `status_change_logs` ก่อนลบ
+- ทำใน `DB::transaction` + `lockForUpdate` + re-check status — กัน race กับ confirm/verify ที่กำลังเปลี่ยน status พร้อมกัน
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบรายการจองเรียบร้อยแล้วค่ะนายท่าน 🗑️",
+  "booking_id": "booking-uuid"
+}
+```
+
+**Errors:**
+
+| Code | Cause |
+|------|-------|
+| 401  | ไม่ได้ล็อกอิน |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin |
+| 404  | ไม่พบ booking ที่ระบุ |
+| 422  | Booking ไม่ได้อยู่ในสถานะ draft |
+| 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
+
+---
+
+### POST `/bookings/{id}/confirm` — Submit payment confirmation
+
+🌟 **Refactor (24/07/26)**: User ส่งหลักฐานการชำระ (slip + time) → สร้าง `booking_confirmations` row + booking `draft → paid`. Replaces deprecated webhook flow.
+🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
+🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
+🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
+💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · booking `deferred` **บล็อกสลิป 422** (มีช่องเดียวคือ admin อนุมัติ)
+
+🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
+
+**Content-Type**: `multipart/form-data` (เพราะมีไฟล์ slip)
+
+**Request Body**:
+
+| Field             | Type      | Required | Description                                   |
+|-------------------|-----------|----------|-----------------------------------------------|
+| `slip_image`      | file      | ✅       | ไฟล์สลิป (jpeg/png/jpg, max 4MB) — บังคับเสมอ |
+| `transfer_time`   | datetime  | ❌       | เวลาที่ลูกค้าแจ้งโอน (จากสลิป), ไม่ใช่อนาคต |
+| `amount`          | integer   | ❌       | 💳 ยอดที่ชำระตามสลิป (บาท, ≥ 1 ถ้าส่ง) — เก็บเป็น `booking_confirmations.amount` (ชั้น A) · ไม่ส่ง = null (verify ไม่แตะ ledger/is_paid) |
+
+**Example**:
+```bash
+curl -X POST /api/v1/bookings/{id}/confirm \
+  -H "Authorization: Bearer <token>" \
+  -F "slip_image=@slip.jpg" \
+  -F "transfer_time=2026-07-24T10:30:00Z" \
+  -F "amount=750"
+```
+
+**Response 201**:
+```json
+{
+  "status": "success",
+  "message": "ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน",
+  "confirmation_id": "confirmation-uuid",
+  "confirmation_status": "pending",
+  "amount": 750,
+  "expected_amount": 750,
+  "booking_status": "pending",
+  "payment_type": "deposit",
+  "deposit_amount": 750,
+  "paid_amount": 0,
+  "outstanding_amount": 1500,
+  "slip_image_url": "http://localhost/api/v1/images/<image-uuid>/file?expires=...&signature=..."
+}
+```
+
+> 🖼️ `slip_image_url` เป็น **signed URL อายุ 15 นาที** — 🔐 (26/10/26) การเปิดไฟล์ต้องส่ง `Authorization: Bearer <token>` ด้วย (เจ้าของ booking / admin เท่านั้น — ดู `GET /images/{id}/file`) · frontend ใช้ `fetch` + header แล้วแปลงเป็น blob URL (`URL.createObjectURL`) แทน `<img src>` ตรงๆ · หมดอายุ/พ้น response ต้องขอ response ใหม่ (ไม่มี URL ถาวรสำหรับสลิปอีกต่อไป)
+> 💳 `expected_amount` = ยอดที่ระบบคาดว่าต้องชำระ ณ ตอนนี้ (deposit งวดแรก = ยอดมัดจำ, กรณีอื่น = `outstanding_amount`) · 4 field `payment_type/deposit_amount/paid_amount/outstanding_amount` ส่งทุก response ของ booking ทุก role
+
+**Guards** (422 on failure):
+- ❌ **payment_type = `deferred`** — booking ค้างชำระ รอแอดมินอนุมัติ ไม่รับสลิป (ตรวจก่อน guard อื่น)
+- ❌ Booking ไม่ใช่ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่)
+- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft`, `verify_error` ส่งใหม่ได้แม้หมด deadline)
+- ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
+- ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
+- ❌ ไม่ส่ง `amount` / amount < 1 (💳 ใหม่ 25/09/26)
+
+---
+
+### PUT `/booking-confirmations/{id}/verify` — Admin verify slip
+
+🔒 **Admin only** · Pending → verified + booking `pending → paid → confirmed`
+
+💳 **(25/09/26)**: verify ผ่าน = **เงินเข้าจริง** → เขียน **payments ledger row** ใหม่ (`amount` = ยอดที่ user แจ้ง, `reference_number` = confirmation UUID, `received_by` = admin) · `is_paid` = `SUM(payments) ≥ total_amount + charges_total` (💸 15/10/26 — charges ค่าปรับ/ค่ายืม/addon บวกยอดจริง · full จ่ายเต็ม → true เหมือนเดิม · deposit งวดแรก → false จนจ่ายครบ) · 💳 **(08/10/26)** สลิปที่ **ไม่แจ้งยอด (amount = null)** → เดิมไม่เขียน ledger · 💳 **(22/10/26 — bug fix "บิล full ยังค้างชำระหลัง verify")**: ถ้า `payment_type = full` → verify = ยืนยัน "จ่ายครบ" → **เขียน ledger = ยอดคงค้าง ณ ตอน verify** (`total + charges − จ่ายมาแล้ว`; outstanding = 0 อยู่แล้วไม่เขียน) + `is_paid` ตามสูตร · **`deposit` คงพฤติกรรม 08/10/26 เดิม** — ไม่เดายอดงวด (admin ตัดสินจากภาพสลิป + เก็บส่วนที่เหลือผ่าน `recordPayment` ภายหลังได้)
+
+**Request Body**: `{ "review_note": "optional reason" }`
+
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "id": "...", "url": "<signed URL 15 นาที>", "mime_type": "image/jpeg", "size": 184320, "original_name": "slip.jpg", "category": "slip" } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
+
+> 🖼️ **(26/10/26)** `slip_image` JSON ซ่อน field ภายในแล้ว (`path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` ไม่ serialize) — เหลือ `id`, `mime_type`, `size`, `original_name`, `category`, timestamps, `url`
+
+> 💳 `expected_amount` (ระบบคำนวณ) vs `claimed_amount` (ยอด user แจ้ง) = คู่เทียบแบบ **soft** — ระบบไม่ hard-reject ยอดไม่ตรง (เผื่อค่าโอน) admin ตัดสินเอง
+
+---
+
+### PUT `/booking-confirmations/{id}/reject` — Admin reject slip
+
+🔒 **Admin only** · Pending → rejected, **booking `pending → verify_error`** (รอ user ส่ง slip ใหม่ = row ใหม่)
+
+**Request Body**: `{ "review_note": "slip ไม่ชัด" }`
+
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "verify_error", "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ... }`
+
+> 💳 reject **ไม่เขียน payments row** (ยังไม่รับเงิน) — ยอด 4 field ส่งกลับเพื่อ consistency (ค่าไม่เปลี่ยน)
+
+---
+
+### GET `/booking-confirmations/pending` — Admin dashboard list
+
+🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`, `slipImage`
+
+💳 **(25/09/26)**: แต่ละ row มี `amount` (ยอด user แจ้ง — claimed) + `expected_amount` (ระบบคำนวณจาก booking: deposit งวดแรก = ยอดมัดจำ / กรณีอื่น = outstanding) — admin เห็นคู่เทียบตั้งแต่หน้า list
+
+**Response 200**: `{ "status": "success", "confirmations": { paginated data } }`
+
+---
+
+### GET `/images/{id}/file` — Serve image via signed URL
+
+🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป / check-in evidence / รูป housekeeping) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
+
+🔐 **(26/10/26) ต้องส่ง `Authorization: Bearer <token>`** — token + signature คุมคู่กัน (2 ชั้น) · ผู้ขอต้องเป็น:
+- **admin** — เห็นได้ทุกรูป
+- **เจ้าของรูปตาม imageable** — สลิป (`BookingConfirmation`) / check-in evidence (`BookingRoom`) → เจ้าของ booking (org booking `user_id = null` → admin เท่านั้น) · รูป housekeeping (`HousekeepingTask`) → แม่บ้านที่ถูก `assigned_to`
+- type แปลกปลอม → admin เท่านั้น (fail-closed)
+
+**Throttle**: `10,1`
+
+- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending
+- ⚠️ Route นี้ **exempt `RequireJsonAccept`** เฉพาะจุดเดียวในระบบ — เพื่อให้ fetch รูปที่ส่ง `Accept: image/*` โหลดได้ (มิฉะนั้นโดน 406) — เหตุผลถูกบันทึกใน `cline.md`
+- ไฟล์จริงอยู่ที่ `storage/app/private/slips/...` — ไม่มี symlink สาธารณะ
+
+**Example**:
+```bash
+curl -H "Authorization: Bearer <TOKEN>" \
+  "http://localhost/api/v1/images/<image-uuid>/file?expires=1755600000&signature=abc123..."
+```
+
+**Response 200**: ไฟล์ภาพ stream inline (`Content-Type: image/jpeg` ฯลฯ)
+
+**Errors**:
+- `401` — ไม่ส่ง token / token หมดอายุ (ตรวจก่อน signature)
+- `403` — ล็อกอินแล้วแต่ไม่ใช่เจ้าของรูป/admin · หรือลายเซ็นไม่ถูกต้อง / ถูกแกะ / หมดอายุ (เกิน 15 นาที)
+- `404` — Image row มีแต่ไฟล์ถูกลบไปแล้ว (เช่น ผ่านรอบ cleanup)
+
+> 💡 **Frontend pattern**: `<img src>` ใส่ header ไม่ได้ — ให้ `fetch(url, { headers: { Authorization: Bearer } })` → `response.blob()` → `URL.createObjectURL(blob)` แล้วค่อยใส่ใน `<img src>`
+
+**Retention (cleanup รอบ 02:30 ทุกวัน — `app:cleanup-images`)**:
+- สลิปของ confirmation `rejected` เก่ากว่า `SLIP_RETENTION_DAYS` (default 30) วัน → ลบรูป (คง confirmation row ตาม audit trail)
+- สลิป `verified` เก็บไว้ทั้งหมด (หลักฐานการเงิน — ห้ามลบอัตโนมัติ)
+- ไฟล์/row กำพร้า (ไม่มี row คุม / confirmation หายไปแล้ว) → เก็บกวาดทิ้ง
+
+---
+
 ### GET `/bookings/{id}` — Get booking by ID
 
 🔒 **Auth required** · Ownership: User can only view own bookings (admin sees all)
 
 **Path Params:** `id` (UUID, format: 36 chars)
+
+> 💳 **(22/10/26) `confirmations` — ประวัติส่งสลิป 1:N:** ทุก endpoint ที่ return **booking object เต็ม** จะแนบ `confirmations` เป็น **array** ครบทั้ง 6 จุด — `GET /bookings`, `GET /bookings/{id}`, `PUT`/`DELETE /bookings/{bookingId}/discount-code`, `PUT /bookings/{id}` (admin payment), `PUT /bookings/{bookingId}/assign-rooms` · แต่ละแถวคือหนึ่งครั้งที่ user ส่งสลิป (`pending`/`verified`/`rejected` — reject แล้วส่งใหม่ = แถวใหม่) พร้อม `slip_image` (morph `Image` — มี `url` signed URL อายุ 15 นาที; ยังไม่เคยส่งสลิป = `[]`, สลิป rejected เกิน retention = `slip_image: null`) · endpoint ที่ return แค่ `booking_id`/`booking_status` (create/confirm/check-in ฯลฯ) **ไม่แนบ** · ตัวตน reviewer ดูรายละเอียดได้ผ่าน `/booking-confirmations/*` (admin)
 
 **Response `200`:**
 ```json
@@ -736,8 +2034,6 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
     "confirmation": "202606-00001",
     "source": "online",
     "status": "paid",
-    "check_in": "2026-06-20",
-    "check_out": "2026-06-22",
     "total_amount": 2400,
     "is_paid": true,
     "payment_deadline": "...",
@@ -748,11 +2044,26 @@ Uses **state machine** — invalid transitions are rejected (see [Room State Mac
         "booking_id": "booking-uuid",
         "room_type_id": "rt-uuid",
         "room_id": "room-uuid-or-null",
+        "check_in": "2026-06-20",
+        "check_out": "2026-06-22",
         "guests": [...],
-        "children": 0,
-        "addon": {...},
-        "room_type": {...},
-        "room": {...}
+        "billing_address": null,
+        "billing_comment": null,
+        "addon": {...}
+      }
+    ],
+    "confirmations": [
+      {
+        "id": "confirmation-uuid",
+        "booking_id": "booking-uuid",
+        "transfer_time": "2026-06-20T10:00:00+07:00",
+        "amount": 2400,
+        "status": "verified",
+        "reviewed_by": "admin-uuid",
+        "reviewed_at": "2026-06-20T11:00:00+07:00",
+        "review_note": null,
+        "expected_amount": 2400,
+        "slip_image": { "id": "image-uuid", "url": "http://localhost/api/v1/images/image-uuid/file?expires=...&signature=...", "...": "..." }
       }
     ]
   }
@@ -777,8 +2088,11 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 }
 ```
 
-**Allowed `status` values:**
-`draft`, `paid`, `confirmed`, `checked_in`, `checked_out`, `cancelled`, `no_show`, `deleted`
+**Allowed `status` values:** *(container-level)*
+`draft`, `paid`, `confirmed`, `complete`
+
+> 🌟 **Refactor (25/06/26)**: `checked_in`/`checked_out`/`no_show` moved to **BookingRoom-level**. The booking container only tracks `draft` → `paid` → `confirmed` → `complete`.
+> 💳 **(25/09/26) deferred approval**: booking `deferred` อนุมัติผ่าน endpoint **นี้เท่านั้น** (ตั้ง `status=confirmed` — transition `draft → confirmed` walk-in path เดิม) — ไม่มี endpoint/state ใหม่ · response เพิ่ม `payment_type`, `deposit_amount`, `paid_amount`, `outstanding_amount`
 
 **Response `200`:**
 ```json
@@ -786,7 +2100,11 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
   "status": "success",
   "message": "อัปเดตสถานะเป็น confirmed โดยคุณ admin เรียบร้อยแล้วค่ะ",
   "booking_id": "booking-uuid",
-  "booking_status": "confirmed"
+  "booking_status": "confirmed",
+  "payment_type": "deferred",
+  "deposit_amount": null,
+  "paid_amount": 0,
+  "outstanding_amount": 1500
 }
 ```
 
@@ -806,6 +2124,15 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 
 Assigns actual room numbers to booking_rooms that don't have one yet. Booking must be `paid` or `confirmed`.
 
+**Request Body (optional):**
+```json
+{
+  "include_reserved": true
+}
+```
+
+> 🏨 **(24/09/26) `include_reserved`** — admin เท่านั้น: allocator โหลด pool ตัดเฉพาะห้องติด **maintenance period** — ห้องติด **reserved period** ทับช่วงเข้าพักถูก assign ได้ (ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" หมวด Rooms) · **ไม่ persist** — booking ที่สร้างด้วย flag แต่ assign ไม่ส่ง flag อาจ 422 เมื่อเหลือแต่ห้องสำรอง (fail-safe — ระบบไม่ดึงห้องสำรองเอง) · assignment แตะแค่ `booking_rooms.room_id` — สถานะกายภาพห้อง + period row ไม่ถูกแตะ · non-admin (booking owner ทั่วไป) ส่ง flag = เมยายีเงียบ ๆ
+
 **Response `200`:**
 ```json
 {
@@ -816,42 +2143,404 @@ Assigns actual room numbers to booking_rooms that don't have one yet. Booking mu
     "booking_rooms": [
       {
         "id": "br-uuid",
+        "room_type_id": "rt-uuid",
         "room_id": "room-uuid",
-        "room": { "id": "room-uuid", "room_number": "101", ... }
+        "addon": { ... }
       }
     ]
   }
 }
 ```
 
+> 🌟 **(26/08/26, 27/08/26)**: `booking_rooms` ใน response นี้คืน format เดียวกันกับ endpoint อื่นๆ ทุกตัว (`addon` relation — ซ่อน `room_type`/`room` object)
+
+> 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
+
 **Response `422`:**
 - Booking not in `paid`/`confirmed` status
-- No rooms available for the requested type
+- No rooms available for the requested type — รวมกรณี admin **ไม่**ส่ง flag แล้วเหลือแต่ห้องติด reserved period (ส่ง `include_reserved=true` ใหม่เพื่อใช้ห้องสำรอง)
 
 ---
 
-### POST `/bookings/validate-discount` — Validate discount code 🚧
+### GET `/bookings/{id}/status-logs` — Booking state-change audit log (Admin)
 
-🔒 **Auth required**
+🔒 **Admin only**
 
-> 🚧 **DRAFT / TESTING** — Discount system incomplete. Do not use in production.
+Returns the audit trail of status transitions for a booking — both the **booking container** and every **booking_room** under it, ordered oldest → newest.
 
-**Request Body:**
-```json
-{
-  "code": "WELCOME10",
-  "subtotal": 2400
-}
-```
+Each log row captures **who** changed **what** **when**:
+| Field | Type | Description |
+|---|---|---|
+| `entity_type` | string | `booking` \| `booking_room` |
+| `entity_id` | uuid | the id of the booking or booking_room that changed |
+| `from_status` | string | previous status |
+| `to_status` | string | new status |
+| `role` | string | role that authorized the transition (`user`/`guest`/`admin`/`system`/...) |
+| `causer_id` | uuid\|null | `Auth::id()` of the user who triggered it — **null for system/queue transitions** (e.g. auto `confirmed → complete` via `syncStatusFromRooms`) |
+| `note` | string\|null | reserved for future context |
+| `created_at` | timestamp | when the transition occurred |
+
+> 📝 Logs are written inside `transitionStatus()` (the single chokepoint). A transition that fails validation (throws 422/403) writes **no** log. Log rows participate in the caller's DB transaction and roll back together on failure.
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "discount_applied": 240,
-  "net_total": 2160
+  "message": "Status change logs retrieved",
+  "booking_id": "booking-uuid",
+  "logs": [
+    {
+      "id": "log-uuid",
+      "entity_type": "booking",
+      "entity_id": "booking-uuid",
+      "from_status": "draft",
+      "to_status": "paid",
+      "role": "user",
+      "causer_id": "user-uuid",
+      "note": null,
+      "created_at": "2026-08-04T10:00:00.000000Z"
+    },
+    {
+      "id": "log-uuid-2",
+      "entity_type": "booking_room",
+      "entity_id": "br-uuid",
+      "from_status": "confirmed",
+      "to_status": "checked_in",
+      "role": "admin",
+      "causer_id": "admin-uuid",
+      "note": null,
+      "created_at": "2026-08-04T11:30:00.000000Z"
+    }
+  ]
 }
 ```
+
+**Response `404`:** booking id not found.
+
+---
+
+### GET `/rooms/{id}/status-logs` — Room state-change audit log (Admin)
+
+🔒 **Admin only** 📝 (24/09/26, REQ-039 — wayfinder `room-state-periods` ticket 03)
+
+Returns the audit trail of **room** status transitions (`entity_type='room'` on `status_change_logs`), ordered oldest → newest. Precedent: `GET /bookings/{id}/status-logs`.
+
+- Written inside `Room::transitionStatusTo()` (single chokepoint) — every transition via `PUT /rooms/{id}/status`, front-desk check-in/out, housekeeping task completion, walk-in, and `app:daily-room-maintenance` is captured automatically.
+- `role` = role of the acting user (looked up from `causer_id`); cron/system transitions log `role='system'` with **null** `causer_id`.
+- **Retention 1 ปีย้อนหลัง (REQ-039):** `app:cleanup-status-logs` (schedule รายวัน 02:45) ตัดเฉพาะ row `entity_type='room'` ที่เก่ากว่า `config/room_status_log.php` `retention_days` (env `ROOM_STATUS_LOG_RETENTION_DAYS`, default `365`) — **log ของ booking/booking_room ไม่ถูกแตะ** มี `--dry-run` ให้นับก่อน
+- 🏨 เมื่อ map `room-state-periods` ตรง spec: ห้องที่อยู่ใน period สำรอง/ซ่อม ไม่มี transition ให้ log — ประวัติของ reserved/maintenance อ่านจากตาราง `room_state_periods` โดยตรง (audit ชั้นเอง)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "Room status logs retrieved",
+  "room_id": "room-uuid",
+  "room_number": "101",
+  "logs": [
+    {
+      "id": "log-uuid",
+      "entity_type": "room",
+      "entity_id": "room-uuid",
+      "from_status": "available",
+      "to_status": "dirty",
+      "role": "housekeeping",
+      "causer_id": "user-uuid",
+      "note": null,
+      "created_at": "2026-09-24T02:45:00.000000Z"
+    }
+  ]
+}
+```
+
+**Response `404`:** room id not found.
+
+---
+
+### POST `/discounts/validate` — Validate discount code & preview quota 🎟️
+
+🔒 **Auth required** · Rate limit: `10,1`
+
+Preview a discount code and check live quota remaining without side effects (does NOT hold or reserve a slot).
+
+**Request Body:**
+```json
+{
+  "code": "SUPER50",
+  "check_in": "2026-09-10",
+  "check_out": "2026-09-12"
+}
+```
+> `check_in` and `check_out` are optional. If provided, the code's `stay_from` / `stay_until` window is validated.
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "โค้ดใช้งานได้ค่ะนายท่าน! ✨",
+  "discount": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "code": "SUPER50",
+    "type": "percent",
+    "value": 50,
+    "room_type_ids": null,
+    "usable_from": "2026-09-01T00:00:00.000000Z",
+    "usable_until": "2026-09-30T23:59:59.000000Z",
+    "stay_from": "2026-09-01",
+    "stay_until": "2026-12-20",
+    "max_uses": 10,
+    "max_uses_per_user": 3,
+    "is_active": true,
+    "created_at": "2026-08-27T11:00:00.000000Z",
+    "updated_at": "2026-08-27T11:00:00.000000Z"
+  },
+  "quota": {
+    "global_used": 3,
+    "global_max": 10,
+    "global_remaining": 7,
+    "per_user_used": 1,
+    "per_user_max": 3,
+    "per_user_remaining": 2
+  }
+}
+```
+
+---
+
+### GET `/discounts/{code}` — Get discount details by code or UUID 🎟️
+
+🔒 **Auth required** (All user roles: `user`, `ku_member`, `guest`, `staff`, `admin`, etc.) · Rate limit: `10,1`
+
+Lookup discount information by code name (case-insensitive) or UUID without requiring an active booking.
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ดึงข้อมูลโค้ดส่วนลดเรียบร้อยแล้วค่ะ ✨",
+  "discount": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "code": "SUPER50",
+    "type": "percent",
+    "value": 50,
+    "room_type_ids": null,
+    "usable_from": "2026-09-01T00:00:00.000000Z",
+    "usable_until": "2026-09-30T23:59:59.000000Z",
+    "stay_from": "2026-09-01",
+    "stay_until": "2026-12-20",
+    "max_uses": 10,
+    "max_uses_per_user": 3,
+    "is_active": true,
+    "created_at": "2026-08-27T11:00:00.000000Z",
+    "updated_at": "2026-08-27T11:00:00.000000Z"
+  }
+}
+```
+
+**Error responses:** `401` (Unauthenticated) · `404` (Not Found)
+
+---
+
+### PUT `/bookings/{bookingId}/discount-code` — Apply / Change discount code 🎟️
+
+🔒 **Auth required** (Owner or Admin) · Rate limit: `5,1`
+
+Applies or swaps a discount code on an existing `draft` booking. Holds quota slots for eligible rooms and reprices the booking.
+
+**Request Body:**
+```json
+{
+  "code": "SUPER50"
+}
+```
+
+> 🛡️ **Validation (2026-08-27):** missing/empty `code` → **`422`** standard Laravel validation errors (`{"message":..., "errors": {"code": [...]}}`) — ไม่ใช่ 500. Non-owner → `403`, non-draft booking → `422`.
+
+**Error responses:** `401` (ยังไม่ล็อกอิน) · `403` (ไม่ใช่เจ้าของ/admin) · `404` (ไม่พบ booking) · `422` (validation / โค้ดหมดอายุ / ปิดใช้งาน / โควตาไม่พอ / ไม่มีห้อง eligible / สถานะไม่ใช่ draft)
+
+> ⚠️ **Frontend contract (2026-08-27):** ถ้า admin **ปิดใช้งานหรือหมดอายุ** (`usable_until`) โค้ดที่ booking ถืออยู่ภายหลัง — hold + ส่วนลดเดิม**ยังค้างอยู่ใน draft** (reprice ไม่ re-validate) แต่การ `PUT .../rooms/*` จะโดน `422` ("โค้ดหมดเขต/ปิดใช้งาน") เพราะ re-apply ใหม่ไม่ผ่าน → ทางออกของ user คือ `DELETE /bookings/{bookingId}/discount-code` ก่อนแก้ไขห้อง
+
+> 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป — บน draft ยังไม่ส่งสลิป = `[]`) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ใส่โค้ดส่วนลดเรียบร้อยแล้วค่ะ! 🎟️",
+  "booking": {
+    "id": "9d1f3c2e-...",
+    "confirmation": "202608-00001",
+    "status": "draft",
+    "discount_code": "SUPER50",
+    "total_amount": 260000,
+    "booking_rooms": [
+      {
+        "id": "...",
+        "room_type_id": "...",
+        "check_in": "2026-09-10",
+        "check_out": "2026-09-12",
+        "room_amount": 400000,
+        "discount_amount": 200000,
+        "amount": 260000,
+        "addon": {
+          "breakfast": 2,
+          "breakfast_price": 60000,
+          "extra_bed": 0,
+          "extra_bed_price": 0,
+          "early_checkIn_price": 0,
+          "late_checkOut_price": 0
+        }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### DELETE `/bookings/{bookingId}/discount-code` — Remove discount code 🎟️
+
+🔒 **Auth required** (Owner or Admin) · Rate limit: `5,1`
+
+Removes the discount code from a `draft` booking, releases held redemption slots, and reprices the booking to full rate.
+
+> 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป — บน draft ยังไม่ส่งสลิป = `[]`) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบโค้ดส่วนลดออกจากการจองเรียบร้อยแล้วค่ะ 🎟️",
+  "booking": {
+    "id": "...",
+    "discount_code": null,
+    "total_amount": 460000,
+    "booking_rooms": [
+      {
+        "id": "...",
+        "room_amount": 400000,
+        "discount_amount": 0,
+        "amount": 400000
+      }
+    ]
+  }
+}
+```
+
+> 🧾 **Per-room `amount` (2026-09-03):** ทุก `booking_room` มี field `amount` (integer baht) = **ยอดสุทธิต่อห้อง**:
+> `amount = room_amount − discount_amount + extra_bed_price + breakfast_price + early_checkIn_price + late_checkOut_price`
+> Server คำนวณที่จุดเดียว (`DiscountService::reprice()`) ครบทุก flow รวมถึง walk-in — **invariant: Σ `booking_rooms.amount` == `bookings.total_amount`** (ทั้งสองฝั่ง net) frontend จึงไม่ต้องบวกเอง และห้ามส่ง `amount` เข้ามาเอง (read-only, server-computed)
+
+---
+
+### Discount Management Endpoints (Admin only) 🎟️
+
+🔒 **Admin only**
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/discounts` | List all discounts (Admin only, optional `?is_active=true/false`, `?code=CODE`, `?search=TERM`) |
+| `GET` | `/discounts/{code}` | Get discount by code name or UUID (**All authenticated roles**, `200 OK` / `404 Not Found`) |
+| `POST` | `/discounts` | Create a new discount (`201 Created`) |
+| `PUT` | `/discounts/{id}` | Update discount attributes |
+| `PATCH` | `/discounts/{id}/toggle` | Toggle `is_active` status |
+
+> ❄️ **Note:** Discounts cannot be deleted (`DELETE` endpoint does not exist) to protect financial audit history. Soft toggle is used instead.
+
+> 🔍 **Lookup & Search:**
+> - `GET /discounts?code=SUMMER50` — กรองรายการตามชื่อโค้ดแบบ exact match (Admin only, case-insensitive)
+> - `GET /discounts?search=SUMMER` — ค้นหาโค้ดที่มีคำว่า SUMMER (Admin only, partial match)
+> - `GET /discounts/SUMMER50` หรือ `GET /discounts/{uuid}` — ดึงข้อมูลโค้ดรายตัวโดยตรงสำหรับทุก role (คืน object `discount`)
+
+> 🛡️ **Update rules (2026-08-27):**
+> - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน
+> - `stay_from` / `stay_until` ต้องส่ง**มาเป็นคู่เสมอ** (`required_with` กันไว้ทั้ง store/update) — half-set window ถูกปฏิเสธ `422`
+> - ความซ้ำของ `code` เช็คแบบ **case-insensitive** (`welcome10` ≡ `WELCOME10`) — ส่งซ้ำต่าง case → `422` validation error
+
+---
+
+### Organization Management Endpoints (Admin only) 🏛️
+
+> 🏛️ **ที่มา (25/09/26, wayfinder/organization-bookings ticket 01/05):** ตาราง `organizations` = master data หน่วยงาน/องค์กรที่ admin ใช้จองแทน (โหมด C — ส่ง `organize` = erp code บน `POST /bookings` ดูหัวข้อ Bookings) · `erp` คือ key กลางสำหรับ map ไปยัง organization-data API ภายนอกในอนาคต (replaceability contract)
+
+🔒 **Admin only** · ไม่มี throttle เพิ่ม (precedent กลุ่ม admin `/discounts`) · controller มี re-check `role:admin` อีกชั้น (defense-in-depth)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/organizations` | List all organizations (optional `?is_active=true/false`, `?search=TERM` — ค้น `name` หรือ `erp` แบบ partial match) |
+| `GET` | `/organizations/{id}` | Get organization by UUID (`404` ถ้าไม่พบ — route รับ UUID เท่านั้น) |
+| `POST` | `/organizations` | Create a new organization (`201 Created`) |
+| `PUT` | `/organizations/{id}` | Update organization attributes (partial — `sometimes`) |
+| `PATCH` | `/organizations/{id}/toggle` | Toggle `is_active` status |
+
+> ❄️ **Note:** ไม่มี `DELETE /organizations/{id}` ตาม precedent discounts — เลิกใช้องค์กร = `PATCH .../toggle` (ปิดแล้ว booking ใหม่ที่อ้างผ่าน `organize` โดน `422` แต่ booking เก่าไม่กระทบ เพราะอ่าน snapshot `customer_*` + FK `organization_id` ของตัวเอง; `bookings.organization_id` เป็น FK `restrictOnDelete` กันลบทิ้งอีกชั้น)
+
+**Organization object:**
+```json
+{
+  "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+  "erp": "ORG-KU-001",
+  "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+  "is_active": true,
+  "created_at": "2026-09-25T11:00:00.000000Z",
+  "updated_at": "2026-09-25T11:00:00.000000Z"
+}
+```
+
+---
+
+#### POST `/organizations` — Create organization 🏛️
+
+**Request Body:**
+```json
+{
+  "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+  "erp": "ORG-KU-001"
+}
+```
+
+| Field | Rules |
+|---|---|
+| `name` | **required**, string, max 255 |
+| `erp` | nullable, string, max 100, **unique** — เช็คซ้ำแบบ trim ก่อนเทียบ (ส่งซ้ำ → `422`) · เว้นได้สำหรับองค์กรที่ยังไม่มีรหัส ERP |
+
+**Response `201`:** `{ "status": "success", "message": ..., "organization": { ... } }`
+
+---
+
+#### PUT `/organizations/{id}` — Update organization 🏛️
+
+Partial update — ส่งเฉพาะ field ที่ต้องการแก้ (`name` ใช้กฎ `sometimes|required`; `erp` ใช้กฎ `sometimes|nullable`):
+
+> 🛡️ **`erp` update rules:** ส่งค่าเดิมกลับมา หรือส่งค่าว่าง/ช่องว่างล้วน = **no-op อนุญาต** (ไม่ error) · ส่งค่าใหม่ที่ชนองค์กรอื่น → `422` · ค่าที่ validate ผ่านจะถูก trim ก่อนบันทึกเสมอ
+
+**Response `200`:** `{ "status": "success", "message": ..., "organization": { ... } }`
+
+---
+
+#### PATCH `/organizations/{id}/toggle` — Toggle active 🏛️
+
+สลับ `is_active` (true ↔ false) — ไม่ต้องส่ง body:
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "เปลี่ยนสถานะองค์กรเรียบร้อยแล้วค่ะ! ✨",
+  "organization": {
+    "id": "9d1f3c2e-4b6a-7d8e-9f0a-1b2c3d4e5f6a",
+    "erp": "ORG-KU-001",
+    "name": "คณะวิศวกรรมศาสตร์ ม.เกษตรศาสตร์",
+    "is_active": false,
+    "created_at": "2026-09-25T11:00:00.000000Z",
+    "updated_at": "2026-09-25T11:05:00.000000Z"
+  }
+}
+```
+
+> 🔗 **ผลของ `is_active = false`:** `POST /bookings` โหมด C ที่ส่ง `organize` = erp ขององค์กรนี้ → `422` (ไม่เจอ/inactive) · `PUT /bookings/{id}` attach org ก็โดน `422` เช่นกัน — ดูรายละเอียด flow ในหัวข้อ Bookings (3 โหมด admin) และ 💳 Payment types
+
+**Error responses (ทุก endpoint ในหมวดนี้):** `401` (ยังไม่ล็อกอิน) · `403` (ไม่ใช่ admin) · `404` (ไม่พบองค์กร หรือ `{id}` ไม่ใช่รูปแบบ UUID — route constraint) · `422` (validation: `name` หาย/`erp` ซ้ำ)
 
 ---
 
@@ -871,15 +2560,16 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
   "verified_by": "admin-uuid",
   "nights": 2,
   "room_id": "room-uuid",
+  "include_reserved": false,
   "guests": [
     {
       "title": "Mr.",
       "name": "Walk-in Guest",
-      "nationality": "Thai",
-      "is_ku_member": false
+      "nationality": "Thai"
     }
   ],
-  "children": 0
+  "billing_address": null,
+  "billing_comment": null
 }
 ```
 
@@ -894,10 +2584,11 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 | `guests.*.title`         | nullable, string, max 50            |
 | `guests.*.name`          | nullable, string, max 255           |
 | `guests.*.nationality`   | nullable, string, max 100           |
-| `guests.*.is_ku_member`  | nullable, boolean                   |
-| `children`               | nullable, integer, min 0            |
+| `billing_address`        | nullable, string, max 255           |
+| `billing_comment`        | nullable, string, max 255           |
 
 > Room must be in `available` or `prep_checkin` status.
+> 🏨 **(24/09/26) Period guard + `include_reserved`**: ห้องที่มี **maintenance period** ทับช่วง `[now, now+nights)` → reject เสมอ (`400` — กฎเหล็ก ส่ง flag ก็ไม่ผ่าน) · ห้องที่มี **reserved period** ทับช่วง → ผ่านได้เมื่อ admin ส่ง `include_reserved=true` (body field — ดูสัญญาเต็มหัวข้อ "Flag `include_reserved`" หมวด Rooms) ไม่งั้น reject `400`: `"Room number X is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน"`
 
 **Response `201`:**
 ```json
@@ -913,7 +2604,23 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 ```json
 {
   "status": "error",
-  "message": "Room number 101 is not ready for walk-in. Current status: maintenance"
+  "message": "Room number 101 is not ready for walk-in. Current status: dirty"
+}
+```
+
+```json
+// 🗓️ ห้องติด maintenance period ทับช่วง — reject เสมอ (ส่ง include_reserved ก็ไม่ผ่าน)
+{
+  "status": "error",
+  "message": "Room number 101 is under a maintenance period for those dates and cannot be used for walk-in."
+}
+```
+
+```json
+// 🏨 ห้องติด reserved period ทับช่วง แต่ไม่ได้ส่ง include_reserved
+{
+  "status": "error",
+  "message": "Room number 101 is a reserved (สำรอง) room for those dates — admin ต้องส่ง include_reserved เพื่อใช้ห้องสำรองค่ะนายท่าน"
 }
 ```
 
@@ -995,17 +2702,75 @@ Requires all payments to be completed. Auto-creates housekeeping tasks.
 
 ---
 
-### POST `/front-desk/{bookingId}/payment` — Record payment
+### POST `/front-desk/{bookingId}/mark-no-show` — Mark guest as no-show
 
 🔒 **Admin only**
 
-Records a completed payment. Auto-marks booking `is_paid=true` and transitions `draft → paid` if applicable. Creates a receipt when fully paid.
+Marks one or more rooms as `no_show` (BookingRoom-level). Supports **partial no-show** — omit `booking_room_ids` to mark *all* rooms, or specify individual rooms to mark only those. The booking container auto-syncs to `complete` when every room has reached a terminal state (`checked_out` or `no_show`).
+
+**Request Body:**
+```json
+{
+  "verified_by": "admin-uuid",
+  "booking_room_ids": ["br-uuid-1"]
+}
+```
+
+**Validation Rules:**
+
+| Field                  | Rule                                |
+|------------------------|-------------------------------------|
+| `verified_by`          | required, uuid, exists in users     |
+| `booking_room_ids`     | nullable, array                     |
+| `booking_room_ids.*`   | required, uuid, exists in booking_rooms |
+
+> 🛡️ **Guards:**
+> - Booking must **not** already be `complete`
+> - Every targeted room must be in `draft` or `confirmed` status (checked_in/checked_out/no_show rooms are rejected — ⏱️ 2026-10-27: ยอมรับ draft เพราะ verify ไม่ได้ย้ายสถานะห้อง โดยระบบจะ promote `draft → confirmed → no_show` ให้ตาม state machine)
+> - If the booking container is still `paid`, it is transitioned to `confirmed` first so a paid-but-absent booking can still be closed
+
+**Response `200` (partial — some rooms still active):**
+```json
+{
+  "status": "success",
+  "message": "Mark No-Show สำเร็จแล้วค่ะนายท่าน",
+  "booking_id": "booking-uuid",
+  "booking_status": "confirmed"
+}
+```
+
+**Response `200` (all rooms terminal — container auto-completes):**
+```json
+{
+  "status": "success",
+  "message": "Mark No-Show สำเร็จแล้วค่ะนายท่าน",
+  "booking_id": "booking-uuid",
+  "booking_status": "complete"
+}
+```
+
+**Response `422`:**
+```json
+{
+  "status": "error",
+  "message": "ไม่สามารถ mark No-Show ได้ค่ะนายท่าน เนื่องจากห้องมีสถานะ 'checked_in' (ต้องเป็น 'confirmed' เท่านั้น) กรุณาตรวจสอบอีกครั้งนะคะ"
+}
+```
+
+---
+
+### POST `/front-desk/{bookingId}/payment` — Record payment
+
+🔒 **Admin + Staff** (`role:admin,staff` — REQ-031 24hr front desk · controller re-check อีกชั้น)
+
+Records a completed payment (เงินสดหน้าเคาน์เตอร์ / เก็บยอดค้างของมัดจำ·ค้างชำระ). Auto-marks booking `is_paid=true` เมื่อยอดรวม (SUM ทุก row) ≥ `total_amount + charges_total` (💸 15/10/26 — charges ค่าปรับ/ค่ายืม/addon บวกยอดจริง) และ transitions `draft → paid` ถ้า booking ยัง draft.
+
+💳 **(25/09/26)**: `amount` **min 1** (เดิม 0 — 0 ไม่ใช่เหตุการณ์เงิน) · **overpay ยอมรับ** (เขียน row ตามจริง — `outstanding_amount` clamp 0, ไม่มี reject) · **เรียกซ้ำได้** (1 ครั้ง = 1 ledger row — มัดจำ/ค้างชำระเก็บหลายงวดได้) · เก็บยอดค้างหลัง `confirmed` → **สถานะคง `confirmed`** ไม่มี transition ใหม่ · ⚠️ draft ที่มี payments row ไม่ถูก `CleanupExpiredDrafts` ลบ และลบด้วย `DELETE /bookings/{id}` ไม่ได้ (422 — กัน ledger หาย)
 
 **Request Body:**
 ```json
 {
   "amount": 2400,
-  "payment_method": "cash",
   "reference_number": "CASH-2026-001",
   "received_by": "admin-uuid"
 }
@@ -1016,8 +2781,7 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
 | Field              | Rule                                                |
 |--------------------|-----------------------------------------------------|
 | `booking_id`       | required, uuid, exists in bookings                  |
-| `amount`           | required, integer, min 1                            |
-| `payment_method`   | required, in: `cash`, `credit_card`, `transfer`, `qr`, `other` |
+| `amount`           | required, integer, **min 1** 💳                     |
 | `reference_number` | nullable, string                                    |
 | `received_by`      | nullable, uuid, exists in users                     |
 
@@ -1030,19 +2794,110 @@ Records a completed payment. Auto-marks booking `is_paid=true` and transitions `
     "id": "payment-uuid",
     "booking_id": "booking-uuid",
     "amount": 2400,
-    "payment_method": "cash",
     "status": "completed",
     "reference_number": "CASH-2026-001",
     "received_by": "admin-uuid"
   },
   "booking_is_paid": true,
-  "booking_status": "paid"
+  "booking_status": "confirmed",
+  "payment_type": "deposit",
+  "deposit_amount": 1200,
+  "paid_amount": 2400,
+  "outstanding_amount": 0
 }
 ```
 
 ---
 
+## 💳 Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ) — 25/09/26
+
+> wayfinder map `booking-payment-types` (tickets 01–05) — booking มีประเภทการชำระ 3 แบบบน column `bookings.payment_type`
+
+### สัญญา (contract) รวม
+
+| ประเภท | ค่า | สรุป |
+|---|---|---|
+| เต็มจำนวน | `full` (**default**) | flow เดิมทุกอย่าง — สลิปเต็ม → verify → `is_paid=true` |
+| มัดจำ | `deposit` | จ่ายงวดแรก = ยอดมัดจำ (`deposit_amount` ตายตัว, null = **50%** ของ `total_amount` — config `booking.deposit_percent`) → verify → confirmed + `is_paid=false` → เก็บส่วนเหลือที่เคาน์เตอร์ (`recordPayment`) จน `is_paid=true` |
+| ค้างชำระ | `deferred` | ไม่รับสลิป — admin อนุมัติ `draft → confirmed` (ผ่าน `PUT /bookings/update/{id}`) → เก็บเงินปลายทางผ่าน `recordPayment` จนครบ |
+
+**กติกาสิทธิ์:** ตั้ง/แก้ `payment_type` / `deposit_amount` ได้ **admin/system เท่านั้น** — ช่องทาง 2 ทาง: `POST /bookings` (ครั้งเดียวตอนสร้าง) และ `PUT /bookings/{id}` (draft only) · non-admin ส่ง field เงินมา = **403**
+
+**Response envelope (4 field — ทุก response ของ booking ทุก role):**
+
+```json
+{
+  "payment_type": "deposit",
+  "deposit_amount": 750,          // effective — type=deposit: column ?? ceil(total × 50%); type อื่น = null
+  "paid_amount": 750,             // SUM(payments.amount) เฉพาะ completed — ledger เดียว
+  "outstanding_amount": 750       // max(0, total_amount + charges_total − paid_amount) — clamp 0 รองรับ overpay
+}
+```
+
+- **ชั้น A** — `booking_confirmations.amount` (บาท, **nullable** — 08/10/26, ≥ 1 ถ้าส่ง): ยอดที่ user แจ้งต่อครั้งส่งสลิป · ไม่แจ้ง = null → verify บิล **`full`** ถือเป็น "จ่ายครบ" (**เขียน ledger ยอดคงค้าง + `is_paid` ตามสูตร — 22/10/26**) · บิล **`deposit`** ยังไม่เขียน ledger + ไม่แตะ `is_paid` (ไม่เดายอดงวด)
+- **ชั้น B** — ภาพรวมจ่ายแล้ว/ค้าง **derive จาก ledger ล้วน ไม่มี column** — `payments` = ledger เดียวของ "เงินที่เข้าจริง" · **เขียนได้ 3 จุดเท่านั้น:** ① `PUT /booking-confirmations/{id}/verify` (สลิปผ่าน) ② `POST /front-desk/{id}/payment` (เงินสด) ③ `POST /payments` (mock QR)
+- **`is_paid`** = `SUM(payments) ≥ total_amount + charges_total` — "จ่ายครบ" เท่านั้น (💸 15/10/26 — `charges_total` (Σ `additional_charges`) append มากับ booking ทุก response เสมอ · deposit งวดแรกผ่าน ≠ is_paid) · ตั้งจริงตอน verify / recordPayment / QR · สร้าง/แก้/ลบ charge → recompute อัตโนมัติ (`Booking::syncIsPaid()`)
+- **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`
+- **Check-in/out ไม่มี hard guard เรื่องเงิน** — เข้าพัก/ปิด booking ได้แม้ยอดค้าง (การตามเก็บเป็นกระบวนการ ไม่ใช่ระบบบล็อก)
+- **deadline / cleanup:** ทุก type ใช้ `payment_deadline` 15 นาทีเหมือนกัน — แต่ draft `deferred` **ยกเว้น `CleanupExpiredDrafts`** และ **ยึด slot ต่อ** จน admin อนุมัติหรือลบ (จุดประสงค์ของ deferred = การันตีห้องให้องค์กรก่อนชำระ)
+
+### 💵 กติกาปัดเศษขึ้นหลักสิบ (REQ-015/016) — 25/09/26
+
+> wayfinder `booking-payment-types` ticket 07/09 — "ยอดเงินลูกค้าไม่มีทศนิยม มีเศษให้ปัดขึ้นหลักสิบ" (`ceil($amount / 10) * 10`) — **กติกาเดียวทั้งระบบ ไม่แยก stay_type**
+
+- **ปัดที่ไหน:** `booking_rooms.amount` ใน `DiscountService::reprice()` (chokepoint เดียวของเงิน booking) — ลำดับ `(เรท×คืน) − ส่วนลด + addon → ปัดขึ้นสิบท้ายสุดครั้งเดียว` · `room_amount`/`discount_amount` เก็บค่าดิบ · `total_amount = Σ amount ที่ปัดแล้ว` (invariant `Σ booking_rooms.amount == total_amount` คงอยู่)
+- **มัดจำ default** (`deposit_amount` effective จาก config `booking.deposit_percent`) **ปัดสิบต่อ** — เป็นยอดที่ลูกต้องจ่าย · ส่วน `deposit_amount` ที่ admin ตั้งเอง **ไม่ force ปัด** (admin รับผิดชอบตัวเลขเอง)
+- **ชั้น A `booking_confirmations.amount` (ยอดแจ้งต่อครั้งส่งสลิป) ไม่บังคับปัด** — soft check ให้ admin ตัดสินตอน verify เหมือนเดิม
+- **ส่วนลด `percent` ใช้ `intdiv` ตัดทิ้งเหมือนเดิม** — การปัดท้ายครอบเศษที่เหลือทั้งหมด
+- **จองครึ่งคืนไม่มีในโดเมน** — ทุกจุดคำนวณคืน (`reprice()` + `BookingController` 4 จุด: create/confirm rooms/update rooms/record-walk-in) `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` เสมอ (กัน Carbon 3 คืน float เมื่อ input เป็น datetime เช่น `2026-10-01 14:00`)
+- **Regression:** เรทหลักร้อยตัวงั้น (เช่น 1,500) ยอดเดิมไม่เปลี่ยน — ปัดสิบโดนเฉพาะเมื่อเกิดเศษ
+
+### 💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10) — 25/09/26
+
+> กรณี booking `paid|confirmed` (มัดจำ/ค้างชำระ verify ผ่าน หรือจ่ายเต็มแล้ว) ต้องการ**เปลี่ยน room type หรือแก้รายละเอียดห้อง** ให้แขก — ราคารวมเปลี่ยน → ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `recordPayment` (กลไกเดิม — **ไม่มี endpoint เงินใหม่**)
+
+- **ช่องทาง:** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` เดิม (2 โหมด — draft = แก้ปกติ, `paid|confirmed` = surcharge) — **admin เท่านั้น** (user เจ้าของ = `403`)
+- **Guard:** BR ต้องยัง `draft|confirmed` (checked_in/out/no_show = `422`) · BR ที่มี `room_id` ถูกจัดแล้ว เปลี่ยน room type/วันที่ไม่ได้ (`422` — ปลดการจัดห้องก่อน) · availability re-check + `holdingSlot()` เหมือนโหมด draft
+- **Downgrade:** ยอดรวมใหม่ **ต่ำกว่าเงินที่เข้า ledger = `422`** (ticket 08 — ไม่มีการคืนเงินในระบบ) · ลดได้เฉพาะยอดรวมใหม่ยัง ≥ `paid_amount` → `outstanding_amount` ลดตาม
+- **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว) · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset `false` (ตามนิยาม `SUM(payments) ≥ total + charges_total`)
+- **Response เพิ่ม 6 field เสมอ:** `previous_total_amount` · `surcharge_amount` (ติดลบได้) · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
+
+### PUT `/bookings/{id}` — Update booking payment + customer identity fields (Admin) 🆕
+
+🔒 **Admin only (role:admin) · Throttle `5,1`** · guard state **แยกตาม field-group**:
+- 💳 **payment group** — booking ต้อง **draft** เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+- 🏛️ **customer identity group** (25/09/26, organization-bookings ticket 07) — ได้ตั้งแต่ draft จนถึง **checked_in** (จนก่อน `complete`/`no_show` — รองรับ front desk ที่รู้ภายหลังว่าเป็นขององค์กรไหน)
+
+**Request Body:**
+
+| Field | Rule | หมายเหตุ |
+|---|---|---|
+| `payment_type` | nullable in: `full,deposit,deferred` | ไม่ส่ง = ไม่แตะค่าเดิม |
+| `deposit_amount` | nullable integer ≥ 1 | ส่ง `null` ชัด ๆ = revert ไป effective 50% · 422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit |
+| `discount_code` | nullable string max 50 | reuse กลไก `DiscountService` — reconcile `total_amount` ให้ครบ · ค่าว่าง = ลบโค้ด |
+| `payment_deadline` | nullable date after:now | ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม |
+| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · ส่ง `null` ชัด ๆ = ถอด identity กลับเฮดเปล่า |
+| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · ส่ง `null` ชัด ๆ = ถอด identity |
+| `customer_name` 🏛️ | nullable string max 255 | **บังคับ** เมื่อส่ง `organize` · snapshot ผู้ติดต่อ/ผู้เข้าพัก |
+| `customer_phone` 🏛️ | nullable string max 50 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
+| `customer_email` 🏛️ | nullable string email max 255 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
+
+> `total_amount` **ไม่รับ**จาก input — reprice โดยระบบเสมอ
+>
+> 🏛️ **กติกา attach/switch/detach (ticket 07):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · ส่ง `user: null` / `organize: null` ชัด ๆ = ถอดกลับเฮดเปล่า (เคลียร์ครบ) · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
+
+> 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
+
+**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "user_id": ..., "organization_id": ..., "customer_name": ..., "customer_phone": ..., "customer_email": ... }`
+
+**Errors**: `403` non-admin · `404` booking ไม่พบ · `422` payment fields บน non-draft / identity fields บน `complete`/`no_show` / `user`+`organize` พร้อมกัน / `organize` ไม่มี `customer_name` / erp ไม่เจอหรือ inactive / deposit_amount กับ type ที่ไม่ใช่ deposit
+
+---
+
 ## Payments & Webhooks
+
+> ⚠️ **DEMO / Not Production-Ready:** Payment & Webhook endpoints below are functional demos. Schema/enum values (`status`) may change when the real payment gateway is integrated.
+> 🌟 **Refactor (19/08/26)**: `payment_method` ถูกลบออกจากทุก flow แล้ว — การชำระเงินเหลือ "ส่งสลิป → รอแอดมินตรวจ" ผ่าน `POST /bookings/{id}/confirm`
 
 ### POST `/payments` — Request payment (Admin)
 
@@ -1053,8 +2908,7 @@ Creates a `pending` payment and returns a mock payment URL.
 **Request Body:**
 ```json
 {
-  "booking_id": "booking-uuid",
-  "payment_method": "credit_card"
+  "booking_id": "booking-uuid"
 }
 ```
 
@@ -1080,6 +2934,10 @@ Creates a `pending` payment and returns a mock payment URL.
 ---
 
 ### POST `/payment/webhook` — Payment gateway callback
+
+> ❄️ **FROZEN (24/07/26)** — Deprecated. Returns `410 GONE`.
+> ใช้ `POST /bookings/{id}/confirm` (user submit slip) + `PUT /booking-confirmations/{id}/verify` (admin verify) แทน
+> ผ่าน `booking_confirmations` table (1:N history + state machine pending→verified|rejected)
 
 🔒 **Public** (called by payment gateway, signature verification TBD)
 
@@ -1112,52 +2970,56 @@ Creates a `pending` payment and returns a mock payment URL.
 > 1. Updates payment → `completed`
 > 2. Sets booking `is_paid = true`
 > 3. Transitions booking `draft → paid` (system role)
-> 4. Generates a receipt
+> 4. ~~Generates a receipt~~ ❄️ FROZEN — receipts table deprecated (24/07/26)
 
 ---
 
-## Addon Rates
+## Global Rates
 
-### GET `/addon-rates` — List all addon rates
+> 🌟 **(22/07/26 renamed from "Addon Rates" / `/addon-rates`)** — ตารางเดียว (`global_rates`) เก็บทั้ง **room rate** (`rate_type` = `daily` / `daily_ku` / `group` / `month` — ผูก `room_type_id`) และ **addon rate** (`rate_type` = `addon` — ใช้ `code` เป็น key). ทุก row มี `rate_type` + `room_type_id` (null สำหรับ addon) เสมอ.
+
+### GET `/global-rates` — List all rates (room + addon)
 
 🔒 **Public**
+
+**Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
+
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast` 200 (200 THB), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "ดึงรายการ Add-on Rates เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ดึงรายการ Global Rates เรียบร้อยแล้วค่ะ! ✨",
   "rates": [
     {
       "id": "rate-uuid",
+      "rate_type": "addon",
+      "room_type_id": null,
       "code": "breakfast",
       "name_en": "Breakfast",
       "name_th": "อาหารเช้า",
-      "default_price": 150,
+      "default_price": 20000,
       "is_active": true
     },
     {
       "id": "rate-uuid",
-      "code": "early_checkin",
-      "name_en": "Early Check-in",
-      "name_th": "เช็คอินก่อนเวลา",
-      "default_price": 200,
+      "rate_type": "daily",
+      "room_type_id": "room-type-uuid",
+      "code": null,
+      "name_en": "Superior Daily General",
+      "name_th": "ห้องซูพีเรียร์ (ราคารายวัน)",
+      "default_price": 100000,
       "is_active": true
     },
     {
       "id": "rate-uuid",
-      "code": "late_checkout",
-      "name_en": "Late Check-out",
-      "name_th": "เช็คเอาท์ช้ากว่าเวลา",
-      "default_price": 200,
-      "is_active": true
-    },
-    {
-      "id": "rate-uuid",
-      "code": "extra_bed",
-      "name_en": "Extra Bed",
-      "name_th": "เตียงเสริม",
-      "default_price": 300,
+      "rate_type": "group",
+      "room_type_id": "room-type-uuid",
+      "code": "min_5_rooms",
+      "name_en": "Superior Group (5+ Rooms)",
+      "name_th": "ห้องซูพีเรียร์ (ราคาหมู่คณะ 5 ห้องขึ้นไป)",
+      "default_price": 75000,
       "is_active": true
     }
   ]
@@ -1166,7 +3028,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 ---
 
-### GET `/addon-rates/{id}` — Get addon rate by ID
+### GET `/global-rates/{id}` — Get rate by ID
 
 🔒 **Public**
 
@@ -1174,39 +3036,45 @@ Creates a `pending` payment and returns a mock payment URL.
 ```json
 {
   "status": "success",
-  "message": "ดึงข้อมูล Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ดึงข้อมูล Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...rate object... }
 }
 ```
 
 ---
 
-### PUT `/addon-rates/{id}` — Update addon rate (Admin)
+### PUT `/global-rates/{id}` — Update rate (Admin)
 
 🔒 **Admin only**
 
 **Request Body (all optional):**
 ```json
 {
+  "rate_type": "addon",
+  "room_type_id": null,
+  "code": "breakfast",
   "name_en": "Breakfast Buffet",
   "name_th": "บุฟเฟ่ต์อาหารเช้า",
-  "default_price": 180,
+  "default_price": 18000,
   "is_active": true
 }
 ```
+
+> ⚠️ **Consistency rule (บังคับที่ server):** `rate_type` กับ `code`/`room_type_id` ต้องสอดคล้องกัน —
+> `addon` → ต้องมี `code`, server force `room_type_id = null` · `group` → ต้องมี `room_type_id` + `code` (`min_5_rooms` / `min_10_rooms`) · `daily` / `daily_ku` / `month` → ต้องมี `room_type_id`, server force `code` = ชื่อ rate_type (22/10/26 — เลิกใช้ `null`, backfill ด้วย migration 2026_10_22_131500)
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "อัปเดต Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "อัปเดต Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...updated rate... }
 }
 ```
 
 ---
 
-### PATCH `/addon-rates/{id}/toggle` — Toggle addon rate active state (Admin)
+### PATCH `/global-rates/{id}/toggle` — Toggle rate active state (Admin)
 
 🔒 **Admin only**
 
@@ -1214,7 +3082,7 @@ Creates a `pending` payment and returns a mock payment URL.
 ```json
 {
   "status": "success",
-  "message": "ปิดใช้งาน Add-on Rate เรียบร้อยแล้วค่ะ! ✨",
+  "message": "ปิดใช้งาน Global Rate เรียบร้อยแล้วค่ะ! ✨",
   "rate": { ...rate with is_active toggled... }
 }
 ```
@@ -1294,7 +3162,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `name`        | string    | Full name                              |
 | `email`       | string    | Unique email                           |
 | `password`    | string    | Hashed (bcrypt)                        |
-| `role`        | enum      | `admin` / `user` (default: `user`)     |
+| `role`        | string    | `user`, `guest`, `ku_member`, `staff`, `admin`, `housekeeping`, `system` (default: `user`) |
 | `ver`         | boolean   | Verified status (default: false)       |
 | `created_at`  | timestamp |                                        |
 | `updated_at`  | timestamp |                                        |
@@ -1309,18 +3177,17 @@ Returns tasks with status `pending` or `in_progress`.
 | `user_id`          | UUID      | FK → users (booking owner — staff for walk-in)          |
 | `confirmation`     | string    | Format: `YYYYMM-XXXXX` (auto-generated, unique)         |
 | `source`           | enum      | `online` / `admin` / `line`                             |
-| `status`           | enum      | See [Booking State Machine](#booking-state-machine)     |
-| `check_in`         | date      |                                                         |
-| `check_out`        | date      |                                                         |
+| `status`           | enum      | Container-level: `draft`, `paid`, `confirmed`, `complete` |
 | `total_amount`     | integer   | In baht (no decimals — integer since 2026-06-05)        |
 | `is_paid`          | boolean   | Default: false                                          |
-| `payment_deadline` | datetime  | For draft bookings (24h from creation)                  |
+| `payment_deadline` | datetime  | For draft bookings (15 min from creation — REQ-008, 2026-09-24) |
 | `created_at`       | timestamp |                                                         |
 | `updated_at`       | timestamp |                                                         |
 
 **Relationships:**
 - `belongsTo User` — owner
 - `hasMany BookingRoom` — the rooms in this booking
+- `hasMany BookingConfirmation` — payment proof history (1:N, replaces payments/receipts)
 
 > 🌟 **Refactor (18/06/26)**: Guest name/title/nationality moved from `bookings` to `booking_rooms.guests` JSON. `bookings` no longer stores guest info.
 
@@ -1334,8 +3201,15 @@ Returns tasks with status `pending` or `in_progress`.
 | `booking_id`   | UUID      | FK → bookings                                           |
 | `room_type_id` | UUID      | FK → room_types (what was booked)                       |
 | `room_id`      | UUID      | FK → rooms (nullable — assigned at check-in)            |
-| `guests`       | JSON      | Array of `{title, name, nationality, is_ku_member}`     |
-| `children`     | integer   | Number of children in this room                         |
+| `check_in`     | date      | 🌟 Per-room check-in date (Refactor 02/07/26)            |
+| `check_out`    | date      | 🌟 Per-room check-out date (Refactor 02/07/26)           |
+| `status`       | enum      | BR-level: `draft`, `confirmed`, `checked_in`, `checked_out`, `no_show` |
+| `guests`       | JSON      | Array of `{title, name, firstName, lastName, email, phone, nationality}` |
+| `billing_address` | string | Billing address (nullable)                          |
+| `billing_comment` | string | Billing note/comment (nullable)                     |
+| `room_amount`  | integer   | Gross room price = rate × nights (integer baht, server-computed 27/08/26) |
+| `discount_amount` | integer | Discount applied to this room (integer baht, server-computed) |
+| `amount`       | integer   | 🧾 Net total per room (integer baht, server-computed 03/09/26): `room_amount − discount_amount + addon รวมทุกอย่าง` — invariant `Σ booking_rooms.amount == bookings.total_amount` |
 | `created_at`   | timestamp |                                                         |
 | `updated_at`   | timestamp |                                                         |
 
@@ -1344,15 +3218,15 @@ Returns tasks with status `pending` or `in_progress`.
 [
   {
     "title": "Mr.",
-    "name": "Somchai Jaidee",
-    "nationality": "Thai",
-    "is_ku_member": false
+    "firstName": "Somchai",
+    "lastName": "Jaidee",
+    "nationality": "Thai"
   },
   {
     "title": "Ms.",
-    "name": "Suda Jaidee",
-    "nationality": "Thai",
-    "is_ku_member": true
+    "firstName": "Suda",
+    "lastName": "Jaidee",
+    "nationality": "Thai"
   }
 ]
 ```
@@ -1387,21 +3261,36 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### RoomType
 
-| Field                  | Type    | Description                            |
-|------------------------|---------|----------------------------------------|
-| `id`                   | UUID    | Primary key                            |
-| `name_en`              | string  | English name                           |
-| `name_th`              | string  | Thai name                              |
-| `rate_daily_general`   | integer | Daily rate for general public (baht)   |
-| `rate_daily_ku`        | integer | Daily rate for KU members (baht)       |
-| `max_occupancy`        | integer | Max guests                             |
-| `builtin_extra_beds`   | integer | Default extra bed capacity             |
-| `created_at`           | timestamp |                                      |
-| `updated_at`           | timestamp |                                      |
+| Field                | Type      | Description                              |
+|----------------------|-----------|------------------------------------------|
+| `id`                 | UUID      | Primary key                              |
+| `name_en`            | string    | English name                             |
+| `name_th`            | string    | Thai name                                |
+| `description`        | string    | Description (nullable)                   |
+| `max_guests`         | integer   | Max guests per room                      |
+| `extra_bed_enabled`  | boolean   | Whether extra beds are allowed (default: false) |
+| `max_extra_beds`     | integer   | Max extra beds allowed (default: 0)      |
+| `extra_bed_price`    | string    | Price per extra bed — integer baht, non-decimal (e.g. `500` = 500 THB; storage = wire, 11/09/26) |
+| `rates`              | object    | **Virtual** — canonical rates object `{daily: {general, ku_member}, group: {min_5_rooms, min_10_rooms}, monthly}` in 2-dp decimal baht strings resolved from `global_rates`. Fallback `"0.00"` if missing/inactive. |
+| `created_at`         | timestamp |                                          |
+| `updated_at`         | timestamp |                                          |
+
+> 💡 **Room Rates & Money Policy (03/09/26):**
+> - **Money Policy:** Database storage and API wire use **integer baht, non-decimal** (e.g. `1200` = 1,200 THB) — มาตรฐานใหม่ 11/09/26 (เดิม integer satang + baht string ที่ขอบ API). ทุก rate value, `extra_bed_price`, `total_amount`, `booking_rooms.amount`, addons, discounts อยู่หน่วยเดียวกันทั้งระบบ
+> - **Rate Types in `global_rates`:**
+>   - `daily` (code `daily`): Daily rate for general guests (`rates.daily.general`)
+>   - `daily_ku` (code `daily_ku`): Daily rate for KU members / university personnel (`rates.daily.ku_member`)
+>   - `group` (code `min_5_rooms`): Group rate for 5+ rooms (`rates.group.min_5_rooms`)
+>   - `group` (code `min_10_rooms`): Group rate for 10+ rooms (`rates.group.min_10_rooms`)
+>   - `month` (code `month`): Long-stay monthly rate (`rates.monthly`)
+>   - 🌟 **(22/10/26):** room rate rows เก็บ `code` = ชื่อ `rate_type` เสมอ (เลิก `code: null`) — แถว `group` คง `min_5_rooms`/`min_10_rooms` ตามเดิม · `GET /global-rates` จึงไม่มี `code: null` ให้ frontend ต้องเช็คอีกต่อไป
+> - The legacy virtual field `daily_rate` is deprecated and dropped from JSON serialization in favor of `rates`.
 
 **Relationships:**
 - `hasMany Room`
 - `hasMany BookingRoom`
+- `hasMany GlobalRate` (via `rateRows()`)
+- `hasOne GlobalRate` (daily rate, via `dailyRateRow()`)
 
 ---
 
@@ -1415,8 +3304,10 @@ Returns tasks with status `pending` or `in_progress`.
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
 | `breakfast`            | integer | Number of breakfasts                     |
 | `breakfast_price`      | integer | Total breakfast price (baht)             |
-| `early_checkIn_price`  | integer | Early check-in price (0 if not selected) |
-| `late_checkOut_price`  | integer | Late check-out price (0 if not selected) |
+| `early_checkIn_price`  | integer | Early check-in total price (integer baht)|
+| `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
+| `late_checkOut_price`  | integer | Late check-out total price (integer baht)|
+| `late_hours`           | integer | Late check-out hours (0–7, default: 0)   |
 | `created_at`           | timestamp |                                        |
 | `updated_at`           | timestamp |                                        |
 
@@ -1444,12 +3335,14 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Payment
 
+> ⚠️ **DEMO** — Payment schema is provisional. Fields may change when real gateway integration lands.
+> 🌟 **(19/08/26)** — `payment_method` dropped: flow เหลือสลิปอย่างเดียว
+
 | Field              | Type      | Description                                              |
 |--------------------|-----------|---------------------------------------------------------|
 | `id`               | UUID      | Primary key                                             |
 | `booking_id`       | UUID      | FK → bookings                                           |
 | `amount`           | integer   | In baht (integer since 2026-06-05)                      |
-| `payment_method`   | enum      | `cash` / `credit_card` / `transfer` / `qr` / `other`    |
 | `status`           | enum      | `pending` / `completed` / `failed`                      |
 | `reference_number` | string    | Bank/gateway reference (nullable)                       |
 | `received_by`      | UUID      | FK → users (admin who received cash, nullable)          |
@@ -1463,9 +3356,13 @@ Returns tasks with status `pending` or `in_progress`.
 
 ### Receipt
 
+> ❄️ **FROZEN (24/07/26)** — Deprecated read-only table. ไม่สร้าง receipt row ใหม่อีกต่อไป
+> ใช้ `booking_confirmations` table แทน (POST /bookings/{id}/confirm + admin verify)
+> ⚠️ **DEMO** — Receipt generation is tied to the demo payment flow. Fields may change with production gateway integration.
+
 | Field          | Type      | Description                                       |
 |----------------|-----------|---------------------------------------------------|
-| `receipt_no`   | string    | Format: `RCP-YYYYMM-XXXXX` (auto-generated)       |
+| `receipt_no`   | string    | Format: `REC-YYYYMM-XXXXX` (auto-generated)       |
 | `booking_id`   | UUID      | FK → bookings                                     |
 | `payment_id`   | UUID      | FK → payments                                     |
 | `amount`       | integer   | In baht                                           |
@@ -1476,6 +3373,54 @@ Returns tasks with status `pending` or `in_progress`.
 **Relationships:**
 - `belongsTo Booking`
 - `belongsTo Payment`
+
+---
+
+### BookingConfirmation
+
+🌟 **(24/07/26)** — Replaces payments/receipts. 1:N with bookings (history of every payment proof submitted, even rejected ones).
+🌟 **(19/08/26)** — `payment_method` dropped: flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" (`slip_image` บังคับ, `transfer_time` optional)
+🌟 **(19/08/26 #2)** — `slip_image` column **ถูกลบแล้ว** — รูปสลิปอยู่ใน `images` table ผ่าน morph (`slipImage()`)
+
+| Field              | Type      | Description                                              |
+|--------------------|-----------|---------------------------------------------------------|
+| `id`               | UUID      | Primary key                                              |
+| `booking_id`       | UUID      | FK → bookings (1:N, not unique)                          |
+| `transfer_time`    | timestamp | Time customer reported transfer (from slip)              |
+| `status`           | string    | `pending`, `verified`, `rejected` (default: pending)     |
+| `reviewed_by`      | UUID      | FK → users (admin who reviewed)                          |
+| `reviewed_at`      | timestamp | When admin reviewed                                     |
+| `review_note`      | string    | Reason (optional, mostly for reject)                     |
+| `created_at`       | timestamp |                                                          |
+| `updated_at`       | timestamp |                                                          |
+
+**Relationships:**
+- `belongsTo Booking`
+- `belongsTo User` (reviewer)
+- `morphOne Image` (`slipImage`) — รูปสลิปบน private disk + signed URL (ดู `images` table ด้านล่าง)
+
+---
+
+### Image
+
+🖼️ **(19/08/26)** — ระบบรูปจริงจัง (แทน draft เดิม) · polymorphic: ใช้กับสลิปวันนี้, housekeeping ฯลฯ ต่อได้
+
+| Field           | Type      | Description                                            |
+|-----------------|-----------|--------------------------------------------------------|
+| `id`            | UUID      | Primary key                                            |
+| `path`          | string    | ตำแหน่งไฟล์บน disk เช่น `slips/abc123.jpg`             |
+| `disk`          | string    | filesystem disk (default `local` = `storage/app/private`) |
+| `mime_type`     | string    | เช่น `image/jpeg` (nullable)                           |
+| `size`          | bigint    | ขนาดไฟล์ bytes (nullable)                              |
+| `original_name` | string    | ชื่อไฟล์ที่ผู้ใช้อัปโหลด (nullable)                    |
+| `uploaded_by`   | UUID      | FK → users (nullOnDelete)                              |
+| `imageable_id`  | UUID      | morph target id (เช่น booking_confirmation id)         |
+| `imageable_type`| string    | morph target class (เช่น `App\Models\BookingConfirmation`) |
+
+**Relationships:** `morphTo imageable` · `belongsTo User` (uploader)
+
+**พฤติกรรมพิเศษ:** serialize แล้วมี appended `url` (signed URL อายุ 15 นาที) · ลบ row = ลบไฟล์บน disk อัตโนมัติ (hook `deleting`)
+🖼️ **(26/10/26)** — field ภายใน `path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` ถูก `$hidden` ออกจาก JSON output ทั้งหมด (ยังใช้ได้ปกติฝั่ง server) — JSON เหลือ `id`, `mime_type`, `size`, `original_name`, `category`, timestamps, `url` · การเปิดไฟล์ต้องส่ง Bearer token + เป็นเจ้าของรูป/admin (ดู `GET /images/{id}/file`)
 
 ---
 
@@ -1499,45 +3444,112 @@ Returns tasks with status `pending` or `in_progress`.
 
 ## State Machines
 
-### Booking State Machine
+### Booking State Machine (Container)
+
+> 🌟 **Refactor (03/07/26):** Booking = container เก็บสถานะ payment/admin flow เท่านั้น
+> `checked_in`/`checked_out`/`no_show` ย้ายไปอยู่ที่ **BookingRoom** (BR-level) แล้ว
+> 🌟 **Refactor (25/08/26):** เพิ่ม `pending` ก่อน `paid` — mirror กับ BookingConfirmation (user ส่งสลิป = รอ admin ตรวจ, `paid` = ตรวจแล้วเท่านั้น)
+> 🌟 **Refactor (25/08/26):** เพิ่ม `verify_error` เมื่อ admin reject สลิป (แทนการกลับ `draft`) — user ส่งสลิปใหม่จะกลับ `pending`
 
 ```
-                          ┌──────────────────────────────┐
-                          │           cancelled           │ ◄──── admin (from paid/confirmed)
-                          └──────────────────────────────┘
+   ┌─────────┐ user/guest/admin ┌─────────┐  admin   ┌─────────┐   admin    ┌────────────┐  admin/system  ┌─────────────┐
+   │  draft  │ ───────────────► │ pending │ ───────► │   paid  │ ─────────► │ confirmed  │ ─────────────► │  complete   │
+   └─────────┘                  └─────────┘          └─────────┘            └────────────┘                └─────────────┘
+       │                            │
+       │ admin/system               │ admin (reject)
+       │ (เงินสดหน้าเคาน์เตอร์)         ▼
+       │                      ┌──────────────┐ user/guest/admin (ส่งสลิปใหม่)
+       │                      │ verify_error │ ───────────────────────────────┘
+       │                      └──────────────┘
+       │ admin (walk-in skip จนถึง confirmed)
+       └──────────────────────────────────────────────────► confirmed
+```
 
-   ┌─────────┐  user/admin  ┌─────────┐  admin   ┌────────────┐  admin   ┌─────────────┐  admin  ┌─────────────┐
-   │  draft  │ ───────────► │   paid  │ ───────► │ confirmed  │ ───────► │ checked_in  │ ──────► │ checked_out │
-   └─────────┘              └─────────┘          └────────────┘          └─────────────┘         └─────────────┘
-       │                        │                      │
-       │ admin (walk-in)        │                      │ admin
-       └────────────────────────┼──────────────────────┴───► no_show
-                                │
-       user/admin/system        │
-       └──────────────────► deleted
+**Valid Transitions (Container):**
 
-   Special: webhook (system role) can do draft → paid only
+| From          | To             | Allowed Roles              |
+|---------------|----------------|----------------------------|
+| `draft`       | `pending`      | user, guest, admin (ส่งสลิป รอตรวจ) |
+| `draft`       | `paid`         | admin, system (เงินสดหน้าเคาน์เตอร์ / webhook อนาคต) |
+| `draft`       | `confirmed`    | admin (walk-in only)       |
+| `pending`     | `paid`         | admin (verify สลิปผ่าน)     |
+| `pending`     | `verify_error` | admin (reject สลิป — ให้ user ส่งใหม่) |
+| `verify_error`| `pending`      | user, guest, admin (ส่งสลิปใหม่ รอตรวจ) |
+| `paid`        | `confirmed`    | admin                      |
+| `confirmed`   | `complete`     | admin, system (auto-sync)  |
+
+> ❌ **ไม่มี `cancelled`** — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+> 🧹 `pending` และ `verify_error` ที่หมด deadline **ไม่ถูกลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่)
+> 🗑️ **(17/08/26)** เจ้าของ/admin ลบ draft เองได้ผ่าน `DELETE /bookings/{bookingId}` (hard delete cascade + audit log `draft → deleted` ใน status_change_logs)
+> ❌ ไม่มี `deleted` เป็น state — เป็นการลบจริง (cascade BR + Addon + Payment)
+> 💳 **(25/09/26) หมายเหตุ payment types:** `paid` ของ booking `deposit` = "งวดปัจจุบันผ่านแล้ว" — `is_paid` ยัง false จนจ่ายครบ (is_paid = SUM(payments) ≥ total + charges_total) · `deferred` อนุมัติด้วย transition `draft → confirmed` (walk-in path เดิม — ไม่เพิ่ม state) · draft `deferred` **ยกเว้น CleanupExpiredDrafts + ยึด slot ต่อ** จน admin อนุมัติหรือลบ · draft ที่มี payments row ไม่ถูก cleanup ลบ (กัน ledger หาย)
+
+---
+
+### BookingConfirmation State Machine (24/07/26)
+
+🌟 **Replaces payments/receipts flow.** 1:N with bookings — เก็บ history ทุกครั้งที่ user ส่งหลักฐานการชำระ (แม้ reject)
+
+```
+   ┌─────────┐  admin   ┌──────────┐
+   │ pending │ ───────► │ verified │ (terminal — booking pending → paid → confirmed)
+   └─────────┘          └──────────┘
+       │
+       │ admin
+       ▼
+   ┌──────────┐
+   │ rejected │ (terminal — booking เปลี่ยนเป็น verify_error, user ส่งสลิปใหม่เพื่อลองอีก)
+   └──────────┘
 ```
 
 **Valid Transitions:**
 
-| From          | To            | Allowed Roles                    |
-|---------------|---------------|----------------------------------|
-| `draft`       | `paid`        | user, guest, admin, system       |
-| `draft`       | `checked_in`  | admin (walk-in only)             |
-| `draft`       | `deleted`     | user, guest, admin, system       |
-| `paid`        | `confirmed`   | admin                            |
-| `paid`        | `cancelled`   | admin                            |
-| `confirmed`   | `cancelled`   | admin                            |
-| `confirmed`   | `checked_in`  | admin                            |
-| `confirmed`   | `no_show`     | admin                            |
-| `checked_in`  | `checked_out` | admin                            |
+| From       | To         | Allowed Roles | Side effect on booking          |
+|------------|------------|---------------|---------------------------------|
+| `pending`  | `verified` | admin         | booking `pending → paid → confirmed` + `is_paid=true` |
+| `pending`  | `rejected` | admin         | booking `pending → verify_error` (ส่งใหม่ได้) |
+
+> ✅ `verified` + `rejected` = terminal (ไม่ย้อนกลับ — จะแก้ทำ row ใหม่แทน เพื่อรักษา audit trail)
+> ✅ **1 pending max guard** — ถ้ามี pending อยู่แล้ว → POST confirm จะ 422 (กัน spam)
+> ✅ User re-submit หลัง reject → สร้าง row ใหม่ status=pending (row rejected เก่ายังอยู่ใน history)
+
+---
+
+### BookingRoom State Machine (BR-level)
+
+> 🌟 **New (25/06/26):** แต่ละห้องมี state machine ของตัวเอง (รองรับหลายห้อง/หลายวันต่อ booking)
+
+```
+   ┌─────────┐  admin/system  ┌────────────┐   admin    ┌─────────────┐   admin   ┌──────────────┐
+   │  draft  │ ─────────────► │ confirmed  │ ─────────► │ checked_in  │ ────────► │ checked_out  │
+   └─────────┘                 └────────────┘            └─────────────┘           └──────────────┘
+                                    │
+                                    │ admin
+                                    └────────────────► no_show
+```
+
+**Valid Transitions (BR-level):**
+
+| From          | To            | Allowed Roles |
+|---------------|---------------|---------------|
+| `draft`       | `confirmed`   | admin, system |
+| `confirmed`   | `checked_in`  | admin         |
+| `confirmed`   | `no_show`     | admin         |
+| `checked_in`  | `checked_out` | admin         |
+
+> **Container auto-sync:** เมื่อ BR ทุกห้องเป็น `checked_out`/`no_show` → booking container → `complete`
+>
+> 🌟 **(17/08/26) Draft-editable window:** ถ้า parent booking เป็น `draft` และ BR เป็น `draft` —
+> แก้ไขห้องได้ทุก field ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` (เช็ค availability + คิดราคาใหม่ที่ server)
+> และลบห้องออกได้ผ่าน `DELETE /bookings/{bookingId}/rooms/{bookingRoomId}` (ห้องสุดท้ายลบไม่ได้ — ให้ลบทั้ง booking)
 
 ---
 
 ### Room State Machine
 
-**Allowed statuses:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `maintenance`, `reserved_closed`
+**Allowed statuses:** `available`, `occupied`, `checkout_makeup`, `prep_checkin`, `dirty`
+
+> 🗓️ **(2026-09-24 — room-state-periods):** `maintenance` และ `reserved_closed` **ถูกถอดออกจาก machine แล้ว** — "ซ่อมแซม/ห้องสำรอง" เป็นช่วงวันที่บน `room_state_periods` (ดู [Room state periods](#️-room-state-periods--ห้องสำรองซ่อมแซม-เป็นช่วงเวลา-2026-09-24)) ไม่ใช่สถานะ · lifecycle ของห้องวิ่งแค่ 5 สถานะนี้
 
 **Common transitions (driven by `Room::transitionStatusTo()`):**
 
@@ -1546,7 +3558,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Walk-in / Check-in         | available/prep    | `occupied`          |
 | Check-out                  | occupied          | `checkout_makeup`   |
 | Housekeeping done          | checkout_makeup   | `available`         |
-| Admin manual update        | any → any         | (validated)         |
+| Admin manual update        | validated pairs   | (see `Room::transitionStatusTo()`) |
 
 > The `transitionStatusTo()` method enforces valid transitions and logs who changed the status.
 
@@ -1561,7 +3573,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Auth (login/register) | ✅     | ✅    | ✅    |
 | Rooms (read)          | ✅     | ✅    | ✅    |
 | Availability          | ✅     | ✅    | ✅    |
-| Addon Rates (read)    | ✅     | ✅    | ✅    |
+| Global Rates (read)   | ✅     | ✅    | ✅    |
 | Profile (`/me`)       | ❌     | ✅    | ✅    |
 | Create Booking        | ❌     | ✅    | ✅    |
 | View Own Bookings     | ❌     | ✅    | ✅    |
@@ -1569,9 +3581,13 @@ Returns tasks with status `pending` or `in_progress`.
 | User Management       | ❌     | ❌    | ✅    |
 | Booking Status Change | ❌     | ❌    | ✅    |
 | Assign Rooms          | ❌     | owner | ✅    |
+| Add Rooms to Booking  | ❌     | owner | ✅    |
 | Front Desk Ops        | ❌     | ❌    | ✅    |
 | Room Status Update    | ❌     | ❌    | ✅    |
-| Addon Rate Update     | ❌     | ❌    | ✅    |
+| Global Rate Update    | ❌     | ❌    | ✅    |
+| Validate Discount (preview) 🎟️ | ❌ | ✅ | ✅ |
+| Apply/Remove Discount Code (draft) 🎟️ | ❌ | owner | ✅ |
+| Discounts Admin CRUD / Toggle 🎟️ | ❌ | ❌ | ✅ |
 | Dashboard/Housekeeping| ❌     | ❌    | ✅    |
 | Payment Webhook       | ✅     | ✅    | ✅    |
 
@@ -1581,25 +3597,30 @@ Returns tasks with status `pending` or `in_progress`.
 
 These endpoints exist but are **not production-ready**:
 
-| Endpoint                            | Status                  |
-|-------------------------------------|-------------------------|
-| `POST /bookings/validate-discount`  | 🚧 Testing only         |
-| `POST /upload-image`                | 🚧 Testing only         |
+| Endpoint / Module                   | Status                          |
+|-------------------------------------|---------------------------------|
+| `POST /payments`                    | 🚧 Demo (mock gateway)          |
+| `POST /payment/webhook`             | 🚧 Demo (signature verify TBD)  |
+| `POST /front-desk/{id}/payment`     | ⚠️ Demo record-payment (admin)  |
+| Receipt model / auto-generation     | ⚠️ Demo (tied to payment flow)  |
+
+> 🖼️ **(19/08/26)** — `POST /upload-image` (draft, unauthenticated) ถูก**ถอดออกแล้ว** — ระบบรูปใช้งานจริงผ่าน flow ของเจ้าของ (เช่น `POST /bookings/{id}/confirm`) + ดูผ่าน `GET /images/{id}/file` (signed URL)
 
 ---
 
 ### Pricing Notes
 
-- All prices stored as **integers** (baht, no decimals) since 2026-06-05.
-- Room rates come from `room_types.rate_daily_general` (or `rate_daily_ku` for members).
-- Addon rates come from `addon_rates.default_price` — **server-side only** (clients cannot send prices).
+- All prices stored as **integer baht (non-decimal)** since 2026-09-11 — ก่อนหน้านั้นเป็น integer satang (2026-06-05) และ `rates`/`extra_bed_price` ของ RoomType เป็น baht string 2 ตำแหน่ง (03/09/26, ยกเลิกแล้ว)
+- Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
+- 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
+- Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
 - Pricing formula per room:
   ```
-  subtotal = (room_type.rate × nights)
+  subtotal = (global_rates[rate_type='daily'].default_price × nights)
            + (extra_bed_qty × extra_bed_rate × nights)
            + (breakfast_qty × breakfast_rate)
-           + (early_checkin ? early_checkin_rate : 0)
-           + (late_checkout ? late_checkout_rate : 0)
+           + (early_hours × early_checkin_rate)
+           + (late_hours × late_checkout_rate)
   ```
 
 ---
@@ -1609,7 +3630,7 @@ These endpoints exist but are **not production-ready**:
 | Type           | Format                  | Example            |
 |----------------|-------------------------|--------------------|
 | Confirmation # | `YYYYMM-XXXXX`          | `202606-00001`     |
-| Receipt #      | `RCP-YYYYMM-XXXXX`      | `RCP-202606-00001` |
+| Receipt #      | `REC-YYYYMM-XXXXX`      | `REC-202606-00001` |
 
 Both use atomic counters (`booking_sequences` / `receipt_sequences` tables) with `SELECT FOR UPDATE` to prevent collisions.
 
@@ -1619,31 +3640,33 @@ Both use atomic counters (`booking_sequences` / `receipt_sequences` tables) with
 
 **Login:**
 ```bash
-curl -X POST http://localhost/api/v1/login \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"password"}'
 ```
 
 **Create Booking:**
 ```bash
-curl -X POST http://localhost/api/v1/bookings \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 1|your_token_here" \
   -d '{
     "source": "online",
-    "check_in": "2026-07-01",
-    "check_out": "2026-07-03",
     "booking_rooms": [{
       "room_type_id": "rt-uuid",
-      "quantity": 1,
-      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai","is_ku_member":false}]
+      "check_in": "2026-07-01",
+      "check_out": "2026-07-03",
+      "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
+      "billing_address": null,
+      "billing_comment": null,
+      "addons": {"extra_bed": 0, "breakfast": 2, "early_checkin": 0, "late_checkout": 0}
     }]
   }'
 ```
 
 **Check-in (Front Desk):**
 ```bash
-curl -X POST http://localhost/api/v1/front-desk/booking-uuid/check-in \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/check-in \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 1|admin_token_here" \
   -d '{"assigned_rooms":["room-uuid-1"]}'
@@ -1651,4 +3674,958 @@ curl -X POST http://localhost/api/v1/front-desk/booking-uuid/check-in \
 
 ---
 
-*Last updated: 2026-06-19 · KU HOME API v1*
+## 📊 Reports & Additional Charges (ระบบรายงาน Excel 15 ฉบับ) — 05/10/26
+
+> ระบบรายงาน Excel 15 ฉบับ (phpoffice/phpspreadsheet 5.x) + ระบบจัดการค่าใช้จ่ายเพิ่มเติม (Additional Charges ledger) ตามข้อกำหนด `wayfinder/excel-reports` (spec §2, §2.3, §2.6, §4)
+
+### 1. ระบบรายงาน Excel (Excel Export 15 ฉบับ)
+
+- **สถาปัตยกรรม & การส่งไฟล์:** 
+  - สตรีมไฟล์ `.xlsx` สดออกจากหน่วยความจำทันที (Synchronous streaming — ไม่มีไฟล์ค้างบน disk)
+  - รูปแบบการจัดหน้า: Minimal flat table ขาวดำ, ไม่ merge cells, header & summary แถวหนา (Bold), freezePane แถวข้อมูล, repeat print title แถวหัวตาราง, หน้ากระดาษ A4 แนวนอน (Landscape), เปิด autoFilter ให้กรองใน Excel ได้
+  - วันที่จัดรูปแบบเป็น พ.ศ. (`d/m/YYYY`) และยอดเงิน (`money_baht`) จัดรูปแบบเป็นตัวเลขจำนวนเต็มบาท `#,##0` ไม่มีทศนิยม
+- **HTTP Headers ที่ตอบกลับ (StreamedResponse):**
+  ```http
+  Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+  Content-Disposition: attachment; filename=report.xlsx; filename*=UTF-8''<url_encoded_filename>
+  Cache-Control: max-age=0
+  ```
+- **สิทธิ์การเข้าถึง (Authorization):**
+  - ทุกรายงานเข้าถึงได้โดยผู้ใช้สิทธิ์ `admin` และ `staff`
+  - มี **2 ฉบับแม่บ้าน** ที่อนุญาตให้ผู้ใช้สิทธิ์ `housekeeping` เข้าถึงเพิ่มเติมได้ ได้แก่ `housekeeping` และ `housekeeping-v2`
+- **อัตราจำกัดการเรียก (Rate Limit / Throttle):** `10,1` (10 ครั้ง/นาที ต่อ IP/ผู้ใช้ ในกลุ่ม lookups)
+- **รหัสข้อผิดพลาด (Error Contract):**
+  - `401 Unauthorized` — ไม่ได้ส่ง Sanctum Bearer Token หรือ Token หมดอายุ (เกิน 8 ชั่วโมง)
+  - `403 Forbidden` — ผู้ใช้ไม่มีสิทธิ์เข้าถึงรายงาน (`{"status":"error","message":"คุณไม่มีสิทธิ์เข้าถึงรายงานนี้ค่ะ"}`)
+  - `404 Not Found` — ไม่พบ slug รายงานที่ระบุในระบบ (`{"status":"error","message":"ไม่พบรายงานที่ระบุค่ะ"}`)
+  - `422 Unprocessable Content` — พารามิเตอร์ไม่ผ่านเงื่อนไขการตรวจสอบตาม `filterRules()` ของรายงานนั้นๆ (เช่น ไม่ได้ระบุวันที่, รูปแบบวันที่ผิด, หรือช่วงวันที่เกินเพดาน 366 วัน)
+  - `500 Internal Server Error` — เกิดข้อผิดพลาดฝั่งเซิร์ฟเวอร์ โดยจะตอบกลับ generic message และบันทึกรายละเอียดลงใน error log
+
+#### ตารางรายละเอียดรายงานทั้ง 15 ฉบับ (`GET /api/v1/reports/{slug}/export`)
+
+| Slug | ชื่อรายงาน (ภาษาไทย) | สิทธิ์ (Role) | Query Parameters & กฎการตรวจสอบ (จาก `filterRules()` จริง) |
+|---|---|---|---|
+| `check-in` | รายงานห้องเข้าพัก | `admin`, `staff` | • `checkin_date` *(required, date)*: วันที่เช็คอิน<br>• `room_type` *(nullable, string, max:100)*: กรองตามประเภทห้อง (เช่น Deluxe, Standard หรือ 'ทุกประเภท') |
+| `check-out` | รายงานห้องออก | `admin`, `staff` | • `checkout_date` *(required, date)*: วันที่เช็คเอาท์<br>• `room_type` *(nullable, string, max:100)*: กรองตามประเภทห้อง |
+| `daily-financial` | รายงานการเงินประจำวัน | `admin`, `staff` | • `date` *(required, date)*: วันที่ทำรายการการเงิน<br>• `payment_channel` *(nullable, in:ทั้งหมด,สลิป (โอน/QR),เงินสด)*: ค่าเริ่มต้นคือ 'ทั้งหมด' (ที่มาเงิน derive จาก reference_number โดย confirmation UUID = สลิป ไม่งั้นคือเงินสด) |
+| `deposit` | รายงานยอดมัดจำ / ยอดค้างชำระ | `admin`, `staff` | • `date` *(required, date)*: วันที่สร้างการจอง<br>• `guest_type` *(nullable, in:หน่วยงาน/ทั่วไป,หน่วยงาน,ทั่วไป)*: ค่าเริ่มต้นคือ 'หน่วยงาน/ทั่วไป' |
+| `occupancy` | รายงานการเข้าพัก 7 วันถัดไป | `admin`, `staff` | • `date` *(required, date)*: วันที่เริ่มต้นช่วง 7 คืน |
+| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด,ชุด 100,ชุด 200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' |
+| `erp-transfer` | รายงานการโอนระหว่างหน่วยงาน | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้นสร้างการจอง<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง date_from ถึง date_to ต้อง ≤ 366 วัน)<br>• `agency_code` *(nullable, string, max:100)*: รหัส ERP ของหน่วยงาน |
+| `housekeeping` | รายงานแม่บ้าน (v1) | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้านและสถานะห้องพัก |
+| `housekeeping-v2` | รายงานแม่บ้าน v2 | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้าน (หัวคอลัมน์ checklist 3 ช่องอ่านจาก config `reporting.cleaning_checks`) |
+| `room-status` | รายงานสถานะห้องพัก real-time | `admin`, `staff` | • `status` *(nullable, in:ทุกสถานะ,OCC,OOO,EA,VD,VC)*: กรองสถานะห้อง (รายงาน snapshot ณ เวลาที่ export ปัจจุบัน — **ไม่รับพารามิเตอร์วันที่**) |
+| `extra-bed` | รายงานเตียงเสริม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน — **คอลัมน์ขยาย dynamic ตามคืนในช่วงวันที่**, ยอด inventory อิง config `reporting.extra_bed_fleet_size`) |
+| `supplies` | รายงานวัสดุสิ้นเปลือง | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `category` *(nullable, string, max:100)*: หมวดหมู่พัสดุ (แสดง minimal จาก `stock_inventories` ฟิลด์ที่ไม่มีตารางรองจะเว้นว่าง) |
+| `out-of-service-room` | รายงานห้องชำรุด/บำรุงรักษา | `admin`, `staff` | • `date_from` *(required, date)*: วันที่แจ้งซ่อมเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `work_type` *(nullable, in:ทุกประเภท,ไฟฟ้า,ประปา,งานระบบ)*: ประเภทงานซ่อม |
+| `additional-charges` | รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม | `admin`, `staff` | • `date_from` *(required, date)*: วันที่ทำรายการเริ่มต้น<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง ≤ 366 วัน)<br>• `item_type` *(nullable, in:ทุกประเภท,ค่าเสียหาย,ค่ายืม,บริการเสริม)*: ประเภทรายการ |
+| `manager` | รายงานผู้จัดการ (Manager Report) | `admin`, `staff` | • `date` *(required, date)*: วันที่ประจำรายงาน<br>• `mode` *(nullable, in:Complete,Week,Month)*: โหมดรายงาน (ค่าเริ่มต้นคือ 'Complete')<br>• `date_from` *(required_if:mode,Month, date)*: วันที่เริ่มต้นช่วงเดือนที่เลือก (เฉพาะเมื่อ `mode=Month`)<br>• `date_to` *(required_if:mode,Month, date, after_or_equal:date_from)*: วันสิ้นสุด (เฉพาะเมื่อ `mode=Month`, ช่วงห่าง ≤ 366 วัน) |
+
+---
+
+### 2. Additional Charges CRUD (ค่าปรับ / ค่าเสียหาย / บริการเสริม — REQ-042/044)
+
+ตาราง `additional_charges` เป็น ledger ค่าปรับ/ค่าเสียหาย (damage), ค่ายืมอุปกรณ์ (rental) และบริการเสริมกรอกเอง (addon — REQ-044)
+
+> 💳 **อัปเดต 15/10/26 (srs-v2-gap-closure ticket 13) — ยอดบวกยอดจริงที่ booking แล้ว** (เดิมเป็น report-only ledger):
+> - `total_amount` ของ booking **คงค่าห้องล้วน** (invariant Σ `booking_rooms.amount` == `total_amount` ไม่เปลี่ยน) — booking ทุก response เพิ่ม append **`charges_total`** (Σ additional_charges)
+> - **`outstanding_amount` = total + charges_total − paid** · **`is_paid` = paid ≥ total + charges_total** — สร้าง/แก้/ลบ charge ระบบ recompute `is_paid` ให้อัตโนมัติ (เช่น ลบ charge แล้วเงินพอ → กลับมา `true`)
+> - `deposit_amount` (มัดจำ 50%) **ไม่ขยับ** — มัดจำผูกค่าห้อง ไม่รวมค่าเสียหายที่ยังไม่เกิด
+> - บันทึก charge ได้**ทุกสถานะ booking** — ยอดบวกจริงทันที · เก็บเงินหลังเข้าพักผ่าน **`POST /front-desk/{bookingId}/payment` (recordPayment) เท่านั้น** (admin+staff) — ไม่เปิดให้ user ส่งสลิปเพิ่มผ่าน confirm flow
+> - **สิทธิ์:** `admin` และ `staff` เท่านั้น (ทั้ง GET/POST/PATCH/DELETE)
+
+#### `POST /api/v1/additional-charges` (สร้างรายการ)
+สร้างรายการบันทึกค่าเสียหาย ค่ายืม หรือบริการเสริมเพิ่มเติม
+
+**Request Headers:**
+```http
+Authorization: Bearer <token>
+Content-Type: application/json
+Accept: application/json
+```
+
+**Request Body (`StoreAdditionalChargeRequest`):**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `booking_id` | UUID | Yes | รหัสการจองที่ผูกรายการ (`exists:bookings,id`) |
+| `booking_room_id` | UUID | No | ห้องพักที่ผูก (nullable) — **ต้องเป็น booking_room ลูกของ `booking_id` เดียวกัน (422 ถ้าไม่ใช่)** · ใส่ = จดต่อห้อง (REQ-042) · เว้น = รวมทั้ง booking |
+| `transaction_date` | Date string | Yes | วันที่ทำรายการ รูปแบบ `YYYY-MM-DD` |
+| `item_code` | String | No | รหัสรายการ/สินค้า (nullable, สูงสุด 100 ตัวอักษร) |
+| `item_name` | String | Yes | ชื่อรายการ เช่น "ค่าเสียหาย ปลอกหมอน", "บริการเสริม ตกแต่งห้อง" (สูงสุด 255 ตัวอักษร) |
+| `qty` | Integer | No | จำนวน (ขั้นต่ำ 1, ค่าเริ่มต้นคือ 1) |
+| `unit` | String | No | หน่วยนับ เช่น "ชิ้น", "อัน", "ครั้ง" (nullable, สูงสุด 50 ตัวอักษร) |
+| `price` | Integer | Yes | ราคารวมของรายการ หน่วยเป็น **จำนวนเต็มบาท (integer baht)** ขั้นต่ำ 0 |
+| `charge_type` | String | Yes | ประเภทรายการ: `damage` (ค่าเสียหาย), `rental` (ค่ายืม) หรือ `addon` (บริการเสริมกรอกเอง — REQ-044) |
+
+**Response (201 Created)** — แนบ snapshot เงินของ booking กลับมาให้หน้างานอัปเดตรอบเดียว:
+```json
+{
+  "status": "success",
+  "message": "บันทึกรายการค่าใช้จ่ายเรียบร้อยแล้วค่ะ 💸",
+  "additional_charge": {
+    "id": "ac-uuid-here",
+    "booking_id": "booking-uuid-here",
+    "booking_room_id": "booking-room-uuid-here",
+    "transaction_date": "2026-10-15T00:00:00.000000Z",
+    "item_code": null,
+    "item_name": "ค่าเสียหาย แก้วน้ำแตก",
+    "qty": 1,
+    "unit": "ใบ",
+    "price": 250,
+    "charge_type": "damage",
+    "recorded_by": "user-uuid-here",
+    "created_at": "2026-10-15T14:00:00.000000Z",
+    "updated_at": "2026-10-15T14:00:00.000000Z"
+  },
+  "booking_id": "booking-uuid-here",
+  "total_amount": 1500,
+  "charges_total": 250,
+  "paid_amount": 1500,
+  "outstanding_amount": 250,
+  "booking_is_paid": false,
+  "booking_status": "confirmed"
+}
+```
+
+#### `GET /api/v1/bookings/{bookingId}/additional-charges` (รายการต่อ booking — ใหม่ 15/10/26)
+ดึงรายการค่าใช้จ่ายทั้งหมดของ booking (เรียงตาม `transaction_date`) พร้อม snapshot เงิน — ใช้หน้า front desk · 🆕 endpoint นี้ปลดธรรมเนียมเดิม "ไม่มี GET อ่านผ่าน report อย่างเดียว" เพราะยอดเงินของ booking ตอนนี้ขึ้นกับ charges แล้ว
+
+- URL Parameter: `bookingId` (UUID ของ booking) · **สิทธิ์:** `admin`, `staff`
+- แต่ละแถวมี relation `booking_room` (+ `room`) และ `recorder` ถ้ามี
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ดึงรายการค่าใช้จ่ายเรียบร้อยแล้วค่ะ",
+  "additional_charges": [ ... ],
+  "booking_id": "booking-uuid-here",
+  "total_amount": 1500,
+  "charges_total": 350,
+  "paid_amount": 1500,
+  "outstanding_amount": 350,
+  "booking_is_paid": false,
+  "booking_status": "confirmed"
+}
+```
+
+#### `PATCH /api/v1/additional-charges/{id}` (แก้ไขรายการ)
+แก้ไขข้อมูลรายการตาม UUID (`UpdateAdditionalChargeRequest`) — validation เดียวกับ POST (รวม `booking_room_id` ต้องเป็นลูกของ `booking_id` — ถ้าไม่ส่ง `booking_id` มาด้วย ระบบเทียบกับ booking ปัจจุบันของรายการ) · แก้แล้ว recompute `is_paid` ให้อัตโนมัติ (ย้าย charge ข้าม booking จะ recompute ทั้งสองฝั่ง)
+
+- URL Parameter: `id` (UUID ของรายการ)
+- Request Body: ฟิลด์เหมือนกับ `POST` ทุกตัว แต่เป็น optional ทั้งหมด (`sometimes`)
+- **Response (200 OK):** รูปแบบเดียวกับ POST (รายการ + snapshot เงิน booking)
+
+#### `DELETE /api/v1/additional-charges/{id}` (ลบรายการ)
+ลบรายการออกจาก ledger — ถ้าการลบทำให้ `paid ≥ total + charges` อีกครั้ง ระบบตั้ง `is_paid` กลับเป็น `true` ให้เอง (โดยไม่เปลี่ยนสถานะ booking)
+
+- URL Parameter: `id` (UUID ของรายการ)
+- **Response (200 OK):** `{"status":"success","message":"ลบรายการเรียบร้อยแล้วค่ะ 🗑️","additional_charge_id":"...","booking_id":"...","total_amount":1500,"charges_total":0,"paid_amount":1500,"outstanding_amount":0,"booking_is_paid":true,"booking_status":"confirmed"}`
+
+---
+
+### 3. Booking Attributes 4 ฟิลด์ใหม่ (ระดับ Booking Container)
+
+ระบบเพิ่ม 4 ฟิลด์ใหม่บนตาราง `bookings` เพื่อรองรับรายงานและการทำงานของฝ่ายจัดการ (spec §2.1):
+
+| Field | Type | คำอธิบาย |
+|---|---|---|
+| `invoice_requested_at` | nullable timestamp / date | เวลาที่เจ้าหน้าที่กดทำเรื่องขอใบแจ้งหนี้ ERP (null = ยังไม่ได้ทำเรื่อง) |
+| `special_request` | nullable string (max: 2000) | คำขอพิเศษของผู้เข้าพัก (แสดงซ้ำในทุกห้องของ booking เดียวกันในรายงาน) |
+| `comment` | nullable string (max: 2000) | หมายเหตุฝั่งแอดมินหรือฝ่ายบัญชีงาน ERP (**แยกออกจาก special_request**) |
+| `is_complimentary` | nullable boolean (default: false) | ป้ายกำกับห้องพักอภินันทนาการ (**Tag-only — ไม่แตะ invariant การเงินหรือลดราคายอดจองใดๆ**) |
+
+🔒 **กติกาสิทธิ์การแก้ไข (Authorization):**
+- ฟิลด์ทั้ง 4 ตัวนี้ **ตั้งได้เฉพาะผู้ใช้สิทธิ์ `admin` หรือ `system` เท่านั้น**
+- สามารถส่งได้ผ่าน 2 ช่องทาง:
+  1. `POST /api/v1/bookings` (ตอนสร้างการจอง)
+  2. `PUT /api/v1/bookings/{id}` (ตอนแก้ไขข้อมูลการจอง)
+- หากผู้ใช้ role อื่น (เช่น `user`, `guest`, `staff`) ส่งฟิลด์ใดฟิลด์หนึ่งใน 4 ตัวนี้มา ระบบจะปฏิเสธด้วย HTTP **`403 Forbidden`** ทันที
+
+---
+
+### 4. หมายเหตุ Wire Format สำหรับ Addons & Room Types
+
+- **`room_types.extra_bed_price` (Display-only):**
+  - ฟิลด์ `extra_bed_price` บนโมเดล `RoomType` (ที่ส่งกลับใน availability / calendar endpoints) ทำหน้าที่เป็น **display-only สำหรับการแสดงผลหน้า UI เท่านั้น**
+  - การคำนวณเงินจริงของระบบอ้างอิงจาก `global_rates` (code: `extra_bed`) ผ่าน `AddonPricing` เสมอ
+- **Addon Canonical Wire Format (รูปแบบมาตรฐานใหม่):**
+  - **ชุดอาหารเช้า (Breakfast):** ส่งเป็น `breakfast_sets` object แยก 2 ราคา:
+    ```json
+    "addons": {
+      "breakfast_sets": {
+        "set_100": 1,
+        "set_200": 2
+      }
+    }
+    ```
+  - **เตียงเสริม (Extra Bed):** ส่งเป็น `extra_beds_by_night` object ในรูปแบบ Map รายคืนของช่วงที่พัก `[check_in, check_out)`:
+    ```json
+    "addons": {
+      "extra_beds_by_night": {
+        "2026-10-10": 1,
+        "2026-10-11": 2
+      }
+    }
+    ```
+- **การรองรับ Legacy Alias (ย้อนหลัง):**
+  - ระบบยังคงรับและแปลงค่าผ่านคลาส `App\Services\Addon\AddonPricing` อัตโนมัติ:
+    - ส่ง `breakfast: N` (integer เดิม) → ถูก normalize แปลงเป็น `set_200 = N` (เรทเดิม 200 บาท)
+    - ส่ง `extra_bed: N` หรือ `extra_beds: N` (integer เดิม) → ถูก normalize เป็น flat map ทุกคืนเท่ากับ $N$ เตียงตลอดช่วงเวลาเข้าพัก
+
+---
+
+### 5. Housekeeping Task Checklist Tick (บันทึก Checklist แม่บ้าน)
+
+`PATCH /api/v1/dashboard/tasks/{id}/status` รองรับการบันทึกรายการตรวจสอบความสะอาด 3 ข้อ (spec §2.4):
+- **สิทธิ์:** `admin` หรือ `housekeeping`
+- **ฟิลด์ Request Body:**
+  - `cleaning_check_1`: nullable boolean — ตรวจความสะอาดข้อ 1 (ค่าเริ่มต้น: ทำความสะอาดห้องน้ำ)
+  - `cleaning_check_2`: nullable boolean — ตรวจความสะอาดข้อ 2 (ค่าเริ่มต้น: เครื่องนอน/ผ้า)
+  - `cleaning_check_3`: nullable boolean — ตรวจความสะอาดข้อ 3 (ค่าเริ่มต้น: พื้น + ขยะ)
+  - `status`: nullable string (`in_progress`, `done`) — **เป็น optional เมื่อมีการส่ง checklist ข้อใดข้อหนึ่งมาด้วย** (`required_without_all:cleaning_check_1,cleaning_check_2,cleaning_check_3`)
+- **พฤติกรรม:** การส่งเฉพาะ checklist (tick ล้วน) ถือเป็น **การบันทึกข้อมูลประกอบการทำงาน ไม่จำเป็นต้องเปลี่ยนสถานะงานเป็น `done`** (ไม่บังคับผูกกับ state machine)
+
+---
+
+---
+
+## 🧩 SRS v2 Gap Closure (Tickets 01–07) — 14/10/26
+
+> ผนวกจาก handoff ของ wayfinder map `srs-v2-gap-closure` (dispatch ขนานผ่าน agent-hub/antigravity · gemini-3.8-flash) · ticket 01 (SRS deviation ledger) เป็นเอกสารล้วน อยู่ใน `cline.md` ไม่มี endpoint ใหม่
+
+
+---
+
+## API Doc Handoff — Ticket 02: Guest Cap Validation (REQ-007, REQ-019)
+
+เอกสารส่งมอบสำหรับผู้จัดการเพื่อนำไปผนวกเข้าใน `docs/api_guide.md`
+
+---
+
+## สรุปภาพรวมการเปลี่ยนแปลง (Summary of Changes)
+
+เพิ่มระบบตรวจสอบจำนวนผู้เข้าพัก (Guest Cap Validation) 2 ชั้น ตามข้อกำหนด SRS REQ-007 และ REQ-019:
+1. **ชั้นที่ 1 (Cap Validation):** ตรวจสอบจำนวนผู้เข้าพักใน `guests` array ของแต่ละห้อง ต้องไม่เกิน `max_guests` ของประเภทห้องนั้นๆ
+2. **ชั้นที่ 2 (Confirmation Guest Requirement):** ตรวจสอบก่อนส่งหลักฐานการชำระเงิน (Confirm) ว่าทุกห้องในรายการจองจะต้องมีผู้เข้าพักอย่างน้อย 1 คน (`guests >= 1`)
+
+> **หมายเหตุสำคัญเกี่ยวกับการจอง:**
+> - การสร้างรายการจองในขั้นตอน Draft (`POST /api/v1/bookings`) **ไม่บังคับ** ฟิลด์ `guests` เพื่อรองรับ Real-time Draft Creation Flow ผู้ใช้สามารถสร้างห้องจองก่อนแล้วค่อยกรอกรายชื่อผู้เข้าพักภายหลังได้
+> - รองรับชื่อผู้เข้าพักซ้ำกันในห้องเดียวกันหรือข้ามห้องได้ตาม REQ-019 โดยไม่มีการ reject ด้วย unique validation
+
+---
+
+## Endpoints ที่ได้รับผลกระทบ
+
+### 1. `POST /api/v1/bookings` (สร้างการจองใหม่)
+- **พฤติกรรม:** หากมีการระบุ `guests` ในแต่ละ `booking_rooms` จำนวนสมาชิกใน `guests` ต้องไม่เกิน `room_types.max_guests`
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 2 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 2. `POST /api/v1/bookings/{id}/rooms` (เพิ่มห้องในรายการจอง)
+- **พฤติกรรม:** หากมีการระบุ `guests` ในห้องที่เพิ่ม จำนวนสมาชิกใน `guests` ต้องไม่เกิน `room_types.max_guests` ของห้องนั้น
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 2 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 3. `PUT /api/v1/bookings/{id}/rooms/{roomId}` (แก้ไขห้องเดี่ยว)
+- **พฤติกรรม:** 
+  - หากระบุ `guests` ใหม่: จำนวนคนต้องไม่เกิน `max_guests` ของประเภทห้องที่มีผล (effective room type)
+  - หากระบุเฉพาะ `room_type_id` ใหม่โดยไม่เปลี่ยน `guests`: จำนวน `guests` เดิมของห้องนั้นต้องไม่เกิน `max_guests` ของประเภทห้องใหม่
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 1 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 4. `PUT /api/v1/bookings/{id}/rooms` (แก้ไขห้องแบบกลุ่ม / Batch)
+- **พฤติกรรม:** ตรวจสอบ Final State ของทุกห้องใน Batch หากมีห้องใดห้องหนึ่งมีจำนวน `effectiveGuests` เกิน `effectiveTypeId.max_guests` จะถูก reject ทันที
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "ผู้เข้าพักเกินจำนวนสูงสุด 1 คนของห้องประเภทนี้ค่ะ 🥺"
+  }
+  ```
+
+### 5. `POST /api/v1/bookings/{id}/confirm` (ส่งหลักฐานการชำระเงิน)
+- **พฤติกรรม:** ตรวจสอบทุก `booking_rooms` ของ booking นั้น หากพบห้องใดที่ `guests` ว่างเปล่า (`empty`, `null` หรือ `count < 1`) จะถูกปฏิเสธทันที
+- **Error Response (422 Unprocessable Content):**
+  ```json
+  {
+    "status": "error",
+    "message": "กรุณาระบุข้อมูลผู้เข้าพักอย่างน้อย 1 คนต่อห้องก่อนส่งหลักฐานการชำระเงินค่ะ 🥺"
+  }
+  ```
+
+---
+
+## Request Model / FormRequest
+
+- `App\Http\Requests\StoreBookingRoomRequest`: เพิ่ม `withValidator()` ตรวจสอบกรณี `count(guests) > roomType->max_guests` ส่งคืน validation error key `guests`
+
+
+---
+
+## API Documentation Handoff — Ticket 03 (Front Desk Staff Role / REQ-031)
+
+เอกสารส่งมอบสำหรับผู้จัดการเพื่อนำไปผนวกเข้ากับ `docs/api_guide.md` หลังปิด Ticket 03
+
+---
+
+## สรุปการเปลี่ยนแปลงสิทธิ์ (Permissions Changes)
+
+ตามข้อกำหนด SRS REQ-031 (เปิดให้แผนกต้อนรับ/รปภ. ให้บริการเช็คอิน-เช็คเอาต์ได้ตลอด 24 ชั่วโมง โดยใช้บัญชี role `staff`) ได้มีการปรับเปลี่ยนสิทธิ์การเข้าถึง endpoint ที่เกี่ยวข้องดังนี้:
+
+| Endpoint | Method | สิทธิ์เดิม (Before) | สิทธิ์ใหม่ (After) | เหตุผล |
+|---|---|---|---|---|
+| `/bookings/{bookingId}/assign-rooms` | `PUT` | `admin` (or owner) | `admin`, `staff` (or owner) | เพื่อให้เจ้าหน้าที่หน้าฟร้อนสามารถจัดสรรห้องอัตโนมัติตาม cluster allocator ได้ทันทีเมื่อผู้เข้าพักมาถึง |
+| `/front-desk/{bookingId}/check-in` | `POST` | `admin` | `admin`, `staff` | REQ-031 รับเช็คอินผู้เข้าพักได้ตลอด 24 ชม. |
+| `/front-desk/{bookingId}/check-out` | `POST` | `admin` | `admin`, `staff` | REQ-031 รับเช็คเอาต์ผู้เข้าพักและ trigger งานแม่บ้าน (housekeeping task) อัตโนมัติ |
+| `/front-desk/{bookingId}/payment` | `POST` | `admin` | `admin`, `staff` | จำเป็นอย่างยิ่งในการเคลียร์ยอดค้างชำระหน้าเคาน์เตอร์ก่อนเช็คอิน หรือค่าใช้จ่ายเพิ่มเติมก่อนเช็คเอาต์ |
+| `/front-desk/walk-in` | `POST` | `admin` | `admin` (คงเดิม) | การเปิดห้อง walk-in นอกระบบยังคงสงวนไว้สำหรับระดับบริหาร/Admin |
+| `/front-desk/{bookingId}/mark-no-show` | `POST` | `admin` | `admin` (คงเดิม) | การตัด no-show และริบมัดจำยังคงเป็นอำนาจของ Admin |
+
+---
+
+## ส่วนที่ต้องอัปเดตใน `docs/api_guide.md`
+
+### 1. หมวด `PUT /bookings/{bookingId}/assign-rooms`
+
+**แก้ไขหัวข้อและป้ายกำกับสิทธิ์:**
+```markdown
+### PUT `/bookings/{bookingId}/assign-rooms` — Auto-assign rooms (Admin / Staff)
+
+🔒 **Admin, Staff** (or booking owner)
+```
+
+### 2. หมวด Front Desk Endpoints
+
+**แก้ไขคำนำหน้าหมวดหมู่:**
+```markdown
+> Endpoints in this section are restricted to **Admin** and **Staff** (front-desk operations), except `/walk-in` and `/mark-no-show` which remain strictly **Admin only**.
+```
+
+**แก้ไขป้ายกำกับสิทธิ์ของแต่ละ Endpoint:**
+
+#### `POST /front-desk/{bookingId}/check-in`
+```markdown
+### POST `/front-desk/{bookingId}/check-in` — Check-in guest
+
+🔒 **Admin, Staff**
+```
+
+#### `POST /front-desk/{bookingId}/check-out`
+```markdown
+### POST `/front-desk/{bookingId}/check-out` — Check-out guest
+
+🔒 **Admin, Staff**
+```
+
+#### `POST /front-desk/{bookingId}/payment`
+```markdown
+### POST `/front-desk/{bookingId}/payment` — Record payment
+
+🔒 **Admin, Staff**
+```
+
+*(หมายเหตุ: `POST /front-desk/walk-in` และ `POST /front-desk/{bookingId}/mark-no-show` ยังคงระบุ `🔒 Admin only` ตามเดิม)*
+
+
+---
+
+## API Guide Handoff - Ticket 04: Auto-assign เลขห้องล่วงหน้า 2 วันก่อน check-in (REQ-023)
+
+## ส่วนที่เกี่ยวข้องกับเอกสาร `docs/api_guide.md`
+
+### การเปลี่ยนแปลงในคำสั่ง Daily Room Maintenance (`app:daily-room-maintenance`)
+
+คำสั่ง `php artisan app:daily-room-maintenance` ซึ่งทำงานตามรอบเวลาทุกวัน (Daily Schedule) ได้รับการปรับปรุงเพื่อรองรับข้อกำหนด **REQ-023** โดยมีรายละเอียดดังนี้:
+
+#### 1. การทำงานและลำดับการจัดสรรห้องพักอัตโนมัติ (Auto-assign Pipeline)
+- **ลำดับที่ 1 (Today Check-ins):** ระบบจะค้นหาและจัดสรรหมายเลขห้องพักให้กับบุ๊กกิ้งที่ยืนยันแล้ว (`paid`, `confirmed`) ซึ่งมีกำหนดการเข้าพัก **ในวันนี้ (Today)** ก่อนเสมอ
+- **ลำดับที่ 2 (T-2 Check-ins):** หลังจากจัดสรรห้องพักสำหรับวันนี้เสร็จสิ้น ระบบจะดำเนินการค้นหาและจัดสรรหมายเลขห้องพักให้กับบุ๊กกิ้งที่มีกำหนดการเข้าพัก **ล่วงหน้า 2 วัน (T-2 หรือ Today + 2 วัน)**
+- **การจัดสรรตามอัลกอริทึม:** ใช้ `RoomAllocator` (Hybrid+ v3 cluster algorithm) ร่วมกับการเรียงลำดับความสำคัญของบุ๊กกิ้งด้วย `BookingPriority` (Suite → X09-free → Twin → Most-rooms → Least-checkout)
+- **พฤติกรรม Fail-Safe:** หากห้องพักประเภทที่ต้องการไม่เพียงพอสำหรับการจัดสรรในวัน T-2 ระบบจะไม่หยุดการทำงาน (No Crash/Throw Exception) แต่จะบันทึก Warning Log และคงสถานะ `room_id` ของห้องนั้นเป็น `null` เพื่อให้ผู้ดูแลระบบ (Admin) ตรวจสอบและจัดสรรห้องพักด้วยตนเอง
+
+#### 2. ความสัมพันธ์กับระบบเตรียมห้องพัก (Housekeeping - `prep_checkin`)
+- ห้องพักที่ได้รับการจัดสรรล่วงหน้าสำหรับวัน T-2 จะยังคงสถานะเดิม (`available` หรือ `dirty`) จนกระทั่งถึงวัน T-1 (1 วันก่อนเข้าพัก / Tomorrow)
+- เมื่อถึงวัน T-1 กระบวนการ Sweep ใน `DailyRoomMaintenance` จะดึงห้องพักที่มี `room_id` แล้วและมีกำหนดเข้าพักในวันพรุ่งนี้ เพื่อปรับสถานะเป็น `prep_checkin` และสร้างงานทำความสะอาด `pre_checkin` โดยอัตโนมัติ โดยไม่เกิดงานซ้ำซ้อน
+
+#### 3. การปรับเปลี่ยนและจัดห้องพักด้วยตนเองโดยผู้ดูแลระบบ (Manual Override)
+- การทำงานอัตโนมัตินี้ไม่กระทบต่อฟังก์ชันการจัดห้องและย้ายห้องของผู้ดูแลระบบ:
+  - `PUT /api/v1/bookings/{bookingId}/assign-rooms` ยังคงสามารถเรียกใช้งานเพื่อจัดห้องพักใหม่ได้
+  - `PUT /api/v1/bookings/{bookingId}/rooms/{bookingRoomId}` สามารถแก้ไขเปลี่ยนห้องพัก (`room_id`) ได้
+  - `POST /api/v1/frontdesk/bookings/{id}/check-in` สามารถส่ง `assigned_rooms` เพื่อสลับหรือระบุห้องพักใหม่ในขณะทำการเช็คอินได้ตามปกติ
+
+
+---
+
+## API Documentation Handoff — Ticket 05 (REQ-033: Check-in Evidence Upload)
+
+> เอกสารส่วนต่อขยายสำหรับนำไปผสานเข้าสู่ `docs/api_guide.md` (เขียนแยกตามกติกาห้ามแก้ไข `docs/api_guide.md` โดยตรงใน ticket worktree)
+
+---
+
+## 🛎️ Front Desk Check-in Evidence Operations (REQ-033)
+
+ระบบจัดเก็บและจัดการไฟล์หลักฐานการเข้าพักตอน check-in เช่น บัตรประชาชน (ID Card / Passport), ใบลงทะเบียนเข้าพัก (Registration Form), Guest Register (กระดาษ/ดิจิทัล), เอกสารยินยอม PDPA และเอกสารอื่นๆ โดยใช้โครงสร้าง `images` table ร่วมกับ private disk (`local` = `storage/app/private/checkin_evidences/`) และเข้าถึงไฟล์ผ่าน Signed URL อายุ 15 นาทีตามมาตรฐานความปลอดภัยของ KU HOME API
+
+- **Model ที่ผูก:** `BookingRoom` (Polymorphic `imageable_*` ผ่าน relation `evidences()`)
+- **สิทธิ์การใช้งาน (RBAC):** `admin` และ `staff` เท่านั้น (user / housekeeping ได้ 403 Forbidden)
+- **สถานะห้องพักที่อนุญาต (State Guard):** `confirmed`, `checked_in`, `checked_out` (หากเป็น `draft` หรือ `no_show` จะตอบกลับ `422 Unprocessable Entity`)
+- **ระยะเวลาจัดเก็บ (Retention):** 365 วัน (1 ปี) ตัดตามอายุตรง ๆ ผ่านคำสั่ง `php artisan app:cleanup-images` (รันอัตโนมัติรอบ 02:30 ทุกวัน)
+
+---
+
+### 1. Upload Check-in Evidence
+
+อัปโหลดไฟล์หลักฐานการเข้าพักสำหรับห้องพักที่ระบุ (`booking_rooms.id`)
+
+- **Method:** `POST`
+- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **Headers:**
+  - `Authorization: Bearer <TOKEN>`
+  - `Content-Type: multipart/form-data`
+  - `Accept: application/json`
+- **Roles:** `admin`, `staff`
+- **Path Parameters:**
+  - `id` *(string, required)*: UUID ของ `booking_rooms`
+- **Body (Multipart Form-Data):**
+  - `file` *(file, required)*: ไฟล์ภาพหรือเอกสาร (mimes: `jpeg, png, jpg, webp, pdf`, ขนาดสูงสุด 10MB = 10,240 KB)
+  - `type` *(string, required)*: ประเภทของหลักฐาน ค่าที่รองรับได้แก่:
+    - `id_card`: บัตรประจำตัวประชาชน หรือ Passport
+    - `registration`: ใบลงทะเบียนการเข้าพัก (Registration Form)
+    - `guest_register`: Guest Register
+    - `pdpa`: เอกสารยินยอม PDPA
+    - `other`: เอกสารอื่นๆ
+  - `note` *(string, optional)*: หมายเหตุเพิ่มเติม (ความยาวไม่เกิน 1,000 ตัวอักษร)
+
+#### Success Response (201 Created)
+
+```json
+{
+  "status": "success",
+  "message": "อัปโหลดหลักฐานการเข้าพักเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "01a1386c-ec31-7203-8e78-dcf3bbd84a0d",
+    "booking_room_id": "01a1386c-eb99-7032-9cb1-8de20df98a12",
+    "type": "id_card",
+    "metadata": {
+      "type": "id_card",
+      "note": "บัตรประชาชนนายสมชาย"
+    },
+    "file_name": "id_card.jpg",
+    "mime_type": "image/jpeg",
+    "size": 102400,
+    "url": "https://ku-home.ku.ac.th/backend/api/v1/images/01a1386c-ec31-7203-8e78-dcf3bbd84a0d/file?expires=1770956400&signature=abcdef123456...",
+    "created_at": "2026-10-14T03:20:00.000000Z"
+  }
+}
+```
+
+#### Error Responses
+
+- **401 Unauthorized:** ไม่ได้ส่ง Token หรือ Token หมดอายุ
+- **403 Forbidden:** ผู้ใช้ไม่ใช่ role `admin` หรือ `staff`
+- **404 Not Found:** ไม่พบ `booking_room` ตาม UUID ที่ส่งมา
+- **422 Unprocessable Entity:** 
+  - ส่งประเภทหลักฐานผิด / ไม่ได้แนบไฟล์ / ไฟล์เกิน 10MB / นามสกุลไฟล์ไม่รองรับ
+  - สถานะห้องไม่อยู่ในกลุ่มที่อนุญาต (เช่น ยังเป็น `draft` หรือถูกมาร์ก `no_show`)
+
+---
+
+### 2. Get Check-in Evidences
+
+ดึงรายการหลักฐานทั้งหมดของห้องพักที่ระบุ พร้อม Signed URL สดใหม่ (อายุ 15 นาที) สำหรับเปิดดูไฟล์
+
+- **Method:** `GET`
+- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **Headers:**
+  - `Authorization: Bearer <TOKEN>`
+  - `Accept: application/json`
+- **Roles:** `admin`, `staff`
+- **Path Parameters:**
+  - `id` *(string, required)*: UUID ของ `booking_rooms`
+
+#### Success Response (200 OK)
+
+```json
+{
+  "status": "success",
+  "booking_room_id": "01a1386c-eb99-7032-9cb1-8de20df98a12",
+  "evidences": [
+    {
+      "id": "01a1386c-ec31-7203-8e78-dcf3bbd84a0d",
+      "type": "id_card",
+      "metadata": {
+        "type": "id_card",
+        "note": "บัตรประชาชนนายสมชาย"
+      },
+      "file_name": "id_card.jpg",
+      "mime_type": "image/jpeg",
+      "size": 102400,
+      "url": "https://ku-home.ku.ac.th/backend/api/v1/images/01a1386c-ec31-7203-8e78-dcf3bbd84a0d/file?expires=1770956400&signature=abcdef123456...",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 3. File Streaming Route
+
+- **Method:** `GET`
+- **URL:** `/api/v1/images/{image}/file?expires=...&signature=...`
+- **Auth:** 🔐 (26/10/26) ต้องส่ง Sanctum Token — เฉพาะเจ้าของ booking หรือ admin (staff ไม่มีสิทธิ์เปิดไฟล์โดยตรง) + Laravel Temporary Signed URL ยืนยันอีกชั้น (มีอายุ 15 นาที) — รายละเอียดกติกาสิทธิ์ดูหัวข้อ `GET /images/{id}/file`
+- **Exempt:** ยกเว้น `RequireJsonAccept` เพื่อให้ fetch รูปที่ส่ง `Accept: image/*` โหลดได้ (frontend: `fetch` + Authorization header + blob URL)
+
+
+---
+
+## 📝 API Documentation Handoff — Ticket 06 (REQ-048: Housekeeping Photos)
+
+เอกสารส่งมอบสำหรับนำไปรวมใน `docs/api_guide.md` (ตามกติกาห้ามแตะ `docs/api_guide.md` โดยตรงใน branch ticket)
+
+---
+
+## 🧹 Housekeeping Task Photos API (REQ-048)
+
+ระบบอัปโหลดและดูรูปภาพงานแม่บ้าน 4 หมวด (ก่อน/หลัง, ของที่ลืม, ความเสียหาย) พร้อมบันทึกหมายเหตุงาน จัดเก็บด้วยตาราง `images` (polymorphic morph กับ `HousekeepingTask`) บน private disk (`local`) และเปิดดูผ่าน Temporary Signed URL อายุ 15 นาที โดยมีระบบ Retention เก็บรักษา 90 วันผ่านคำสั่ง `app:cleanup-images`
+
+---
+
+### 1. อัปโหลดรูปภาพงานทำความสะอาด
+
+- **Endpoint:** `POST /api/v1/dashboard/tasks/{id}/photos`
+- **Auth:** `auth:sanctum`
+- **Role:** `admin`, `housekeeping`
+  - `housekeeping`: อัปโหลดได้เฉพาะ task ที่ตนเองได้รับมอบหมาย (`assigned_to === auth.id`) หากเป็นงานของคนอื่นหรือยังไม่มีผู้รับ จะได้ `403 Forbidden`
+  - `admin`: อัปโหลดได้กับทุก task
+- **Content-Type:** `multipart/form-data`
+- **Headers:** `Accept: application/json`
+
+#### Request Parameters (Form-Data)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `category` | String | Yes | หมวดหมู่รูปภาพ: `before`, `after`, `forgotten_item`, `damage` |
+| `photo` | File | Yes* | ไฟล์รูปภาพ (`image/*`, ขนาดสูงสุด 10MB) (*จำเป็นเมื่อไม่ส่ง `photos`) |
+| `photos` | File[] | Yes* | อาร์เรย์ของไฟล์รูปภาพ (*จำเป็นเมื่อไม่ส่ง `photo`) |
+| `notes` | String | No | ข้อความหมายเหตุงานทำความสะอาด (บันทึกลงฟิลด์ `notes` ของ task) |
+
+#### Validation & Cap Rules
+
+1. **Cap 5+5 ภาพ:**
+   - หมวด `before` สามารถอัปโหลดได้สูงสุด **5 ภาพ** ต่อ 1 task
+   - หมวด `after` สามารถอัปโหลดได้สูงสุด **5 ภาพ** ต่อ 1 task
+   - หากจำนวนรูปเดิม + รูปใหม่เกิน 5 ระบบจะปฏิเสธด้วย `422 Unprocessable Entity` พร้อมข้อความแจ้งเตือน
+2. **หมวด forgotten_item / damage:** ไม่ติด cap 5 ภาพ
+3. **⚠️ Damage Photo Disclaimer:** รูปภาพความเสียหายเป็นหลักฐานสภาพห้องเท่านั้น **ไม่มีผลทางบัญชี** ไม่มีการสร้างรายการชำระเงินหรือบันทึกค่าเสียหายลงในระบบการเงินโดยอัตโนมัติ
+
+#### Response `201 Created`
+
+```json
+{
+  "status": "success",
+  "message": "อัปโหลดรูปภาพงานทำความสะอาดเรียบร้อยค่ะ ✨",
+  "photo": {
+    "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+    "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+    "category": "before",
+    "original_name": "before_cleaning.jpg",
+    "size": 245120,
+    "mime_type": "image/jpeg",
+    "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+    "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+    "created_at": "2026-10-14T03:20:00.000000Z"
+  },
+  "photos": [
+    {
+      "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "before",
+      "original_name": "before_cleaning.jpg",
+      "size": 245120,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    }
+  ],
+  "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+  "notes": "พบรอยเปื้อนบนพรม"
+}
+```
+
+---
+
+### 2. ดูรายการรูปภาพของงานทำความสะอาด
+
+- **Endpoint:** `GET /api/v1/dashboard/tasks/{id}/photos`
+- **Auth:** `auth:sanctum`
+- **Role:** `admin`, `housekeeping`
+  - `housekeeping`: ดูได้เฉพาะงานที่ได้รับมอบหมาย (`assigned_to === auth.id`) หากเป็นงานของแม่บ้านคนอื่น จะได้ `403 Forbidden`
+  - `admin`: ดูได้ทุกงาน
+- **Headers:** `Accept: application/json`
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `category` | String | No | กรองดูเฉพาะหมวด: `before`, `after`, `forgotten_item`, `damage` |
+
+#### Response `200 OK`
+
+```json
+{
+  "status": "success",
+  "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+  "notes": "พบรอยเปื้อนบนพรม",
+  "total_photos": 2,
+  "counts": {
+    "before": 1,
+    "after": 1,
+    "forgotten_item": 0,
+    "damage": 0
+  },
+  "photos": [
+    {
+      "id": "01a1386b-dbd1-7002-8d82-631ef9f41e35",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "before",
+      "original_name": "before_cleaning.jpg",
+      "size": 245120,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386b-dbd1-7002-8d82-631ef9f41e35/file?expires=1791948900&signature=abc123...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:20:00.000000Z"
+    },
+    {
+      "id": "01a1386c-7f12-7003-9112-a1b2c3d4e5f6",
+      "task_id": "01a1386a-72ef-70aa-9a74-d2c610bca3f1",
+      "category": "after",
+      "original_name": "after_cleaning.jpg",
+      "size": 268400,
+      "mime_type": "image/jpeg",
+      "url": "http://localhost:8000/api/v1/images/01a1386c-7f12-7003-9112-a1b2c3d4e5f6/file?expires=1791948900&signature=def456...",
+      "uploaded_by": "01a13869-7c85-7075-8eb6-a367469a924b",
+      "created_at": "2026-10-14T03:35:00.000000Z"
+    }
+  ]
+}
+```
+
+---
+
+### 3. การแสดงผลรูปภาพและความปลอดภัย (Signed URL)
+
+- URL ของรูปภาพ (`url`) เป็น Temporary Signed Route ของ `GET /api/v1/images/{id}/file` อายุ **15 นาที**
+- 🔐 (26/10/26) การเปิดไฟล์ต้องแนบ Sanctum Token ด้วย — เฉพาะแม่บ้านที่ถูก assign task (`assigned_to`) หรือ admin · frontend ใช้ `fetch` + Authorization header แล้วแปลงเป็น blob URL (`<img src>` ใส่ header ไม่ได้)
+- หากลายเซ็นหมดอายุหรือถูกแก้ไข ระบบจะปฏิเสธด้วย `403 Invalid signature` · ไม่ส่ง token = `401` · ไม่ใช่เจ้าของ/admin = `403`
+- การลบงานทำความสะอาด (`HousekeepingTask::delete()`) จะลบแถวรูปภาพในตาราง `images` และลบไฟล์จริงออกจาก Storage โดยอัตโนมัติ
+
+---
+
+### 4. นโยบายการจัดเก็บและล้างข้อมูล (Retention Policy 90 วัน)
+
+- คำสั่ง `php artisan app:cleanup-images` (ตั้งเวลาไว้ใน `routes/console.php` ทำงานทุกวันเวลา 02:30 น.) จะทำการ:
+  1. ลบไฟล์กำพร้าในโฟลเดอร์ `housekeeping` บน local disk
+  2. ลบแถว `images` ที่ผูกกับ `HousekeepingTask` ที่ถูกลบไปแล้ว
+  3. ลบรูปภาพงานแม่บ้านที่มีอายุเกิน **90 วัน** (ปรับแต่งได้ผ่าน ENV: `HOUSEKEEPING_PHOTO_RETENTION_DAYS`)
+
+
+---
+
+## API Documentation Handoff — Ticket 07 (REQ-051/052)
+## ระบบจัดการสต็อกสินค้าและวัสดุสิ้นเปลือง (Stock Inventory & Movement Logs)
+
+สำหรับนำไปผนวกเข้ากับ `docs/api_guide.md` โดยผู้จัดการ
+
+---
+
+### ภาพรวม (Overview)
+- **Base URL Prefix:** `/api/v1/stock`
+- **Authentication:** Bearer Token (Sanctum) ทุก endpoint
+- **Role Permissions:**
+  - `admin`, `staff`: สิทธิ์อ่านและเขียนเต็มรูปแบบ (CRUD + Adjust Stock)
+  - `housekeeping`: สิทธิ์อ่านอย่างเดียว (`GET /stock`, `GET /stock/{id}`, `GET /stock/{id}/movements`), เขียนจะได้รับ HTTP 403
+  - `user`, `guest`: ไม่มีสิทธิ์ (HTTP 403)
+- **Derived Status:**
+  - `out`: เมื่อ `quantity <= 0`
+  - `low`: เมื่อ `quantity <= reorder_point` (และ `quantity > 0`)
+  - `ok`: สต็อกปกติ (`quantity > reorder_point`)
+  - *หมายเหตุ:* Backend ส่ง enum สถานะ (`ok`, `low`, `out`) ให้ frontend จัดการแสดงสีแถบสถานะตาม UI Design
+- **Deletion Strategy:** Soft Delete (`deleted_at`) เพื่อรักษาประวัติการเคลื่อนไหวสต๊อก (Movement Logs) ย้อนหลัง 1 ปี (365 วัน)
+- **Audit & Movement Log:** ทุกครั้งที่มีการเพิ่ม/ลด `quantity` (ไม่ว่าจะผ่าน Create, Update, หรือ Adjust) ระบบจะบันทึก `stock_movements` โดยอัตโนมัติ
+
+---
+
+### Endpoint Reference
+
+#### 1. รายการสต็อกสินค้า (List Stock Items)
+`GET /api/v1/stock`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Query Parameters:**
+  - `search` (string, optional): ค้นหาชื่อสินค้า, รหัสสินค้า, หรือหมายเหตุ
+  - `category` (string, optional): กรองหมวดหมู่สินค้า เช่น `Guest Amenities`, `Linen and Bedding`
+  - `status` (string, optional): กรองตามสถานะ derived (`ok`, `low`, `out`)
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "019266e7-...",
+      "item_code": "SKU-WATER-01",
+      "item_name": "น้ำดื่ม 500ml",
+      "category": "Guest Amenities",
+      "quantity": 150,
+      "unit": "ขวด",
+      "reorder_point": 50,
+      "max_stock": 500,
+      "status": "ok",
+      "notes": "สต็อกชั้น 1",
+      "created_at": "2026-10-14T03:00:00.000000Z",
+      "updated_at": "2026-10-14T03:00:00.000000Z"
+    }
+  ]
+}
+```
+
+#### 2. ดูรายละเอียดสต็อกสินค้า (Show Stock Item)
+`GET /api/v1/stock/{id}`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id": "019266e7-...",
+    "item_code": "SKU-WATER-01",
+    "item_name": "น้ำดื่ม 500ml",
+    "category": "Guest Amenities",
+    "quantity": 150,
+    "unit": "ขวด",
+    "reorder_point": 50,
+    "max_stock": 500,
+    "status": "ok",
+    "notes": null,
+    "created_at": "2026-10-14T03:00:00.000000Z",
+    "updated_at": "2026-10-14T03:00:00.000000Z"
+  }
+}
+```
+
+#### 3. เพิ่มรายการสินค้าในคลัง (Create Stock Item)
+`POST /api/v1/stock`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body:**
+```json
+{
+  "item_code": "SKU-SOAP-01",
+  "item_name": "สบู่เหลวอาบน้ำ",
+  "category": "Guest Amenities",
+  "quantity": 100,
+  "unit": "ขวด",
+  "reorder_point": 30,
+  "max_stock": 300,
+  "notes": "ยี่ห้อ KU Fresh",
+  "reason": "เปิดคลังรอบใหม่"
+}
+```
+- **Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "เพิ่มรายการสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "019266e8-...",
+    "item_code": "SKU-SOAP-01",
+    "item_name": "สบู่เหลวอาบน้ำ",
+    "category": "Guest Amenities",
+    "quantity": 100,
+    "unit": "ขวด",
+    "reorder_point": 30,
+    "max_stock": 300,
+    "status": "ok",
+    "notes": "ยี่ห้อ KU Fresh",
+    "created_at": "2026-10-14T03:10:00.000000Z",
+    "updated_at": "2026-10-14T03:10:00.000000Z"
+  }
+}
+```
+
+#### 4. แก้ไขข้อมูลสินค้า (Update Stock Item)
+`PUT /api/v1/stock/{id}`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body:**
+```json
+{
+  "item_name": "สบู่เหลวอาบน้ำ (สูตรอ่อนโยน)",
+  "reorder_point": 40,
+  "quantity": 120,
+  "reason": "นับสต็อกประจำสัปดาห์พบส่วนเกิน"
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "อัปเดตข้อมูลสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": { ... }
+}
+```
+
+#### 5. ปรับปรุงจำนวนสต็อก / เบิก-จ่าย / รับเข้า (Adjust Stock Quantity)
+`POST /api/v1/stock/{id}/adjust`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`, `Content-Type: application/json`
+- **Request Body (ระบุ delta หรือ quantity อย่างใดอย่างหนึ่ง):**
+```json
+{
+  "delta": -5,
+  "reason": "เบิกใส่ห้องพัก",
+  "housekeeping_task_id": "019266e9-...",
+  "notes": "ห้อง 204"
+}
+```
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ปรับปรุงจำนวนสต็อกสินค้าเรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "...",
+    "quantity": 95,
+    "status": "ok",
+    ...
+  },
+  "movement": {
+    "id": "019266ea-...",
+    "stock_inventory_id": "...",
+    "delta": -5,
+    "quantity_before": 100,
+    "quantity_after": 95,
+    "reason": "เบิกใส่ห้องพัก",
+    "housekeeping_task_id": "019266e9-...",
+    "user_id": "...",
+    "notes": "ห้อง 204",
+    "created_at": "2026-10-14T03:15:00.000000Z"
+  }
+}
+```
+
+#### 6. ลบรายการสินค้า (Delete Stock Item)
+`DELETE /api/v1/stock/{id}`
+- **Role:** `admin`, `staff`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "ลบรายการสินค้าในคลังเรียบร้อยแล้วค่ะนายท่าน 🗑️"
+}
+```
+
+#### 7. ดูประวัติการเคลื่อนไหวสต๊อก (List Stock Movements)
+`GET /api/v1/stock/{id}/movements`
+- **Headers:** `Accept: application/json`, `Authorization: Bearer <token>`
+- **Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "019266ea-...",
+      "stock_inventory_id": "...",
+      "delta": -5,
+      "quantity_before": 100,
+      "quantity_after": 95,
+      "reason": "เบิกใส่ห้องพัก",
+      "housekeeping_task_id": "019266e9-...",
+      "user_id": "...",
+      "notes": "ห้อง 204",
+      "created_at": "2026-10-14T03:15:00.000000Z",
+      "user": { ... },
+      "housekeeping_task": { ... }
+    }
+  ]
+}
+```
+
+---
+
+### Scheduled Command: Cleanup Stock Movements
+`php artisan app:cleanup-stock-movements {--dry-run}`
+- รันอัตโนมัติทุกวันเวลา 03:00 น. (`dailyAt('03:00')`)
+- ลบประวัติ `stock_movements` ที่มีอายุเกิน `STOCK_MOVEMENT_RETENTION_DAYS` (default 365 วัน)
+- ตัวเลือก `--dry-run` สำหรับการนับจำนวนโดยไม่ลบจริง
+
+
+---
+
+## API Documentation Handoff — Ticket 08/09: 🌙 Pricing Tier v2 — กติกาเลือกเรท 2 เส้นทาง + สูตรรายเดือน (REQ-004/015/016) — 22/10/26
+
+> implement ตาม Resolution ของ [ticket 08](../wayfinder/srs-v2-gap-closure/tickets/08-pricing-tier-grilling.md) + มติ owner 2026-10-22 (เอกสารหลักเกณฑ์ราคาของโรงแรม) · chokepoint เดียว = `DiscountService::reprice()` · chokepoint guard = `BookingRule::guardMonthlyNights()` ใน Form Requests ทั้ง 4
+
+### 🌙 กติกาเลือกเรท (สรุปสำหรับ frontend)
+
+ตัวแปร: **x** = จำนวนคืนของแต่ละ booking_room (คืนเต็ม) · ประตูเขตรายเดือน = `booking.block_min_nights` = **20 คืน** (เดิม 21)
+
+**เส้นทาง user จองเอง (role ผู้ล็อกอิน ≠ admin):**
+- x < 20 คืน → ราคาเส้นตรง `x × daily` (ku_member → `daily_ku` อัตโนมัติ)
+- ห้องไหน **x ≥ 20 คืน → 422 reject ทั้งบิล** — การจองรายเดือน/จองเหมาเป็นเขตบริการของ admin · guard ครอบทุก write path: create (`POST /bookings`), เพิ่มห้อง (`POST /bookings/{id}/rooms`), แก้รายห้อง (`PUT .../rooms/{bookingRoomId}`), batch edit (`PUT .../rooms`) · guard ตรวจเฉพาะ payload ที่แตะวันที่ (แก้ addon/guests อย่างเดียวไม่โดน)
+- ≥ 5 ห้อง → 422 ผ่าน cap เดิม (`max_rooms_per_booking` = 4)
+
+**เส้นทาง admin (จองแทน/เฮดเปล่า/org booking):**
+- **ห้อง x ≥ 20 คืน → สูตรรายเดือน** `room_amount = intdiv(x × month_rate ÷ 30, 1)` หรือ `intdiv(x × month_rate, 30)` — เดือนเต็ม (30 วัน) + เศษคิดรายวันแบบเดือน (`month ÷ 30`) ตามเอกสารโรงแรม · สูตร monotonic ทุกคืน (ไม่มี cliff)
+- ห้อง x < 20 คืน → เส้นตรงตาม**ชั้นจำนวนห้องของบิล**: ≥10 ห้อง → `group min_10_rooms` · ≥5 → `min_5_rooms` · ต่ำกว่า → เรทรายวัน effective ของเจ้าของบิล (`daily_ku` ถ้าเป้าเป็น ku_member, org booking userless → `daily`)
+- **ไม่มีแถว `month` (หรือ inactive)** → fallback ราคาเส้นตรงรายวัน (ชั้นจำนวนห้องยังทำงาน) — มติ owner 2026-10-22
+- `set_room_price` (โค้ดราคาสัญญา) ชนะเด็ดขาดข้ามสูตรรายเดือน: net = `set_price × x` ตรง ๆ (ไม่ขยับราคาขึ้น)
+- ส่วนลด `percent`/`fixed` คิดจาก**ยอด prorate แล้ว** (ฐานส่วนลด = room_amount ใหม่)
+
+**บิลที่เกิดจากเส้นทาง admin (`source='admin'` หรือ userless/org) คง pricing ของ admin ตลอดอายุบิล** แม้เจ้าของ (non-admin) จะมาแก้ addon/guests ทีหลัง — กันราคาเด้งขึ้นเงียบ ๆ (การ spoof `source='admin'` ไม่มีประโยชน์ — guard 422 คืน/จำนวนห้องตัดสินจาก sanctum role เสมอ)
+
+### ตารางตัวอย่าง (Deluxe: daily 1,200 · daily_ku 1,000 · group 900/750 · month 18,000 → 600/วัน)
+
+| เคส | คำนวณ | ยอดค่าห้อง |
+|---|---|---|
+| user จองเอง 19 คืน | daily เส้นตรง | 19 × 1,200 = **22,800** |
+| user จองเอง 25 / 45 คืน | ห้อง x ≥ 20 → **422** | — |
+| admin 1 ห้อง 45 คืน | intdiv(45 × 18,000, 30) = 18,000 + 15×600 | **27,000** |
+| admin 1 ห้อง 25 คืน | intdiv(25 × 18,000, 30) | **15,000** |
+| admin 1 ห้อง 50 คืน | intdiv(50 × 18,000, 30) | **30,000** (เรียบ ไม่มี cliff) |
+| admin 1 ห้อง 19 คืน | ต่ำกว่าประตู → daily | 19 × 1,200 = **22,800** |
+| admin 6 ห้อง 3 คืน | group min_5 | ห้องละ 900 × 3 = **2,700** |
+| admin 11 ห้อง 3 คืน | group min_10 | ห้องละ 750 × 3 = **2,250** |
+| admin 45 คืน + set_room_price 500 | ชนะข้ามสูตร | 500 × 45 = **22,500** |
+| admin 45 คืน (เรท month ยังไม่ตั้ง) | fallback daily | 45 × 1,200 = **54,000** |
+
+### การเปลี่ยนแปลง wire format
+
+- `RoomType::rates` object (room-types, availability, calendar ทุก endpoint) เพิ่ม key ใหม่: **`monthly_per_day`** = `intdiv(monthly, 30)` (0 เมื่อไม่มีเรทเดือน) — frontend ใช้คำนวณยอดก่อนส่งจากแหล่งเดียวกับ server
+- 422 message ตัวอย่าง: `"การจองตั้งแต่ 20 คืนขึ้นไป (จองรายเดือน/จองเหมา — ห้องนี้ 45 คืน) เป็นเขตบริการของผู้ดูแลระบบ กรุณาติดต่อผู้ดูแลค่ะ 🌙"`
+- `stay_type` derived: `block` เริ่มที่ 20 คืน (เดิม 21) — `monthly` คง 30 คืน
+
+### ⚠️ Finding (บั๊กเดิม พบตอน implement — รอ owner ตัดสิน)
+
+บิล admin/userless (`user_id = null`) ที่ใส่ `discount_code` ตอน create จะโดน **500** — `discount_redemptions.user_id` เป็น NOT NULL แต่บิลไม่มีเจ้าของ (โค้ดเดิมก่อน ticket 09 ก็เป็นแบบนี้ แค่ไม่เคยมีเคสทดสอบ) · ทางเลือก: 422 reject "โค้ดส่วนลดต้องมี user เจ้าของบิล" หรือทำ column nullable + ข้ามโควตา per-user — **ยังไม่แก้ใน ticket นี้** (out of scope)
+
+---
+
+*Last updated: 2026-10-22 · KU HOME API v1*

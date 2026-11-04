@@ -1,0 +1,223 @@
+{
+    "id": "supplies-report",
+    "name_th": "รายงานวัสดุสิ้นเปลื้อง",
+    "name_en": "Supplies Report",
+    "category_th": "รายงานบริหารจัดการ",
+    "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+    "primary_users_th": [
+        "แอดมิน",
+        "ฝ่ายบัญชี"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "วันที่, รายการของใช้, จำนวนของใช้, จำนวนที่ใช้, คงเหลือ, วันที่เติมของใช้ล่าสุด",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.วัสดุสินเปลื้อง",
+        "sheet_gid": "404292563",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date_range",
+            "label_th": "ช่วงเวลา",
+            "type": "date_range",
+            "sample_value": "15-17 กันยายน 2569"
+        },
+        {
+            "key": "category",
+            "label_th": "แผนกสินค้า/หมวดหมู่",
+            "type": "enum",
+            "options": [
+                "ทั้งหมด",
+                "Guest Amenities",
+                "Linen and Bedding"
+            ],
+            "sample_value": "หมวดหมู่"
+        }
+    ],
+    "columns": [
+        {
+            "key": "item_code",
+            "label_th": "รหัสสินค้า",
+            "type": "string"
+        },
+        {
+            "key": "category",
+            "label_th": "หมวดหมู่",
+            "type": "enum",
+            "options": [
+                "Guest Amenities",
+                "Linen and Bedding"
+            ]
+        },
+        {
+            "key": "item_name",
+            "label_th": "ชื่อสินค้า",
+            "type": "string"
+        },
+        {
+            "key": "unit",
+            "label_th": "หน่วยนับ",
+            "type": "string"
+        },
+        {
+            "key": "carried_over",
+            "label_th": "ยอดยกมา",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "received",
+            "label_th": "รับเข้า",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "issued",
+            "label_th": "เบิกจ่าย",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "remaining",
+            "label_th": "คงเหลือ",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "reorder_point",
+            "label_th": "จุดสั่งซื้อ",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "max_stock",
+            "label_th": "สต็อกสูงสุด",
+            "type": "integer",
+            "nullable": true
+        },
+        {
+            "key": "status",
+            "label_th": "สเตตัส",
+            "type": "enum",
+            "options": [
+                "ปกติ",
+                "สั่งซื้อ"
+            ],
+            "nullable": true
+        }
+    ],
+    "sample_data": [
+        {
+            "item_code": "xxxx",
+            "category": "Guest Amenities",
+            "item_name": "น้ำดื่ม",
+            "unit": "ขวด",
+            "carried_over": 300,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": "ปกติ"
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Guest Amenities",
+            "item_name": "หมวกคลุมผม",
+            "unit": "ชิ้น",
+            "carried_over": 500,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": "สั้งซื้อ"
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ผ้าเช็คตัว",
+            "unit": "ผืน",
+            "carried_over": 300,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ผ้าเช็คผม",
+            "unit": "ผืน",
+            "carried_over": 300,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ปลอกผ้าหนวม 6 ฟุต",
+            "unit": "ชิ้น",
+            "carried_over": 360,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ปลอกผ้าหนวม 3.5 ฟุต",
+            "unit": "ชิ้น",
+            "carried_over": 400,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ปลอกหมอน",
+            "unit": "ชิ้น",
+            "carried_over": 400,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        },
+        {
+            "item_code": "xxxx",
+            "category": "Linen and Bedding",
+            "item_name": "ผ้าปู 6 ฟุต",
+            "unit": "ชิ้น",
+            "carried_over": 360,
+            "received": null,
+            "issued": null,
+            "remaining": null,
+            "reorder_point": null,
+            "max_stock": null,
+            "status": null
+        }
+    ],
+    "notes": [
+        "สีบอกสถานะในชีต: เขียว=ปกติ แดง=ใกล้หมด ส้ม=ใกล้จะซื้อ — ใช้ field status คู่กับ reorder_point แทนสี",
+        "ชีตต้นทางสะกด \"สั้งซื้อ\" (Typo) — normalize เป็น \"สั่งซื้อ\"",
+        "ตัวอย่างยังไม่กรอก รับเข้า/เบิกจ่าย/คงเหลือ และแถว Grand Total เป็น 0 ทั้งแถว"
+    ]
+}

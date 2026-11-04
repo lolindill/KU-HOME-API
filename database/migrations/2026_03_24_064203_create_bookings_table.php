@@ -12,28 +12,18 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->string('confirmation')->nullable();
             $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
-            
-            // 📅 ข้อมูลการเข้าพัก
-            $table->string('source')->default('online'); // online | admin | line 
-            $table->date('check_in');
-            $table->date('check_out');
-            
-            // 🧍‍♂️ ข้อมูลผู้เข้าพัก (Snapshot)
-            $table->string('guest_title')->nullable();
-            $table->string('guest_name');
-            $table->string('guest_email');
-            $table->string('guest_phone');
-            
-            $table->string('guest_nationality')->nullable()->default('Thai');
-            $table->boolean('is_ku_member')->default(false);
-            
-            $table->integer('total_amount');
+
+            // 📅 แหล่งที่มาของการจอง (dates + guests ย้ายไป booking_rooms แล้ว)
+            $table->string('source')->default('online'); // online | admin | line
+
+            $table->integer('total_amount')->default(0);
             $table->boolean('is_paid')->default(false);
             $table->timestamp('payment_deadline')->nullable();
 
-            $table->string('status')->default('draft'); // draft | confirmed | checked_in | checked_out | cancelled
+            // 🚦 State Machine (container): draft → paid → confirmed → complete
+            // (walk-in เข้า confirmed ตรงๆ — skip draft→paid)
+            $table->string('status')->default('draft');
 
-            
             $table->timestamps();
         });
     }

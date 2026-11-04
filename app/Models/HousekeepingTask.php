@@ -2,14 +2,160 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
+use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\Auth;
 
+/**
+ * 🧹 Housekeeping Task (Phase A refactor — 15/07/26)
+ *
+ *    Task types:   pre_checkin | checkout | checkout_then_in | daily | monthly | group
+ *    Status flow:  unassigned → accepted → in_progress → done (locked)
+ *
+ *    - status ก่อนหน้า 'pending' ถูก migrate ไป 'unassigned' แล้ว
+ *    - assigned_to ตั้งค่าตอน accept (housekeeper) หรือ assign (admin)
+ *    - done เป็น terminal state — transitionStatus() จะ throw ถ้าพยายามเปลี่ยนต่อ
+ */
 class HousekeepingTask extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuids;
 
-    protected $guarded = [];
     public $incrementing = false;
+
     protected $keyType = 'string';
+
+    // 🌟 Fix (15/07/26): เปลี่ยนจาก $guarded = [] → $fillable (mass-assignment protection + match convention)
+    protected $fillable = [
+        'room_id',
+        'assigned_to',
+        'task_type',
+        'status',
+        'notes',
+        'completed_at',
+        'accepted_at',
+        'scheduled_for',
+        // 📊 (05/10/26) excel-reports spec §2.4 — checklist แม่บ้าน 3 หัวข้อ (tick ประกอบ ไม่ผูก done)
+        'cleaning_check_1',
+        'cleaning_check_2',
+        'cleaning_check_3',
+    ];
+
+    // 🌟 Fix L1 (03/07/26): missing casts — completed_at / accepted_at ใช้เป็น Carbon
+    protected $casts = [
+        'completed_at' => 'datetime',
+        'accepted_at' => 'datetime',
+        'scheduled_for' => 'date',
+        // 📊 (05/10/26) PgBoolean — PostgreSQL strict boolean (ห้าม 'boolean' ตรง ๆ)
+        'cleaning_check_1' => PgBoolean::class,
+        'cleaning_check_2' => PgBoolean::class,
+        'cleaning_check_3' => PgBoolean::class,
+    ];
+
+    // 🧹 Drop (15/07/26): ปิด updated_at auto-manage — column ถูก drop แล้ว
+    public const UPDATED_AT = null;
+
+    // 🌟 Fix L2 (03/07/26): inverse relationships ที่หายไป
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(Room::class, 'room_id');
+    }
+
+    public function assignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    /**
+     * 🖼️ (14/10/26, REQ-048): รูปภาพงานทำความสะอาด — morphMany ไป images table (หมวด before, after, forgotten_item, damage)
+     */
+    public function photos(): MorphMany
+    {
+        return $this->morphMany(Image::class, 'imageable');
+    }
+
+    public function images(): MorphMany
+    {
+        return $this->morphMany(Image::class, 'imageable');
+    }
+
+    protected static function booted(): void
+    {
+        // 🧹 เมื่อ task ถูกลบ → ลบรูปภาพที่ผูกอยู่ทั้งหมด (hook deleting ของ Image จะลบไฟล์บน disk ให้)
+        static::deleting(function (HousekeepingTask $task) {
+            $task->photos->each->delete();
+        });
+    }
+
+    // 🧹 Phase A (15/07/26): ลบ inventories() relation — HousekeepingInventory ถูกลบแล้ว (Fix S-B3)
+
+    /**
+     * Task status state machine (Phase A refactor)
+     *
+     *   unassigned → accepted   (housekeeper accept หรือ admin assign)
+     *   accepted   → in_progress
+     *   in_progress → done      (terminal — lock)
+     *   done       → *          ❌ throw (เขียนใหม่ทำงานจริง แทน dead-code guard เดิม Fix L3)
+     *
+     * คืน true ถ้า transition สำเร็จ, throw Exception (422) ถ้า invalid
+     */
+    public function transitionStatus(string $newStatus, ?string $userId = null): bool
+    {
+        $newStatus = strtolower($newStatus);
+        $currentStatus = $this->status ?? 'unassigned';
+
+        if ($currentStatus === $newStatus) {
+            return false;
+        }
+
+        $allowedTransitions = [
+            // key = target, value = allowed sources
+            'accepted' => ['unassigned'],
+            'in_progress' => ['accepted', 'unassigned'], // unassigned→in_progress ใช้ตอน admin assign skip accepted แล้วเริ่มทำเลย
+            'done' => ['accepted', 'in_progress'],
+        ];
+
+        if (! isset($allowedTransitions[$newStatus])
+            || ! in_array($currentStatus, $allowedTransitions[$newStatus], true)) {
+            throw new Exception(
+                "Invalid task status transition from '{$currentStatus}' to '{$newStatus}'.",
+                422
+            );
+        }
+
+        $this->status = $newStatus;
+
+        // ตั้ง assigned_to + accepted_at ตอนเข้าสถานะ accepted
+        if ($newStatus === 'accepted') {
+            if ($userId) {
+                $this->assigned_to = $userId;
+            }
+            $this->accepted_at = now();
+        }
+
+        // ตั้ง completed_at ตอน done
+        if ($newStatus === 'done') {
+            $this->completed_at = now();
+        }
+
+        $this->save();
+
+        // 📝 Audit log: เก็บประวัติการเปลี่ยนสถานะของ housekeeping task
+        $causerId = $userId ?? Auth::id();
+        StatusChangeLog::create([
+            'entity_type' => 'housekeeping_task',
+            'entity_id' => $this->id,
+            'from_status' => $currentStatus,
+            'to_status' => $newStatus,
+            'role' => $causerId ? (User::find($causerId)?->role ?? 'system') : 'system',
+            'causer_id' => $causerId,
+            'note' => null,
+        ]);
+
+        return true;
+    }
 }

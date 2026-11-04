@@ -3,97 +3,567 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use App\Models\Room;
-use App\Models\RoomType;
-use App\Models\Booking;
+use App\Http\Requests\AssignTaskRequest;
+use App\Http\Requests\StoreHousekeepingTaskRequest;
 use App\Models\HousekeepingTask;
+use App\Models\Room;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
+/**
+ * 🧹 Housekeeping Dashboard Controller (Phase A refactor — 15/07/26)
+ *
+ *    Endpoint map:
+ *      GET    /dashboard/tasks               (admin)        — listTasks (+ filter ?status=&type=)
+ *      POST   /dashboard/tasks               (admin)        — createTask (manual: daily/monthly/group/pre_checkin)
+ *      PUT    /dashboard/tasks/{id}/assign   (admin)        — assignTask (skip accepted)
+ *      GET    /dashboard/tasks/unassigned    (admin|hk)     — unassignedTasks
+ *      POST   /dashboard/tasks/{id}/accept   (admin|hk)     — acceptTask
+ *      PATCH  /dashboard/tasks/{id}/status   (admin|hk)     — updateStatus (by task_id)
+ *
+ *    Fix S-B2: updateStatus ใช้ task_id แทน room_id (กันสับสนเมื่อมีหลาย task/ห้อง)
+ *    Fix S-B4: แยก routes admin vs housekeeper + defense-in-depth role check ในทุก method
+ *    Fix L3 (เขียนใหม่): guard `done → *` ทำงานจริง อยู่ใน HousekeepingTask::transitionStatus()
+ */
 class DashboardController extends Controller
 {
-    // 🧹 ดูสถานะงานทำความสะอาดของแม่บ้าน
-    public function cleaningTasks(Request $request)
+    // ============================================
+    // 🔐 Admin endpoints
+    // ============================================
+
+    /**
+     * List ทุก housekeeping task + filter ?status=&type=
+     */
+    public function listTasks(Request $request)
     {
-        $tasks = HousekeepingTask::with('room.roomType')
-            ->whereIn('status', ['pending', 'in_progress'])
-            ->orderBy('created_at', 'asc')
-            ->get()
-            ->map(function ($task) {
-                return [
-                    'task_id' => $task->id,
-                    'room_number' => $task->room->room_number ?? 'N/A',
-                    'room_type' => $task->room->roomType->name_en ?? 'N/A',
-                    'task_status' => $task->status,
-                    'notes' => $task->notes,
-                    'requested_at' => Carbon::parse($task->checked_out_at ?? $task->created_at)->format('Y-m-d H:i')
-                ];
-            });
+        $user = $request->user();
+        if (! $user || $user->role !== 'admin') {
+            return $this->forbidden('ต้องเป็นแอดมินเท่านั้นถึงจะดูรายการงานทั้งหมดได้ค่ะ');
+        }
+
+        $query = HousekeepingTask::with(['room.roomType', 'assignee']);
+
+        if ($status = $request->input('status')) {
+            $query->where('status', $status);
+        }
+        if ($type = $request->input('type')) {
+            $query->where('task_type', $type);
+        }
+
+        $tasks = $query->orderBy('created_at', 'asc')->get()
+            ->map(fn ($t) => $this->serializeTask($t));
 
         return response()->json([
             'status' => 'success',
             'message' => 'Housekeeping tasks fetched successfully',
-            'pending_tasks' => $tasks->count(),
-            'tasks' => $tasks
+            'total_tasks' => $tasks->count(),
+            'tasks' => $tasks,
         ]);
     }
 
-    // 🧹 อัปเดตสถานะงานทำความสะอาด (ค้นหาจาก Room ID)
-    public function updateCleaningStatus(Request $request, $roomId)
+    /**
+     * Manual create task — admin สร้าง daily/monthly/group/pre_checkin เอง
+     */
+    public function createTask(StoreHousekeepingTaskRequest $request)
     {
-        $validated = $request->validate([
-            'status' => 'required|in:in_progress,done', 
-            'verified_by' => 'required|uuid|exists:users,id' 
-        ]);
+        $user = $request->user();
+        if (! $user || $user->role !== 'admin') {
+            return $this->forbidden('ต้องเป็นแอดมินเท่านั้นถึงจะสร้างงานได้ค่ะ');
+        }
+
+        $validated = $request->validated();
 
         try {
             DB::beginTransaction();
 
-            $task = HousekeepingTask::where('room_id', $roomId)
-                ->whereIn('status', ['pending', 'in_progress'])
-                ->first();
-
-            if (!$task) {
-                throw new \Exception('No active cleaning task found for this room. It might be already clean!');
+            // Fix S-B2: กัน duplicate active task ในห้องเดียวกัน
+            $activeExists = HousekeepingTask::where('room_id', $validated['room_id'])
+                ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                ->exists();
+            if ($activeExists) {
+                throw new \Exception('ห้องนี้มีงานที่กำลังดำเนินการอยู่แล้วค่ะ กรุณาปิดงานเดิมก่อนสร้างใหม่', 422);
             }
 
-            // อัปเดตสถานะงาน
-            $task->status = $validated['status'];
+            $task = HousekeepingTask::create([
+                'id' => Str::uuid(),
+                'room_id' => $validated['room_id'],
+                'task_type' => $validated['task_type'] ?? 'daily',
+                'status' => 'unassigned',
+                'notes' => $validated['notes'] ?? null,
+                'scheduled_for' => $validated['scheduled_for'] ?? null,
+            ]);
 
-            if ($validated['status'] === 'done') {
-                $task->completed_at = Carbon::now();
+            DB::commit();
+
+            $task->load(['room.roomType', 'assignee']);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'สร้างงาน housekeeping สำเร็จแล้วค่ะนายท่าน!',
+                'task' => $this->serializeTask($task),
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Create housekeeping task failed: '.$e->getMessage());
+            $statusCode = $e->getCode();
+            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
+            $message = $statusCode === 422
+                ? $e->getMessage()
+                : 'เกิดข้อผิดพลาดในการสร้างงาน กรุณาลองใหม่อีกครั้งค่ะ';
+
+            return response()->json(['status' => 'error', 'message' => $message], $statusCode);
+        }
+    }
+
+    /**
+     * Admin assign housekeeper ให้ task — skip accepted (status=accepted ตรงๆ)
+     */
+    public function assignTask(AssignTaskRequest $request, $id)
+    {
+        $user = $request->user();
+        if (! $user || $user->role !== 'admin') {
+            return $this->forbidden('ต้องเป็นแอดมินเท่านั้นถึงจะ assign งานได้ค่ะ');
+        }
+
+        $validated = $request->validated();
+
+        try {
+            DB::beginTransaction();
+
+            $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
+            $task->transitionStatus('accepted', $validated['assigned_to']);
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Assign งานให้แม่บ้านเรียบร้อยค่ะ!',
+                'task' => $this->serializeTask($task->fresh(['room.roomType', 'assignee'])),
+            ]);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Assign task failed: '.$e->getMessage());
+            $statusCode = $e->getCode();
+            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
+            return response()->json([
+                'status' => 'error',
+                'message' => $statusCode === 422
+                    ? $e->getMessage()
+                    : 'เกิดข้อผิดพลาดในการ assign งาน กรุณาลองใหม่ค่ะ',
+            ], $statusCode);
+        }
+    }
+
+    // ============================================
+    // 🧹 Shared endpoints — admin OR housekeeping
+    // ============================================
+
+    /**
+     * List task ที่ยังไม่มีคนรับ (สำหรับ housekeeper dashboard)
+     */
+    public function unassignedTasks(Request $request)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะดูงานที่ยังไม่มีคนรับได้ค่ะ');
+        }
+
+        $tasks = HousekeepingTask::with(['room.roomType'])
+            ->where('status', 'unassigned')
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(fn ($t) => $this->serializeTask($t));
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Unassigned tasks fetched successfully',
+            'total_unassigned' => $tasks->count(),
+            'tasks' => $tasks,
+        ]);
+    }
+
+    /**
+     * Housekeeper accept งาน — เซ็ต assigned_to = auth user + transition → accepted
+     */
+    public function acceptTask(Request $request, $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะ accept งานได้ค่ะ');
+        }
+
+        try {
+            $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
+
+            // แม่บ้านไม่สามารถ accept งานที่ถูก assign ให้แม่บ้านคนอื่นไปแล้วได้
+            if ($user->role === 'housekeeping' && $task->assigned_to !== null && $task->assigned_to !== $user->id) {
+                return $this->forbidden('ไม่มีสิทธิ์รับงานนี้เนื่องจากมอบหมายให้ผู้อื่นแล้วค่ะ');
             }
-            $task->save();
 
+            DB::beginTransaction();
+
+            $task->transitionStatus('accepted', $user->id);
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'รับงานเรียบร้อยแล้วค่ะ! เริ่มทำได้เลยนะคะ ✨',
+                'task' => $this->serializeTask($task->fresh(['room.roomType', 'assignee'])),
+            ]);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Accept task failed: '.$e->getMessage());
+            $statusCode = $e->getCode();
+            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
+            return response()->json([
+                'status' => 'error',
+                'message' => $statusCode === 422
+                    ? $e->getMessage()
+                    : 'เกิดข้อผิดพลาดในการรับงาน กรุณาลองใหม่ค่ะ',
+            ], $statusCode);
+        }
+    }
+
+    /**
+     * อัปเดต status ของ task — ใช้ task_id (Fix S-B2) ไม่ใช่ room_id
+     * ถ้า status=done → เปลี่ยนสถานะห้อง → available ผ่าน state machine
+     */
+    public function updateStatus(Request $request, $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะอัปเดตสถานะงานได้ค่ะ');
+        }
+
+        $validated = $request->validate([
+            'status' => 'nullable|required_without_all:cleaning_check_1,cleaning_check_2,cleaning_check_3|in:in_progress,done',
+            'cleaning_check_1' => 'nullable|boolean',
+            'cleaning_check_2' => 'nullable|boolean',
+            'cleaning_check_3' => 'nullable|boolean',
+        ]);
+
+        try {
+            // Fix S-B2: ใช้ task_id แทน room_id — ไม่มี first() ที่จะเลือกผิด
+            $task = HousekeepingTask::with(['room.roomType', 'assignee'])->findOrFail($id);
+
+            // แม่บ้านอัปเดตสถานะได้เฉพาะงานที่ได้รับมอบหมายเท่านั้น (คนอื่น 403)
+            if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+                return $this->forbidden('ไม่มีสิทธิ์อัปเดตสถานะสำหรับงานนี้ค่ะ');
+            }
+
+            DB::beginTransaction();
+
+            // 📊 (05/10/26, excel-reports spec §2.4): tick ล้วน = บันทึกประกอบ ไม่ผูก done
+            $hasChecklist = false;
+            foreach (['cleaning_check_1', 'cleaning_check_2', 'cleaning_check_3'] as $field) {
+                if ($request->has($field)) {
+                    $task->{$field} = $validated[$field];
+                    $hasChecklist = true;
+                }
+            }
+            if ($hasChecklist) {
+                $task->save();
+            }
+
+            $status = $validated['status'] ?? null;
             $roomStatus = $task->room->status ?? 'unknown';
 
-            // 🌟 ถ้างานเสร็จ ใช้ state machine เปลี่ยนสถานะห้อง → available
-            if ($validated['status'] === 'done') {
-                $room = Room::findOrFail($roomId);
-                $room->transitionStatusTo('available', $validated['verified_by']);
-                $roomStatus = $room->status;
+            // transition เมื่อ status มีค่าเท่านั้น
+            if ($status !== null) {
+                // Fix L3 (เขียนใหม่): guard done→* อยู่ใน transitionStatus() แล้ว — ทำงานจริง
+                $task->transitionStatus($status);
+
+                // ถ้างาน done → เปลี่ยนสถานะห้อง → available เฉพาะสถานะห้องที่พร้อมกลับมาว่าง (ไม่เปลี่ยนห้อง occupied)
+                if ($status === 'done' && $task->room_id) {
+                    $room = Room::findOrFail($task->room_id);
+                    if (in_array($room->status, ['checkout_makeup', 'dirty', 'prep_checkin'], true)) {
+                        $room->transitionStatusTo('available', $user->id);
+                        $roomStatus = $room->status;
+                    } else {
+                        $roomStatus = $room->status;
+                    }
+                }
             }
 
             DB::commit();
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Housekeeping status updated successfully!',
-                'task_id' => $task->id,
-                'new_task_status' => $task->status,
-                'room_id' => $roomId,
-                'new_room_status' => $roomStatus
-            ], 200);
+                'message' => $status === null
+                    ? 'บันทึก checklist เรียบร้อยค่ะ 🧹'
+                    : ($status === 'done'
+                        ? 'งานเสร็จเรียบร้อย! ห้องพร้อมให้บริการแล้วค่ะ 💖'
+                        : 'เริ่มทำงานแล้วค่ะ!'),
+                'task' => $this->serializeTask($task->fresh(['room.roomType', 'assignee'])),
+                'new_room_status' => $roomStatus,
+            ]);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Dashboard cleaning status update failed: " . $e->getMessage());
+            Log::error('Update task status failed: '.$e->getMessage());
+            $statusCode = $e->getCode();
+            $statusCode = ($statusCode >= 400 && $statusCode <= 599) ? $statusCode : 400;
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในการอัปเดตสถานะ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
-            ], 400);
+                'message' => $statusCode === 422
+                    ? $e->getMessage()
+                    : 'เกิดข้อผิดพลาดในการอัปเดตสถานะ กรุณาลองใหม่ค่ะ',
+            ], $statusCode);
         }
+    }
+
+    /**
+     * 🖼️ (14/10/26, REQ-048): อัปโหลดรูปภาพงานทำความสะอาด
+     * หมวด: before / after (cap 5+5 ภาพต่อ task) / forgotten_item / damage
+     * หมายเหตุ: บันทึกลง notes ของ task
+     * POST /api/v1/dashboard/tasks/{id}/photos
+     */
+    public function uploadPhoto(Request $request, string $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะอัปโหลดรูปภาพได้ค่ะ');
+        }
+
+        $task = HousekeepingTask::find($id);
+        if (! $task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+        }
+
+        // แม่บ้านอัปโหลดได้เฉพาะ task ที่ได้รับมอบหมายเท่านั้น (คนอื่น 403)
+        if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+            return $this->forbidden('ไม่มีสิทธิ์อัปโหลดรูปภาพสำหรับงานนี้ค่ะ');
+        }
+
+        $request->validate([
+            'category' => 'required|string|in:before,after,forgotten_item,damage',
+            'photo' => 'required_without:photos|file|image|max:10240',
+            'photos' => 'required_without:photo|array',
+            'photos.*' => 'file|image|max:10240',
+            'notes' => 'nullable|string',
+        ]);
+
+        $category = $request->input('category');
+
+        $files = [];
+        if ($request->hasFile('photo')) {
+            $files[] = $request->file('photo');
+        } elseif ($request->hasFile('photos')) {
+            $files = $request->file('photos');
+        }
+
+        if (empty($files)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'กรุณาแนบไฟล์รูปภาพค่ะนายท่าน',
+            ], 422);
+        }
+
+        // ตรวจสอบ cap 5+5 สำหรับหมวด before และ after
+        if (in_array($category, ['before', 'after'], true)) {
+            $currentCount = $task->photos()->where('category', $category)->count();
+            if ($currentCount + count($files) > 5) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => "หมวด {$category} สามารถอัปโหลดได้สูงสุด 5 ภาพต่อ task ค่ะ (ปัจจุบันมี {$currentCount} ภาพ)",
+                ], 422);
+            }
+        }
+
+        $uploadedImages = [];
+        $savedPaths = [];
+
+        try {
+            DB::beginTransaction();
+
+            if ($request->has('notes')) {
+                $task->notes = $request->input('notes');
+                $task->save();
+            }
+
+            foreach ($files as $file) {
+                $path = $file->store('housekeeping', 'local');
+                $savedPaths[] = $path;
+
+                $image = $task->photos()->create([
+                    'path' => $path,
+                    'disk' => 'local',
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                    'original_name' => $file->getClientOriginalName(),
+                    'category' => $category,
+                    'uploaded_by' => $user->id,
+                ]);
+
+                $uploadedImages[] = $image;
+            }
+
+            DB::commit();
+
+            $photoPayload = array_map(fn ($img) => [
+                'id' => $img->id,
+                'task_id' => $task->id,
+                'category' => $img->category,
+                'original_name' => $img->original_name,
+                'size' => $img->size,
+                'mime_type' => $img->mime_type,
+                'url' => $img->url,
+                'uploaded_by' => $img->uploaded_by,
+                'created_at' => $img->created_at?->toISOString(),
+            ], $uploadedImages);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'อัปโหลดรูปภาพงานทำความสะอาดเรียบร้อยค่ะ ✨',
+                'photo' => count($photoPayload) === 1 ? $photoPayload[0] : null,
+                'photos' => $photoPayload,
+                'task_id' => $task->id,
+                'notes' => $task->notes,
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            foreach ($savedPaths as $path) {
+                Storage::disk('local')->delete($path);
+            }
+            Log::error('Upload housekeeping photo failed: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ กรุณาลองใหม่อีกครั้งค่ะ',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🖼️ (14/10/26, REQ-048): ดูรายการรูปภาพของงานทำความสะอาด
+     * GET /api/v1/dashboard/tasks/{id}/photos
+     */
+    public function listPhotos(Request $request, string $id)
+    {
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'housekeeping'], true)) {
+            return $this->forbidden('ต้องเป็นแอดมินหรือแม่บ้านถึงจะดูรูปภาพได้ค่ะ');
+        }
+
+        $task = HousekeepingTask::find($id);
+        if (! $task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบงานที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
+        }
+
+        // แม่บ้านดูได้เฉพาะ task ตัวเอง (admin ดูได้ทั้งหมด)
+        if ($user->role === 'housekeeping' && $task->assigned_to !== $user->id) {
+            return $this->forbidden('ไม่มีสิทธิ์ดูรูปภาพของงานนี้ค่ะ');
+        }
+
+        $query = $task->photos()->orderBy('created_at', 'asc');
+
+        if ($category = $request->query('category')) {
+            $query->where('category', $category);
+        }
+
+        $allPhotos = $task->photos()->get();
+        $counts = [
+            'before' => $allPhotos->where('category', 'before')->count(),
+            'after' => $allPhotos->where('category', 'after')->count(),
+            'forgotten_item' => $allPhotos->where('category', 'forgotten_item')->count(),
+            'damage' => $allPhotos->where('category', 'damage')->count(),
+        ];
+
+        $photos = $query->get()->map(fn ($img) => [
+            'id' => $img->id,
+            'task_id' => $task->id,
+            'category' => $img->category,
+            'original_name' => $img->original_name,
+            'size' => $img->size,
+            'mime_type' => $img->mime_type,
+            'url' => $img->url,
+            'uploaded_by' => $img->uploaded_by,
+            'created_at' => $img->created_at?->toISOString(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'task_id' => $task->id,
+            'notes' => $task->notes,
+            'total_photos' => $photos->count(),
+            'counts' => $counts,
+            'photos' => $photos,
+        ]);
+    }
+
+    // ============================================
+    // 🔧 Helpers
+    // ============================================
+
+    /**
+     * แปลง task เป็น array สำหรับ JSON response (consistent shape)
+     */
+    private function serializeTask(HousekeepingTask $task): array
+    {
+        return [
+            'task_id' => $task->id,
+            'room_id' => $task->room_id,
+            'room_number' => $task->room?->room_number ?? 'N/A',
+            'room_type' => $task->room?->roomType?->name_en ?? 'N/A',
+            'task_type' => $task->task_type,
+            'task_status' => $task->status,
+            'assigned_to' => $task->assigned_to,
+            'assignee_name' => $task->assignee?->name,
+            'notes' => $task->notes,
+            'scheduled_for' => $task->scheduled_for?->format('Y-m-d'),
+            'requested_at' => Carbon::parse($task->created_at)->format('Y-m-d H:i'),
+            'accepted_at' => $task->accepted_at?->format('Y-m-d H:i'),
+            'completed_at' => $task->completed_at?->format('Y-m-d H:i'),
+        ];
+    }
+
+    private function forbidden(string $message)
+    {
+        return response()->json(['status' => 'error', 'message' => $message], 403);
     }
 }

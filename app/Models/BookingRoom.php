@@ -2,67 +2,253 @@
 
 namespace App\Models;
 
+use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\Auth;
 
 class BookingRoom extends Model
 {
     use HasFactory, HasUuids;
 
     /**
-     * ✅ #17 Fixed: เปลี่ยนจาก $guarded = [] เป็น $fillable
-     * 🌟 Refactor (18/06/26): ย้ายข้อมูลผู้เข้าพักจาก bookings มาที่ booking_rooms
-     *    รองรับหลายคนผ่าน guests (JSON), บันทึก children แยก
+     * 🌟 Refactor (25/06/26): Booking Room State Machine
+     *    - เก็บ check_in/check_out + status รายห้อง
+     *    - State: draft → confirmed → {checked_in → checked_out | no_show}
      */
     protected $fillable = [
         'booking_id',
         'room_type_id',
-        'room_id',  // nullable — assign ตอน check-in
-        'guests',   // JSON: [{ title, name, nationality, is_ku_member }, ...]
-        'children', // int: จำนวนเด็กที่เข้าพักในห้องนี้
+        'room_id',     // nullable — assign ตอน check-in
+        'check_in',    // ย้ายมาจาก bookings (แต่ละห้องมีวันที่ต่างกันได้)
+        'check_out',
+        'guests',      // JSON: [{ title, name, firstName, lastName, email, phone, nationality }, ...]
+        'status',      // draft | confirmed | checked_in | checked_out | no_show
+        // 🏨 bed_preference สำหรับ Room Allocation Algorithm (king_size = ชั้น 8 | null=any)
+        'bed_preference',
+        // 🧾 Billing fields (04/08/26): ที่อยู่ + หมายเหตุใบกำกับภาษีระดับห้อง
+        'billing_address',
+        'billing_comment',
+        // 🎟️ Discount fields (27/08/26): ค่าห้องก่อนลด และ ส่วนลดของห้องนี้ (integer บาท)
+        'room_amount',
+        'discount_amount',
+        // 🧾 Net total ต่อห้อง (03/09/26): room_amount − discount_amount + addon รวมทุกอย่าง (integer บาท)
+        //    invariant Σ booking_rooms.amount == bookings.total_amount (บังคับด้วย test)
+        'amount',
     ];
 
     protected $casts = [
+        'check_in' => 'date',
+        'check_out' => 'date',
         'guests' => 'array',
-        'children' => 'integer',
+        'room_amount' => 'integer',
+        'discount_amount' => 'integer',
+        'amount' => 'integer',
     ];
 
-    // 🌟 Helper: ดึงผู้เข้าพักคนแรก (primary guest)
+    /**
+     * 🔒 ซ่อน relation roomType และ room ไม่ให้ serialize ออกไปใน JSON ทุก endpoint
+     * (ให้ client ใช้เฉพาะ room_type_id / room_id ตรงๆ)
+     */
+    protected $hidden = ['roomType', 'room'];
+
+    /**
+     * 🗓️ (2026-09-24, SRS v2 REQ-026/027): derived fields — nights (จำนวนคืน) และ
+     * stay_type ('daily' | 'block' | 'monthly' — จองเหมา/รายเดือน ตาม config/booking.php)
+     */
+    protected $appends = ['nights', 'stay_type'];
+
+    // =========================================================
+    // 🚦 State Machine (BR-level)
+    // =========================================================
+
+    /**
+     * BR State Machine:
+     *   draft → confirmed (admin/staff/system)
+     *   confirmed → checked_in (admin/staff)       [walk-in skip มาตรงนี้]
+     *   confirmed → no_show (admin)
+     *   checked_in → checked_out (admin/staff)
+     */
+    public function transitionStatus(string $newStatus, string $userRole = 'admin'): void
+    {
+        $current = $this->status;
+
+        $validTransitions = [
+            'draft' => [
+                'confirmed' => ['admin', 'staff', 'system'],
+            ],
+            'confirmed' => [
+                'checked_in' => ['admin', 'staff'],
+                'no_show' => ['admin'],
+            ],
+            'checked_in' => [
+                'checked_out' => ['admin', 'staff'],
+            ],
+        ];
+
+        if (! isset($validTransitions[$current]) ||
+            ! isset($validTransitions[$current][$newStatus])) {
+            throw new Exception(
+                "ไม่อนุญาตให้เปลี่ยนสถานะห้องจาก '{$current}' → '{$newStatus}' ตาม Flow ระบบค่ะ",
+                422
+            );
+        }
+
+        $requiredRoles = $validTransitions[$current][$newStatus];
+        if (! in_array($userRole, $requiredRoles)) {
+            throw new Exception('ไม่มีสิทธิ์ดำเนินการสถานะห้องค่ะ!', 403);
+        }
+
+        $this->status = $newStatus;
+        $this->save();
+
+        // 📝 Audit log (04/08/26): เก็บประวัติการเปลี่ยนสถานะ BR (chokepoint เดียว)
+        StatusChangeLog::create([
+            'entity_type' => 'booking_room',
+            'entity_id' => $this->id,
+            'from_status' => $current,
+            'to_status' => $newStatus,
+            'role' => $userRole,
+            'causer_id' => Auth::id(),
+            'note' => null,
+        ]);
+    }
+
+    // =========================================================
+    // 🌟 Helpers: ดึงข้อมูลผู้เข้าพัก
+    // =========================================================
+
     public function getPrimaryGuestAttribute(): ?array
     {
         return $this->guests[0] ?? null;
     }
 
-    // 🌟 Helper: ดึงชื่อผู้เข้าพักหลักสำหรับ Receipt
+    /**
+     * 🗓️ จำนวนคืนของห้องนี้ (mirror สูตรใน BookingController — ครึ่งวันนับเป็น 1 คืน)
+     */
+    public function getNightsAttribute(): int
+    {
+        if (empty($this->check_in) || empty($this->check_out)) {
+            return 0;
+        }
+
+        return $this->check_in->copy()->startOfDay()->diffInDays($this->check_out->copy()->startOfDay()) ?: 1;
+    }
+
+    /**
+     * 🗓️ ประเภทการเข้าพักตามจำนวนคืน (derived — SRS v2 REQ-026/027)
+     *    monthly = จองรายเดือน (>= monthly_min_nights), block = จองเหมา (>= block_min_nights)
+     */
+    public function getStayTypeAttribute(): string
+    {
+        $nights = $this->nights;
+
+        if ($nights >= (int) config('booking.monthly_min_nights', 30)) {
+            return 'monthly';
+        }
+
+        if ($nights >= (int) config('booking.block_min_nights', 20)) {
+            return 'block';
+        }
+
+        return 'daily';
+    }
+
+    // =========================================================
+    // 🛏️ Availability: ชุดสถานะที่ "กิน slot" (ทุก endpoint ใช้ scope เดียวกัน)
+    // =========================================================
+
+    /**
+     * Slot-holding set — สถานะ BR ที่นับลด availability: draft + confirmed + checked_in
+     *
+     * ⏱️ (2026-09-24, REQ-008 + owner decision "draft + payment_deadline รวม 15 นาที"):
+     * draft ที่ payment_deadline ผ่านไปแล้ว "ไม่กิน slot" อีก — ปลดล็อกเป็นห้องว่าง
+     * ทันทีตอน query (ไม่รอ CleanupExpiredDrafts มาลบ ซึ่งเป็นแค่ garbage-collect)
+     * draft ที่ deadline เป็น null (walk-in style) นับเป็นกิน slot ตามเดิม
+     * ห้ามใช้ whereIn('status', ['draft',...]) เองนอก scope นี้ — ไม่งั้น draft หมดอายุ
+     * จะยังล็อกห้องค้างจนกว่า sweep จะมาลบค่ะ
+     *
+     * 💳 (25/09/26, booking-payment-types ticket 03): draft **deferred** ยึด slot ต่อ
+     * แม้ payment_deadline ผ่านไปแล้ว — จุดประสงค์ของ deferred คือการันตีห้องให้องค์กร
+     * ก่อนชำระ (ถ้าปล่อย slot การยกเว้น CleanupExpiredDrafts ก็ไร้ความหมาย) —
+     * draft deferred สร้าง/ดูแลโดย admin เท่านั้น จึงมีคนรับผิดชอบเก็บกวาดเสมอ
+     *
+     * ⏱️ (2026-10-27, fix slot leak): บิลที่ container เลย draft แล้ว
+     * (pending/verify_error/paid/confirmed) ห้อง draft ยึด slot เสมอ — ไม่สน deadline
+     * เพราะ verify สลิป / updateStatus ไม่ได้ย้ายสถานะห้อง ทำให้ห้องค้าง draft ตลอดชีวิตบิล
+     * · complete ไม่อยู่ในลิสต์ — บิลจบแล้วห้องควรคืน pool
+     * · บิล container draft คงพฤติกรรมเดิมทุกอย่าง (เกิน 15 นาทีปล่อย / null หรือ deferred ยึด)
+     */
+    public function scopeHoldingSlot($query)
+    {
+        return $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->where(function ($q) {
+                $q->whereIn('status', ['confirmed', 'checked_in'])
+                    ->orWhere(function ($draft) {
+                        $draft->where('status', 'draft')
+                            ->whereHas('booking', fn ($b) => $b->where(function ($w) {
+                                $w->whereNull('payment_deadline')
+                                    ->orWhere('payment_deadline', '>', now())
+                                    // 💳 draft deferred — ยึด slot จน admin confirm หรือลบ
+                                    ->orWhere('payment_type', 'deferred')
+                                    // ⏱️ (2026-10-27) fix slot leak: บิลที่ container เลย draft แล้ว
+                                    //    (pending/verify_error/paid/confirmed) ห้อง draft ยึด slot เสมอ —
+                                    //    verify/updateStatus ไม่ได้ย้ายสถานะห้อง ห้องค้าง draft ตลอดชีวิตบิล
+                                    //    เดิมเงื่อนไขดูแค่ payment_deadline ทำให้บิลที่จ่าย/ยืนยันแล้วหลุด
+                                    //    จากการนับ slot หลัง 15 นาที → overbooking (เหตุการณ์ห้อง 508 บน prod)
+                                    //    · complete ไม่อยู่ในลิสต์ — บิลจบแล้วห้องควรคืน pool
+                                    ->orWhereIn('status', ['pending', 'verify_error', 'paid', 'confirmed']);
+                            }));
+                    });
+            });
+    }
+
     public function getPrimaryGuestNameAttribute(): string
     {
         $primary = $this->primary_guest;
-        if (!$primary) return 'Customer';
-        return trim(($primary['title'] ?? '') . ' ' . ($primary['name'] ?? ''));
+        if (! $primary) {
+            return 'Customer';
+        }
+
+        $firstName = $primary['firstName'] ?? $primary['first_name'] ?? '';
+        $lastName = $primary['lastName'] ?? $primary['last_name'] ?? '';
+        $fullName = trim($firstName.' '.$lastName);
+
+        if (empty($fullName)) {
+            $fullName = $primary['name'] ?? '';
+        }
+
+        if (empty($fullName)) {
+            return 'Customer';
+        }
+
+        return trim(($primary['title'] ?? '').' '.$fullName);
     }
 
-    // 🌟 Helper: นับจำนวนผู้เข้าพักทั้งหมด (ผู้ใหญ่ + เด็ก)
     public function getTotalGuestsAttribute(): int
     {
-        return (is_array($this->guests) ? count($this->guests) : 0) + ($this->children ?? 0);
+        return is_array($this->guests) ? count($this->guests) : 0;
     }
 
-    // 🌟 1. เชื่อมกลับไปหาข้อมูล Booking หลัก
+    // =========================================================
+    // 🌟 Relationships
+    // =========================================================
+
     public function booking(): BelongsTo
     {
         return $this->belongsTo(Booking::class);
     }
 
-    // 🌟 2. เชื่อมไปหาประเภทห้องพักที่ลูกค้าเลือกตอนจอง
     public function roomType(): BelongsTo
     {
         return $this->belongsTo(RoomType::class);
     }
 
-    // 🌟 3. เชื่อมไปหาห้องพักจริงๆ (เป็น Nullable เพราะรอ Assign เลขห้องตอนที่ลูกค้ามาเช็คอิน)
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
@@ -73,44 +259,62 @@ class BookingRoom extends Model
         return $this->hasOne(Addon::class);
     }
 
+    public function additionalCharges(): HasMany
+    {
+        return $this->hasMany(AdditionalCharge::class);
+    }
+
+    /**
+     * 🖼️ (REQ-033): หลักฐานการเข้าพักตอน check-in (บัตร ปชช., registration, PDPA ฯลฯ)
+     * morphMany ไปยัง images table (เก็บ 365 วัน)
+     */
+    public function evidences(): MorphMany
+    {
+        return $this->morphMany(Image::class, 'imageable');
+    }
+
     // =========================================================
-    // 🌟 New Logic: ฟังก์ชันสำหรับหาห้องว่างและ Assign ให้ตัวเอง
+    // 🌟 Logic: หาห้องว่าง + Assign
     // =========================================================
+
+    /**
+     * หาห้องว่างและ assign ให้ BR ตัวเอง
+     * - ใช้ $this->check_in/check_out (BR-level dates)
+     * - นับตั้งแต่ draft (availability counting = C)
+     */
     public function assignAvailableRoom(): bool
     {
-        // ถ้ามีห้องอยู่แล้ว ไม่ต้องหาใหม่ค่ะ ถือว่าสำเร็จเลย
         if ($this->room_id !== null) {
             return true;
         }
 
-        // 🌟 ดึง check_in และ check_out จาก Booking หลักผ่าน Relation ได้เลยค่ะ!
-        $checkIn = $this->booking->check_in;
-        $checkOut = $this->booking->check_out;
+        $checkIn = $this->check_in;
+        $checkOut = $this->check_out;
 
-        // ดึงจำนวนเตียงเสริมที่ลูกค้าขอ
-        $requestedExtraBeds = $this->addon ? $this->addon->extra_bed : 0;
+        // 📊 (05/10/26) extra-bed เป็นรายคืนแล้ว — จับคู่ห้องด้วยจำนวนสูงสุดต่อคืน (accessor extra_beds_max)
+        $requestedExtraBeds = $this->addon ? $this->addon->extra_beds_max : 0;
 
-        // ค้นหาห้องว่าง
+        // ค้นหาห้องว่าง — เช็คจาก BR-level ชุด slot-holding (draft ที่ยังไม่หมดเวลา + confirmed + checked_in)
+        // 🗓️ (24/09/26) room-state-periods: ตัด whereNotIn(status maintenance/reserved_closed) ออก —
+        //    สองสถานะนี้ถูกถอดจาก machine แล้ว (period-check อยู่ที่ allocator/availability)
+        //    ⚠️ method นี้เป็น dead code (assignment จริงไหลผ่าน RoomAllocator) — คงไว้ตาม spec เดิม
         $availableRoom = Room::where('room_type_id', $this->room_type_id)
             ->whereDoesntHave('bookingRooms', function ($query) use ($checkIn, $checkOut) {
-                $query->whereHas('booking', function ($bQuery) use ($checkIn, $checkOut) {
-                    $bQuery->whereIn('status', ['paid', 'confirmed', 'checked_in'])
-                           ->where('check_in', '<', $checkOut)
-                           ->where('check_out', '>', $checkIn);
-                });
+                $query->holdingSlot()
+                    ->where('check_in', '<', $checkOut)
+                    ->where('check_out', '>', $checkIn);
             })
-            ->whereNotIn('status', ['maintenance', 'reserved_closed'])
             ->orderByRaw('builtin_extra_beds >= ? DESC', [$requestedExtraBeds])
             ->orderBy('builtin_extra_beds', 'ASC')
-            ->lockForUpdate() // ล็อก row ป้องกันคนจองชนกันวินาทีเดียวกัน
+            ->lockForUpdate()
             ->first();
 
-        // ถ้าเจอห้องว่าง ให้อัปเดตตัวเอง
         if ($availableRoom) {
             $this->update(['room_id' => $availableRoom->id]);
-            return true; // แจ้งว่า Assign สำเร็จ
+
+            return true;
         }
 
-        return false; // แจ้งว่าหาห้องไม่ได้ค่ะ 😭
+        return false;
     }
 }

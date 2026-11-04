@@ -2,33 +2,109 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+
 class RoomType extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuids;
 
     protected $guarded = []; // อนุญาตให้ Mass Assignment
 
     // 👇 เติม 2 บรรทัดนี้เพื่อกำราบ Laravel ค่ะ!
     public $incrementing = false;
+
     protected $keyType = 'string';
+
+    /**
+     * 🌟 Update (11/09/26): rates object เป็น integer บาทล้วน (non-decimal)
+     * รวม daily (general, ku_member), group (min_5_rooms, min_10_rooms), monthly
+     * 💰 มาตรฐานเงินใหม่: storage = wire = integer บาท ไม่มีการแปลงที่ขอบ API แล้ว
+     */
+    protected $appends = ['rates'];
+
+    /**
+     * 🌟 ซ่อน relationship rows ออกจาก JSON response
+     */
+    protected $hidden = ['rateRows'];
 
     protected function casts(): array
     {
         return [
-            'extra_bed_enabled' => 'boolean',
+            // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+            'extra_bed_enabled' => PgBoolean::class,
+            // 🌟 Fix L1 (03/07/26): integer casts สำหรับคอลัมน์ตัวเลข
+            'max_guests' => 'integer',
+            'max_extra_beds' => 'integer',
+            // 💰 (11/09/26): integer บาทล้วน — ไม่มี accessor/mutator แปลงทศนิยมแล้ว
+            'extra_bed_price' => 'integer',
         ];
     }
+
+    /**
+     * 🌟 Add (03/09/26): โหลด rate rows ทั้งหมดที่ active สำหรับ room type นี้
+     */
+    public function rateRows(): HasMany
+    {
+        return $this->hasMany(GlobalRate::class, 'room_type_id', 'id')
+            ->whereRaw('is_active = TRUE');
+    }
+
+    /**
+     * 🌟 Canonical rates object (integer บาทล้วน — non-decimal)
+     */
+    public function getRatesAttribute(): array
+    {
+        $rows = $this->relationLoaded('rateRows')
+            ? $this->rateRows
+            : $this->rateRows()->get();
+
+        $dailyGeneral = $rows->first(fn ($r) => $r->rate_type === 'daily' && $r->is_active)?->default_price ?? 0;
+        $dailyKu = $rows->first(fn ($r) => $r->rate_type === 'daily_ku' && $r->is_active)?->default_price ?? 0;
+        $groupMin5 = $rows->first(fn ($r) => $r->rate_type === 'group' && $r->code === 'min_5_rooms' && $r->is_active)?->default_price ?? 0;
+        $groupMin10 = $rows->first(fn ($r) => $r->rate_type === 'group' && $r->code === 'min_10_rooms' && $r->is_active)?->default_price ?? 0;
+        $monthly = $rows->first(fn ($r) => $r->rate_type === 'month' && $r->is_active)?->default_price ?? 0;
+
+        return [
+            'daily' => [
+                'general' => (int) $dailyGeneral,
+                'ku_member' => (int) $dailyKu,
+            ],
+            'group' => [
+                'min_5_rooms' => (int) $groupMin5,
+                'min_10_rooms' => (int) $groupMin10,
+            ],
+            'monthly' => (int) $monthly,
+            // 🌙 (22/10/26, srs-v2-gap-closure ticket 09): ราคาต่อวันแบบรายเดือน (month ÷ 30) —
+            //    ใช้เป็นเรทของ "เศษวันที่เหลือ" ในสัญญารายเดือน · frontend คำนวณยอดก่อนส่งได้
+            //    จากแหล่งเดียวกับ server: room_amount = intdiv(x × monthly, 30) เมื่อ x >= 20 คืน
+            'monthly_per_day' => $monthly > 0 ? intdiv((int) $monthly, 30) : 0,
+        ];
+    }
+
+    /**
+     * 🌟 Local Scope: Eager-load rateRows และนับจำนวนห้องที่ขายได้
+     * 🗓️ (24/09/26) room-state-periods: denominator = ห้องกายภาพทั้งหมดของ type
+     *    (สถานะ maintenance / is_reserved ถูกถอดแล้ว) — ห้องที่ติด period
+     *    (reserved/maintenance) ถูกตัดที่ occupied matrix ของแต่ละ endpoint แทน
+     *    (period เป็นช่วงวันที่ — วันไหนครอบวันนั้นห้องหาย วันอื่นขายปกติ)
+     */
+    public function scopeWithSellableRoomsAndRates($query)
+    {
+        return $query->withCount('rooms as total_rooms_count')->with('rateRows');
+    }
+
     public function rooms(): HasMany
     {
         // เชื่อมไปยัง Model Room โดยใช้ room_type_id เป็น Foreign Key ค่ะ
         return $this->hasMany(Room::class, 'room_type_id', 'id');
     }
+
     public function bookingRooms(): HasMany
     {
         return $this->hasMany(BookingRoom::class, 'room_type_id', 'id');
     }
-    
 }

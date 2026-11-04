@@ -1,0 +1,286 @@
+{
+    "id": "extra-bed-report",
+    "name_th": "รายงานเตียงเสริม",
+    "name_en": "Extra-Bed Report",
+    "category_th": "รายงานปฏิบัติการรายวัน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "พนักงานหน้าเคาน์เตอร์",
+        "แอดมิน",
+        "หัวหน้าแม่บ้าน"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "Booking, Guest Name, Room, Arrival, Departure, Date",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.เตียงเสริม",
+        "sheet_gid": "1274698485",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date_range",
+            "label_th": "From / To",
+            "type": "date_range",
+            "sample_value": "2026-09-09 ถึง 2026-09-14"
+        }
+    ],
+    "columns": [
+        {
+            "key": "booking_no",
+            "label_th": "Booking",
+            "type": "string"
+        },
+        {
+            "key": "guest_name",
+            "label_th": "Guest Name",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "Room",
+            "type": "room_no",
+            "nullable": true
+        },
+        {
+            "key": "arrival",
+            "label_th": "Arrival",
+            "type": "date"
+        },
+        {
+            "key": "departure",
+            "label_th": "Departure",
+            "type": "date"
+        },
+        {
+            "key": "beds_by_night",
+            "label_th": "จำนวนเตียงเสริมรายคืน (คอลัมน์ไดนามิกตามวันที่)",
+            "type": "integer_by_date"
+        }
+    ],
+    "night_columns": [
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-12",
+        "2026-09-13",
+        "2026-09-14"
+    ],
+    "summary": {
+        "total_allocated": {
+            "by_night": {
+                "2026-09-09": 0,
+                "2026-09-10": 2,
+                "2026-09-11": 8,
+                "2026-09-12": 8,
+                "2026-09-13": 3,
+                "2026-09-14": 3
+            }
+        },
+        "total_inventory": {
+            "by_night": {
+                "2026-09-09": 35,
+                "2026-09-10": 35,
+                "2026-09-11": 35,
+                "2026-09-12": 35,
+                "2026-09-13": 35,
+                "2026-09-14": 35
+            }
+        },
+        "balance": {
+            "by_night": {
+                "2026-09-09": 35,
+                "2026-09-10": 33,
+                "2026-09-11": 27,
+                "2026-09-12": 27,
+                "2026-09-13": 32,
+                "2026-09-14": 32
+            }
+        }
+    },
+    "sample_data": [
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณมานิตย์ คำสวย",
+            "room_no": "609",
+            "arrival": "2026-09-12",
+            "departure": "2026-09-13",
+            "beds_by_night": []
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณกันต์ ขยันจัง",
+            "room_no": "709",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-13",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณฉัตรชัย สุขดี",
+            "room_no": "710",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-12",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณฉัตรชัย สุขดี",
+            "room_no": "712",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-12",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณฉัตรชัย สุขดี",
+            "room_no": "713",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-12",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณฉัตรชัย สุขดี",
+            "room_no": "714",
+            "arrival": "2026-09-11",
+            "departure": "2026-09-12",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณธวัชชัย การงาน",
+            "room_no": "909",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-13",
+            "beds_by_night": {
+                "2026-09-10": 1,
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณพงศกร สีเหลือง",
+            "room_no": "609",
+            "arrival": "2026-09-10",
+            "departure": "2026-09-13",
+            "beds_by_night": {
+                "2026-09-10": 1,
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณยุวดี คิดไว",
+            "room_no": null,
+            "arrival": "2026-09-12",
+            "departure": "2026-09-13",
+            "beds_by_night": {
+                "2026-09-11": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณดวงใจ ต้นไม้",
+            "room_no": null,
+            "arrival": "2026-09-13",
+            "departure": "2026-09-14",
+            "beds_by_night": {
+                "2026-09-12": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณพรพรรณ ใจดี",
+            "room_no": null,
+            "arrival": "2026-09-14",
+            "departure": "2026-09-15",
+            "beds_by_night": {
+                "2026-09-12": 1,
+                "2026-09-13": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณกนกพร สินใจ",
+            "room_no": null,
+            "arrival": "2026-09-14",
+            "departure": "2026-09-15",
+            "beds_by_night": {
+                "2026-09-12": 2,
+                "2026-09-13": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณxxxx",
+            "room_no": null,
+            "arrival": "2026-09-12",
+            "departure": "2026-09-14",
+            "beds_by_night": {
+                "2026-09-12": 1,
+                "2026-09-13": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณxxxx",
+            "room_no": null,
+            "arrival": "2026-09-12",
+            "departure": "2026-09-15",
+            "beds_by_night": {
+                "2026-09-12": 1,
+                "2026-09-14": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณxxxx",
+            "room_no": null,
+            "arrival": "2026-09-12",
+            "departure": "2026-09-15",
+            "beds_by_night": {
+                "2026-09-12": 1,
+                "2026-09-14": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณxxxx",
+            "room_no": null,
+            "arrival": "2026-09-12",
+            "departure": "2026-09-13",
+            "beds_by_night": {
+                "2026-09-12": 1
+            }
+        },
+        {
+            "booking_no": "xxxxx",
+            "guest_name": "คุณxxxx",
+            "room_no": null,
+            "arrival": "2026-09-14",
+            "departure": "2026-09-15",
+            "beds_by_night": {
+                "2026-09-14": 1
+            }
+        }
+    ],
+    "notes": [
+        "คอลัมน์จำนวนเตียงเป็นไดนามิกตามช่วงวันที่ของ filter (ตัวอย่าง 6 คืน)",
+        "ห้อง \"-\" = ยังไม่ได้ assign ห้อง (null)",
+        "ชีตต้นทางสะกด \"Tatal Allocated\" (Typo ของ Total Allocated); filter จริงคือ 9-14 กันยายน 2569 แม้หัวเรื่องระบุวันอื่น",
+        "Total Inventory 35 เตียง/คืน = stock เตียงเสริมทั้งหมดของโรงแรม"
+    ]
+}

@@ -1,10 +1,42 @@
 <?php
 
+use App\Http\Middleware\CheckRole;
+use App\Http\Middleware\RequireJsonAccept;
+use Composer\Autoload\ClassLoader;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
 
-return Application::configure(basePath: dirname(__DIR__))
+$baseDir = dirname(__DIR__);
+$_ENV['APP_BASE_PATH'] = $baseDir;
+$_SERVER['APP_BASE_PATH'] = $baseDir;
+
+if (class_exists(ClassLoader::class)) {
+    foreach (ClassLoader::getRegisteredLoaders() as $loader) {
+        $loader->setPsr4('App\\', [$baseDir.'/app']);
+        $loader->setPsr4('Database\\Factories\\', [$baseDir.'/database/factories']);
+        $loader->setPsr4('Database\\Seeders\\', [$baseDir.'/database/seeders']);
+        $loader->setPsr4('Tests\\', [$baseDir.'/tests']);
+
+        try {
+            $ref = new ReflectionProperty($loader, 'classMap');
+            $ref->setAccessible(true);
+            $map = $ref->getValue($loader);
+            foreach ($map as $class => $path) {
+                if (str_starts_with($class, 'App\\') || str_starts_with($class, 'Database\\') || str_starts_with($class, 'Tests\\')) {
+                    unset($map[$class]);
+                }
+            }
+            $ref->setValue($loader, $map);
+        } catch (Throwable) {
+            // best-effort
+        }
+    }
+}
+
+return Application::configure(basePath: $baseDir)
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
@@ -13,9 +45,31 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'role' => \App\Http\Middleware\CheckRole::class, // 👈 เติมบรรทัดนี้ลงไปค่ะ!
+            'role' => CheckRole::class, // 👈 เติมบรรทัดนี้ลงไปค่ะ!
         ]);
+
+        // 🎯 Global middleware บน API group: บังคับ Accept: application/json ทุก /api/* request
+        //    (prepend ให้ทำงานก่อน throttle/auth:sanctum — see RequireJsonAccept)
+        $middleware->api(prepend: [
+            RequireJsonAccept::class,
+        ]);
+
+        // 🔐 (26/10/26) API-only — ไม่มี route 'login' ให้ redirect: guest ที่ไม่ยอมรับ JSON
+        //    (เช่น request รูปที่ส่ง Accept: image/* ผ่าน route images.file ที่ exempt
+        //    RequireJsonAccept) ต้องโดน AuthenticationException → 401 JSON ด้านล่าง
+        //    ไม่ใช่ 500 RouteNotFoundException
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // 🔐 (26/10/26) unauthenticated บน /api/* → 401 JSON ตาม error shape ของระบบเสมอ
+        //    (ปกติ RequireJsonAccept คอย default Accept: application/json ให้ — จุดเดียวที่
+        //    ลุยถึงตรงนี้ได้คือ route ที่ exempt เช่น images.file)
+        $exceptions->render(function (AuthenticationException $e, Request $request) {
+            if ($request->is('api/*')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!',
+                ], 401);
+            }
+        });
     })->create();

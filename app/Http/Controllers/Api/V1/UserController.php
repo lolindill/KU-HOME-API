@@ -3,20 +3,29 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use Illuminate\Http\Request;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
+use App\Models\User;
+use Illuminate\Http\Request;
 
 class UserController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $users = User::paginate(15); 
+        // 🎫 split user: email ซ้ำข้าม provider ได้ — โชว์ auth_provider + ให้ admin กรองได้ (ticket 09)
+        $provider = $request->query('auth_provider');
+
+        $users = User::query()
+            ->when(
+                $provider !== null && $provider !== '',
+                fn ($query) => $query->where('auth_provider', $provider)
+            )
+            ->paginate(15);
+
         return response()->json([
             'status' => 'success',
             'message' => 'Users fetched successfully',
-            'users' => $users
+            'users' => $users,
         ]);
     }
 
@@ -28,18 +37,18 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'สร้างผู้ใช้เรียบร้อยแล้ว',
-            'user' => $user
+            'user' => $user,
         ], 201);
     }
 
     public function show(string $id)
     {
         $user = User::findOrFail($id);
-        
+
         return response()->json([
             'status' => 'success',
             'message' => 'User fetched successfully',
-            'user' => $user
+            'user' => $user,
         ]);
     }
 
@@ -52,7 +61,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'อัปเดตข้อมูลสำเร็จเรียบร้อยแล้ว',
-            'user' => $user
+            'user' => $user,
         ]);
     }
 
@@ -63,7 +72,7 @@ class UserController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'ลบผู้ใช้เรียบร้อยแล้ว'
+            'message' => 'ลบผู้ใช้เรียบร้อยแล้ว',
         ]);
     }
 
@@ -72,7 +81,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'User profile fetched successfully',
-            'user' => $request->user()
+            'user' => $request->user(),
         ]);
     }
 
@@ -94,7 +103,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Profile updated successfully',
-            'user' => $user
+            'user' => $user,
         ]);
     }
 
@@ -114,7 +123,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => $validated['ver'] ? 'ยืนยันตัวตนผู้ใช้สำเร็จ' : 'ยกเลิกการยืนยันตัวตนผู้ใช้สำเร็จ',
-            'user' => $user->fresh()
+            'user' => $user->fresh(),
         ]);
     }
 }

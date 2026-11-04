@@ -1,0 +1,163 @@
+{
+    "id": "manager-report",
+    "name_th": "รายงานผู้จัดการ (Manager's Report)",
+    "name_en": "Status",
+    "category_th": null,
+    "frequency_th": null,
+    "primary_users_th": null,
+    "output_format_th": null,
+    "register_note_th": null,
+    "register_displayed_data_th": null,
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานผู้จัดการ",
+        "sheet_gid": "105152104",
+        "extracted_at": "2026-09-22"
+    },
+    "layout": "metrics(rows) x periods(columns)",
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "ประจำวันที่",
+            "type": "date",
+            "sample_value": "2026-09-09"
+        },
+        {
+            "key": "mode",
+            "label_th": "Complete / Week / Month",
+            "type": "enum",
+            "options": [
+                "Complete",
+                "Week",
+                "Month"
+            ],
+            "sample_value": "Complete"
+        },
+        {
+            "key": "date_range",
+            "label_th": "เมื่อเลือกเดือน ให้เลือกช่วง From-TO ได้",
+            "type": "date_range"
+        }
+    ],
+    "periods": [
+        {
+            "key": "day",
+            "label_th": "Day",
+            "sample_label": "Day 9 กันยายน 69"
+        },
+        {
+            "key": "month_to_date",
+            "label_th": "Month to Date",
+            "sample_label": "Month to Date 1 กันยายน 69 - 9 กันยายน 69"
+        },
+        {
+            "key": "year_to_date",
+            "label_th": "Year to Date",
+            "sample_label": "Year to Date 1 มกราคม 69 - 9 กันยายน 69"
+        },
+        {
+            "key": "ly_same_date",
+            "label_th": "LY Same Date (วันเดียวกัน ปีก่อน)",
+            "sample_label": "LY Same Date 9 กันยายน 68"
+        },
+        {
+            "key": "ly_month_to_date",
+            "label_th": "LY Same Date (ช่วงเดือน ปีก่อน)",
+            "sample_label": "LY Same Date 1 กันยายน 68 - 9 กันยายน 68"
+        },
+        {
+            "key": "ly_year_to_date",
+            "label_th": "LY Same Date (ช่วงปี ปีก่อน)",
+            "sample_label": "LY Same Date 1 มกราคม 68 - 9 กันยายน 68"
+        }
+    ],
+    "metrics": [
+        {
+            "key": "total_persons",
+            "label_th": "Total Persons"
+        },
+        {
+            "key": "total_rooms",
+            "label_th": "Total Rooms"
+        },
+        {
+            "key": "rooms_occupied",
+            "label_th": "Room Occupied"
+        },
+        {
+            "key": "confirmed",
+            "label_th": "Comfirmed"
+        },
+        {
+            "key": "provisional",
+            "label_th": "Provisisional"
+        },
+        {
+            "key": "unsold_rooms",
+            "label_th": "Unsold Rooms"
+        },
+        {
+            "key": "unsold_rooms_plus_provisional",
+            "label_th": "Unsold Rooms+Prov"
+        },
+        {
+            "key": "percent_occupied",
+            "label_th": "%Occupied"
+        },
+        {
+            "key": "percent_occupied_plus_confirmed_provisional",
+            "label_th": "%Occ+Comf+Prov"
+        },
+        {
+            "key": "complimentary_rooms",
+            "label_th": "Complimentary Room"
+        },
+        {
+            "key": "out_of_order_rooms",
+            "label_th": "Out of Order Room"
+        },
+        {
+            "key": "total_rooms_minus_ooo",
+            "label_th": "Total Rooms-OOO"
+        },
+        {
+            "key": "avail_rooms_ooo",
+            "label_th": "Avail Rooms-OOO"
+        },
+        {
+            "key": "percent_occupied_minus_ooo",
+            "label_th": "%Occupied-OOO"
+        },
+        {
+            "key": "arrival_rooms",
+            "label_th": "Arrival Rooms"
+        },
+        {
+            "key": "arrival_persons",
+            "label_th": "Arrival Persons"
+        },
+        {
+            "key": "departure_rooms",
+            "label_th": "Depart Rooms"
+        },
+        {
+            "key": "departure_persons",
+            "label_th": "Depart Persons"
+        },
+        {
+            "key": "no_show_rooms",
+            "label_th": "No Show Rooms"
+        },
+        {
+            "key": "no_show_persons",
+            "label_th": "No Show Persons"
+        }
+    ],
+    "sample_data": null,
+    "notes": [
+        "เทมเพลตในชีตเป็น layout: แถว = ตัวชี้วัด 20 ตัว, คอลัมน์ = ช่วงเวลา 6 ช่วง (Day / MTD / YTD + เทียบปีก่อน LY) ไม่มีตัวเลขตัวอย่าง",
+        "ชีตต้นทางสะกด \"Comfirmed\" / \"Provisisional\" (Typo) — normalize เป็น confirmed / provisional แล้ว",
+        "ตามสารบัญ: Export PDF/Excel เพื่อปิดยอด ผู้ใช้หลักคือผู้จัดการ/ผู้บริหาร"
+    ]
+}

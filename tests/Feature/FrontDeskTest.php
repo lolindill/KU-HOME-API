@@ -2,14 +2,17 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\Booking;
+use App\Models\BookingRoom;
+use App\Models\GlobalRate;
+use App\Models\HousekeepingTask;
+use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomType;
-use App\Models\BookingRoom;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class FrontDeskTest extends TestCase
 {
@@ -17,28 +20,42 @@ class FrontDeskTest extends TestCase
 
     private function createRoomType(): RoomType
     {
-        return RoomType::create([
+        $rt = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard Double',
             'name_th' => 'สแตนดาร์ด ดับเบิล',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
         ]);
+        // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $rt->id,
+            'code' => null,
+            'name_en' => 'Standard Double Daily',
+            'default_price' => 1500,
+            'is_active' => true,
+        ]);
+
+        return $rt;
     }
+
+    // counter แทน rand() — เลขห้องสุ่มชนกันเองแล้ว suite พังแบบสุ่ม (เหมือน precedent ใน BookingTest)
+    private static int $roomSeq = 0;
 
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
     {
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.(++self::$roomSeq),
             'status' => $status,
         ]);
     }
 
     /**
-     * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
+     * 🌟 Refactor (29/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
+     * Container states: draft, paid, confirmed, complete (เท่านั้น) — ไม่มี cancelled แล้ว
      */
     private function createBooking(array $overrides = []): Booking
     {
@@ -48,12 +65,32 @@ class FrontDeskTest extends TestCase
             'user_id' => $user->id,
             'source' => 'online',
             'status' => 'confirmed',
-            'check_in' => now()->toDateString(),
-            'check_out' => now()->addDays(2)->toDateString(),
             'total_amount' => 3000,
         ], $overrides));
 
         return $booking;
+    }
+
+    /**
+     * 🌟 Helper: สร้าง BookingRoom พร้อม check_in/check_out (จำเป็นสำหรับ BR-level)
+     */
+    private function createBookingRoom(Booking $booking, RoomType $roomType, ?Room $room = null, string $brStatus = 'confirmed'): BookingRoom
+    {
+        return BookingRoom::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'room_id' => $room?->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(2)->toDateString(),
+            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
+            'status' => $brStatus,
+        ]);
+    }
+
+    private function createStaff(): User
+    {
+        return User::factory()->create(['role' => 'staff']);
     }
 
     // ============================================
@@ -67,7 +104,7 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType);
 
-        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[] + children, ไม่มี guest_name/email/phone แล้ว
+        // 🌟 Refactor (18/06/26): payload ใหม่ — guests[], ไม่มี guest_name/email/phone แล้ว
         $response = $this->postJson('/api/v1/front-desk/walk-in', [
             'verified_by' => $admin->id,
             'room_id' => $room->id,
@@ -75,20 +112,30 @@ class FrontDeskTest extends TestCase
             'guests' => [
                 ['title' => 'mr', 'name' => 'Walk In Guest', 'nationality' => 'TH'],
             ],
-            'children' => 0,
         ]);
 
         $response->assertStatus(201);
-        // 🌟 ข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
+        // 🌟 Refactor (25/06/26): container = confirmed (walk-in skips draft→paid)
+        // BR-level = checked_in
         $this->assertDatabaseHas('bookings', [
-            'user_id' => $admin->id, // 🌟 staff เป็นผู้ถือ booking
+            'user_id' => $admin->id,
             'source' => 'admin',
-            'status' => 'checked_in',
+            'status' => 'confirmed',
         ]);
         $this->assertDatabaseHas('booking_rooms', [
             'room_id' => $room->id,
-            'children' => 0,
+            'status' => 'checked_in',
         ]);
+
+        // 🧾 (03/09/26) walk-in เข้า invariant เดียวกับ flow ออนไลน์ (T2):
+        //    reprice ตอน draft → amount = room_amount = rate × nights = 1500 × 2 = 3000
+        $booking = Booking::where('user_id', $admin->id)->where('source', 'admin')->latest('created_at')->first();
+        $this->assertNotNull($booking);
+        $this->assertEquals(3000, $booking->total_amount);
+        $br = $booking->bookingRooms()->first();
+        $this->assertEquals(3000, $br->room_amount);
+        $this->assertEquals(3000, $br->amount);
+        $this->assertAmountInvariant($booking);
     }
 
     public function test_non_admin_cannot_walk_in_guest(): void
@@ -119,22 +166,77 @@ class FrontDeskTest extends TestCase
         $room = $this->createRoom($roomType);
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Attach room to booking — 🌟 ต้องมี guests JSON ตาม structure ใหม่
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $roomType->id,
-            'room_id' => $room->id,
-            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — ต้องมี check_in/check_out + status
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
             'assigned_rooms' => [$room->id],
         ]);
 
         $response->assertStatus(200);
-        $this->assertEquals('checked_in', $booking->fresh()->status);
+        // 🌟 Container stays at confirmed (check-in is BR-level now)
+        $this->assertEquals('confirmed', $booking->fresh()->status);
+        // 🌟 BR-level = checked_in
+        $this->assertEquals('checked_in', $br->fresh()->status);
+    }
+
+    /**
+     * 🌟 NEW (scrutinize 29/06/26): Bug fix #1 — check-in ต้องปฏิเสธ draft booking
+     * ก่อนหน้านี้ code เดิม bypass state machine ทำให้ draft → confirmed ได้โดยข้ามการชำระเงิน
+     */
+    public function test_check_in_rejects_draft_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'draft']); // 🚨 ยังไม่จ่ายเงิน!
+
+        $br = $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(400);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('ชำระเงิน', $response->json('message'));
+        // 🛡️ State must remain unchanged (no silent bypass)
+        $this->assertEquals('draft', $booking->fresh()->status);
+        $this->assertEquals('draft', $br->fresh()->status);
+    }
+
+    public function test_check_in_rejects_pending_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'pending']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertEquals('pending', $booking->fresh()->status);
+    }
+
+    public function test_check_in_rejects_verify_error_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'verify_error']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertEquals('verify_error', $booking->fresh()->status);
     }
 
     // ============================================
@@ -148,25 +250,18 @@ class FrontDeskTest extends TestCase
         $roomType = $this->createRoomType();
         $room = $this->createRoom($roomType, 'occupied');
         $booking = $this->createBooking([
-            'status' => 'checked_in',
+            'status' => 'confirmed',
             'is_paid' => true,
         ]);
 
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $roomType->id,
-            'room_id' => $room->id,
-            'guests' => [['title' => 'mr', 'name' => 'FD Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — pre-assigned room + status checked_in
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
 
         // Need a completed payment for check-out to succeed
-        \App\Models\Payment::create([
+        Payment::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'amount' => 3000,
-            'payment_method' => 'cash',
             'status' => 'completed',
         ]);
 
@@ -175,22 +270,111 @@ class FrontDeskTest extends TestCase
         ]);
 
         $response->assertStatus(200);
-        $this->assertEquals('checked_out', $booking->fresh()->status);
+        // 🌟 Refactor (25/06/26): container auto-syncs to complete
+        $this->assertEquals('complete', $booking->fresh()->status);
+        // 🌟 BR-level = checked_out
+        $this->assertEquals('checked_out', $br->fresh()->status);
+    }
+
+    public function test_check_out_rejects_when_additional_charges_unpaid(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'occupied');
+        $booking = $this->createBooking([
+            'status' => 'confirmed',
+            'is_paid' => true,
+            'total_amount' => 3000,
+        ]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
+
+        Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 3000,
+            'status' => 'completed',
+        ]);
+
+        \App\Models\AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => $admin->id,
+        ]);
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(400);
+        $this->assertEquals('checked_in', $br->fresh()->status);
+    }
+
+    /**
+     * 🌟 NEW (scrutinize): Integration test — full check-in → check-out flow
+     * ไม่ pre-set state ด้วยมือ เพื่อจับ bugs ที่เกิดจาก integration ระหว่าง state machines จริง
+     */
+    public function test_full_check_in_to_check_out_integration_flow(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+        $booking = $this->createBooking([
+            'status' => 'confirmed',
+            'is_paid' => false,
+            'total_amount' => 3000,
+        ]);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        // Step 1: Record payment (booking is confirmed, payment marks is_paid=true)
+        $payResponse = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+            'booking_id' => $booking->id,
+            'amount' => 3000,
+        ]);
+        $payResponse->assertStatus(201);
+        $this->assertTrue($booking->fresh()->is_paid);
+
+        // Step 2: Check-in (BR: confirmed → checked_in, room → occupied)
+        $checkInResponse = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+        $checkInResponse->assertStatus(200);
+        $this->assertEquals('checked_in', $br->fresh()->status);
+        $this->assertEquals('occupied', $room->fresh()->status);
+
+        // Step 3: Check-out (BR: checked_in → checked_out, room → checkout_makeup, booking → complete)
+        $checkOutResponse = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $admin->id,
+        ]);
+        $checkOutResponse->assertStatus(200);
+        $this->assertEquals('checked_out', $br->fresh()->status);
+        $this->assertEquals('checkout_makeup', $room->fresh()->status);
+        $this->assertEquals('complete', $booking->fresh()->status);
     }
 
     // ============================================
     // 💰 Record payment
     // ============================================
 
+    /**
+     * 🌟 FIXED (scrutinize): เดิมใช้ status='confirmed' ทำให้ logic transition draft→paid ไม่ทำงาน
+     * และไม่ assert booking status/is_paid/receipt → false confidence
+     * ตอนนี้ใช้ status='draft' + assert full state เพื่อจับ bugs จริง
+     */
     public function test_admin_can_record_payment(): void
     {
         $this->actingAsAdmin();
-        $booking = $this->createBooking(['status' => 'checked_in', 'total_amount' => 3000]);
+        $booking = $this->createBooking(['status' => 'draft', 'total_amount' => 3000]);
 
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
             'booking_id' => $booking->id,
             'amount' => 3000,
-            'payment_method' => 'cash',
         ]);
 
         $response->assertStatus(201);
@@ -199,6 +383,30 @@ class FrontDeskTest extends TestCase
             'amount' => 3000,
             'status' => 'completed',
         ]);
+        // 🌟 Fixed: assert full state transition จริงๆ
+        $this->assertEquals('paid', $booking->fresh()->status, 'Booking should transition draft → paid');
+        $this->assertTrue($booking->fresh()->is_paid, 'Booking is_paid should be true');
+        // ❄️ FROZEN (24/07/26): Receipt table deprecated — recordPayment ไม่สร้าง receipt แล้ว
+        //    flow payment confirmation ย้ายไป booking_confirmations table (POST /bookings/{id}/confirm + admin verify)
+        $this->assertDatabaseMissing('receipts', ['booking_id' => $booking->id]);
+    }
+
+    /**
+     * 🌟 Fix H4 (03/07/26): front-desk payment รับ booking_id จาก URL param
+     * ไม่บังคับต้องส่ง booking_id ใน body ด้วย
+     */
+    public function test_record_payment_without_body_booking_id(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(['status' => 'draft', 'total_amount' => 3000]);
+
+        // ส่งแค่ amount (ไม่ส่ง booking_id ใน body)
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+            'amount' => 3000,
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertTrue($booking->fresh()->is_paid);
     }
 
     // ============================================
@@ -216,7 +424,14 @@ class FrontDeskTest extends TestCase
             'name_th' => 'สแตนดาร์ด',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1000,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $standardType->id,
+            'code' => null,
+            'name_en' => 'Standard Daily',
+            'default_price' => 1000,
+            'is_active' => true,
         ]);
 
         $deluxeType = RoomType::create([
@@ -225,7 +440,14 @@ class FrontDeskTest extends TestCase
             'name_th' => 'ดีลักซ์',
             'max_guests' => 4,
             'extra_bed_enabled' => true,
-            'rate_daily_general' => 3000,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $deluxeType->id,
+            'code' => null,
+            'name_en' => 'Deluxe Daily',
+            'default_price' => 3000,
+            'is_active' => true,
         ]);
 
         // Create a DELUXE room (but booking is for STANDARD)
@@ -238,14 +460,8 @@ class FrontDeskTest extends TestCase
 
         $booking = $this->createBooking(['status' => 'confirmed']);
 
-        // Booking room expects Standard type — 🌟 ต้องมี guests JSON
-        BookingRoom::create([
-            'id' => Str::uuid(),
-            'booking_id' => $booking->id,
-            'room_type_id' => $standardType->id,
-            'guests' => [['title' => 'mr', 'name' => 'Guest', 'nationality' => 'TH']],
-            'children' => 0,
-        ]);
+        // 🌟 Refactor (25/06/26): BR-level — ต้องมี check_in/check_out + status
+        $this->createBookingRoom($booking, $standardType, null, 'confirmed');
 
         // Try to check-in with Deluxe room — should FAIL
         $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
@@ -257,5 +473,433 @@ class FrontDeskTest extends TestCase
             'status' => 'error',
         ]);
         $this->assertStringContainsString('ไม่ตรงกับประเภทห้องที่จองไว้', $response->json('message'));
+    }
+
+    // ============================================
+    // 🚫 Mark No-Show (Fix BUG #1, #3, #4 — 03/07/26)
+    // ============================================
+
+    /**
+     * 🌟 BUG #1 regression: ป้องกัน route mark-no-show หายไปอีก
+     */
+    public function test_mark_no_show_route_exists(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $roomType = $this->createRoomType();
+        $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $admin = User::factory(['role' => 'admin'])->create();
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        // ถ้า route ไม่ exist → 404; route มี → 200
+        $response->assertStatus(200);
+    }
+
+    /**
+     * 🌟 BUG #3+#4: full no-show — ทุกห้อง confirmed → no_show, booking → complete
+     */
+    public function test_admin_can_mark_full_no_show(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        // booking auto-sync → complete เพราะทุกห้องจบแล้ว
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    /**
+     * 🌟 BUG #4: partial no-show — mark เฉพาะบางห้อง
+     * ห้องที่ mark → no_show, ห้องที่เหลือ → confirmed, booking → ยัง confirmed
+     */
+    public function test_admin_can_mark_partial_no_show(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br1 = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+        $br2 = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        // Mark เฉพาะ br1
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+            'booking_room_ids' => [$br1->id],
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br1->fresh()->status);
+        // อีกห้องยัง confirmed อยู่
+        $this->assertEquals('confirmed', $br2->fresh()->status);
+        // booking ยังไม่ complete (ยังมีห้อง confirmed)
+        $this->assertEquals('confirmed', $booking->fresh()->status);
+    }
+
+    /**
+     * 🌟 BUG #3: booking ยังเป็น paid → auto paid→confirmed→complete
+     */
+    public function test_no_show_auto_transitions_paid_to_confirmed(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        // booking paid (จ่ายเงินแล้ว ยังไม่ confirm)
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        // booking: paid → confirmed → complete (auto sync)
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    /**
+     * 🌟 BUG #4: reject BR ที่ไม่ใช่ confirmed ด้วย error ชัดเจน (ไม่ silent skip)
+     */
+    public function test_no_show_rejects_non_confirmed_br(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        // BR ที่ checked_in แล้ว — ไม่ควร mark no-show ได้
+        $br = $this->createBookingRoom($booking, $roomType, null, 'checked_in');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(400);
+        $response->assertJson(['status' => 'error']);
+        // state ต้องไม่เปลี่ยน (no silent mutation)
+        $this->assertEquals('checked_in', $br->fresh()->status);
+        $this->assertEquals('confirmed', $booking->fresh()->status);
+    }
+
+    // ============================================
+    // 🛎️ Staff Role Front Desk Tests (REQ-031 24hr Front Desk)
+    // ============================================
+
+    public function test_staff_can_check_in_confirmed_booking(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in");
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_id' => $booking->id,
+            'booking_status' => 'confirmed',
+        ]);
+
+        $this->assertSame('occupied', $room->fresh()->status);
+        $this->assertSame('checked_in', $br->fresh()->status);
+        $this->assertSame('confirmed', $booking->fresh()->status);
+    }
+
+    public function test_staff_can_check_in_paid_booking(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-in");
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_status' => 'confirmed',
+        ]);
+
+        $this->assertSame('occupied', $room->fresh()->status);
+        $this->assertSame('checked_in', $br->fresh()->status);
+        $this->assertSame('confirmed', $booking->fresh()->status);
+    }
+
+    public function test_staff_can_check_out_checked_in_booking_and_creates_housekeeping_task(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'occupied');
+        $booking = $this->createBooking(['status' => 'confirmed', 'total_amount' => 1500]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
+
+        // บันทึกการชำระเงินครบถ้วน
+        Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 1500,
+            'status' => 'completed',
+        ]);
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $staff->id,
+            'notes' => 'Staff night checkout',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_status' => 'complete',
+        ]);
+
+        $this->assertSame('checked_out', $br->fresh()->status);
+        $this->assertSame('checkout_makeup', $room->fresh()->status);
+        $this->assertSame('complete', $booking->fresh()->status);
+
+        // ตรวจสอบว่า Housekeeping Task ถูกสร้างขึ้นจริง
+        $task = HousekeepingTask::where('room_id', $room->id)->first();
+        $this->assertNotNull($task, 'Housekeeping task should be created on staff check-out');
+        $this->assertSame('unassigned', $task->status);
+        $this->assertSame('Staff night checkout', $task->notes);
+    }
+
+    public function test_staff_can_record_payment(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'draft', 'total_amount' => 1500, 'is_paid' => false]);
+        $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+            'amount' => 1500,
+            'reference_number' => 'CASH-STAFF-001',
+            'received_by' => $staff->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_is_paid' => true,
+            'booking_status' => 'paid',
+        ]);
+
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
+        $this->assertSame('paid', $booking->fresh()->status);
+
+        $payment = Payment::where('booking_id', $booking->id)->first();
+        $this->assertNotNull($payment);
+        $this->assertSame(1500, (int) $payment->amount);
+        $this->assertSame('CASH-STAFF-001', $payment->reference_number);
+    }
+
+    public function test_staff_can_record_payment_on_pending_booking(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'pending', 'total_amount' => 1500, 'is_paid' => false]);
+        $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+            'amount' => 1500,
+            'reference_number' => 'CASH-STAFF-PENDING-001',
+            'received_by' => $staff->id,
+        ]);
+
+        $response->assertStatus(201);
+        $response->assertJson([
+            'status' => 'success',
+            'booking_is_paid' => true,
+            'booking_status' => 'paid',
+        ]);
+
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
+        $this->assertSame('paid', $booking->fresh()->status);
+    }
+
+    public function test_staff_can_auto_assign_rooms(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/assign-rooms");
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'status' => 'success',
+        ]);
+
+        $this->assertSame($room->id, $br->fresh()->room_id);
+    }
+
+    public function test_regular_user_and_guest_cannot_access_front_desk_endpoints(): void
+    {
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        foreach (['user', 'guest'] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            $this->actingAs($user, 'sanctum');
+
+            // check-in 403
+            $this->postJson("/api/v1/front-desk/{$booking->id}/check-in")
+                ->assertStatus(403);
+
+            // check-out 403
+            $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+                'verified_by' => $user->id,
+            ])->assertStatus(403);
+
+            // payment 403
+            $this->postJson("/api/v1/front-desk/{$booking->id}/payment", [
+                'amount' => 1500,
+            ])->assertStatus(403);
+
+            // assign-rooms 403
+            $this->putJson("/api/v1/bookings/{$booking->id}/assign-rooms")
+                ->assertStatus(403);
+        }
+    }
+
+    public function test_staff_cannot_walk_in(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType);
+
+        $response = $this->postJson('/api/v1/front-desk/walk-in', [
+            'verified_by' => $staff->id,
+            'nights' => 1,
+            'room_id' => $room->id,
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_staff_cannot_mark_no_show(): void
+    {
+        $staff = $this->createStaff();
+        $this->actingAs($staff, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $staff->id,
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_mark_no_show_allows_draft_br_in_confirmed_booking(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    public function test_mark_no_show_allows_draft_br_in_paid_booking_and_auto_promotes_container(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/mark-no-show", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('no_show', $br->fresh()->status);
+        // container โดน promote เป็น confirmed ก่อน แล้วจบที่ complete เมื่อ mark ครบ
+        $this->assertEquals('complete', $booking->fresh()->status);
+    }
+
+    public function test_check_in_assigned_rooms_rejects_overlapping_room_holding_slot(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+
+        // บิลแรกจอง room นี้ไว้และถือ slot อยู่ (confirmed) ช่วงวันที่เดียวกัน
+        $bookingA = $this->createBooking(['status' => 'confirmed', 'is_paid' => true]);
+        $this->createBookingRoom($bookingA, $roomType, $room, 'confirmed');
+
+        // บิลที่สองต้องการเช็คอินเข้าห้องเดียวกันวันทับซ้อนกัน ด้วย assigned_rooms
+        $bookingB = $this->createBooking(['status' => 'paid', 'is_paid' => true]);
+        $this->createBookingRoom($bookingB, $roomType, null, 'draft');
+
+        $response = $this->postJson("/api/v1/front-desk/{$bookingB->id}/check-in", [
+            'assigned_rooms' => [$room->id],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('มีการจองอื่นทับช่วงเข้าพัก', $response->json('message'));
+    }
+
+    public function test_walk_in_rejects_overlapping_room_holding_slot(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'available');
+
+        // Existing booking holds slot for today to tomorrow
+        $booking = $this->createBooking(['status' => 'confirmed', 'is_paid' => true]);
+        $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        $response = $this->postJson('/api/v1/front-desk/walk-in', [
+            'verified_by' => $admin->id,
+            'nights' => 1,
+            'room_id' => $room->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('overlapping', $response->json('message'));
     }
 }

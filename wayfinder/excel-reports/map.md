@@ -1,0 +1,65 @@
+---
+label: wayfinder:map
+title: "Excel report export — สร้าง Excel 15 รายงานจาก template docs/report_docAndSample"
+status: closed
+---
+
+# 🗺️ Wayfinder Map — Excel report export (15 รายงาน)
+
+- **label:** `wayfinder:map`
+- **status:** open
+- **tracker:** local-markdown — tickets อยู่ใน `tickets/`, research อยู่ใน `research/` (blocking = field `blocked-by` ของแต่ละ ticket)
+- **charted:** 2026-09-22
+
+## Destination ✅ COMPLETED (2026-10-05)
+
+Design spec (label `ready-for-agent`) ฉบับเดียว สำหรับฟีเจอร์ **export ไฟล์ Excel (.xlsx) ของรายงานทั้ง 15 ฉบับ** ตาม template ใน `docs/report_docAndSample/report-templates/` — ตัดสินครบ: library, renderer architecture + ที่อยู่ของ template, API contract + สิทธิ์, formatting/print conventions และ data-coverage รวม design ตารางใหม่ที่จำเป็น — พอให้ implement ต่อได้โดยไม่ต้องตัดสินใจใหญ่อีก
+
+## Notes
+
+- **Domain:** KU HOME API (Laravel 13 · PHP 8.3 · API-only · PostgreSQL prod / SQLite test) — คือ roadmap "Generate & print report templates" (Planned ใน AGENTS.md) ฉบับ Excel · server-side rendering ตาม AGENTS.md (frontend React แยก repo)
+- **Template source:** `docs/report_docAndSample/report-templates/*.json` 15 ไฟล์ + `_index.json` — ⚠️ โฟลเดอร์นี้ถูก `/docs/*` gitignore (มีเฉพาะเครื่อง dev นี้) → การวาง template ฝั่ง app เป็น decision ใน ticket 03
+- **🌟 TRUTH SOURCE (owner ประกาศ 2026-09-22):** Google Sheets ["เอกสารระบบที่พัก_Document"](https://docs.google.com/spreadsheets/d/1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw/edit) (แท็บรายงาน `gid=1127367576`) — **ชีตนี้คือความจริง** ทุก ticket ที่คุยเลย์เอาต์/คอลัมน์/metric ต้องเทียบชีตใบนี้ · template JSON เป็นตัวกลางที่แปลงจากชีต (`_index.json` อ้าง id เดียวกัน) — ถ้าขัดกัน **ชีต wins** แล้ว re-convert · public view-only · snapshot xlsx + แผนผังแท็บ↔JSON อยู่ที่ [research/truth-snapshot/](research/truth-snapshot/README.md)
+- **Schema จาก template:** `money_baht` = integer บาท (convention 2026-09-11), `date` = ISO-8601, มี `sample_data` จากชีตต้นทางใช้ mock ได้, typo/ความไม่สม่ำเสมอของต้นทางระบุใน `notes` ของแต่ละไฟล์
+- **Tracker ธรรมเนียมเดียวกับ map อื่น:** claim = เติม `assignee:` ก่อนลงมือ · 1 ticket/session · ปิด = `status: closed` + `## Resolution` · commit tracker ไปกับ branch ปัจจุบันเสมอ
+- ไม่มี skill `grilling`/`domain-modeling`/`research` บนเครื่อง — grilling ถาม owner ตรง (AskUserQuestion), งานสำรวจใช้ Explore agent (precedent ku-sso)
+- **🆕 Facts จากแมปพี่เลี้ยงที่ปิดแล้ว (2026-09-25 — ตรวจสถานะ):**
+  - **[`booking-payment-types`](../booking-payment-types/map.md) ✅ closed** — `bookings.payment_type` = `full|deposit|deferred` (default full, admin-only) · ชั้น A `booking_confirmations.amount` (required สลิปใหม่) · **`payments` = ledger เดียวเงินที่เข้าจริง** (3 จุดเขียน) · ชั้น B derive ล้วน (`paid_amount` = SUM(payments), `outstanding` = total − paid) · `deposit_amount` nullable บน bookings (null = 50% config) · ปัดเศษขึ้นหลักสิบ → **ticket 08 ปลดล็อก** — ธง "ยอดสลิป/มัดจำ 50%" มีคำตอบพร้อมใช้; ธง `payment_channel` ถูกยกมาไว้ที่ ticket 08 ตัดสินเอง (แมป payment-types ตัดสินว่า derive จากจุดเขียน ledger ได้ ไม่ต้องกลับ column — จะมี column ชัด ๆ ไหมเป็นของ ticket 08); `receipt_ref` ยังติด `receipts` FROZEN เหมือนเดิม
+  - **[`organization-bookings`](../organization-bookings/map.md) ✅ closed** — ตาราง `organizations` (`erp` string unique nullable + `is_active`) + `bookings.organization_id` (FK restrict) + snapshot `customer_name`/`customer_phone`/`customer_email` บน bookings · `GET /bookings?organization_id` filter แล้ว แต่ **aggregation รายงานตามองค์กรยกให้แมปนี้** → **ticket 09 premise หมดอายุบางส่วน** — audit เดิมบอก "ไม่มี concept หน่วยงาน/ERP เลย" ตอนนี้ไม่จริงแล้ว (มี org/erp/`guest_type` หน่วยงานผ่าน organization_id แล้ว) เหลือ design เฉพาะ `is_inter_unit_transfer`, แจ้งหนี้, `special_request`, `complimentary`
+- **Charting defaults (2026-09-22 — owner ไม่ได้ตอบ grill ตอน chart, ใช้ best judgment, กลับมาแก้ได้):**
+  1. Destination = **spec อย่างเดียว** (plan-don't-do — implement เป็นงานถัดไปหลัง spec ผ่าน)
+  2. ขอบเขต = **Excel เท่านั้น** — เอกสาร PDF 9 ฉบับ (document-register.json) เป็น effort แยก
+  3. รายงานที่ข้อมูลไม่พอ → **ออกแบบตารางใหม่รวมใน spec** (ไม่ตัดรายงานทิ้ง)
+
+## Decisions so far
+
+<!-- ดัชนี: 1 บรรทัดต่อ ticket ที่ปิดแล้ว — zoom เข้า ticket/research อ่านรายละเอียด -->
+
+- [Research: เลือก library สร้าง Excel](tickets/01-excel-library-choice.md) *(2026-09-22)*: แนะนำ **phpoffice/phpspreadsheet 5.x ใช้ตรง ๆ** — styling ครบทุกข้อ (merged cells, number format, freeze panes, print titles, A4 landscape) + `IOFactory::load()` test ได้; OpenSpout ตกเพราะ v5 ต้อง PHP 8.4+ · sign-off รอใน ticket 03 — รายละเอียด [research/excel-library.md](research/excel-library.md)
+- [Research: data-coverage audit](tickets/02-data-coverage-audit.md) *(2026-09-22)*: 15 รายงาน = **1 ✅ / 11 ⚠️ / 3 ❌** — gap เจ็บสุดคือ slip flow ไม่เก็บยอดเงิน + `payment_channel` ถูก drop แล้ว · gap 12 กลุ่ม graduate เป็น tickets 08–11 — รายละเอียด [research/data-coverage-audit.md](research/data-coverage-audit.md)
+- [สถาปัตยกรรม renderer + ที่อยู่ของ template](tickets/03-renderer-architecture.md) *(2026-09-22 — grilling defaults ✅ owner sign-off แล้วในวันเดียวกัน)*: **phpspreadsheet 5.x ใช้ตรง** (sign-off ticket 01) · **Hybrid** = engine กลาง template-driven + `ReportData` ต่อรายงาน · template JSON วางที่ **`resources/report-templates/`** ใน repo (runtime source) — ชีต truth = upstream, sync manual re-convert — snapshot ชีต + แผนผังแท็บอยู่ที่ [research/truth-snapshot/](research/truth-snapshot/README.md)
+- [Formatting & print conventions ของไฟล์ Excel](tickets/05-formatting-print-conventions.md) *(2026-09-22 — grilling)*: วันที่ **พ.ศ. `d/m/YYYY`** · เงิน **`#,##0` ไม่มีทศนิยม** · สไตล์ = **minimal flat table** (owner เลือกไม่ mirror ชีต — ไม่ merged ไม่ fill, filter ใน Excel ได้, summary เป็นแถวรวมท้ายตาราง bold) · print ครบธรรมเนียมชีต (A4 landscape, freeze + repeat title, หัวไฟล์ชื่อรายงาน + ช่วงวันที่, ชื่อชีตไทย)
+- [API contract + สิทธิ์](tickets/04-api-contract-and-roles.md) *(2026-09-22 — grilling)*: endpoint = **route ต่อรายงาน (explicit 15 routes, ไม่ generic)** · ส่งไฟล์ = **stream ทันที** (ไม่มีไฟล์ค้าง/ไม่ต้อง cleanup) · สิทธิ์ = **admin+staff ทุกใบ + housekeeping เฉพาะใบแม่บ้าน 2 ใบ** · throttle `10,1` + จำกัดช่วงวันที่ ≤ 1 ปี · error ตาม shape เดิม — ในรอบเดียวกัน owner **sign-off ticket 03 ครบทั้ง 4 ข้อ**
+- [นิยาม manager-report — template ไม่มี columns เลย](tickets/06-manager-report-definition.md) *(2026-10-05 — grilling)*: matrix **20 metrics × 6 คอลัมน์ตามชีต** — แถว 9–14 = breakdown ต่อคืน · `provisional` = **draft+pending+verify_error ไม่เพิ่ม storage** · Complimentary = **flag `is_complimentary` บน bookings → design ต่อใน ticket 09** · mode ครบ 3 โหมด (Complete / Week-to-Date เริ่มจันทร์ / Month From-TO) · รวมช่วง = ผลรวม (counters) + เฉลี่ยต่อคืน (stock) · **LY โชว์ 0** รอข้อมูลปีก่อน · **OOO ย้อนหลังผูก ticket 11** (room status history)
+- [Payment/deposit semantics](tickets/08-payment-amount-channel-deposit.md) *(2026-10-05 — grilling, ปลด pause ด้วยแมป booking-payment-types)*: ยอดสลิป + มัดจำ **จบด้วยแมปพี่เลี้ยง** (ชั้น A/B + `payment_type`/`deposit_amount` — ไม่ตัดสินซ้ำ) · **`payment_channel` → "ที่มาเงิน" 2 ค่า: สลิป (โอน/QR) | เงินสด** — derive จากจุดเขียน ledger ไม่เพิ่ม column · **`receipt_ref` เก็บคอลัมน์ไว้แสดง "-"** รอระบบใบเสร็จใหม่ (จดหมายเหตุใน spec) — ผลต่อ template: daily-financial-report adjust filter/column ตอน implement
+- [ERP/agency/inter-unit + booking attributes](tickets/09-erp-agency-inter-unit-booking-attributes.md) *(2026-10-05 — grilling)*: agency/erp_code = อ่านจาก `organizations` มีแล้ว · **inter-unit = derive จาก organization_id ไม่เพิ่ม flag** (check-in section Fully Paid ตามต้นทาง) · เพิ่ม 4 column บน `bookings`: **`invoice_requested_at` · `special_request` · `comment` · `is_complimentary` (tag-only — ยอดเงินคงเดิม, admin-only)** · ไม่มีตารางใหม่ · **fog "รายงานตามองค์กร" จบ** — v1 มีมุมมอง org แค่ erp-transfer + deposit (filter)
+- [Addon product model — breakfast แยกชุด, extra-bed รายคืน, checklist แม่บ้าน](tickets/10-addon-product-model-breakdown.md) *(2026-10-05 — grilling)*: breakfast = **2 columns `breakfast_set_100/200` บน addons** + เรท global_rates 2 แถว (`breakfast_100`/`breakfast_200`) · **คิดเงิน × คืน** (แก้ undercharge เดิมคิดครั้งเดียว) — วันกิน = เช้าวันถัดจากคืนนอน `(check_in, check_out]` ตรง sample ชีต · extra-bed = **JSON `extra_beds_by_night`** คิดรายคืน เรทจาก global_rates ต่อไป (`room_types.extra_bed_price` เหลือ display-only — เจอ inconsistency ระหว่าง grill) · fleet 35 = config · checklist = **3 booleans บน housekeeping_tasks แม่บ้าน tick** หัวข้อ label อยู่ config · reprice แก้ที่ chokepoint เดียว invariant คงเดิม
+- [โดเมนห้อง/สต๊อก — maintenance log, supplies, charges, VIP, room history](tickets/11-room-domain-new-tables.md) *(2026-10-05 — grilling)*: repair log = **เพิ่ม `work_type`+`repair_detail` บน `room_state_periods` ไม่มีตารางใหม่** (วันแจ้งซ่อม = start, เสร็จ = end, duration derive · note OOO = repair_detail) · charges = ตาราง `additional_charges` **ledger รายงานล้วน ไม่เข้ายอด booking** (invariant คงเดิม · ผู้บันทึก admin+staff = default ติดธง sign-off) · supplies = **เอาไว้ก่อน** รายงาน minimal จาก `stock_inventories` เดิม · **VIP ไว้ก่อน** legend เหลือ 5 ค่า OCC/OOO/VC/VD/EA · Inspected derive จาก `prep_checkin` (default ติดธง) · **room history หมดคำถามก่อน grill** — `status_change_logs` entity_type room + `room_state_periods` landed แล้วตามแมป `room-state-periods` — OOO ย้อนหลังของ occupancy/manager-report ปลดล็อก (ticket 06)
+- [รวบ decisions → spec.md ฉบับ ready-for-agent](tickets/07-spec-ready-for-agent.md) *(2026-10-05 — task AFK)*: **[spec.md](spec.md) ฉบับเดียวจบ** (label `ready-for-agent`) — phpspreadsheet 5.x ตรง · Hybrid engine + `ReportData` 15 classes · template ที่ `resources/report-templates/` · migration pack (bookings +4, addons reshape, global_rates +2, checklist 3, periods +2, ตาราง `additional_charges`) · 15 routes stream + สิทธิ์ · พ.ศ./`#,##0`/minimal flat/A4 · 2 seams testing · IMPL-01..08 — default รอ sign-off 2 ข้อติดธงใน spec §9 — **map ปิดสมบูรณ์**
+
+## Not yet specified
+
+- ~~Design ตารางใหม่รายโดเมน~~ *(graduated 2026-09-22: audit ทำให้ gap ชัด → tickets 08 payment/deposit · 09 ERP/agency/booking attributes · 10 addon product model · 11 room/supplies domain tables)*
+- เอกสาร PDF ฉบับที่อาจต้องมี Excel ตารางร่วม (เช่น ใบงานแม่บ้านเป็นตารางรายวัน) — ถ้า owner ขอค่อยขยาย destination
+- ~~เพดานขนาดไฟล์/ช่วงวันที่ export สูงสุด~~ *(จบ 2026-09-22 ใน ticket 04 — คุมช่วง ≤ 1 ปี + throttle `10,1` ตาม default · stream ทันทีไม่มีไฟล์ค้าง · ข้อสังเกตจาก research ticket 01: ถ้าจริงเจอรายงาน >50k แถว ค่อยกลับมาคุย cache/queue — เพราะ stream สมมติไฟล์ไม่ใหญ่)*
+- ~~Design ฝั่ง payment type ที่ยังไม่เคยออกแบบจริง~~ *(fog 2026-09-22 → graduated 2026-09-24 เป็นแมป [`booking-payment-types`](../booking-payment-types/map.md) → **จบ 2026-09-25** — แมปปิดสมบูรณ์ design + implement, suite 554 เขียว → [ticket 08](tickets/08-payment-amount-channel-deposit.md) ปลดล็อก กลับเป็น frontier — เหลือตัดสินเฉพาะ `payment_channel` กับ `receipt_ref` ในบริบทรายงาน)*
+- ~~**รายงาน/aggregation ตามองค์กร**~~ *(fog 2026-09-25 → จบ 2026-10-05 ใน [ticket 09](tickets/09-erp-agency-inter-unit-booking-attributes.md) — v1 มีมุมมององค์กรแค่ erp-transfer-report (list + filter erp) กับ deposit-report (filter หน่วยงาน/ทั่วไป) รายงานอื่นไม่ break down ตาม org, demand ภายหลังเปิดงานใหม่)*
+- **Movement ledger + item master ของวัสดุสิ้นเปลือง** *(เลื่อนโดย owner "เอาไว้ก่อน" 2026-10-05 ใน [ticket 11](tickets/11-room-domain-new-tables.md))* — ว่าก่อนออกแบบ `stock_movements` (in/out) + master attributes (item_code/category/reorder_point/max_stock) เมื่อ owner วงข้อมูลจริงได้ (ชีตต้นทางยังไม่กรอกรับเข้า/เบิกจ่าย/คงเหลือ) — ก่อนหน้านั้น supplies-report โชว์ minimal จาก `stock_inventories` เดิม
+- **ป้าย VIP (ห้องผู้บริหาร)** *(เลื่อนโดย owner "ไว้ก่อน" 2026-10-05 ใน [ticket 11](tickets/11-room-domain-new-tables.md))* — ถ้าวันหน้าอยากได้ = เพิ่ม boolean บน `rooms` + branch เดียวใน room-status-report (legend กลับเป็น 6 ค่า) — รอ owner วงรายชื่อห้องผู้บริหารจริง
+
+## Out of scope
+
+- เอกสาร PDF 9 ฉบับจาก `document-register.json` (Registration/PDPA/Quotation/Receipt/Guest Folio/ใบงานแม่บ้าน/ใบแจ้งซ่อม) + digital signature — roadmap effort แยก ("Digital signature on physical documents")
+- Export รายงานเป็น **PDF** (ต้นทางระบุ PDF/Excel — effort นี้ทำ Excel ก่อน, PDF ผลักไปหลัง)
+- หน้าจอแสดงรายงาน/กราฟฝั่ง React frontend (ku-home)
+- ระบบ scheduling/email ส่งรายงานอัตโนมัติ (ถ้ามีความต้องการจริง ค่อยเปิด effort ใหม่)

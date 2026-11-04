@@ -2,16 +2,18 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Database\QueryException;
+use App\Casts\PgBoolean;
+use App\Support\RoundToTen;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class Booking extends Model
 {
@@ -30,20 +32,46 @@ class Booking extends Model
         'confirmation',
         'source',
         'status',
-        'check_in',
-        'check_out',
+        'discount_code',
         'total_amount',
         'is_paid',
         'payment_deadline',
+        // 💳 (25/09/26) booking-payment-types — ประเภทการชำระ + ยอดมัดจำ (admin/system ตั้งเท่านั้น)
+        'payment_type',
+        'deposit_amount',
+        // 🏛️ (25/09/26) organization-bookings ticket 03 — org booking (user_id = null)
+        'organization_id',
+        'customer_name',
+        'customer_phone',
+        'customer_email',
+        // 📊 (05/10/26) excel-reports spec §2.1 — booking attributes (ticket 09)
+        //    is_complimentary tag-only — ยอดเงินคงเดิม · ตั้งได้ admin เท่านั้น (guard ใน controller)
+        'invoice_requested_at',
+        'special_request',
+        'comment',
+        'is_complimentary',
     ];
 
     protected $casts = [
-        'check_in' => 'date',
-        'check_out' => 'date',
         'total_amount' => 'integer',
-        'is_paid' => 'boolean',
+        // 🌟 Fix PostgreSQL strict boolean (03/07/26): ใช้ PgBoolean cast แทน 'boolean'
+        // (PDO ส่ง PHP bool → integer 0/1 → PostgreSQL ปฏิเสธ)
+        'is_paid' => PgBoolean::class,
         'payment_deadline' => 'datetime',
+        // 💳 (25/09/26) booking-payment-types
+        'deposit_amount' => 'integer',
+        // 📊 (05/10/26) excel-reports spec §2.1
+        'invoice_requested_at' => 'datetime',
+        'is_complimentary' => PgBoolean::class,
     ];
+
+    /**
+     * 💳 (25/09/26) booking-payment-types — ยอดเงิน 2 ชั้น (ticket 04): ชั้น B derive จาก ledger ล้วน
+     * payments = ledger เดียวของ "เงินที่เข้าจริง" (verify / recordPayment / QR — 3 จุดเขียนเท่านั้น)
+     * ส่งทุก response ทุก role — ไม่มี column เก็บ จึงไม่มีทาง drift
+     * 💸 (15/10/26, ticket 13) เพิ่ม charges_total — Σ additional_charges (REQ-042/044)
+     */
+    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total'];
 
     // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
     // ใช้สำหรับ Receipt billing_name และแสดงผล — สำรองด้วย user.name
@@ -58,7 +86,9 @@ class Booking extends Model
             return $bookingRoom->primary_guest_name;
         }
 
-        return $this->user?->name ?? 'Customer';
+        // 🏛️ (25/09/26, organization-bookings ticket 03): ยืด fallback chain —
+        //    `user?->name` → `customer_name` (org booking / เฮดเปล่าระบุคนเข้าพัก) → 'Customer'
+        return $this->user?->name ?? $this->customer_name ?? 'Customer';
     }
 
     // 🌟 Helper: นับจำนวนผู้เข้าพักรวมทุกห้อง (สำหรับ dashboard / summary)
@@ -72,20 +102,155 @@ class Booking extends Model
         return $this->belongsTo(User::class);
     }
 
+    // 🏛️ (25/09/26, organization-bookings ticket 03): org booking — FK ชั้น replaceability
+    //    (snapshot customer_name/phone/email อ่านความหมายได้แม้เทตาราง organizations ทิ้ง)
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
+    }
+
     public function bookingRooms(): HasMany
     {
         return $this->hasMany(BookingRoom::class, 'booking_id');
     }
 
+    // 🌟 Fix (03/07/26): relationship ที่หายไป — CleanupExpiredDrafts เรียก $booking->payments()->delete()
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     /**
-     * Booking Status State Machine
+     * 💸 (15/10/26, srs-v2-gap-closure ticket 13 — REQ-042/044): charges ค่าปรับ/ค่าเสียหาย/addon
+     *    (เดิมเป็น ledger รายงานล้วน — ตอนนี้บวกยอดจริงผ่านปลายน้ำ accessors ด้านล่าง)
+     */
+    public function additionalCharges(): HasMany
+    {
+        return $this->hasMany(AdditionalCharge::class);
+    }
+
+    // =========================================================
+    // 💳 ยอดเงิน derive จาก ledger (booking-payment-types ticket 04/05 — 25/09/26)
+    // 💸 (15/10/26, ticket 13) ยอดรวม = total_amount + charges_total — charges บวกทุกสถานะ
+    //    แตะที่ total_amount ไม่ได้ (คง invariant Σ booking_rooms.amount == total_amount)
+    // =========================================================
+
+    /**
+     * 💰 paid_amount = SUM(payments.amount) เฉพาะ completed (เงินที่เข้าจริง)
+     *    (pending row ของ mock QR ยังไม่นับ — รอเหตุการณ์เงินจริง)
+     */
+    public function getPaidAmountAttribute(): int
+    {
+        return (int) $this->payments()
+            ->where('status', 'completed')
+            ->sum('amount');
+    }
+
+    /**
+     * 💸 charges_total = Σ additional_charges.price (ค่าเสียหาย/ค่ายืม/addon — กรอกเอง)
+     *    deposit 50% ไม่รวม (มัดจำผูกค่าห้อง — ค่าเสียหายยังไม่เกิดตอนจอง)
+     */
+    public function getChargesTotalAttribute(): int
+    {
+        return (int) $this->additionalCharges()->sum('price');
+    }
+
+    /**
+     * 💰 outstanding_amount = (total + charges) − paid (clamp 0 รองรับ overpay)
+     */
+    public function getOutstandingAmountAttribute(): int
+    {
+        return max(0, $this->total_amount + $this->charges_total - $this->paid_amount);
+    }
+
+    /**
+     * 💳 deposit_amount (effective) — frontend อ่านตัวเดียวจบ:
+     *    type ≠ deposit → null · type = deposit → column ?? ceil(total × deposit_percent)
+     *    (accessor ทับ column เดิม — เขียนผ่าน $booking->deposit_amount = X ยังเข้า column ตามปกติ)
+     *    💵 (25/09/26) REQ-015/016 — มัดจำ default ปัดขึ้นหลักสิบต่อ (เป็นยอดที่ลูกต้องจ่าย)
+     *    · deposit_amount ที่ admin ตั้งเองไม่ force ปัด (admin รับผิดชอบตัวเลขเอง — ticket 07)
+     */
+    public function getDepositAmountAttribute(): ?int
+    {
+        if ($this->payment_type !== 'deposit') {
+            return null;
+        }
+
+        if ($this->attributes['deposit_amount'] !== null) {
+            return (int) $this->attributes['deposit_amount'];
+        }
+
+        return RoundToTen::round(
+            (int) ceil($this->total_amount * ((int) config('booking.deposit_percent', 50)) / 100)
+        );
+    }
+
+    /**
+     * 💳 ยอดที่ต้องชำระ "ณ ตอนนี้" (ticket 05 หัวข้อ 9 — ใช้ร่วม confirm/verify/pending list):
+     *    deposit งวดแรก (ยังไม่มีเงินเข้า) = ยอดมัดจำ · กรณีอื่น = ยอดคงเหลือ
+     */
+    public function getExpectedAmountAttribute(): int
+    {
+        if ($this->paid_amount === 0 && $this->payment_type === 'deposit') {
+            return $this->deposit_amount;
+        }
+
+        return $this->outstanding_amount;
+    }
+
+    /**
+     * 💸 (15/10/26, ticket 13) recompute is_paid ตามนิยาม paid ≥ total + charges —
+     *    เรียกหลัง charge เปลี่ยน (create/update/delete ใน AdditionalChargeController)
+     *    เพราะ is_paid เป็น column: สร้าง charge ทำยอดโตเกิน paid → false ·
+     *    ลบ/แก้ charge จน paid ครบอีกครั้ง → true คืน · **ไม่แตะ state machine** —
+     *    สถานะเดินด้วยเหตุการณ์เงินเท่านั้น (recordPayment/verify เป็นคน transition)
      *
-     * draft → paid (user, guest, admin), checked_in (admin), deleted (user, guest, admin)
-     * paid → confirmed (admin), cancelled (admin)
-     * confirmed → cancelled (admin), checked_in (admin), no_show (admin)
-     * checked_in → checked_out (admin)
+     * @return bool ค่า is_paid ล่าสุดหลัง recompute
+     */
+    public function syncIsPaid(): bool
+    {
+        $expected = $this->paid_amount >= $this->total_amount + $this->charges_total;
+
+        if ((bool) $this->is_paid !== $expected) {
+            $this->update(['is_paid' => $expected]);
+        }
+
+        return $expected;
+    }
+
+    public function receipts(): HasMany
+    {
+        return $this->hasMany(Receipt::class);
+    }
+
+    /**
+     * 🌟 Refactor (24/07/26): Payment confirmations (1:N) — replaces payments/receipts
+     * - เก็บ history ทุกครั้งที่ user ส่งหลักฐานการชำระ
+     * - state machine: pending → verified | rejected
+     */
+    public function confirmations(): HasMany
+    {
+        return $this->hasMany(BookingConfirmation::class, 'booking_id');
+    }
+
+    /**
+     * 🌟 Refactor (29/06/26): Booking = Container State Machine (Final — no cancelled)
+     * 🌟 Refactor (25/08/26): เพิ่ม 'pending' ก่อน paid — mirror BookingConfirmation flow
+     * 🌟 Refactor (25/08/26): เพิ่ม 'verify_error' แทน pending→draft เมื่อ admin reject สลิป
      *
-     * Special: 'system' role for webhook (draft → paid only)
+     * Booking (container) เก็บสถานะ payment/admin flow:
+     *   draft → pending (user, guest, admin — ส่งสลิปแล้ว รอ admin ตรวจ)
+     *   pending → paid (admin — verify สลิปผ่านแล้ว)
+     *   pending → verify_error (admin — reject สลิป รอ user ส่งใหม่)
+     *   verify_error → pending (user, guest, admin — ส่งสลิปใหม่ รอตรวจ)
+     *   draft → paid (admin, staff, system — front-desk เก็บเงินสด / webhook อนาคต)
+     *   draft → confirmed (admin, walk-in เข้าตรงๆ)
+     *   paid → confirmed (admin, staff)
+     *   confirmed → complete (auto เมื่อ BR ทุกห้อง checked_out/no_show)
+     *
+     * ❌ ไม่มี cancelled แล้ว — draft ที่หมดอายุจะถูก hard delete (CleanupExpiredDrafts)
+     *    (pending / verify_error ที่หมด deadline ไม่ถูกลบ — รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้, ห้องยังถูก hold ตาม BR availability)
+     * ⚠️ checked_in / checked_out / no_show อยู่ที่ BookingRoom (BR-level state machine)
      */
     public function transitionStatus(string $newStatus, string $userRole)
     {
@@ -93,38 +258,84 @@ class Booking extends Model
 
         $validTransitions = [
             'draft' => [
-                'paid'       => ['user', 'guest', 'admin', 'system'],
-                'checked_in' => ['admin'], // walk-in by admin
-                'deleted'    => ['user', 'guest', 'admin', 'system'],
+                'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิป — รอ admin ตรวจ
+                'paid' => ['admin', 'staff', 'system'], // front-desk เก็บเงินหน้าเคาน์เตอร์ / webhook
+                'confirmed' => ['admin'], // walk-in by admin (skip paid)
+            ],
+            'pending' => [
+                'paid' => ['admin', 'staff'], // admin verify สลิปผ่าน หรือ front-desk staff รับชำระ
+                'verify_error' => ['admin'], // admin reject สลิป — รอ user ส่งสลิปใหม่
+            ],
+            'verify_error' => [
+                'pending' => ['user', 'guest', 'ku_member', 'staff', 'admin'], // ส่งสลิปใหม่ — รอ admin ตรวจอีกครั้ง
             ],
             'paid' => [
-                'confirmed' => ['admin'],
-                'cancelled' => ['admin'],
+                'confirmed' => ['admin', 'staff'],
             ],
             'confirmed' => [
-                'cancelled'  => ['admin'],
-                'checked_in' => ['admin'],
-                'no_show'    => ['admin'],
-            ],
-            'checked_in' => [
-                'checked_out' => ['admin'],
+                'complete' => ['admin', 'system'], // auto เมื่อ BR ครบ
             ],
         ];
 
         // เช็คว่า flow ถูกต้องไหม
-        if (!array_key_exists($currentStatus, $validTransitions) ||
-            !array_key_exists($newStatus, $validTransitions[$currentStatus])) {
+        if (! array_key_exists($currentStatus, $validTransitions) ||
+            ! array_key_exists($newStatus, $validTransitions[$currentStatus])) {
             throw new Exception("ไม่อนุญาตให้เปลี่ยนสถานะจาก '{$currentStatus}' ไปเป็น '{$newStatus}' ตาม Flow ระบบค่ะนายท่าน", 422);
         }
 
         // เช็ค Role
         $requiredRoles = $validTransitions[$currentStatus][$newStatus];
-        if (!in_array($userRole, $requiredRoles)) {
-            throw new Exception("ไม่มีสิทธิ์ดำเนินการค่ะ!", 403);
+        if (! in_array($userRole, $requiredRoles)) {
+            throw new Exception('ไม่มีสิทธิ์ดำเนินการค่ะ!', 403);
         }
 
         $this->status = $newStatus;
         $this->save();
+
+        // 📝 Audit log (04/08/26): เก็บประวัติการเปลี่ยนสถานะ (ใคร/role/from/to/เมื่อไหร่)
+        //    เขียนที่นี่เพราะเป็น chokepoint เดียว — อย่า bypass ด้วย ->status = ตรงๆ
+        //    causer_id ใช้ Auth::id() (nullable สำหรับ system/queue transition)
+        StatusChangeLog::create([
+            'entity_type' => 'booking',
+            'entity_id' => $this->id,
+            'from_status' => $currentStatus,
+            'to_status' => $newStatus,
+            'role' => $userRole,
+            'causer_id' => Auth::id(),
+            'note' => null,
+        ]);
+
+        // 🎟️ Discount (27/08/26): เงินเข้าจริงแล้ว (verify ผ่าน / เงินสด) → ล็อก slot เป็น used ถาวร
+        //    idempotent (อัปเดตเฉพาะ held) · ครอบ draft→paid, pending→paid, draft→confirmed
+        if (in_array($newStatus, ['paid', 'confirmed'])) {
+            DiscountRedemption::query()
+                ->whereIn('booking_room_id', $this->bookingRooms()->pluck('id'))
+                ->where('status', 'held')
+                ->update(['status' => 'used']);
+        }
+    }
+
+    /**
+     * 🌟 Helper: อัปเดตสถานะ booking container อัตโนมัติ
+     * - ถ้า BR ทุกห้อง checked_out/no_show → booking → 'complete'
+     *
+     * 🌟 Fix scrutinize (29/06/26): ใช้ transitionStatus() แทน direct set เพื่อ enforce state machine
+     * กันกรณี flow ผิดปกติ (เช่น booking ยังเป็น 'paid' แต่ BR จบแล้ว) — state machine จะ throw exception
+     * ทำให้ bug ปรากฏชัดแทนที่จะถูก silent ignore
+     */
+    public function syncStatusFromRooms(): void
+    {
+        $rooms = $this->bookingRooms;
+        if ($rooms->isEmpty()) {
+            return;
+        }
+
+        $allFinished = $rooms->every(fn ($br) => in_array($br->status, ['checked_out', 'no_show']));
+        if ($allFinished && $this->status !== 'complete') {
+            // ใช้ state machine (system role) — confirmed → complete
+            // ถ้า status ปัจจุบันไม่ใช่ confirmed จะ throw exception ให้ผู้เรียกจัดการ (เช่น paid → complete)
+            $this->transitionStatus('complete', 'system');
+        }
     }
 
     /**
@@ -134,6 +345,7 @@ class Booking extends Model
      * Format: YYYYMM-XXXXX (เช่น 202606-00001)
      *
      * @return string Confirmation number ที่ unique การันตี
+     *
      * @throws Exception ถ้าสร้างไม่สำเร็จหลัง retry
      */
     public static function generateUniqueConfirmation(): string
@@ -163,11 +375,11 @@ class Booking extends Model
                         ]);
                     }
 
-                    return $key . '-' . str_pad($next, 5, '0', STR_PAD_LEFT);
+                    return $key.'-'.str_pad($next, 5, '0', STR_PAD_LEFT);
                 });
             } catch (QueryException $e) {
                 if ($i === $maxAttempts - 1) {
-                    throw new Exception('Unable to generate unique confirmation number after ' . $maxAttempts . ' attempts');
+                    throw new Exception('Unable to generate unique confirmation number after '.$maxAttempts.' attempts');
                 }
                 usleep(100000); // รอ 100ms แล้ว retry
             }

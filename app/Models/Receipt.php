@@ -2,14 +2,14 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Database\QueryException;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 class Receipt extends Model
 {
@@ -28,7 +28,7 @@ class Receipt extends Model
     ];
 
     /**
-     * ✅ #30 Fixed: เพิ่ม cast สำหรับ amount เป็น integer (satang/cents)
+     * ✅ #30 Fixed: เพิ่ม cast สำหรับ amount เป็น integer บาทล้วน (11/09/26: satang → baht)
      * ให้ตรงกับ Booking.total_amount และ Payment.amount
      */
     protected $casts = [
@@ -47,10 +47,10 @@ class Receipt extends Model
 
     /*
       ✅ #19 Fixed: Atomic counter receipt number generator
-      
+
       ใช้ receipt_sequences table + SELECT FOR UPDATE เพื่อป้องกัน collision
      Format: REC-YYYYMM-XXXXX (เช่น REC-202606-00001)
-     
+
      @return string Receipt number ที่ unique การันตี
       @throws Exception ถ้าสร้างไม่สำเร็จหลัง retry
      */
@@ -81,11 +81,11 @@ class Receipt extends Model
                         ]);
                     }
 
-                    return 'REC-' . $key . '-' . str_pad($next, 5, '0', STR_PAD_LEFT);
+                    return 'REC-'.$key.'-'.str_pad($next, 5, '0', STR_PAD_LEFT);
                 });
             } catch (QueryException $e) {
                 if ($i === $maxAttempts - 1) {
-                    throw new Exception('Unable to generate unique receipt number after ' . $maxAttempts . ' attempts');
+                    throw new Exception('Unable to generate unique receipt number after '.$maxAttempts.' attempts');
                 }
                 usleep(100000); // รอ 100ms แล้ว retry
             }

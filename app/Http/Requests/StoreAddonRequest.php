@@ -15,8 +15,11 @@ class StoreAddonRequest extends FormRequest
     {
         return [
             'booking_room_id'     => 'required|uuid|exists:booking_rooms,id',
-            'extra_bed'           => 'nullable|integer|min:0',
-            'breakfast'           => 'nullable|integer|min:0',
+            // 📊 (05/10/26) canonical — breakfast แยก 2 ชุด + extra-bed รายคืน (spec §2.2)
+            'breakfast_set_100'   => 'nullable|integer|min:0',
+            'breakfast_set_200'   => 'nullable|integer|min:0',
+            'extra_beds_by_night' => 'nullable|array',
+            'extra_beds_by_night.*' => 'nullable|integer|min:0',
             'early_checkIn_price' => 'nullable|integer|min:0',
             'late_checkOut_price' => 'nullable|integer|min:0',
             'extra_bed_price'     => 'nullable|integer|min:0',

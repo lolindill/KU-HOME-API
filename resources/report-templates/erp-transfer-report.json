@@ -1,0 +1,243 @@
+{
+    "id": "erp-transfer-report",
+    "name_th": "รายงานการโอนระหว่างหน่วยงาน",
+    "name_en": "ERP Report",
+    "category_th": "รายงานการเงิน",
+    "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+    "primary_users_th": [
+        "แอดมิน",
+        "ฝ่ายบัญชี"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "เลขบุ๊คกิ้ง, หมายเลขห้อง, รหัสหน่วยงาน, ชื่อหน่วยงาน, จำนวนวันเข้าพัก, ราคา, ราคารวม, ทำเรื่องแจ้งหนี้, ยอดค้างชำระ",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงาน โอนระหว่างหน่วยงาน",
+        "sheet_gid": "1816119196",
+        "extracted_at": "2026-09-22"
+    },
+    "alias_en": "ERP Report",
+    "filters": [
+        {
+            "key": "date_range",
+            "label_th": "วันที่ / ช่วงวันที่",
+            "type": "date_range",
+            "sample_value": "12 - 13 กันยายน 2569"
+        },
+        {
+            "key": "agency_code",
+            "label_th": "รหัสหน่วยงาน",
+            "type": "string",
+            "sample_value": "ทั้งหมด"
+        }
+    ],
+    "columns": [
+        {
+            "key": "date",
+            "label_th": "วันที่",
+            "type": "date"
+        },
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "เลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "agency_name",
+            "label_th": "ชื่อหน่วยงาน",
+            "type": "string"
+        },
+        {
+            "key": "erp_code",
+            "label_th": "รหัส ERP",
+            "type": "string"
+        },
+        {
+            "key": "checkin_date",
+            "label_th": "วันที่เช็คอิน",
+            "type": "date"
+        },
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่เช็คเอ้าท์",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "จำนวนคืน",
+            "type": "integer"
+        },
+        {
+            "key": "price",
+            "label_th": "ราคา",
+            "type": "money_baht"
+        },
+        {
+            "key": "comment",
+            "label_th": "comment",
+            "type": "text",
+            "nullable": true
+        }
+    ],
+    "summary": {
+        "total_items": 12,
+        "total_amount_baht": 23100
+    },
+    "sample_data": [
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "501",
+            "agency_name": "สำนักงานเลขานุการ คณะวิศวกรรมศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-14",
+            "nights": 2,
+            "price": 1600,
+            "comment": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "502",
+            "agency_name": "สำนักงานเลขานุการ คณะวิศวกรรมศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-14",
+            "nights": 2,
+            "price": 1600,
+            "comment": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "617",
+            "agency_name": "ภาควิชาจิตวิทยา คณะสังคมศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-15",
+            "nights": 3,
+            "price": 3000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "619",
+            "agency_name": "ภาควิชาประวัติศาสตร์ คณะสังคมศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "price": 800,
+            "comment": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "705",
+            "agency_name": "ภาควิชากีฏวิทยา คณะเกษตร กำแพงแสน",
+            "erp_code": "KXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "price": 800,
+            "comment": null
+        },
+        {
+            "date": "2026-09-12",
+            "booking_no": "xxxxx",
+            "room_no": "710",
+            "agency_name": "สำนักหอสมุด กำแพงแสน",
+            "erp_code": "KXXXXXXXXX",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "price": 1000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "711",
+            "agency_name": "สำนักเลขานุการ คณะวิทยาศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-14",
+            "nights": 1,
+            "price": 1000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "716",
+            "agency_name": "สำนักเลขานุการ คณะเศรษศาสตร์ ศรีราชา",
+            "erp_code": "SXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-14",
+            "nights": 1,
+            "price": 1000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "805",
+            "agency_name": "ศูนย์นวัตกรรมวัสดุ คณะวิศวกรรมศาสตร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-18",
+            "nights": 5,
+            "price": 4000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "818",
+            "agency_name": "ฝ่ายสารสนเทศ สำนักบริการคอมพิวเตอร์",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-14",
+            "nights": 1,
+            "price": 1500,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "909",
+            "agency_name": "สำนักงานนวัตกรรมและพันธกิจเพื่อสังคม",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-17",
+            "nights": 4,
+            "price": 6000,
+            "comment": null
+        },
+        {
+            "date": "2026-09-13",
+            "booking_no": "xxxxx",
+            "room_no": "919",
+            "agency_name": "สำนักเลขานุการ คณะประมง",
+            "erp_code": "BXXXXXXXXX",
+            "checkin_date": "2026-09-13",
+            "checkout_date": "2026-09-14",
+            "nights": 1,
+            "price": 800,
+            "comment": "สถานีวิจัยเพื่อการพัฒนาชายฝั่งอันดามัน"
+        }
+    ],
+    "notes": [
+        "ตามสารบัญ ฟิลด์เป้าหมายมีเพิ่ม: จำนวนวันเข้าพัก/ราคารวม/ทำเรื่องแจ้งหนี้/ยอดค้างชำระ — เทมเพลตตารางตัวอย่างยังไม่มี",
+        "รหัส ERP ในตัวอย่างเป็น placeholder (BXXXXXXXXX / KXXXXXXXXX / SXXXXXXXXX ตาม campus: บางเขน/กำแพงแสน/ศรีราชา)"
+    ]
+}

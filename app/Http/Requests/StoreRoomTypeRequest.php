@@ -20,7 +20,6 @@ class StoreRoomTypeRequest extends FormRequest
             'extra_bed_enabled'   => 'nullable|boolean',
             'max_extra_beds'      => 'nullable|integer|min:0',
             'extra_bed_price'     => 'nullable|integer|min:0',
-            'rate_daily_general'  => 'required|integer|min:0',
         ];
     }
 }

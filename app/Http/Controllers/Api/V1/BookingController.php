@@ -3,51 +3,122 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\AddBookingRoomsRequest;
 use App\Http\Requests\StoreBookingRequest;
-use App\Http\Requests\UpdateBookingRequest;
+use App\Http\Requests\UpdateBookingPaymentRequest;
+use App\Http\Requests\UpdateBookingRoomRequest;
+use App\Http\Requests\UpdateBookingRoomsRequest;
+use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\Organization;
 use App\Models\Room;
+use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
-use App\Models\Addon;
-use App\Models\AddonRate;
+use App\Models\StatusChangeLog;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use App\Services\Addon\AddonPricing;
+use App\Services\Discount\DiscountService;
+use App\Services\RoomAllocator\RoomAllocator;
+use App\Support\BookingRule;
+use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class BookingController extends Controller
-{   
+{
     public function getBookings(Request $request)
     {
         try {
             $user = $request->user('sanctum');
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
-                    'status' => 'error', 
-                    'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!'
+                    'status' => 'error',
+                    'message' => 'ต้องล็อกอินในระบบ หรือระบุเลข Guest ID ค่ะนายท่าน!',
                 ], 401);
             }
 
             $term = $request->query('term');
             $roomTypeId = $request->query('room_type', 'all');
-            $checkIn = $request->query('check_in'); 
+            $checkIn = $request->query('check_in');
             $checkOut = $request->query('check_out');
+            // 🏛️ organization-bookings ticket 08 — admin filter ตามองค์กร (UUID ตรงตาม FK)
+            $organizationId = $request->query('organization_id');
+            // 📋 status filter — container states เท่านั้น ค่าเดียวหรือ comma-separated
+            //    (เช่น status=pending หรือ status=pending,verify_error — BR-level states
+            //    checked_in/checked_out/no_show ไม่อยู่ในนี้)
+            $statusParam = $request->query('status');
+            $statuses = [];
+            if ($statusParam !== null && $statusParam !== '') {
+                $statuses = collect(explode(',', $statusParam))
+                    ->map(fn ($s) => trim($s))
+                    ->filter(fn ($s) => $s !== '')
+                    ->unique()
+                    ->values()
+                    ->all();
 
-            // 🌟 เปลี่ยน Eager Loading ตรงนี้ค่ะนายท่าน! จาก addon เป็น bookingRooms.addon
-            $query = Booking::with(['bookingRooms.roomType', 'bookingRooms.room', 'bookingRooms.addon'])
+                $invalid = array_diff($statuses, [
+                    'draft', 'pending', 'verify_error', 'paid', 'confirmed', 'complete',
+                ]);
+                if ($invalid !== []) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'status filter ไม่ถูกต้อง: '.implode(', ', $invalid)
+                            .' (ใช้ได้: draft, pending, verify_error, paid, confirmed, complete) ค่ะนายท่าน 📋',
+                    ], 422);
+                }
+            }
+
+            // 💳 payment_type filter — ค่าเดียวหรือ comma-separated (เช่น payment_type=deposit
+            //    หรือ payment_type=deposit,deferred) — อ่านอย่างเดียว ไม่เกี่ยวกับการตั้ง type
+            $paymentTypeParam = $request->query('payment_type');
+            $paymentTypes = [];
+            if ($paymentTypeParam !== null && $paymentTypeParam !== '') {
+                $paymentTypes = collect(explode(',', $paymentTypeParam))
+                    ->map(fn ($t) => trim($t))
+                    ->filter(fn ($t) => $t !== '')
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $invalidTypes = array_diff($paymentTypes, ['full', 'deposit', 'deferred']);
+                if ($invalidTypes !== []) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'payment_type filter ไม่ถูกต้อง: '.implode(', ', $invalidTypes)
+                            .' (ใช้ได้: full, deposit, deferred) ค่ะนายท่าน 💳',
+                    ], 422);
+                }
+            }
+
+            // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
+            // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
+            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage'])
                 ->when($user && $user->role === 'admin', function ($q) {
-                $q->with('user');
-            });
+                    // 🏛️ ticket 08 — admin เห็น object organization คู่กับ user (org booking ไม่มีเจ้าของ user)
+                    $q->with('user')->with('organization');
+                });
 
             if ($user && $user->role === 'admin') {
+                if ($organizationId !== null) {
+                    if (! Str::isUuid($organizationId)) {
+                        return response()->json([
+                            'status' => 'error',
+                            'message' => 'organization_id ต้องเป็น UUID ขององค์กรค่ะ 🏛️',
+                        ], 422);
+                    }
+
+                    $query->where('organization_id', $organizationId);
+                }
             } elseif ($user) {
                 $query->where('user_id', $user->id);
-            } 
+            }
 
             if ($term) {
                 $query = $this->applyUserFilter($query, $term);
@@ -57,6 +128,12 @@ class BookingController extends Controller
             }
             if ($roomTypeId !== 'all') {
                 $query = $this->applyRoomTypeFilter($query, $roomTypeId);
+            }
+            if ($statuses !== []) {
+                $query->whereIn('status', $statuses);
+            }
+            if ($paymentTypes !== []) {
+                $query->whereIn('payment_type', $paymentTypes);
             }
 
             $perPage = $request->query('per_page', 15);
@@ -71,6 +148,9 @@ class BookingController extends Controller
                     'check_in' => $checkIn,
                     'check_out' => $checkOut,
                     'room_type' => $roomTypeId,
+                    'organization_id' => $organizationId,
+                    'status' => $statusParam,
+                    'payment_type' => $paymentTypeParam,
                 ],
                 'bookings' => $bookings->items(),
                 'pagination' => [
@@ -82,183 +162,1698 @@ class BookingController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
-            Log::error("Server error getting bookings: " . $e->getMessage(), [
+            Log::error('Server error getting bookings: '.$e->getMessage(), [
                 'user_id' => optional($request->user('sanctum'))->id,
             ]);
-            
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+                'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
         }
     }
 
-    // 🚧 DRAFT / TESTING — ยังไม่ใช้งานจริง ระบบส่วนลดยังไม่สมบูรณ์
-    public function validateDiscount(Request $request)
+    /**
+     * 🎟️ ใส่ / เปลี่ยน โค้ดส่วนลดให้กับการจองสถานะ draft (เจ้าของหรือ admin)
+     */
+    public function setDiscountCode(Request $request, string $bookingId)
     {
-        $request->validate([
-            'code' => 'required|string',
-            'subtotal' => 'required|numeric',
-        ]);
+        try {
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนดำเนินการค่ะนายท่าน! 🔒', 401);
+            }
 
-        $discountAmount = 0;
-        if (strtoupper($request->code) === 'WELCOME10') {
-            $discountAmount = $request->subtotal * 0.10; 
+            $booking = Booking::findOrFail($bookingId);
+
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ใส่หรือลบโค้ดได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ 📝', 422);
+            }
+
+            $request->validate([
+                'code' => 'required|string|max:50',
+            ]);
+
+            $discountService = app(DiscountService::class);
+            $updatedBooking = $discountService->applyToDraft($booking, $request->code);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ใส่โค้ดส่วนลดเรียบร้อยแล้วค่ะ! 🎟️',
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon', 'confirmations.slipImage']),
+            ], 200);
+
+        } catch (ValidationException $e) {
+            // 🛡️ (27/08/26): validation ต้องคืน 422 มาตรฐาน Laravel — ไม่งั้น getCode()=0 ตกไป branch 500
+            throw $e;
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to set discount code: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการใส่โค้ดส่วนลด กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
         }
-
-        return response()->json([
-            'status' => 'success',
-            'discount_applied' => $discountAmount,
-            'net_total' => $request->subtotal - $discountAmount
-        ]);
     }
-  
+
+    /**
+     * 🎟️ ลบโค้ดส่วนลดออกจากการจองสถานะ draft (เจ้าของหรือ admin)
+     */
+    public function destroyDiscountCode(Request $request, string $bookingId)
+    {
+        try {
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนดำเนินการค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ใส่หรือลบโค้ดได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ 📝', 422);
+            }
+
+            $discountService = app(DiscountService::class);
+            $updatedBooking = $discountService->removeFromDraft($booking);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบโค้ดส่วนลดออกจากการจองเรียบร้อยแล้วค่ะ 🎟️',
+                'booking' => $updatedBooking->fresh(['bookingRooms.addon', 'confirmations.slipImage']),
+            ], 200);
+
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to destroy discount code: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบโค้ดส่วนลด กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 เพิ่มห้องเข้าไปใน booking ที่สร้างไว้แล้ว (เฉพาะ draft state เท่านั้น)
+     *
+     * Logic reuse จาก createBooking (availability check + pricing + create BR + Addon)
+     * แต่ไม่สร้าง Booking ใหม่ — เพิ่ม booking_rooms เข้าไปใน container เดิม
+     *
+     * Constraints:
+     * - booking.status ต้องเป็น 'draft' เท่านั้น (🔒 core guard)
+     * - เจ้าของ booking หรือ admin เท่านั้นที่เพิ่มได้
+     * - ไม่เรียก RoomAllocator (draft ยังไม่จ่ายห้อง — เหมือน createBooking)
+     * - ไม่เรียก transitionStatus (ห้องใหม่สร้างด้วย status='draft' ตรงๆ = initial state)
+     */
+    public function addRooms(AddBookingRoomsRequest $request, $bookingId)
+    {
+        $inTransaction = false;
+
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนเพิ่มห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — เพิ่มห้องได้เฉพาะ draft state เท่านั้น
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถเพิ่มห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะนายท่าน', 422);
+            }
+
+            // 🚪 Room cap guard (ticket 02) — นับห้องเดิมจริงใน booking รวมกับห้องใหม่ที่ขอเพิ่ม (admin exempt)
+            if (! BookingRule::isAdmin($user)) {
+                $existingCount = $booking->bookingRooms()->count();
+                $newCount = count($validated['booking_rooms']);
+                $maxRooms = BookingRule::maxRoomsPerBooking($user);
+
+                if (($existingCount + $newCount) > $maxRooms) {
+                    throw new \Exception(BookingRule::roomCapMessage($user), 422);
+                }
+            }
+
+            // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests ไม่เกิน max_guests ของประเภทห้อง
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                if (! empty($roomRequest['guests']) && is_array($roomRequest['guests'])) {
+                    $roomType = RoomType::find($roomRequest['room_type_id']);
+                    if ($roomType && count($roomRequest['guests']) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
+                }
+            }
+
+            DB::beginTransaction();
+            $inTransaction = true;
+
+            // 🌟 Availability check (reuse pattern จาก createBooking)
+            // group by room_type_id + ตรวจ overlap ของแต่ละช่วงวัน
+            // 🌟 สำคัญ: existing count รวมห้องที่อยู่ใน booking นี้แล้วด้วย (มี status='draft' overlap)
+            $requestedByType = [];
+
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                $rtId = $roomRequest['room_type_id'];
+                $requestedByType[$rtId][] = [
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                ];
+            }
+
+            foreach ($requestedByType as $rtId => $requests) {
+                // ตรวจทีละช่วงวันของห้องที่ขอเพิ่ม — นับ existing bookings + batch overlaps
+                foreach ($requests as $checkReq) {
+                    $checkIn = Carbon::parse($checkReq['check_in']);
+                    $checkOut = Carbon::parse($checkReq['check_out']);
+
+                    // 🎫 denominator = sellable pool ของช่วงนี้ (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($rtId, $checkIn, $checkOut, $request);
+
+                    // 🌟 availability นับที่ BR-level (block ห้องตั้งแต่ draft ขึ้นไป)
+                    $existingBooked = BookingRoom::where('room_type_id', $rtId)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->count();
+
+                    // นับห้องใน batch นี้ที่ overlap กับช่วงวันของห้องปัจจุบัน
+                    $batchOverlapping = 0;
+                    foreach ($requests as $otherReq) {
+                        $otherIn = Carbon::parse($otherReq['check_in']);
+                        $otherOut = Carbon::parse($otherReq['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+            }
+
+            // 📊 (05/10/26) เขียน canonical addon เท่านั้น — ยอดเงินคิดใน reprice() จุดเดียว
+            $addedRooms = [];
+
+            // 🌟 สร้าง BookingRoom + Addon ทีละห้อง (clone pattern จาก createBooking)
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
+                $addonInput = $roomRequest['addons'] ?? null;
+
+                // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
+                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $roomRequest,
+                    $addonInput,
+                    null,
+                    $roomType->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput);
+
+                $bookingRoom = BookingRoom::create([
+                    'booking_id' => $booking->id,
+                    'room_type_id' => $roomType->id,
+                    'room_id' => null, // รอจ่ายห้องตอน Check-in
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                    'status' => 'draft', // BR-level state (initial, ไม่ใช่ transition)
+                    'bed_preference' => $roomRequest['bed_preference'] ?? null,
+                    'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
+                    'billing_address' => $roomRequest['billing_address'] ?? null,
+                    'billing_comment' => $roomRequest['billing_comment'] ?? null,
+                ]);
+
+                // 🌟 บันทึก Addon — canonical เท่านั้น (snapshot ราคาเขียนโดย reprice())
+                Addon::create([
+                    'booking_room_id' => $bookingRoom->id,
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
+                    'early_hours' => $earlyHours,
+                    'late_hours' => $lateHours,
+                ]);
+
+                $addedRooms[] = $bookingRoom;
+            }
+
+            // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+            $this->reconcileDiscount($booking);
+
+            DB::commit();
+
+            $bookingRoomsResponse = array_map(function ($br) {
+                return $br->fresh('addon');
+            }, $addedRooms);
+
+            // 📊 added_amount = ผลรวม amount ของห้องที่เพิ่งเพิ่ม (จาก reprice แล้ว)
+            $addedAmount = collect($bookingRoomsResponse)->sum(fn ($br) => (int) $br->amount);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'เพิ่มห้องเข้าการจองเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'booking_rooms' => $bookingRoomsResponse,
+                'added_amount' => $addedAmount,
+                'total_amount' => $booking->fresh()->total_amount,
+                'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ rollBack เฉพาะเมื่อเรา beginTransaction เอง — early guards (401/403/404/422)
+            //    โยน/return ก่อน begin แล้ว rollBack เปล่าจะไปยกเลิก transaction ของผู้เรียก
+            if ($inTransaction) {
+                DB::rollBack();
+            }
+
+            // 🛡️ #40 pattern: Business logic errors (422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            // ModelNotFoundException → 404 (booking ไม่พบ)
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to add rooms to booking: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการเพิ่มห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): ลบ draft booking (เจ้าของหรือ admin)
+     *
+     * Hard delete cascade แบบเดียวกับ CleanupExpiredDrafts:
+     * addon ของทุก BR → BR → payments (frozen) → confirmations → booking
+     *
+     * Constraints:
+     * - booking.status ต้องเป็น 'draft' เท่านั้น (จ่ายเงิน/ยืนยันแล้วลบไม่ได้)
+     * - เป็นการ hard delete ไม่ใช่ transition ใหม่ใน state machine
+     *   แต่ยังเขียน StatusChangeLog (draft → deleted) เก็บ audit trail ไว้ค่ะ
+     */
+    public function destroyBooking(Request $request, $bookingId)
+    {
+        try {
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนลบรายการจองค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์ลบการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Mode A / Deferred guard (m8): ผู้ใช้ทั่วไปไม่สามารถลบ draft ที่เป็น deferred หรือสร้างโดยแอดมินได้
+            if ($user->role !== 'admin' && ($booking->payment_type === 'deferred' || $booking->source === 'admin')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่สามารถลบการจองนี้ได้ — รายการจองแบบ deferred หรือสร้างโดยเจ้าหน้าที่ ต้องให้แอดมินเป็นผู้ยกเลิกค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — ลบได้เฉพาะ draft เท่านั้น
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+            }
+
+            // 💳 (25/09/26, booking-payment-types): draft ที่มี payments row = มีเงินเข้าจริงแล้ว
+            //    (เช่น เก็บมัดจำสดหน้าเคาน์เตอร์ระหว่างยัง draft) — hard-delete จะทำ ledger หาย
+            //    เหตุผลเดียวกับ guard ของ CleanupExpiredDrafts (ticket 05 หัวข้อ 10)
+            if ($booking->payments()->exists()) {
+                throw new \Exception('ไม่สามารถลบได้ — การจองนี้มีรายการชำระเงินบันทึกไว้แล้วค่ะ (ให้แอดมินตัดสินใจที่ front-desk) 💳', 422);
+            }
+
+            if ($booking->additionalCharges()->exists()) {
+                throw new \Exception('Cannot delete booking with existing additional charges', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ที่กำลัง draft→paid พร้อมกัน
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถลบได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ (ชำระเงินหรือยืนยันแล้ว)', 422);
+                }
+
+                if ($locked->additionalCharges()->exists()) {
+                    throw new \Exception('Cannot delete booking with existing additional charges', 422);
+                }
+
+                foreach ($locked->bookingRooms as $br) {
+                    $br->addon()?->delete();
+                    $br->delete();
+                }
+                // frozen legacy table — ลบทิ้งเหมือน CleanupExpiredDrafts
+                $locked->payments()->delete();
+                // defense-in-depth: draft ไม่ควรมี confirmation (confirm จะ transition เป็น paid ทันที) แต่ลบกันเหนียว
+                // 🖼️ ลบรูปสลิปก่อนลบ confirmation — morph ไม่ cascade เอง (hook deleting ลบไฟล์บน disk ให้)
+                $locked->confirmations->each(fn ($confirmation) => $confirmation->slipImage?->delete());
+                $locked->confirmations()->delete();
+
+                // 📝 Audit log — เก็บไว้แม้ booking row จะหายไปแล้ว (append-only)
+                //    role ใช้ ?? 'user' กันกรณี DB default ยังไม่ถูกอ่านกลับมาใน model instance
+                StatusChangeLog::create([
+                    'entity_type' => 'booking',
+                    'entity_id' => $locked->id,
+                    'from_status' => 'draft',
+                    'to_status' => 'deleted',
+                    'role' => $user->role ?? 'user',
+                    'causer_id' => $user->id,
+                    'note' => 'ผู้ใช้ลบ draft booking เอง (hard delete)',
+                ]);
+
+                $locked->delete();
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบรายการจองเรียบร้อยแล้วค่ะนายท่าน 🗑️',
+                'booking_id' => $bookingId,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to delete draft booking: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบรายการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): แก้ไข booking room รายห้อง (เจ้าของหรือ admin)
+     * 💳 (25/09/26, booking-payment-types ticket 10): เพิ่มโหมด **surcharge หลังจ่าย**
+     *
+     * สองโหมดตาม booking.status:
+     * - 'draft' — แก้ไขปกติ (เจ้าของหรือ admin) — flow เดิม regression 0%
+     *   · booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * - 'paid'|'confirmed' — surcharge หลังมีเงินเข้า ledger แล้ว (**admin เท่านั้น**)
+     *   · BR ต้องยัง draft|confirmed (checked_in/out/no_show แก้ไม่ได้)
+     *   · มี room_id ถูกจัดแล้ว → ห้ามเปลี่ยน room_type/วันที่ (422 — ปลดการจัดห้องก่อน)
+     *   · reprice ผ่าน chokepoint เดียว reprice() — ราคาเพิ่มไหลเข้า outstanding_amount
+     *     เก็บต่อผ่าน recordPayment (กลไกเดิม — ไม่มี endpoint เงินใหม่, ห้ามเขียน payments ตรง)
+     *   · ยอดรวมใหม่ต่ำกว่าเงินที่เข้า ledger = 422 (ticket 08 — ไม่มีการคืนเงินในระบบ)
+     *     · ลดได้เฉพาะยอดรวมใหม่ ≥ paid_amount (outstanding ลดตาม)
+     *   · deposit_amount คงเดิมไม่ย้อน (เป็นข้อมูลงวดที่ตั้ง/จ่ายไปแล้ว) ·
+     *     is_paid=true ที่ total ใหม่ทำให้ยอดค้างเกิด → reset เป็น false
+     *
+     * ร่วมกันทั้งสองโหมด:
+     * - แก้ room_type_id/check_in/check_out ได้ โดยเช็ค availability ใหม่ (ตัดตัวเองออกจาก count)
+     * - ราคาคิดใหม่ทั้งหมดที่ server (global_rates) — ไม่รับ price จาก client เด็ดขาด
+     * - ห้ามแก้ room_id (ต้องผ่าน RoomAllocator) / status (ต้องผ่าน transitionStatus)
+     * - payment_deadline คงเดิม (เหมือน addRooms)
+     */
+    public function updateRoom(UpdateBookingRoomRequest $request, $bookingId, $bookingRoomId)
+    {
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนแก้ไขห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 💳 ticket 10 — ตัดสินโหมดก่อน guard: draft (เดิม) หรือ surcharge หลังจ่าย (paid/confirmed)
+            $postPayment = in_array($booking->status, ['paid', 'confirmed'], true);
+
+            // 🔒 Draft guard — โหมดเดิม booking ต้องเป็น draft
+            if (! $postPayment && $booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+
+            // 💳 ticket 10 — surcharge หลังจ่าย: admin เท่านั้น (ตามธรรมเนียม payment fields)
+            if ($postPayment && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'แก้ไขห้องหลังชำระเงินแล้ว (surcharge) ต้องเป็นแอดมินเท่านั้นค่ะนายท่าน 🔒',
+                ], 403);
+            }
+
+            // 🔒 BR guard — draft mode: BR ต้อง draft · post-payment mode: แก้ได้ก่อนเข้าพักเท่านั้น
+            if ($postPayment) {
+                if (! in_array($bookingRoom->status, ['draft', 'confirmed'], true)) {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ', 422);
+                }
+            } elseif ($bookingRoom->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                $lockedPostPayment = in_array($locked->status, ['paid', 'confirmed'], true);
+                if (! $lockedPostPayment && $locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 💳 ticket 10 — ยอดรวมก่อนแก้ (ใช้คำนวณส่วนต่าง surcharge)
+                $previousTotal = (int) $locked->total_amount;
+
+                // 🎯 Merge ฟิลด์ที่ส่งมาลง BR — เช็คค่าเดิมใน DB เพื่ออัปเดตเฉพาะฟิลด์ที่เปลี่ยนจริง
+                $dirtyFields = [];
+                foreach (['room_type_id', 'check_in', 'check_out', 'guests', 'bed_preference', 'billing_address', 'billing_comment'] as $field) {
+                    if (array_key_exists($field, $validated)) {
+                        $isDirty = match ($field) {
+                            'room_type_id' => (string) $validated['room_type_id'] !== (string) $bookingRoom->room_type_id,
+                            'check_in' => Carbon::parse($validated['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
+                            'check_out' => Carbon::parse($validated['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
+                            'guests' => json_encode($this->stripGuestFields($validated['guests'] ?? null) ?? []) !== json_encode($bookingRoom->guests ?? []),
+                            'bed_preference', 'billing_address', 'billing_comment' => ($validated[$field] ?? null) !== ($bookingRoom->$field ?? null),
+                            default => true,
+                        };
+
+                        if ($isDirty) {
+                            $dirtyFields[$field] = $field === 'guests'
+                                ? $this->stripGuestFields($validated['guests'] ?? null)
+                                : $validated[$field];
+                        }
+                    }
+                }
+
+                // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing + guests cap)
+                $effectiveTypeId = $validated['room_type_id'] ?? $bookingRoom->room_type_id;
+                $effectiveCheckIn = isset($validated['check_in'])
+                    ? Carbon::parse($validated['check_in'])->toDateString()
+                    : $bookingRoom->check_in->toDateString();
+                $effectiveCheckOut = isset($validated['check_out'])
+                    ? Carbon::parse($validated['check_out'])->toDateString()
+                    : $bookingRoom->check_out->toDateString();
+
+                // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests เทียบกับ max_guests ของประเภทห้อง
+                $effectiveGuests = array_key_exists('guests', $validated) ? $validated['guests'] : $bookingRoom->guests;
+                if (! empty($effectiveGuests) && is_array($effectiveGuests)) {
+                    $roomType = RoomType::find($effectiveTypeId);
+                    if ($roomType && count($effectiveGuests) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
+                }
+
+                // 🌟 Availability re-check — เฉพาะเมื่อแก้ประเภทห้องหรือวันที่จริงเท่านั้น
+                //    (นับ existing แบบตัดตัวเองออก — ไม่งั้นเปลี่ยนวันที่แล้วนับซ้ำตัวเอง)
+                $shapeChanged = isset($dirtyFields['room_type_id'])
+                    || isset($dirtyFields['check_in'])
+                    || isset($dirtyFields['check_out']);
+
+                // 💳 ticket 10 — surcharge: BR ที่ถูกจัดเลขห้องแล้วเปลี่ยนประเภท/วันที่ไม่ได้
+                //    (room_id ผูกกับ type เดิม — ให้ปลดการจัดห้องก่อน จึงจะเปลี่ยน shape ได้)
+                if ($postPayment && $bookingRoom->room_id && $shapeChanged) {
+                    throw new \Exception('ห้องนี้ถูกจัดเลขห้องจริงแล้ว ไม่สามารถเปลี่ยนประเภทห้องหรือวันที่ได้ — ให้ปลดการจัดห้องก่อนค่ะ 🏨', 422);
+                }
+
+                if ($shapeChanged) {
+                    $checkIn = Carbon::parse($effectiveCheckIn);
+                    $checkOut = Carbon::parse($effectiveCheckOut);
+                    // 🎫 denominator = sellable pool ของช่วง effective (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($effectiveTypeId, $checkIn, $checkOut, $request);
+
+                    $existingBooked = BookingRoom::where('room_type_id', $effectiveTypeId)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->where('id', '!=', $bookingRoom->id)
+                        ->count();
+
+                    // +1 = ห้องที่กำลังแก้ไขตัวเอง
+                    if (($existingBooked + 1) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+
+                if (! empty($dirtyFields)) {
+                    $bookingRoom->update($dirtyFields);
+                }
+
+                // 🌟 Reprice server-side — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
+                //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
+                $existingAddon = $bookingRoom->addon;
+                $addonInput = $validated['addons'] ?? null;
+
+                $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
+                $effectiveRoomRequest = $validated;
+                $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
+                $effectiveRoomRequest['check_out'] = $effectiveCheckOut;
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $effectiveRoomRequest,
+                    $addonInput,
+                    $existingAddon,
+                    RoomType::findOrFail($effectiveTypeId)->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
+
+                $addonData = [
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
+                    'early_hours' => $earlyHours,
+                    'late_hours' => $lateHours,
+                ];
+                if ($existingAddon) {
+                    $dirtyAddonFields = [];
+                    foreach ($addonData as $k => $v) {
+                        if ($k === 'extra_beds_by_night') {
+                            // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
+                            if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                $dirtyAddonFields[$k] = $v;
+                            }
+
+                            continue;
+                        }
+                        if ((int) $existingAddon->$k !== (int) $v) {
+                            $dirtyAddonFields[$k] = $v;
+                        }
+                    }
+                    if (! empty($dirtyAddonFields)) {
+                        $existingAddon->update($dirtyAddonFields);
+                    }
+                } else {
+                    Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                }
+
+                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+                // 💳 ticket 10 — surcharge: reprice ตรง (applyToDraft guard draft-only ·
+                //    used redemption ยังถูกนับใน reprice — โค้ดส่วนลดคงเดิมไม่ถูกถอด)
+                if ($postPayment) {
+                    app(DiscountService::class)->reprice($locked);
+                } else {
+                    $this->reconcileDiscount($locked);
+                }
+
+                // 💳 ticket 10 — downgrade guard: ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
+                //    (ticket 08 — ไม่มีการคืนเงินในระบบ จึงบล็อกส่วนต่างลดจนเกินยอดที่จ่ายไปแล้ว)
+                //    💸 (15/10/26, ticket 13): ยอดรวม = total + charges — charges หนุนยอดได้
+                $chargesTotal = (int) $locked->charges_total;
+                $newTotal = (int) $locked->fresh()->total_amount;
+                $paidAmount = $locked->paid_amount;
+                if ($newTotal + $chargesTotal < $paidAmount) {
+                    throw new \Exception(
+                        'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                        422
+                    );
+                }
+
+                // 💳 ticket 10 — is_paid=true เดิม (จ่ายครบ) แต่ surcharge ทำให้ยอดค้างเกิด → reset false
+                //    (ตามนิยาม is_paid = SUM(payments) ≥ total + charges — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
+                if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
+                    $locked->update(['is_paid' => false]);
+                }
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            $surchargeAmount = ($newTotal ?? $previousTotal) - $previousTotal;
+
+            return response()->json([
+                'status' => 'success',
+                'message' => $postPayment
+                    ? 'แก้ไขห้องหลังชำระเงินเรียบร้อยแล้ว — ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳'
+                    : 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'booking_room' => $bookingRoom->fresh('addon'),
+                'total_amount' => $locked->fresh()->total_amount,
+                // 💳 (25/09/26, ticket 10) — surcharge หลังจ่าย: ส่วนต่าง + envelope ยอดเงินครบ
+                'previous_total_amount' => $previousTotal,
+                'surcharge_amount' => $surchargeAmount,
+                'payment_type' => $locked->fresh()->payment_type,
+                'deposit_amount' => $locked->fresh()->deposit_amount,
+                'paid_amount' => $locked->fresh()->paid_amount,
+                'outstanding_amount' => $locked->fresh()->outstanding_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to update booking room: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (19/08/26): แก้ไข booking room หลายห้องพร้อมกัน — batch update (เจ้าของหรือ admin)
+     *
+     * 1 array entry = การแก้ 1 ห้อง (payload ต่างกันได้รายห้อง) — ต่างจาก updateRoom
+     * ที่ระบุ bookingRoomId ใน path ตัวเดียว ตรงนี้ระบุ booking_room_id รายแถวใน body
+     *
+     * Constraints (all-or-nothing — ห้องใดห้องหนึ่ง fail = rollback ทั้งชุด):
+     * - booking.status = 'draft' และ booking_room.status = 'draft' ทุกห้องเท่านั้น
+     * - แก้ room_type_id/check_in/check_out ได้ โดยเช็ค availability ใหม่จาก final state ของทั้ง batch
+     *   (existing count ตัดทุกห้องใน batch ออก แล้วนับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape)
+     * - ราคาคิดใหม่ทั้งหมดที่ server (global_rates) — ไม่รับ price จาก client เด็ดขาด
+     * - ห้ามแก้ room_id (ต้องผ่าน RoomAllocator) / status (ต้องผ่าน transitionStatus)
+     * - payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
+     */
+    public function updateRooms(UpdateBookingRoomsRequest $request, $bookingId)
+    {
+        try {
+            $validated = $request->validated();
+
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนแก้ไขห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — booking ต้องเป็น draft
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 ทุก BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404) — ดึงครั้งเดียว
+            //    (distinct rule รับประกันไม่มี id ซ้ำใน batch)
+            $ids = array_column($validated['booking_rooms'], 'booking_room_id');
+            $rooms = $booking->bookingRooms()->whereIn('id', $ids)->get()->keyBy('id');
+            if ($rooms->count() !== count($ids)) {
+                throw new ModelNotFoundException;
+            }
+
+            // 🔒 Pre-flight: ทุกห้องต้องเป็น draft ก่อนแตะอะไร (all-or-nothing)
+            foreach ($rooms as $room) {
+                if ($room->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 🎯 เตรียมข้อมูลรายห้อง: fields ที่จะ merge + effective (final) values
+                //    ห้าม room_id/status/booking_id — validated ไม่มีฟิลด์พวกนี้อยู่แล้ว
+                $fields = ['room_type_id', 'check_in', 'check_out', 'guests', 'bed_preference', 'billing_address', 'billing_comment'];
+                $updates = []; // booking_room_id => ['model', 'request', 'dirty_fields', 'type_id', 'check_in', 'check_out', 'shape_changed']
+
+                foreach ($validated['booking_rooms'] as $roomRequest) {
+                    $brId = $roomRequest['booking_room_id'];
+                    $bookingRoom = $rooms[$brId];
+
+                    $dirtyFields = [];
+                    foreach ($fields as $field) {
+                        if (array_key_exists($field, $roomRequest)) {
+                            $isDirty = match ($field) {
+                                'room_type_id' => (string) $roomRequest['room_type_id'] !== (string) $bookingRoom->room_type_id,
+                                'check_in' => Carbon::parse($roomRequest['check_in'])->toDateString() !== $bookingRoom->check_in->toDateString(),
+                                'check_out' => Carbon::parse($roomRequest['check_out'])->toDateString() !== $bookingRoom->check_out->toDateString(),
+                                'guests' => json_encode($this->stripGuestFields($roomRequest['guests'] ?? null) ?? []) !== json_encode($bookingRoom->guests ?? []),
+                                'bed_preference', 'billing_address', 'billing_comment' => ($roomRequest[$field] ?? null) !== ($bookingRoom->$field ?? null),
+                                default => true,
+                            };
+
+                            if ($isDirty) {
+                                $dirtyFields[$field] = $field === 'guests'
+                                    ? $this->stripGuestFields($roomRequest['guests'] ?? null)
+                                    : $roomRequest[$field];
+                            }
+                        }
+                    }
+
+                    $typeId = $roomRequest['room_type_id'] ?? $bookingRoom->room_type_id;
+                    $checkInStr = isset($roomRequest['check_in'])
+                        ? Carbon::parse($roomRequest['check_in'])->toDateString()
+                        : $bookingRoom->check_in->toDateString();
+                    $checkOutStr = isset($roomRequest['check_out'])
+                        ? Carbon::parse($roomRequest['check_out'])->toDateString()
+                        : $bookingRoom->check_out->toDateString();
+
+                    $shapeChanged = isset($dirtyFields['room_type_id'])
+                        || isset($dirtyFields['check_in'])
+                        || isset($dirtyFields['check_out']);
+
+                    $updates[$brId] = [
+                        'model' => $bookingRoom,
+                        'request' => $roomRequest,
+                        'dirty_fields' => $dirtyFields,
+                        // ค่า final = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing)
+                        'type_id' => $typeId,
+                        'check_in' => $checkInStr,
+                        'check_out' => $checkOutStr,
+                        'shape_changed' => $shapeChanged,
+                    ];
+
+                    // 🛡️ Guard effective dates จากค่า final — ครอบเคส partial update
+                    //    (validation after:* เทียบฟิลด์ที่ไม่ได้ส่งมาไม่ได้ เช่น ส่งแต่ check_in
+                    //     ทับ check_out เดิม หรือส่งแต่ check_out ก่อน check_in เดิม)
+                    if (Carbon::parse($updates[$brId]['check_out'])->lte(Carbon::parse($updates[$brId]['check_in']))) {
+                        throw new \Exception('วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้นค่ะ', 422);
+                    }
+                }
+
+                // 👥 ชั้น 1 (REQ-007/019): ตรวจเทียบ final state ของทั้ง batch
+                foreach ($updates as $u) {
+                    $roomRequest = $u['request'];
+                    $bookingRoom = $u['model'];
+                    $effectiveTypeId = $u['type_id'];
+                    $effectiveGuests = array_key_exists('guests', $roomRequest) ? $roomRequest['guests'] : $bookingRoom->guests;
+
+                    if (! empty($effectiveGuests) && is_array($effectiveGuests)) {
+                        $roomType = RoomType::find($effectiveTypeId);
+                        if ($roomType && count($effectiveGuests) > $roomType->max_guests) {
+                            throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                        }
+                    }
+                }
+
+                // 🌟 Availability re-check จาก final state ของทั้ง batch
+                //    - ตรวจเฉพาะห้องที่ shape เปลี่ยนจริง (ห้อง unchanged ผ่านมาแล้วโดย invariant)
+                //    - existing count ตัด "ทุกห้องใน batch" ออก (มีอยู่แล้วเป็น draft rows)
+                //    - batch overlap นับจากค่า final ของทุกห้องใน batch รวมห้องที่ไม่ได้เปลี่ยน shape
+                //      (ไม่งั้นห้อง unchanged ที่ยังยึดพื้นที่อยู่จะหายไปจากการนับ → overbook)
+                $batchIds = array_keys($updates);
+
+                foreach ($updates as $u) {
+                    if (! $u['shape_changed']) {
+                        continue;
+                    }
+
+                    $checkIn = Carbon::parse($u['check_in']);
+                    $checkOut = Carbon::parse($u['check_out']);
+
+                    // 🎫 denominator = sellable pool ของช่วง final ของแถวนั้น (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    //    คิดต่อ row เพราะแต่ละห้องมีช่วงวันของตัวเอง — cache เดิม keyed แค่ type ใช้ไม่ได้แล้ว
+                    $totalRooms = $this->sellableCapacity($u['type_id'], $checkIn, $checkOut, $request);
+
+                    $existingBooked = BookingRoom::where('room_type_id', $u['type_id'])
+                        ->holdingSlot()
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->whereNotIn('id', $batchIds)
+                        ->count();
+
+                    $batchOverlapping = 0;
+                    foreach ($updates as $other) {
+                        if ($other['type_id'] !== $u['type_id']) {
+                            continue;
+                        }
+                        $otherIn = Carbon::parse($other['check_in']);
+                        $otherOut = Carbon::parse($other['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
+                }
+
+                // 🌟 Apply + reprice รายห้อง — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
+                //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
+                foreach ($updates as $u) {
+                    $bookingRoom = $u['model'];
+                    $roomRequest = $u['request'];
+
+                    if (! empty($u['dirty_fields'])) {
+                        $bookingRoom->update($u['dirty_fields']);
+                    }
+
+                    $existingAddon = $bookingRoom->addon;
+                    $addonInput = $roomRequest['addons'] ?? null;
+
+                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    // effective roomRequest — legacy extra_beds หัวห้องติดไปด้วย (pattern resolveExtraBed เดิม)
+                    $effectiveRoomRequest = $roomRequest;
+                    $effectiveRoomRequest['check_in'] = $u['check_in'];
+                    $effectiveRoomRequest['check_out'] = $u['check_out'];
+                    $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                        $effectiveRoomRequest,
+                        $addonInput,
+                        $existingAddon,
+                        RoomType::findOrFail($u['type_id'])->max_extra_beds
+                    );
+                    [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
+
+                    $addonData = [
+                        'breakfast_set_100' => $sets['set_100'],
+                        'breakfast_set_200' => $sets['set_200'],
+                        'extra_beds_by_night' => $extraBedsByNight ?: null,
+                        'early_hours' => $earlyHours,
+                        'late_hours' => $lateHours,
+                    ];
+                    if ($existingAddon) {
+                        $dirtyAddonFields = [];
+                        foreach ($addonData as $k => $v) {
+                            if ($k === 'extra_beds_by_night') {
+                                // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
+                                if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ((int) $existingAddon->$k !== (int) $v) {
+                                $dirtyAddonFields[$k] = $v;
+                            }
+                        }
+                        if (! empty($dirtyAddonFields)) {
+                            $existingAddon->update($dirtyAddonFields);
+                        }
+                    } else {
+                        Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                    }
+                }
+
+                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+                $this->reconcileDiscount($locked);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            // 🌟 Response — เรียงตามลำดับ rooms ใน request
+            $updatedRooms = [];
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                $updatedRooms[] = $rooms[$roomRequest['booking_room_id']]->fresh('addon');
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'booking_rooms' => $updatedRooms,
+                'total_amount' => $locked->fresh()->total_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to batch update booking rooms: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🌟 (17/08/26): ลบ booking room รายห้องออกจาก draft booking (เจ้าของหรือ admin)
+     *
+     * Constraints:
+     * - booking.status = 'draft' และ booking_room.status = 'draft' เท่านั้น
+     * - ห้องสุดท้ายของ booking ลบไม่ได้ (422) — ให้ลบทั้ง booking ด้วย DELETE /bookings/{id} แทน
+     *   (กันเกิด draft เปล่าที่ไปล็อกโควตา "มี draft ค้าง" ของผู้ใช้)
+     * - BR draft ยังไม่มี room_id (จ่ายห้องตอน paid/confirmed) — ไม่มี room ต้อง release
+     */
+    public function destroyRoom(Request $request, $bookingId, $bookingRoomId)
+    {
+        try {
+            // 🛑 Auth check
+            $user = $request->user('sanctum');
+            if (! $user) {
+                throw new \Exception('กรุณาล็อกอินก่อนลบห้องค่ะนายท่าน! 🔒', 401);
+            }
+
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🔐 Ownership check — เจ้าของ booking หรือ admin เท่านั้น
+            if ($booking->user_id !== $user->id && $user->role !== 'admin') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'คุณไม่มีสิทธิ์แก้ไขการจองนี้ค่ะ',
+                ], 403);
+            }
+
+            // 🔒 Draft guard — booking ต้องเป็น draft
+            if ($booking->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+            if ($bookingRoom->status !== 'draft') {
+                throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+            }
+
+            if ($bookingRoom->additionalCharges()->exists()) {
+                throw new \Exception('Cannot delete room with existing additional charges', 422);
+            }
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างลบ
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                if ($locked->status !== 'draft') {
+                    throw new \Exception('ไม่สามารถลบห้องได้ เนื่องจากการจองไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
+                }
+
+                // 🔒 ห้องสุดท้าย → ห้ามลบ ให้ลบทั้ง booking แทน
+                if ($locked->bookingRooms()->count() <= 1) {
+                    throw new \Exception('ไม่สามารถลบห้องสุดท้ายของการจองได้ค่ะ — ให้ลบทั้งรายการจอง (DELETE /bookings/{bookingId}) แทนนะคะ', 422);
+                }
+
+                $bookingRoom->addon()?->delete();
+                $bookingRoom->delete();
+
+                // 📝 Audit log — เก็บไว้แม้ BR row จะหายไปแล้ว (append-only)
+                StatusChangeLog::create([
+                    'entity_type' => 'booking_room',
+                    'entity_id' => $bookingRoom->id,
+                    'from_status' => 'draft',
+                    'to_status' => 'deleted',
+                    'role' => $user->role ?? 'user',
+                    'causer_id' => $user->id,
+                    'note' => 'ผู้ใช้ลบห้องออกจาก draft booking (hard delete)',
+                ]);
+
+                // 🌟 Reprice total_amount ของ booking ใหม่ (27/08/26)
+                app(DiscountService::class)->reprice($locked);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ลบห้องออกจากการจองเรียบร้อยแล้วค่ะ',
+                'booking_id' => $booking->id,
+                'remaining_rooms' => $locked->bookingRooms()->count(),
+                'total_amount' => $locked->fresh()->total_amount,
+            ], 200);
+
+        } catch (\Exception $e) {
+            // 🛡️ #40 pattern: business errors (401/422) ส่ง message ได้, unexpected ซ่อน
+            $code = $e->getCode();
+            if (in_array($code, [401, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองหรือห้องที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to delete booking room: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการลบห้อง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
     public function createBooking(StoreBookingRequest $request)
     {
+        $inTransaction = false;
+
         try {
             $validated = $request->validated();
 
             // 🛑 1. ดักจับสายดอง: ถ้านายท่านมีบิล Draft ที่ยังไม่หมดเวลา ห้ามสร้างใหม่เด็ดขาด!
             // 🌟 Refactor (18/06/26): Guest/Non-member ใช้งานไม่ได้แล้ว — เช็คแค่ user ที่ล็อกอิน
             $userId = $request->user('sanctum')?->id;
-            if (!$userId) {
-                throw new \Exception("กรุณาล็อกอินก่อนทำการจองค่ะนายท่าน! 🔒", 401);
+            if (! $userId) {
+                throw new \Exception('กรุณาล็อกอินก่อนทำการจองค่ะนายท่าน! 🔒', 401);
             }
 
-            $hasDraft = Booking::where('user_id', $userId)
-                ->where('status', 'draft')
-                ->where('payment_deadline', '>', Carbon::now())
-                ->exists();
+            // 💳 (25/09/26, booking-payment-types ticket 01/05): ตั้ง payment_type/deposit_amount
+            //    ได้ admin/system เท่านั้น — user ทั่วไปไม่ส่ง field ได้ full เสมอ (403 ถ้าส่ง)
+            $user = $request->user('sanctum');
+            $paymentType = $validated['payment_type'] ?? null;
+            $depositAmount = $validated['deposit_amount'] ?? null;
+            if ($paymentType !== null || $depositAmount !== null) {
+                if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                    throw new \Exception('การตั้งประเภทการชำระเงิน / ยอดมัดจำ สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+                }
+            }
+            // ยอดมัดจำมีความหมายเฉพาะ deposit — กันความหมายคลุมเครือ
+            if ($depositAmount !== null && $paymentType !== 'deposit') {
+                throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
+            }
 
-            if ($hasDraft) {
-                throw new \Exception("มีรายการจองที่รอชำระเงินอยู่ค่ะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ", 422);
+            // 📊 (05/10/26, excel-reports ticket 09): ตั้ง invoice_requested_at / special_request /
+            //    comment / is_complimentary ได้ admin/system เท่านั้น (403 ถ้า role อื่นส่งมา)
+            if ($request->hasAny(['invoice_requested_at', 'special_request', 'comment', 'is_complimentary'])) {
+                if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                    throw new \Exception('การตั้งข้อมูล invoice_requested_at / special_request / comment / is_complimentary สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+                }
+            }
+
+            // 🏛️ (25/09/26, organization-bookings ticket 02): admin booking 2 โหมด —
+            //    โหมด A: admin ส่ง `user` (UUID) → user_id = target user (ไม่ใช่ admin ผู้สร้าง)
+            //    โหมด B: admin ไม่ส่ง `user` → user_id = null (เฮดเปล่า — org/group booking)
+            //    non-admin = flow เดิม 100% (user_id ตัวเอง)
+            //    ⚠️ ตัดสินโหมดจาก sanctum role เท่านั้น — ห้ามใช้ field 'source' ตามธรรมเนียม BookingRule
+            $isAdmin = $user !== null && $user->role === 'admin';
+            if ($request->filled('user') && ! $isAdmin) {
+                throw new \Exception('การระบุ user ปลายทาง (จองแทน) สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+            }
+
+            $bookingUserId = $userId;
+            if ($isAdmin) {
+                // 🏛️ โหมด A — link target user · โหมด B — เฮดเปล่า (null)
+                $bookingUserId = $request->filled('user') ? $validated['user'] : null;
+            }
+
+            // 🏛️ (25/09/26, organization-bookings ticket 03): โหมด org — `organize` = erp code string
+            //    → server lookup เป็น FK organization_id (ไม่เก็บ erp บน bookings — replaceability contract
+            //    ของ ticket 01) · `customer_name` โดยไม่มี organize = โหมด B เฮดเปล่าระบุคนเข้าพัก (ticket 02)
+            //    กฎผลพวง user_id = null สืบทอดโหมด B ครบ (ไม่ dedup · ราคา daily · ownership admin)
+            $organize = trim((string) ($validated['organize'] ?? ''));
+            $customerName = $validated['customer_name'] ?? null;
+            $customerPhone = $validated['customer_phone'] ?? null;
+            $customerEmail = $validated['customer_email'] ?? null;
+
+            if (($organize !== '' || $customerName !== null || $customerPhone !== null || $customerEmail !== null) && ! $isAdmin) {
+                throw new \Exception('การจองให้องค์กร / ระบุผู้ติดต่อ (organize, customer_name) สำหรับแอดมินเท่านั้นค่ะนายท่าน 🔒', 403);
+            }
+
+            $organizationId = null;
+            if ($organize !== '') {
+                if ($request->filled('user')) {
+                    throw new \Exception('ส่ง user และ organize พร้อมกันไม่ได้ — เลือกจองแทน user หรือจองให้องค์กรอย่างใดอย่างหนึ่งค่ะ 🏛️', 422);
+                }
+                if (($validated['source'] ?? null) !== 'admin') {
+                    throw new \Exception('จองให้องค์กรต้องใช้ source = admin เท่านั้นค่ะ 🏛️', 422);
+                }
+                if ($customerName === null || trim((string) $customerName) === '') {
+                    throw new \Exception('จองให้องค์กรต้องระบุ customer_name (ผู้ติดต่อ/ผู้เข้าพัก) ด้วยค่ะ 🏛️', 422);
+                }
+
+                $organization = Organization::where('erp', $organize)->first();
+                if (! $organization || ! $organization->is_active) {
+                    throw new \Exception('ไม่พบองค์กรตามรหัสที่ระบุ หรือองค์กรนี้ปิดใช้งานอยู่ค่ะ 🏛️', 422);
+                }
+
+                $organizationId = $organization->id;
+            }
+
+            // 🛑 draft-dedup — โหมด A นับที่ target user (admin มี draft ของตัวเองไม่ขวางการจองแทน)
+            //    · โหมด B (userless) ไม่มี dedup — org จองซ้อนหลายบิลได้ (group booking ปกติ)
+            if ($bookingUserId !== null) {
+                $hasDraft = Booking::where('user_id', $bookingUserId)
+                    ->where('status', 'draft')
+                    ->where('payment_deadline', '>', Carbon::now())
+                    ->exists();
+
+                if ($hasDraft) {
+                    throw new \Exception('มีรายการจองที่รอชำระเงินอยู่คะ กรุณาทำรายการเดิมให้เสร็จสิ้นก่อนนะคะ', 422);
+                }
+            }
+
+            // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests ไม่เกิน max_guests ของประเภทห้อง
+            foreach ($validated['booking_rooms'] as $roomRequest) {
+                if (! empty($roomRequest['guests']) && is_array($roomRequest['guests'])) {
+                    $roomType = RoomType::find($roomRequest['room_type_id']);
+                    if ($roomType && count($roomRequest['guests']) > $roomType->max_guests) {
+                        throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
+                    }
+                }
             }
 
             DB::beginTransaction();
+            $inTransaction = true;
 
-            $checkIn = Carbon::parse($validated['check_in']);
-            $checkOut = Carbon::parse($validated['check_out']);
-            $nights = $checkIn->diffInDays($checkOut) ?: 1;
-
-            $requestedRoomTypes = [];
+            // 🌟 Refactor (02/07/26): ย้าย check_in/check_out ไป BR-level — แต่ละห้องมีวันที่ของตัวเอง
+            // ต้องเช็ค availability แบบ per-room-request (group by room_type + ดู overlap ของแต่ละช่วงวัน)
+            $requestedByType = [];
 
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $rtId = $roomRequest['room_type_id'];
-                $requestedRoomTypes[$rtId] = ($requestedRoomTypes[$rtId] ?? 0) + 1; 
+                $requestedByType[$rtId][] = [
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                ];
             }
 
-            foreach ($requestedRoomTypes as $rtId => $requestedRoomCount) {
-                $totalRooms = Room::where('room_type_id', $rtId)->count();
+            foreach ($requestedByType as $rtId => $requests) {
+                // ตรวจทีละช่วงวันของห้องที่ขอจอง — นับทั้ง existing bookings และ batch requests ที่ overlap
+                // (เพื่อกันกรณีห้อง 2 ห้องใน booking เดียวกันจองช่วงเวลาที่ทับซ้อนกัน)
+                foreach ($requests as $checkReq) {
+                    $checkIn = Carbon::parse($checkReq['check_in']);
+                    $checkOut = Carbon::parse($checkReq['check_out']);
 
-                $bookedRooms = BookingRoom::where('room_type_id', $rtId)
-                    ->whereHas('booking', function ($query) use ($checkIn, $checkOut) {
-                        $query->whereIn('status', ['paid', 'confirmed', 'checked_in'])
-                              ->where('check_in', '<', $checkOut)
-                              ->where('check_out', '>', $checkIn);
-                    })
-                    ->count();
+                    // 🎫 denominator = sellable pool ของช่วงนี้ (ticket 03 — ตัด period, flag ขยายเฉพาะ admin)
+                    $totalRooms = $this->sellableCapacity($rtId, $checkIn, $checkOut, $request);
 
-                $availableRooms = $totalRooms - $bookedRooms;
+                    // 🌟 Refactor (25/06/26): availability นับที่ BR-level (มี check_in/check_out ของตัวเอง)
+                    // นับตั้งแต่ draft ขึ้นไป (availability counting = C — block ห้องเมื่อมีคนจองตั้งแต่ตอนนั้น)
+                    $existingBooked = BookingRoom::where('room_type_id', $rtId)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $checkOut)
+                        ->where('check_out', '>', $checkIn)
+                        ->count();
 
-                if ($requestedRoomCount > $availableRooms) {
-                    throw new \Exception("ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ", 422);
+                    // นับห้องใน batch นี้ที่ overlap กับช่วงวันของห้องปัจจุบัน
+                    $batchOverlapping = 0;
+                    foreach ($requests as $otherReq) {
+                        $otherIn = Carbon::parse($otherReq['check_in']);
+                        $otherOut = Carbon::parse($otherReq['check_out']);
+                        if ($otherIn < $checkOut && $otherOut > $checkIn) {
+                            $batchOverlapping++;
+                        }
+                    }
+
+                    if (($existingBooked + $batchOverlapping) > $totalRooms) {
+                        throw new \Exception('ขออภัยค่ะนายท่าน ห้องพักประเภทที่เลือกเต็มแล้วในช่วงเวลาดังกล่าวค่ะ', 422);
+                    }
                 }
             }
 
             $confirmationNo = Booking::generateUniqueConfirmation();
 
+            $source = $validated['source'];
+            if (! $isAdmin && $source === 'admin') {
+                $source = 'online';
+            }
+
             $booking = Booking::create([
-                'confirmation' => $confirmationNo, 
-                'user_id' => $userId,
-                'source' => $validated['source'],
+                'confirmation' => $confirmationNo,
+                // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A = target user ·
+                //    โหมด B = null (เฮดเปล่า) · non-admin = ตัวเอง (flow เดิม)
+                'user_id' => $bookingUserId,
+                // 🏛️ (25/09/26, organization-bookings ticket 03): org booking — FK + snapshot
+                //    (โหมด B ที่ระบุ customer_name ก็เก็บ snapshot ได้ · บิลโหมดอื่น = null ทั้งชุด)
+                'organization_id' => $organizationId,
+                'customer_name' => $customerName,
+                'customer_phone' => $customerPhone,
+                'customer_email' => $customerEmail,
+                'source' => $source,
                 'status' => 'draft',
-                'check_in' => $validated['check_in'], 
-                'check_out' => $validated['check_out'], 
 
-                // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไป booking_rooms แล้ว
+                // 🌟 Refactor (25/06/26): ย้าย check_in/check_out ไปที่ booking_rooms แล้ว
+                // bookings เก็บแค่ container + payment info เท่านั้น
 
-                'total_amount' => 0, 
-                'payment_deadline' => Carbon::now()->addHours(24)
+                'total_amount' => 0,
+                // 💳 (25/09/26, booking-payment-types): default 'full' — admin ส่งมาเป็น deposit/deferred ได้
+                'payment_type' => $paymentType ?? 'full',
+                'deposit_amount' => $depositAmount,
+                // ⏱️ (2026-09-24, REQ-008): ล็อกห้อง 15 นาที (config booking.payment_deadline_minutes)
+                'payment_deadline' => Carbon::now()->addMinutes((int) config('booking.payment_deadline_minutes')),
+                // 📊 (05/10/26, excel-reports spec ticket 09): booking attributes สำหรับรายงาน (admin/system)
+                'invoice_requested_at' => ! empty($validated['invoice_requested_at']) ? Carbon::parse($validated['invoice_requested_at']) : null,
+                'special_request' => $validated['special_request'] ?? null,
+                'comment' => $validated['comment'] ?? null,
+                'is_complimentary' => $request->has('is_complimentary') ? (bool) $validated['is_complimentary'] : false,
             ]);
-            
-            $totalAmount = 0;
 
-            // 🌟 Refactor (19/06/26): ดึง rate จาก addon_rates (server-side) ทีเดียวจบ
+            // 🌟 Refactor (19/06/26): ดึง rate จาก global_rates (server-side) ทีเดียวจบ
             // ไม่รับ price จาก client อีกต่อไป — ป้องกัน price manipulation (#20)
-            $rates = AddonRate::getPrices(['breakfast', 'early_checkin', 'late_checkout', 'extra_bed']);
+            // 📊 (05/10/26) ยอดเงิน addon คำนวณใน reprice() จุดเดียว — write path normalize input ล้วน
+            $createdRooms = [];
 
             // 🌟 ปรับลูปให้สร้าง BookingRoom และ Addon ไปพร้อมๆ กันต่อห้องเลยค่ะ
             foreach ($validated['booking_rooms'] as $roomRequest) {
                 $roomType = RoomType::findOrFail($roomRequest['room_type_id']);
+                $addonInput = $roomRequest['addons'] ?? null;
 
-                $roomPriceTotal = $roomType->rate_daily_general * $nights;
-                $extraBedQty = $roomRequest['extra_beds'] ?? 0;
-                $extraBedUnit = $rates['extra_bed'] ?? 0;
-                $extraBedTotal = ($extraBedQty * $extraBedUnit) * $nights;
-
-                // คำนวณราคา Addon ของห้องนี้ (rate จาก server เท่านั้น)
-                $addons = $roomRequest['addons'] ?? [];
-                $breakfastQty = $addons['breakfast'] ?? 0;
-                $breakfastPrice = $breakfastQty * ($rates['breakfast'] ?? 0);
-                $earlyCheckInPrice = !empty($addons['early_checkin']) ? ($rates['early_checkin'] ?? 0) : 0;
-                $lateCheckOutPrice = !empty($addons['late_checkout']) ? ($rates['late_checkout'] ?? 0) : 0;
-
-                // รวมยอดของห้องนี้ทั้งหมด
-                $subtotal = $roomPriceTotal + $extraBedTotal + $breakfastPrice + $earlyCheckInPrice + $lateCheckOutPrice;
-                $totalAmount += $subtotal;
+                // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
+                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                    $roomRequest,
+                    $addonInput,
+                    null,
+                    $roomType->max_extra_beds
+                );
+                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput);
 
                 $bookingRoom = BookingRoom::create([
                     'booking_id' => $booking->id,
                     'room_type_id' => $roomType->id,
                     'room_id' => null, // รอจ่ายห้องตอน Check-in
+                    // 🌟 Refactor (02/07/26): วันที่เช็คอิน/เช็คเอาท์อยู่ที่ระดับห้อง (แต่ละห้องต่างวันได้)
+                    'check_in' => $roomRequest['check_in'],
+                    'check_out' => $roomRequest['check_out'],
+                    'status' => 'draft', // BR-level state
+                    'bed_preference' => $roomRequest['bed_preference'] ?? null,
                     // 🌟 Refactor (18/06/26): เก็บข้อมูลผู้เข้าพักหลายคนในห้องนี้
-                    'guests' => $roomRequest['guests'] ?? null,
-                    'children' => $roomRequest['children'] ?? 0,
+                    'guests' => isset($roomRequest['guests']) ? $this->stripGuestFields($roomRequest['guests']) : null,
+                    // 🧾 Billing fields (04/08/26)
+                    'billing_address' => $roomRequest['billing_address'] ?? null,
+                    'billing_comment' => $roomRequest['billing_comment'] ?? null,
                 ]);
 
-                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id แทนค่ะ
+                // 🌟 บันทึก Addon โดยผูกกับ booking_room_id แทนค่ะ (canonical เท่านั้น —
+                //    snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'extra_bed' => $extraBedQty,
-                    'extra_bed_price' => $extraBedTotal,
-                    'breakfast' => $breakfastQty,
-                    'breakfast_price' => $breakfastPrice,
-                    'early_checkIn_price' => $earlyCheckInPrice,
-                    'late_checkOut_price' => $lateCheckOutPrice,
+                    'breakfast_set_100' => $sets['set_100'],
+                    'breakfast_set_200' => $sets['set_200'],
+                    'extra_beds_by_night' => $extraBedsByNight ?: null,
+                    'early_hours' => $earlyHours,
+                    'late_hours' => $lateHours,
                 ]);
+
+                $createdRooms[] = $bookingRoom;
             }
 
-            $booking->update(['total_amount' => $totalAmount]); 
+            // 🎟️ Reconcile ส่วนลด & total_amount (27/08/26)
+            if (! empty($validated['discount_code'])) {
+                app(DiscountService::class)->applyToDraft($booking, $validated['discount_code']);
+            } else {
+                app(DiscountService::class)->reprice($booking);
+            }
 
             DB::commit();
+
+            // 🌟 โหลด relations ของห้องที่สร้างขึ้นทั้งหมด เพื่อส่งกลับใน response
+            $bookingRoomsResponse = array_map(function ($br) {
+                return $br->fresh('addon');
+            }, $createdRooms);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Booking and Add-ons created successfully',
                 'booking_id' => $booking->id,
-                'total_amount' => $booking->total_amount,
+                'confirmation' => $booking->confirmation,
+                'total_amount' => $booking->fresh()->total_amount,
+                // 💳 (25/09/26, booking-payment-types): envelope 4 field — accessors derive จาก ledger
+                'payment_type' => $booking->fresh()->payment_type,
+                'deposit_amount' => $booking->fresh()->deposit_amount,
+                'paid_amount' => $booking->fresh()->paid_amount,
+                'outstanding_amount' => $booking->fresh()->outstanding_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
-                'user_id' => $userId,
+                // 🏛️ (25/09/26, organization-bookings ticket 02): user_id = target (โหมด A) / null (โหมด B)
+                'user_id' => $bookingUserId,
+                // 🏛️ (25/09/26, organization-bookings ticket 03): org fields (null เมื่อไม่ใช่ org/โหมด B)
+                'organization_id' => $booking->organization_id,
+                'customer_name' => $booking->customer_name,
+                'customer_phone' => $booking->customer_phone,
+                'customer_email' => $booking->customer_email,
+                'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            
+            // 🛡️ rollBack เฉพาะเมื่อเรา beginTransaction เอง — early guards (401/draft-limit 422)
+            //    โยนก่อน begin แล้ว rollBack เปล่าจะไปยกเลิก transaction ของผู้เรียก
+            if ($inTransaction) {
+                DB::rollBack();
+            }
+
             // 🛡️ #40 Fixed: Business logic errors (422) ส่ง message ได้, unexpected errors ซ่อน
+            // 💳 (25/09/26) +403 — guard สิทธิ์ payment fields (booking-payment-types ticket 01)
             $code = $e->getCode();
-            if (in_array($code, [401, 422])) {
+            if (in_array($code, [401, 403, 422])) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => $e->getMessage()
+                    'message' => $e->getMessage(),
                 ], $code);
             }
 
-            Log::error("Failed to create booking: " . $e->getMessage());
-            
+            Log::error('Failed to create booking: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭'
+                'message' => 'เกิดข้อผิดพลาดในการสร้างการจอง กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
             ], 500);
+        }
+    }
+
+    /**
+     * 💳🏛️ (25/09/26, booking-payment-types ticket 01/05 + organization-bookings ticket 07) — PUT /bookings/{id}
+     *
+     * Endpoint ระดับ booking container สำหรับแก้ payment fields + customer identity fields:
+     *   💳 payment_type · deposit_amount (ส่ง null = revert effective 50%) · discount_code (reuse
+     *   DiscountService — ค่าว่าง = ลบโค้ด, แก้แล้ว reconcile total_amount) · payment_deadline
+     *   🏛️ user (UUID) · organize (erp code → FK) · customer_name/phone/email (snapshot ผู้ติดต่อ)
+     *
+     * Guards (ticket 07 — แยกตาม field-group):
+     * - role admin/system (route role:admin + re-check ตาม defense-in-depth)
+     * - 💳 payment group — booking ต้อง draft เท่านั้น — หลังส่งสลิป/verify แล้ว frozen (422)
+     * - 🏛️ customer identity group — ได้ตั้งแต่ draft จนถึง checked_in (จนก่อน complete/no_show)
+     * - deposit_amount มีความหมายเฉพาะ type deposit (422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit)
+     * - identity: user×organize mutually exclusive · organize บังคับ customer_name · erp lookup
+     *   ไม่เจอ/inactive → 422 (ชุดเดียวกับ POST /bookings, ticket 03) · ส่ง identity ใหม่ = แทนที่
+     *   ทั้งชุด · ส่ง user/organize = null ชัด ๆ = ถอดกลับเฮดเปล่า · ไม่ re-run draft-dedup ตอน attach
+     * - total_amount ไม่รับจาก input — reprice เฉพาะตอน draft ผ่าน DiscountService::reprice()
+     *   (attach/ถอด user เปลี่ยนเรท daily_ku/daily ผ่าน chokepoint $booking->user · หลัง draft ขึ้นไป
+     *   = เขียน identity เท่านั้น ราคาคงเดิม)
+     */
+    public function updateBookingPayment(UpdateBookingPaymentRequest $request, string $id)
+    {
+        try {
+            $user = $request->user('sanctum');
+            if (! $user || ! in_array($user->role, ['admin', 'system'], true)) {
+                throw new \Exception('ต้องเป็นแอดมินเท่านั้นถึงจะแก้ประเภทการชำระเงินได้ค่ะนายท่าน 🔒', 403);
+            }
+
+            $booking = Booking::findOrFail($id);
+
+            $validated = $request->validated();
+
+            // 🏛️ ticket 07 — guard แยก field-group (ตรวจทั้งก่อน lock และหลัง lock กัน race)
+            $touchesPayment = collect(['payment_type', 'deposit_amount', 'discount_code', 'payment_deadline'])
+                ->contains(fn ($field) => $request->has($field));
+            $touchesCustomer = collect(['user', 'organize', 'customer_name', 'customer_phone', 'customer_email'])
+                ->contains(fn ($field) => $request->has($field));
+            $this->assertUpdatePaymentGroupGuards($booking->status, $touchesPayment, $touchesCustomer);
+
+            DB::beginTransaction();
+            try {
+                // 🌟 lock + re-check กัน race กับ confirm/verify ระหว่างแก้ไข
+                $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+                $this->assertUpdatePaymentGroupGuards($locked->status, $touchesPayment, $touchesCustomer);
+
+                // type ใหม่ที่ effective = ค่าที่ส่งมา ไม่งั้นค่าเดิม
+                $effectiveType = $validated['payment_type'] ?? $locked->payment_type;
+
+                // cross-field: deposit_amount มีความหมายเฉพาะ deposit
+                if ($request->has('deposit_amount') && $validated['deposit_amount'] !== null && $effectiveType !== 'deposit') {
+                    throw new \Exception('ส่ง deposit_amount ได้เฉพาะเมื่อ payment_type = deposit เท่านั้นค่ะ 💳', 422);
+                }
+
+                // 🏛️ ticket 07 — attach/switch/detach identity (validation ชุดเดียวกับ POST /bookings, ticket 03)
+                //    "แทนที่" = เคลียร์ identity เดิมทั้งชุดก่อน แล้วเขียนด้วย field ที่ส่งมา (ไม่ส่ง phone/email = null)
+                $attachUserId = $validated['user'] ?? null;
+                $organizeCode = trim((string) ($validated['organize'] ?? ''));
+                $identityChanged = false;
+
+                if ($attachUserId !== null && $organizeCode !== '') {
+                    throw new \Exception('ส่ง user และ organize พร้อมกันไม่ได้ — เลือกจองแทน user หรือจองให้องค์กรอย่างใดอย่างหนึ่งค่ะ 🏛️', 422);
+                }
+
+                if ($attachUserId !== null) {
+                    // 🏛️ attach/switch จองแทน — link target user · org เดิม (ถ้ามี) ถูกแทนที่
+                    $locked->user_id = $attachUserId;
+                    $locked->organization_id = null;
+                    $locked->customer_name = $validated['customer_name'] ?? null;
+                    $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    $locked->customer_email = $validated['customer_email'] ?? null;
+                    $identityChanged = true;
+                } elseif ($organizeCode !== '') {
+                    // 🏛️ attach/switch org — erp lookup เป็น FK (replaceability contract, ticket 01)
+                    if (($validated['customer_name'] ?? null) === null || trim((string) $validated['customer_name']) === '') {
+                        throw new \Exception('จองให้องค์กรต้องระบุ customer_name (ผู้ติดต่อ/ผู้เข้าพัก) ด้วยค่ะ 🏛️', 422);
+                    }
+                    $organization = Organization::where('erp', $organizeCode)->first();
+                    if (! $organization || ! $organization->is_active) {
+                        throw new \Exception('ไม่พบองค์กรตามรหัสที่ระบุ หรือองค์กรนี้ปิดใช้งานอยู่ค่ะ 🏛️', 422);
+                    }
+                    $locked->user_id = null;
+                    $locked->organization_id = $organization->id;
+                    $locked->customer_name = $validated['customer_name'];
+                    $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    $locked->customer_email = $validated['customer_email'] ?? null;
+                    $identityChanged = true;
+                } elseif ($request->has('user') || $request->has('organize')) {
+                    // 🏛️ ส่ง user/organize = null ชัด ๆ — ถอด identity กลับเฮดเปล่า (เคลียร์ snapshot ครบ)
+                    $locked->user_id = null;
+                    $locked->organization_id = null;
+                    $locked->customer_name = null;
+                    $locked->customer_phone = null;
+                    $locked->customer_email = null;
+                    $identityChanged = true;
+                } else {
+                    // แก้ snapshot ผู้ติดต่อล้วน (ไม่ส่ง user/organize) — แก้เฉพาะ field ที่ส่ง
+                    if ($request->has('customer_name')) {
+                        $locked->customer_name = $validated['customer_name'] ?? null;
+                    }
+                    if ($request->has('customer_phone')) {
+                        $locked->customer_phone = $validated['customer_phone'] ?? null;
+                    }
+                    if ($request->has('customer_email')) {
+                        $locked->customer_email = $validated['customer_email'] ?? null;
+                    }
+                }
+
+                // 💳 payment_type — ไม่ส่ง = ไม่แตะค่าเดิม
+                if ($validated['payment_type'] ?? null) {
+                    $locked->payment_type = $validated['payment_type'];
+                }
+
+                // 💳 deposit_amount — ส่ง null ชัด ๆ = revert ไป effective 50% (column → null)
+                //    (อ่านจาก input ตรง ๆ เพื่อแยก "ไม่ส่ง" ออกจาก "ส่ง null")
+                if ($request->has('deposit_amount')) {
+                    $locked->deposit_amount = $validated['deposit_amount'];
+                }
+
+                // ⏱️ payment_deadline — ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม
+                if ($validated['payment_deadline'] ?? null) {
+                    $locked->payment_deadline = Carbon::parse($validated['payment_deadline']);
+                }
+
+                // 📊 (05/10/26, excel-reports §2.1) booking attributes — admin เท่านั้น
+                //    (route role:admin) · tag-only ไม่แตะยอดเงิน/state machine · ไม่ส่ง = คงเดิม
+                //    (ส่ง null ชัด ๆ = เคลียร์)
+                if ($request->has('invoice_requested_at')) {
+                    $locked->invoice_requested_at = $validated['invoice_requested_at'] !== null
+                        ? Carbon::parse($validated['invoice_requested_at'])
+                        : null;
+                }
+                if ($request->has('special_request')) {
+                    $locked->special_request = $validated['special_request'];
+                }
+                if ($request->has('comment')) {
+                    $locked->comment = $validated['comment'];
+                }
+                if ($request->has('is_complimentary')) {
+                    $locked->is_complimentary = (bool) $validated['is_complimentary'];
+                }
+
+                $locked->save();
+
+                // 🎟️ discount_code — reuse กลไก DiscountService เดิม (reconcile total_amount ครบ)
+                //    ส่งค่าว่าง/null = ลบโค้ด · ไม่ส่ง field = คงโค้ดเดิม
+                if (array_key_exists('discount_code', $validated)) {
+                    if (empty($validated['discount_code'])) {
+                        if ($locked->discount_code) {
+                            app(DiscountService::class)->removeFromDraft($locked);
+                        }
+                    } else {
+                        app(DiscountService::class)->applyToDraft($locked, $validated['discount_code']);
+                    }
+                }
+
+                // 🏛️ ticket 07 — reprice เฉพาะตอน draft: attach/ถอด user เปลี่ยนเรท daily_ku/daily
+                //    ผ่าน chokepoint $booking->user ใน DiscountService::reprice() · หลัง draft ขึ้นไป
+                //    = เขียน identity เท่านั้น ราคาคงเดิม (ไม่ไปยุ่งยอดที่สลิป/การชำระ lock ไว้)
+                if ($identityChanged && $locked->status === 'draft') {
+                    app(DiscountService::class)->reprice($locked);
+                }
+
+                DB::commit();
+
+                $fresh = $locked->fresh(['bookingRooms.addon', 'confirmations.slipImage']);
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => $touchesCustomer
+                        ? 'อัปเดตข้อมูลการชำระเงิน/ผู้เข้าพักเรียบร้อยแล้วค่ะ 💳🏛️'
+                        : 'แก้ไขข้อมูลการชำระเงินเรียบร้อยแล้วค่ะ 💳',
+                    'booking' => $fresh,
+                    'total_amount' => $fresh->total_amount,
+                    'payment_type' => $fresh->payment_type,
+                    'deposit_amount' => $fresh->deposit_amount,
+                    'paid_amount' => $fresh->paid_amount,
+                    'outstanding_amount' => $fresh->outstanding_amount,
+                    'payment_deadline' => $fresh->payment_deadline?->toDateTimeString(),
+                    // 🏛️ ticket 07 — identity หลัง attach/switch/detach
+                    'user_id' => $fresh->user_id,
+                    'organization_id' => $fresh->organization_id,
+                    'customer_name' => $fresh->customer_name,
+                    'customer_phone' => $fresh->customer_phone,
+                    'customer_email' => $fresh->customer_email,
+                ], 200);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Exception $e) {
+            $code = $e->getCode();
+            if (in_array($code, [401, 403, 422])) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $e->getMessage(),
+                ], $code);
+            }
+
+            if ($e instanceof ModelNotFoundException) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'ไม่พบรายการจองที่ระบุค่ะ',
+                ], 404);
+            }
+
+            Log::error('Failed to update booking payment fields: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการแก้ไขข้อมูลการชำระเงิน กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🏛️ (25/09/26, organization-bookings ticket 07) — guard แยก field-group ของ PUT /bookings/{id}
+     *
+     * 💳 payment group — draft เท่านั้น (หลังส่งสลิป/verify แล้ว frozen)
+     * 🏛️ customer identity group — ได้ตั้งแต่ draft จนถึง checked_in (จนก่อน complete/no_show)
+     *    — รองรับ front desk ที่เจอลูกค้าถึงเคาน์เตอร์แล้วค่อยรู้ว่าเป็นขององค์กรไหน
+     */
+    private function assertUpdatePaymentGroupGuards(string $status, bool $touchesPayment, bool $touchesCustomer): void
+    {
+        if ($touchesPayment && $status !== 'draft') {
+            throw new \Exception('แก้ไขประเภทการชำระเงินได้เฉพาะการจองสถานะ draft เท่านั้นค่ะ (หลังส่งสลิป/ยืนยันแล้วแก้ไม่ได้) 📝', 422);
+        }
+
+        if ($touchesCustomer && in_array($status, ['complete', 'no_show'], true)) {
+            throw new \Exception('แก้ไขข้อมูลผู้เข้าพัก/องค์กรได้จนถึง checked_in เท่านั้น — การจองสถานะ complete/no_show แก้ไม่ได้แล้วค่ะ 🏛️', 422);
         }
     }
 
@@ -272,22 +1867,57 @@ class BookingController extends Controller
         $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $term);
 
         // 🌟 Refactor (18/06/26): ลบ guest_name (ย้ายไป booking_rooms.guests แล้ว) — ค้นผ่าน user กับ primary_guest_name แทน
-        return $query->where(function ($q) use ($escaped, $term) {
+        // 🌟 Fix scrutinize (29/06/26): JSON_EXTRACT ใช้ได้แค่ MySQL/SQLite — ทำให้ cross-DB compatible
+        $lowerEscaped = '%'.strtolower($escaped).'%';
+        $guestNameFilter = function ($brQuery) use ($lowerEscaped) {
+            $driver = DB::getDriverName();
+            if (in_array($driver, ['mysql', 'sqlite'])) {
+                $brQuery->where(function ($q) use ($lowerEscaped) {
+                    $q->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].firstName")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].lastName")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].first_name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].last_name")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].email")) LIKE ?', [$lowerEscaped])
+                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].phone")) LIKE ?', [$lowerEscaped]);
+                });
+            } elseif ($driver === 'pgsql') {
+                $brQuery->where(function ($q) use ($lowerEscaped) {
+                    $q->whereRaw("LOWER(guests #>> '{0,name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,firstName}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,lastName}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,first_name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,last_name}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,email}') LIKE ?", [$lowerEscaped])
+                        ->orWhereRaw("LOWER(guests #>> '{0,phone}') LIKE ?", [$lowerEscaped]);
+                });
+            } else {
+                // Fallback: search across whole JSON blob (less precise but safe)
+                $brQuery->whereRaw('LOWER(CAST(guests AS TEXT)) LIKE ?', [$lowerEscaped]);
+            }
+        };
+
+        // 🏛️ organization-bookings ticket 08 — term ค้น snapshot customer_name (org booking / เฮดเปล่า
+        //    ไม่มี user ให้ whereHas จับ) · LOWER ตรง ๆ เพราะ LIKE บน pgsql เป็น case-sensitive
+        $customerNameFilter = function ($q) use ($lowerEscaped) {
+            $q->whereNotNull('customer_name')
+                ->whereRaw('LOWER(customer_name) LIKE ?', [$lowerEscaped]);
+        };
+
+        return $query->where(function ($q) use ($escaped, $term, $guestNameFilter, $customerNameFilter) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
-                  ->orWhereHas('user', function ($userQuery) use ($escaped) {
-                      $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
-                  })
-                  ->orWhereHas('bookingRooms', function ($brQuery) use ($escaped) {
-                      $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', ['%' . strtolower($escaped) . '%']);
-                  });
+                    ->orWhereHas('user', function ($userQuery) use ($escaped) {
+                        $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
+                    })
+                    ->orWhere($customerNameFilter)
+                    ->orWhereHas('bookingRooms', $guestNameFilter);
             } else {
                 $q->whereHas('user', function ($userQuery) use ($escaped) {
-                    $userQuery->where('name', 'LIKE', '%' . $escaped . '%');
+                    $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                 })
-                ->orWhereHas('bookingRooms', function ($brQuery) use ($escaped) {
-                    $brQuery->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', ['%' . strtolower($escaped) . '%']);
-                });
+                    ->orWhere($customerNameFilter)
+                    ->orWhereHas('bookingRooms', $guestNameFilter);
             }
         });
     }
@@ -297,20 +1927,23 @@ class BookingController extends Controller
         $startDate = Carbon::parse($checkIn)->startOfDay();
         $endDate = Carbon::parse($checkOut)->endOfDay();
 
-        return $query->where(function ($q) use ($startDate, $endDate) {
-            $q->whereBetween('check_in', [$startDate, $endDate])
-              ->orWhereBetween('check_out', [$startDate, $endDate])
-              ->orWhere(function ($subQ) use ($startDate, $endDate) {
-                  $subQ->where('check_in', '<=', $startDate)
-                       ->where('check_out', '>=', $endDate);
-              });
+        // 🌟 Refactor (25/06/26): วันที่ย้ายไป BR-level แล้ว — filter ผ่าน whereHas('bookingRooms', ...)
+        return $query->whereHas('bookingRooms', function ($br) use ($startDate, $endDate) {
+            $br->where(function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('check_in', [$startDate, $endDate])
+                    ->orWhereBetween('check_out', [$startDate, $endDate])
+                    ->orWhere(function ($subQ) use ($startDate, $endDate) {
+                        $subQ->where('check_in', '<=', $startDate)
+                            ->where('check_out', '>=', $endDate);
+                    });
+            });
         });
     }
 
     private function applyRoomTypeFilter($query, $roomTypeId)
     {
         if (empty($roomTypeId) || $roomTypeId === 'all') {
-            return $query; 
+            return $query;
         }
 
         return $query->whereHas('bookingRooms', function ($q) use ($roomTypeId) {
@@ -321,40 +1954,97 @@ class BookingController extends Controller
     public function updateStatus(Request $request, $id)
     {
         $request->validate([
-            'status' => 'required|string|in:draft,paid,confirmed,checked_in,checked_out,cancelled,no_show,deleted'
+            // 🌟 Refactor (25/06/26): booking container states เท่านั้น
+            // (checked_in/checked_out/no_show อยู่ที่ BookingRoom)
+            'status' => 'required|string|in:draft,paid,confirmed,complete',
         ]);
 
         try {
             $booking = Booking::findOrFail($id);
             $newStatus = $request->status;
-            
+
             $user = $request->user('sanctum');
             $userRole = $user ? $user->role : 'guest';
-            
+
             $booking->transitionStatus($newStatus, $userRole);
 
+            $fresh = $booking->fresh();
+
             return response()->json([
-                'status'  => 'success',
+                'status' => 'success',
                 'message' => "อัปเดตสถานะเป็น {$newStatus} โดยคุณ {$userRole} เรียบร้อยแล้วค่ะ",
                 'booking_id' => $booking->id,
-                'booking_status' => $booking->status,
+                'booking_status' => $fresh->status,
+                // 💳 (25/09/26) envelope 4 field — deferred อนุมัติผ่าน endpoint นี้ (draft → confirmed)
+                'payment_type' => $fresh->payment_type,
+                'deposit_amount' => $fresh->deposit_amount,
+                'paid_amount' => $fresh->paid_amount,
+                'outstanding_amount' => $fresh->outstanding_amount,
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            $modelName = class_basename($e->getModel()); 
+        } catch (ModelNotFoundException $e) {
+            $modelName = class_basename($e->getModel());
+
             return response()->json([
-                'status'  => 'error',
-                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ"
+                'status' => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ",
             ], 404);
 
         } catch (\Exception $e) {
             $statusCode = $e->getCode() ?: 500;
-            Log::error("Failed to update booking status: " . $e->getMessage());
-            
+            Log::error('Failed to update booking status: '.$e->getMessage());
+
             return response()->json([
-                'status'  => 'error',
-                'message' => $e->getMessage()
+                'status' => 'error',
+                'message' => $e->getMessage(),
             ], $statusCode);
+        }
+    }
+
+    /**
+     * 📝 Audit log (04/08/26): ประวัติการเปลี่ยนสถานะของ booking
+     *
+     * ดึง log ของ booking container + ทุก booking_room ที่อยู่ใต้ booking นี้
+     * เรียงตามเวลา (เก่า → ใหม่) เพื่อให้เห็นลำดับเหตุการณ์เต็มๆ
+     *
+     * Route: GET /api/v1/bookings/{id}/status-logs (admin only)
+     */
+    public function statusLogs(string $id)
+    {
+        try {
+            // โหลด booking + booking_rooms (เพื่อเอา BR ids สำหรับ query log)
+            $booking = Booking::with('bookingRooms')->findOrFail($id);
+            $brIds = $booking->bookingRooms->pluck('id');
+
+            // เก็บ log ของ booking container + ทุก booking_room ที่อยู่ใต้ booking นี้
+            $logs = StatusChangeLog::where(function ($q) use ($id, $brIds) {
+                $q->where(function ($qq) use ($id) {
+                    $qq->where('entity_type', 'booking')
+                        ->where('entity_id', $id);
+                })->orWhere(function ($qq) use ($brIds) {
+                    $qq->where('entity_type', 'booking_room')
+                        ->whereIn('entity_id', $brIds);
+                });
+            })
+                ->orderBy('created_at', 'asc')
+                ->get([
+                    'id', 'entity_type', 'entity_id',
+                    'from_status', 'to_status', 'role', 'causer_id',
+                    'note', 'created_at',
+                ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Status change logs retrieved',
+                'booking_id' => $booking->id,
+                'logs' => $logs,
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูล Booking ที่ระบุในระบบค่ะนายท่าน',
+            ], 404);
         }
     }
 
@@ -363,21 +2053,26 @@ class BookingController extends Controller
         try {
             $user = $request->user('sanctum');
 
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!'
+                    'message' => 'กรุณาเข้าสู่ระบบก่อนนะคะนายท่าน!',
                 ], 401);
             }
 
-            $booking = Booking::with(['user', 'bookingRooms.addon', 'bookingRooms.roomType', 'bookingRooms.room'])
+            // 🏛️ ticket 08 — admin เห็น object organization (org booking ดูได้เฉพาะ admin อยู่แล้ว)
+            // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking
+            $booking = Booking::with(['user', 'bookingRooms.addon', 'confirmations.slipImage'])
+                ->when($user->role === 'admin', function ($q) {
+                    $q->with('organization');
+                })
                 ->where('id', $id)
                 ->firstOrFail();
 
             if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒'
+                    'message' => 'นายท่านไม่มีสิทธิ์ดูข้อมูลการจองของผู้อื่นนะคะ! 🔒',
                 ], 403);
             }
 
@@ -393,7 +2088,8 @@ class BookingController extends Controller
                 'message' => 'ไม่พบรหัสการจองนี้ในระบบค่ะนายท่าน 🔎',
             ], 404);
         } catch (\Exception $e) {
-            Log::error("Failed to show booking: " . $e->getMessage());
+            Log::error('Failed to show booking: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้งค่ะนายท่าน 😭',
@@ -404,43 +2100,43 @@ class BookingController extends Controller
     // 🌟 Refactor (18/06/26): lookupBooking ถูกลบแล้ว — Guest/Non-member ไม่สามารถใช้งานระบบได้
     // นายท่านต้องล็อกอินก่อน แล้วใช้ showById เพื่อดูข้อมูลการจองของตัวเองได้เลยค่ะ
 
-   public function autoAssignRooms(Request $request, $bookingId)
+    public function autoAssignRooms(Request $request, $bookingId)
     {
         try {
             DB::beginTransaction();
 
             // 🌟 1. โหลดข้อมูลการจอง พร้อมกับห้องพัก และ Addon มาด้วยเลย
             $booking = Booking::with(['bookingRooms.addon'])->findOrFail($bookingId);
-  
+
             // =========================================================
-            // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin)
+            // 🛡️ ด่านตรวจที่ 1: เช็คสิทธิ์ User (Token ตรงกับเจ้าของ หรือเป็น Admin/Staff)
             // =========================================================
             $user = $request->user('sanctum');
-            
+
             // ถ้านายท่านยังไม่ได้ล็อกอิน
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'นายท่านยังไม่ได้ล็อกอินนะคะ! กรุณาแนบ Token ก่อนทำรายการค่ะ 🔒',
-                    'user' => $user
+                    'user' => $user,
                 ], 401);
             }
 
-            // ถ้าไม่ใช่ Admin และ ID ไม่ตรงกับคนจอง
-            if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
+            // ถ้าไม่ใช่ Admin/Staff และ ID ไม่ตรงกับคนจอง
+            if (! in_array($user->role, ['admin', 'staff']) && $booking->user_id !== $user->id) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️'
+                    'message' => 'ไม่อนุญาตค่ะนายท่าน! สิทธิ์นี้เฉพาะแอดมินหรือเจ้าของบุ๊กกิ้งเท่านั้นนะคะ 🙅‍♀️',
                 ], 403);
             }
 
             // =========================================================
             // 🛡️ ด่านตรวจที่ 2: เช็คสถานะ Booking (ต้อง paid หรือ confirmed เท่านั้น)
             // =========================================================
-            if (!in_array($booking->status, ['paid', 'confirmed'])) {
+            if (! in_array($booking->status, ['paid', 'confirmed'])) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => "ยังระบุเลขห้องไม่ได้ค่ะนายท่าน! สถานะปัจจุบันคือ '{$booking->status}' (ต้องจ่ายเงิน 'paid' หรือยืนยัน 'confirmed' ก่อนนะคะ) 💳"
+                    'message' => "ยังระบุเลขห้องไม่ได้ค่ะนายท่าน! สถานะปัจจุบันคือ '{$booking->status}' (ต้องจ่ายเงิน 'paid' หรือยืนยัน 'confirmed' ก่อนนะคะ) 💳",
                 ], 422);
             }
 
@@ -455,30 +2151,38 @@ class BookingController extends Controller
                 if ($booking->bookingRooms()->count() === 0) {
                     return response()->json([
                         'status' => 'error',
-                        'message' => 'เอ๊ะ! บุ๊กกิ้งนี้ยังไม่มีการจองห้องพักเข้ามาเลยนะคะนายท่าน! 💦'
+                        'message' => 'เอ๊ะ! บุ๊กกิ้งนี้ยังไม่มีการจองห้องพักเข้ามาเลยนะคะนายท่าน! 💦',
                     ], 422);
                 }
 
                 return response()->json([
                     'status' => 'info',
-                    'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨'
+                    'message' => 'ห้องพักทั้งหมดในบุ๊กกิ้งนี้ถูกระบุเลขห้องเรียบร้อยแล้วค่ะนายท่าน! ✨',
                 ]);
             }
 
-            $checkIn = $booking->check_in;
-            $checkOut = $booking->check_out;
+            // 🌟 Refactor (25/06/26): BR-level dates แล้ว — assignAvailableRoom() ใช้ $this->check_in/check_out เอง
+            // 🏨 Phase 5: เปลี่ยนจาก first-available greedy แบบเดิม → RoomAllocator (Hybrid+ v3 cluster algorithm)
+            //    เหตุผล: algorithm ใหม่จัดห้องเป็น cluster (ระยะเดินใกล้กันที่สุด) แทนที่จะ assign ทีละ BR แยกกัน
+            // 🎫 (26/09/26) ticket 04 map reserved-room-pool: flag `include_reserved` (admin เท่านั้น —
+            //    silent-ignore) ส่งต่อให้ allocator ขยาย pool ให้ห้องติด reserved period เข้า cluster ได้
+            //    (maintenance ถูกตัดเสมอ) · ไม่ persist ค่า flag — แต่ละ request ตัดสินใจเอง (grill #2)
             $assignedCount = 0;
 
-            foreach ($unassignedRooms as $bookingRoom) {
-                // 🌟 เรียกใช้ Method จาก Model แบบหล่อๆ เท่ๆ ไปเลยค่ะ ไม่มี Parameter มากวนใจ!
-                $isSuccess = $bookingRoom->assignAvailableRoom();
+            $result = app(RoomAllocator::class)->allocate(
+                $unassignedRooms,
+                IncludeReservedGate::enabled($request)
+            );
 
-                if ($isSuccess) {
-                    $assignedCount++;
-                } else {
-                    // ถ้าหาห้องไม่ได้ ให้ Throw Exception ออกไปให้ Catch ทำงาน
-                    throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่มีห้องพักว่างให้ระบุเลขห้องได้ในช่วงเวลาดังกล่าวค่ะ 😭 (ตรวจสอบห้องประเภท ID: {$bookingRoom->room_type_id})");
-                }
+            if (! $result->ok) {
+                $failedTypes = $unassignedRooms->map(fn ($br) => $br->room_type_id)->unique()->implode(', ');
+                $winner = $result->winner ?? 'none';
+                throw new \Exception("แย่แล้วค่ะนายท่าน! ไม่สามารถจัดห้องเป็น cluster ได้ในช่วงเวลาดังกล่าวค่ะ 😭 (room_type_id: {$failedTypes}) — algorithm: {$winner}");
+            }
+
+            foreach ($result->assignments as $brId => $roomId) {
+                BookingRoom::where('id', $brId)->update(['room_id' => $roomId]);
+                $assignedCount++;
             }
 
             DB::commit();
@@ -486,22 +2190,99 @@ class BookingController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => "หนูจัดการระบุเลขห้องอัตโนมัติให้จำนวน {$assignedCount} ห้องเรียบร้อยแล้วค่ะนายท่าน! 🎉",
-                'booking' => $booking->load('bookingRooms.room'),
+                // 🌟 (26/08/26): load addon ให้ format booking_rooms เหมือนกับ endpoint อื่นๆ
+                // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking
+                'booking' => $booking->load(['bookingRooms.addon', 'confirmations.slipImage']),
+                // 🏨 debug info: algorithm ที่ชนะ + cluster cost
+                'allocation' => [
+                    'winner' => $result->winner,
+                    'cost' => round($result->cost, 2),
+                    'algo' => $result->algo,
+                ],
             ], 200);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        } catch (ModelNotFoundException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'ไม่พบข้อมูลการจองนี้ในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ'
+                'message' => 'ไม่พบข้อมูลการจองนี้ในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ',
             ], 404);
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error("Failed to auto-assign room: " . $e->getMessage());
-            
+            Log::error('Failed to auto-assign room: '.$e->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: ' . $e->getMessage()
+                'message' => 'หนูขอโทษค่ะ เกิดข้อผิดพลาด: '.$e->getMessage(),
             ], 422);
+        }
+    }
+
+    /**
+     * 👥 ตัดฟิลด์ที่ไม่จัดเก็บออกจาก guests array (เช่น is_ku_member)
+     */
+    private function stripGuestFields(?array $guests): ?array
+    {
+        if ($guests === null) {
+            return null;
+        }
+
+        return array_map(function ($guest) {
+            if (is_array($guest)) {
+                unset($guest['is_ku_member']);
+            }
+
+            return $guest;
+        }, $guests);
+    }
+
+    /**
+     * 🕐🛏️ (05/10/26): normalize ของ addon ทั้งหมดย้ายไป App\Services\Addon\AddonPricing จุดเดียว
+     * (resolveEarlyLate / resolveExtraBed เดิมถูกดูดรวม — 4 write paths เรียกผ่านคลาสเดียวกัน)
+     */
+
+    /**
+     * 🎫 (26/09/26) ticket 03 map reserved-room-pool — denominator ของ capacity checks
+     *    ทั้ง 4 จุด = **sellable pool** ตามช่วง [checkIn, checkOut) ของห้องนั้น ๆ
+     *    (เดิมนับห้องกายภาพเต็มของ type ทำให้จองเกิน pool ที่ assign ได้จริงแล้วจองค้าง — bug fix grill #5)
+     *    - maintenance period: ตัดเสมอ ทุกกรณี (กฎเหล็ก absolute — ไม่ว่าใครส่ง flag)
+     *    - reserved period: ตัดเสมอ — ยกเว้น admin ส่ง include_reserved=true (flag ขยาย pool)
+     *    ห้ามเขียนเงื่อนไข period เอง — ใช้ scope ของ Room ตามธรรมเนียม room-state-periods
+     */
+    private function sellableCapacity(string $typeId, $checkIn, $checkOut, Request $request): int
+    {
+        return Room::where('room_type_id', $typeId)
+            ->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_MAINTENANCE)
+            ->when(
+                ! IncludeReservedGate::enabled($request),
+                fn ($q) => $q->freeOfPeriod($checkIn, $checkOut, RoomStatePeriod::KIND_RESERVED)
+            )
+            ->count();
+    }
+
+    /**
+     * 🎟️ Reconcile ส่วนลด & total_amount หลังแก้ไขห้องใน draft booking (28/08/26 F2)
+     * ถ้าการแก้ไขทำให้ห้องทั้งหมดไม่เข้าเกณฑ์โค้ดส่วนลด จะแจ้งเตือนให้ user ลบโค้ดก่อน
+     */
+    private function reconcileDiscount(Booking $booking): void
+    {
+        if (! $booking->discount_code) {
+            app(DiscountService::class)->reprice($booking);
+
+            return;
+        }
+
+        try {
+            app(DiscountService::class)->applyToDraft($booking, $booking->discount_code);
+        } catch (\Exception $e) {
+            if ($e->getCode() === 422) {
+                throw new \Exception(
+                    'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด '.$booking->discount_code.' อีกต่อไป — '.
+                    'กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ',
+                    422
+                );
+            }
+
+            throw $e;
         }
     }
 }

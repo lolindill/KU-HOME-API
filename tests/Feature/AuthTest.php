@@ -2,9 +2,10 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class AuthTest extends TestCase
 {
@@ -76,7 +77,7 @@ class AuthTest extends TestCase
         $user = User::factory()->create();
         $token = $user->createToken('test')->plainTextToken;
 
-        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->postJson('/api/v1/logout');
         $response->assertStatus(200);
         // Token should be revoked
@@ -125,5 +126,48 @@ class AuthTest extends TestCase
         // ver ต้องเป็น default (false) ไม่ใช่ true
         $user = User::where('email', 'hacker@evil.com')->first();
         $this->assertFalse($user->ver);
+    }
+
+    /*
+      🎫 Regression (wayfinder ticket 09): password login ต้อง scope lookup ที่ auth_provider=password
+      ไม่งั้นกรณี SSO account เกิดก่อน login อาจไปเจอ row ของ SSO (password สุ่มทิ้ง) แล้ว 401
+      ทั้งที่ password account มีอยู่จริง
+     */
+    public function test_login_scopes_lookup_to_password_provider_accounts(): void
+    {
+        // SSO account เกิดก่อน (insert ก่อน — SQLite คืน row นี้ด้วย first() ถ้าไม่ filter)
+        User::factory()->create([
+            'email' => 'twin@ku.th',
+            'auth_provider' => 'ku_sso',
+            'password' => Str::random(64),
+        ]);
+        User::factory()->create(['email' => 'twin@ku.th']); // password account — insert ทีหลัง
+
+        $this->postJson('/api/v1/login', [
+            'email' => 'twin@ku.th',
+            'password' => 'password',
+        ])->assertStatus(200)
+            ->assertJsonStructure(['access_token', 'token_type']);
+    }
+
+    /*
+      🎫 Regression (wayfinder ticket 09): register unique ต้อง scope ต่อ provider —
+      email ที่มี SSO account อยู่แล้ว (split user) ยังสมัคร password account ได้
+     */
+    public function test_register_allows_email_already_used_by_sso_account(): void
+    {
+        User::factory()->create(['email' => 'shared@ku.th', 'auth_provider' => 'ku_sso']);
+
+        $this->postJson('/api/v1/register', [
+            'name' => 'Later Registrant',
+            'email' => 'shared@ku.th',
+            'password' => 'password123',
+        ])->assertStatus(201);
+
+        $this->assertSame(2, User::where('email', 'shared@ku.th')->count());
+        $this->assertSame(
+            1,
+            User::where('email', 'shared@ku.th')->where('auth_provider', 'password')->count()
+        );
     }
 }

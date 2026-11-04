@@ -14,12 +14,12 @@ class UpdateHousekeepingTaskRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'room_id'       => 'sometimes|required|uuid|exists:rooms,id',
-            'assigned_to'   => 'nullable|uuid|exists:users,id',
-            'status'        => 'nullable|string|in:pending,in_progress,done',
-            'notes'         => 'nullable|string',
-            'checked_out_at' => 'nullable|date',
-            'completed_at'  => 'nullable|date',
+            // 🌟 Phase A: status enum ใหม่ — unassigned|accepted|in_progress|done
+            // (transition ผ่าน state machine เท่านั้น — endpoint PATCH /tasks/{id}/status)
+            'status' => 'sometimes|string|in:unassigned,accepted,in_progress,done',
+            'task_type' => 'sometimes|string|in:pre_checkin,checkout,checkout_then_in,daily,monthly,group',
+            'notes' => 'nullable|string',
+            'scheduled_for' => 'nullable|date',
         ];
     }
 }

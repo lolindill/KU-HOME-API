@@ -1,0 +1,296 @@
+{
+    "id": "check-out-report",
+    "name_th": "รายงานห้องออก",
+    "name_en": "Check-out Report",
+    "category_th": "รายงานปฏิบัติการรายวัน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "พนักงานหน้าเคาน์เตอร์"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel",
+    "register_note_th": null,
+    "register_displayed_data_th": "บุ๊กกิ้ง เลขห้อง  ชื่อผู้พัก ประเภทของห้องพัก วันที่เช็คอิน วันที่เช็คเอ้าท์ จำนวนคืน ราคาเต็ม ชำระแล้ว ค้างชำระ คำขอพิเศษ (ถ้ามี) ข้อมูล Early Check in / Extra bed (ถ้ามี)",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานห้องขาออก",
+        "sheet_gid": "1363985383",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่ (ชีตต้นทางใช้ป้าย \"วันที่ Check-in\" — ตามความหมายของรายงานควรเป็นวันที่เช็คเอ้าท์)",
+            "type": "date",
+            "sample_value": "2026-09-13"
+        },
+        {
+            "key": "room_type",
+            "label_th": "ประเภทห้องพัก",
+            "type": "enum",
+            "options": [
+                "ทุกประเภท",
+                "Superior",
+                "Deluxe",
+                "Suite"
+            ]
+        }
+    ],
+    "columns": [
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "เลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "guest_name",
+            "label_th": "ชื่อผู้พัก",
+            "type": "string"
+        },
+        {
+            "key": "room_type",
+            "label_th": "ประเภทของห้องพัก",
+            "type": "enum",
+            "options": [
+                "Superior",
+                "Deluxe",
+                "Suite"
+            ]
+        },
+        {
+            "key": "checkin_date",
+            "label_th": "วันที่เช็คอิน",
+            "type": "date"
+        },
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่เช็คเอ้าท์",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "จำนวนคืน",
+            "type": "integer"
+        },
+        {
+            "key": "full_price",
+            "label_th": "ราคาเต็ม",
+            "type": "money_baht"
+        },
+        {
+            "key": "paid_amount",
+            "label_th": "ชำระแล้ว",
+            "type": "money_baht"
+        },
+        {
+            "key": "outstanding_amount",
+            "label_th": "ค้างชำระ",
+            "type": "money_baht"
+        },
+        {
+            "key": "special_request",
+            "label_th": "คำขอพิเศษ (ถ้ามี)",
+            "type": "text",
+            "nullable": true
+        },
+        {
+            "key": "early_checkin_extra_bed_note",
+            "label_th": "ข้อมูล Early Check in / Extra bed (ถ้ามี)",
+            "type": "text",
+            "nullable": true
+        }
+    ],
+    "sections": [
+        {
+            "key": "all",
+            "label_th": "Grand Total"
+        }
+    ],
+    "summary": {
+        "by_room_type": {
+            "Superior": 7,
+            "Deluxe": 4,
+            "Suite": 1
+        }
+    },
+    "sample_data": {
+        "all": [
+            {
+                "booking_no": "xxxxx",
+                "room_no": "501",
+                "guest_name": "คุณมานิตย์ คำสวย",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-13",
+                "nights": 1,
+                "full_price": 1000,
+                "paid_amount": 1000,
+                "outstanding_amount": 0,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "502",
+                "guest_name": "คุณกันต์ ขยันจัง",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-11",
+                "checkout_date": "2026-09-13",
+                "nights": 2,
+                "full_price": 1000,
+                "paid_amount": 1000,
+                "outstanding_amount": 0,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "503",
+                "guest_name": "คุณฉัตรชัย สุขดี",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-11",
+                "checkout_date": "2026-09-13",
+                "nights": 2,
+                "full_price": 1000,
+                "paid_amount": 1000,
+                "outstanding_amount": 0,
+                "special_request": "ขอกาน้ำ",
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "504",
+                "guest_name": "คุณฉัตรชัย สุขดี",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-11",
+                "checkout_date": "2026-09-13",
+                "nights": 2,
+                "full_price": 1000,
+                "paid_amount": 1000,
+                "outstanding_amount": 0,
+                "special_request": "ขอห้องชั้นไม่สูง",
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "510",
+                "guest_name": "คุณฉัตรชัย สุขดี",
+                "room_type": "Deluxe",
+                "checkin_date": "2026-09-11",
+                "checkout_date": "2026-09-13",
+                "nights": 2,
+                "full_price": 1200,
+                "paid_amount": 1200,
+                "outstanding_amount": 0,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "710",
+                "guest_name": "คุณฉัตรชัย สุขดี",
+                "room_type": "Deluxe",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-13",
+                "nights": 1,
+                "full_price": 1200,
+                "paid_amount": 1200,
+                "outstanding_amount": 0,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "711",
+                "guest_name": "คณะวิศวกรรมศาสตร์",
+                "room_type": "Deluxe",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-13",
+                "nights": 1,
+                "full_price": 1000,
+                "paid_amount": 0,
+                "outstanding_amount": 0,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "716",
+                "guest_name": "คุณพงศกร สีเหลือง",
+                "room_type": "Deluxe",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-13",
+                "nights": 1,
+                "full_price": 1000,
+                "paid_amount": 0,
+                "outstanding_amount": 1000,
+                "special_request": null,
+                "early_checkin_extra_bed_note": "Extra bed 1 เตียง"
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "805",
+                "guest_name": "คุณยุวดี คิดไว",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-12",
+                "nights": 1,
+                "full_price": 800,
+                "paid_amount": 0,
+                "outstanding_amount": 800,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "818",
+                "guest_name": "คุณดวงใจ ต้นไม้",
+                "room_type": "Suite",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-12",
+                "nights": 1,
+                "full_price": 2000,
+                "paid_amount": 1000,
+                "outstanding_amount": 1000,
+                "special_request": null,
+                "early_checkin_extra_bed_note": "Extra bed 1 เตียง"
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "909",
+                "guest_name": "คุณพรพรรณ ใจดี",
+                "room_type": "Deluxe",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-12",
+                "nights": 1,
+                "full_price": 1700,
+                "paid_amount": 0,
+                "outstanding_amount": 1700,
+                "special_request": null,
+                "early_checkin_extra_bed_note": "Extra bed 1 เตียง"
+            },
+            {
+                "booking_no": "xxxxx",
+                "room_no": "919",
+                "guest_name": "คุณกนกพร สินใจ",
+                "room_type": "Superior",
+                "checkin_date": "2026-09-12",
+                "checkout_date": "2026-09-12",
+                "nights": 1,
+                "full_price": 1000,
+                "paid_amount": 0,
+                "outstanding_amount": 1000,
+                "special_request": null,
+                "early_checkin_extra_bed_note": null
+            }
+        ]
+    },
+    "notes": [
+        "คอลัมน์เดียวกับ Check-in Report แต่ตัด \"โอนระหว่างหน่วยงาน\" ออก และไม่แบ่งกลุ่มการชำระเงิน (ป้ายกลุ่มเดียว Grand Total)"
+    ]
+}

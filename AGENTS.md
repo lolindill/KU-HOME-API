@@ -1,0 +1,217 @@
+# AGENTS.md — KU HOME API
+
+> Project-specific workspace instructions for ZCode agents. Read this **before** editing.
+> The detailed long-form memory lives in [`cline.md`](./cline.md) — consult it for history, bug logs, and refactor notes.
+
+## What is this?
+
+**KU HOME API** — hotel management REST API for Kasetsart University. Handles room bookings, payments (slip-based), front-desk (check-in/out), housekeeping tasks, and room allocation (cluster algorithm). Consumed by a separate React frontend (`ku-home`).
+
+- **Runtime:** PHP 8.3+ · **Framework:** Laravel 13 · **Auth:** Sanctum 4 (bearer token)
+- **DB (current `.env`):** **SQLite** is active locally — `DB_CONNECTION=sqlite`, `DB_DATABASE=database/database.sqlite`. PostgreSQL configs (Supabase `aws-1-ap-northeast-2.pooler.supabase.com`, and the org server `dbc.ku.ac.th`) are **commented out** in `.env`. PostgreSQL is still the **prod target** — never write code that relies on SQLite-only quirks. **Tests:** SQLite in-memory.
+- **API-only** — no Blade views. Vite is minimal (frontend is a separate repo).
+
+## Branch strategy (2026-11-04 — branch split main/dev)
+
+- **`dev` = ฉบับพัฒนาเต็ม** (source of truth) — มีทุกอย่าง: `tests/`, `docs/`, `wayfinder/`, `report-samples/`, `postman/`, `process/`, ไฟล์ planning (`AGENTS.md`, `cline.md`, `house_keep_plan.md`) · งานใหม่ทำบน feature branch แล้ว merge เข้า `dev` (จากเดิมทำบน `agust-11` — เก็บไว้เป็น history ไม่ลบ)
+- **`main` = backend-only release tree** (ไว้ deploy/prod) — ได้มาจาก dev โดย **ตัดไฟล์ dev-only ออก**: `tests/`, `phpunit.xml`, `docs/`, `wayfinder/`, `report-samples/`, `postman/`, `process/`, `scripts/`, `AGENTS.md`, `cline.md`, `house_keep_plan.md`, `ReadMeToSetup.txt`, `.zcodeignore`
+- **Sync dev → main ได้เฉพาะผ่าน `bash scripts/sync-main.sh [--push]`** (merge + scrub อัตโนมัติ — รายการไฟล์ที่ตัดอยู่ใน `EXCLUDED` บนหัว script)
+- 🚫 **ห้าม merge dev → main ผ่านปุ่ม PR ของ GitHub** — ไฟล์ test/doc จะไหลกลับเข้า main ทั้งชุด
+- 🚫 **ห้าม force-push `main`** — script merge จาก dev เสมอ จึงเดินหน้าได้อย่างเดียว
+- Deploy จาก main: `composer install --no-dev` (composer.json/lock เหมือนกันทั้งสอง branch ตั้งใจไว้)
+- 🚧 Mock route `/api/v1/mock/*` gate ด้วย `MOCK_ROUTES_ENABLED` (config/booking.php, default **false** — prod-safe ตาม DELETION PLAN ใน MockController) · เครื่อง dev เปิดผ่าน `.env`, tests ใช้ค่าจาก `phpunit.xml`
+
+## Commands
+
+```bash
+composer run setup    # install deps + key + migrate + build assets
+composer run dev      # concurrent: serve + queue:listen + pail logs + vite
+composer run test     # config:clear + php artisan test
+
+php artisan test                              # run full PHPUnit suite
+php artisan test --filter=HousekeepingTaskTest # focused
+php artisan test tests/Unit/RoomAllocator      # directory
+vendor/bin/pint --dirty                        # lint changed files (Laravel Pint)
+```
+
+Manual API test scripts (run from repo root, not PHPUnit): `test_scripts/api_guide.php` (full lifecycle, recommended). **(2026-09-01: `test_scripts/` ทั้งโฟลเดอร์ถูก ignore ออกจาก repo — ไฟล์มีเฉพาะบนเครื่อง dev เดิม, fresh clone/เครื่องอื่นจะไม่มีโฟลเดอร์นี้)**
+
+Remote integration scripts ยิงตรง domain จริง — config ผ่าน env `KUHOME_BASE_URL` (default `https://ku-home.ku.ac.th/backend/api/v1`) + `KUHOME_ADMIN_EMAIL`/`KUHOME_ADMIN_PASS`; pattern `KUHOME_BASE_URL=... php test_scripts/test_*_remote.php`. 🎟️ `test_scripts/test_discount_remote.php` = Discount v2.1 end-to-end 19 checks (รวม regression #42–#45) — script pacing ~1.5s/คำสั่ง + retry-once-หลังพัก 65s เมื่อโดน 429 (WAF/throttle ฝั่ง domain KU), สร้าง throwaway code/user/booking แล้วเก็บกวาดท้าย run (โค้ดถูก toggle inactive — ไม่มี DELETE by design)
+
+### Inspecting data / listing users (server)
+
+`.env` ปัจจุบันใช้ **SQLite** (`database/database.sqlite`). วิธีดู users บน server:
+
+```bash
+# 🌟 แนะนำ — ผ่าน Tinker (Eloquent, cross-DB; รันจาก repo root ที่มี .env)
+php artisan tinker --execute "foreach (App\Models\User::all() as \$u) { echo \$u->email . ' | ' . \$u->role . PHP_EOL; }"
+
+# กรองเฉพาะ role
+php artisan tinker --execute "echo App\Models\User::where('role','admin')->pluck('email')->implode(PHP_EOL);"
+
+# 🔧 ตรงผ่าน sqlite3 CLI (ถ้าลง sqlite3 ไว้บน server; ไม่ต้อง boot Laravel)
+sqlite3 database/database.sqlite "SELECT email, role FROM users;"
+sqlite3 database/database.sqlite "SELECT email, role, created_at FROM users ORDER BY created_at DESC LIMIT 10;"
+
+# 🌐 ผ่าน API (ต้องล็อกอินด้วย admin token ก่อน; route อยู่ใต้ role:admin)
+curl -s -H "Accept: application/json" -H "Authorization: Bearer <ADMIN_TOKEN>" http://localhost:8000/api/v1/users
+```
+
+**หมายเหตุสำคัญ:**
+- **Default seed users** (ดู `database/seeders/UserSeeder.php`): `{user,guest,kumember,staff,admin,housekeeping,system}@kuhome.com` · password **ทุกคนคือ `password123`** (dev/testing เท่านั้น).
+- ตอนนี้ DB มี user แค่ 2 คน (`admin@kuhome.com`, `maid@kuhome.com` housekeeping) → ถ้าอยากได้ default accounts ครบ ต้อง `php artisan migrate:fresh --seed` (ดู "Migration gotchas" ด้านล่าง — เปลี่ยนแปลงข้อมูล).
+- **DB schema เป็นเดียวกัน** ต่อ connection (`pgsql` vs `sqlite`) — แค่เปลี่ยนคำสั่งในระดับ driver. บน prod ที่เป็น PostgreSQL ให้ใช้ `php artisan tinker --execute "..."` (วิธีเดียวกัน) หรือ `psql` แทน `sqlite3`.
+
+## Architecture & Layer Rules
+
+- **🔒 GLOBAL MIDDLEWARE (เด็ดขาด / mandatory):** ทุก `/api/*` request ต้อง "ยอมรับ" JSON — บังคับด้วย `App\Http\Middleware\RequireJsonAccept` (ลงทะเบียนใน `bootstrap/app.php` ผ่าน `$middleware->api(prepend: [...])` ทำงานก่อน `throttle`/`auth:sanctum`).
+  - **ถ้าไม่ส่ง Accept** → middleware **ใส่ `application/json` ให้เป็น default** แล้วปล่อยผ่าน (สุภาพ).
+  - **ถ้าส่ง Accept มาแต่ไม่ยอมรับ JSON** (เช่น `text/html`, `application/xml`) → **reject ทันที** ด้วย HTTP `406 Not Acceptable` + body `{"status":"error","message":"Accept: application/json is required for all /api/* requests. 🥺"}`.
+  - ยอมรับ: `application/json`, `*/*`, `application/*`, `+json` suffix (เช่น `application/vnd.api+json`), และ multiple media types ที่มี JSON/wildcard รวมอยู่.
+  - **Why:** API-only project ไม่มี Blade ให้ fallback — ป้องกัน browser/crawler/spider, ป้องกัน unauthenticated scan, และ lock-in ให้ทุก response เป็น JSON สม่ำเสมอ.
+  - **Do NOT:** ห้ามตรวจแค่ `Content-Type` — ต้องตรวจ `Accept`. ห้ามทำเป็น per-route middleware (ต้องเป็น global-on-API-group). ห้าม bypass ด้วย allowlist โดยไม่ document ใน `cline.md` ก่อน.
+  - **ข้อยกเว้นเดียว (2026-08-19, updated 26/10/26, documented ใน `cline.md`):** route `GET /api/v1/images/{id}/file` ถูก exempt จาก `RequireJsonAccept` ผ่าน `->withoutMiddleware(...)` — เพราะ frontend fetch รูปส่ง `Accept: image/*` (ไม่มี JSON/wildcard) และ route นี้ต้อง serve ไฟล์ภาพได้ (frontend ใช้ fetch + Authorization header + blob URL). อย่าเพิ่ม exemption ที่อื่นโดยไม่มีเหตุผล+ไม่จดใน `cline.md`.
+- **Controllers** all live in `app/Http/Controllers/Api/V1/`. REST routes prefixed `/api/v1/` (see `routes/api.php`).
+- **No API Resources / Transformers** — models are returned directly. No `data` wrapper.
+- **No Policy classes** — authorization is **`CheckRole` middleware only** (`app/Http/Middleware/CheckRole.php`), plus an in-controller `role` re-check (defense-in-depth) in sensitive methods.
+- **Roles:** `user`, `guest`, `ku_member`, `staff`, `admin`, `housekeeping`, `system`.
+- **Service layer** starts at `app/Services/RoomAllocator/` — pure classes invoked via `app(...)`, bound in `AppServiceProvider`.
+- **Synchronous state changes** — no events/listeners for booking/payment transitions. (Broadcasting is intentionally NOT wired — see housekeeping note below.)
+- **Form Requests** in `app/Http/Requests/`, named `Store{Model}Request` / `Update{Model}Request`.
+
+## Critical Conventions (gotchas that bite)
+
+- **PostgreSQL strict boolean typing** — PostgreSQL rejects integer `0`/`1` in a boolean column, but PDO turns a PHP bool into exactly that, so writing `true`/`false` to a boolean column throws "Datatype mismatch" (SQLite/MySQL are lenient — this only breaks in prod). The **`App\Casts\PgBoolean`** custom cast is the canonical fix: it emits `DB::raw('TRUE'/'FALSE')` on write. Always attach it to boolean columns (`is_paid`, `extra_bed_enabled`, `is_active`, `ver`) and never write raw bools / raw `DB::raw('TRUE')` by hand. *(2026-09-08: `users.is_ku_member` ถูก drop — สถานะสมาชิกใช้ role `ku_member` เป็น source of truth; `is_ku_member` ใน guests JSON ของ booking_rooms เป็น key ที่ไม่เก็บ ไม่เกี่ยวกับ column)*
+  - 🔒 **DO NOT try to "fix" or simplify `PgBoolean` (re-litigation freeze).** We already scrutinized this and attempted alternative fixes (plain PHP `true`/`false`, string `'true'`/`'false'`, relying on Eloquent's built-in `boolean` cast) — **none of them work on PostgreSQL**. The `DB::raw('TRUE'/'FALSE')` approach inside the cast is the **final, proven solution** — leave it as-is. If you're tempted to refactor it, you are almost certainly reintroducing the bug.
+- **💰 Money is integer baht (non-decimal) — (2026-09-11, เดิมเป็น integer satang):** `total_amount`, `amount`, rates, addon/discount prices ทุก field เป็น `integer` หน่วย **บาทล้วน ไม่มีทศนิยม** (เช่น ห้อง 1,200 บาท/คืน เก็บและส่งเป็น `1200`) — storage = wire format เดียวกัน ไม่มีการแปลงหน่วยที่ขอบ API อีกต่อไป (helper `App\Support\Money` ถูกลบแล้ว)
+  - **Room-type wire format (อัปเดต 2026-09-11):** `rates` object และ `extra_bed_price` ของ RoomType (`GET /room-types`, `GET /room-types/{id}`, `GET /availability`, calendar endpoints ทั้ง 4) เป็น **integer baht** (เช่น `1200`, `500`) — ยกเลิกรูปแบบ decimal baht string `"1000.00"` เดิม (2026-09-03) แล้ว · migration `2026_09_11_090000_convert_money_satang_to_integer_baht` แปลงข้อมูลเดิม ÷100 (ยกเว้น `discounts.value` type `percent` ไม่หาร)
+  - **KU Member daily rate (2026-09-07):** ผู้ใช้ role `ku_member` จะคำนวณค่าห้องรายวันด้วย `rate_type='daily_ku'` จาก `global_rates` อัตโนมัติผ่าน `GlobalRate::getEffectiveDailyRate()` (fallback ไป `daily` หากไม่มีเรท KU หรือผู้ใช้เป็น role ทั่วไป)
+  - 🌙 **Pricing tier v2 (2026-10-22, srs-v2-gap-closure tickets 08/09):** เขตราคารายเดือนเริ่มที่ **20 คืน** (`booking.block_min_nights`) — **non-admin จอง/แก้ห้อง x ≥ 20 คืน → 422** (เขตของ admin) · admin: `room_amount = intdiv(x × month_rate, 30)` (เดือนเต็ม + เศษ×month÷30 — เช่น Deluxe 45 คืน = 27,000) · group min_5/min_10 ใช้กับบิลสั้น <20 คืน + เป็น fallback เมื่อไม่มีเรท month · `set_room_price` ชนะข้ามสูตร · บิลที่เกิดจาก admin (`source='admin'`/userless) คง pricing admin แม้เจ้าของมาแก้ทีหลัง · wire `rates.monthly_per_day` · รายละเอียด: [`cline.md`](./cline.md) หัวข้อ "🌙 Pricing Tier v2"
+- **💸 Additional charges บวกยอดจริง (2026-10-15, REQ-042/044 — srs-v2-gap-closure ticket 12/13):** `additional_charges` (damage/rental/**addon**) ไม่ใช่ report-only แล้ว — `total_amount` คง**ค่าห้องล้วน** (ห้าม mutate) · booking append `charges_total` · **`outstanding_amount` = max(0, total + charges − paid)** · **`is_paid` = paid ≥ total + charges** — จุดเปรียบเทียบ is_paid ทั้ง 3 (verify สลิป / `recordPayment` / surcharge guard) ต้องรวม charges เสมอ · แก้/ลบ charge → `Booking::syncIsPaid()` recompute (ไม่ transition สถานะ) · ผูกห้อง `booking_room_id` nullable ต้องเป็นลูกของ `booking_id` (422) · เก็บเงิน charge ที่ front desk ผ่าน `recordPayment` เท่านั้น · `GET /bookings/{id}/additional-charges` (admin+staff) — ปลดธรรมเนียม "charges ไม่มี GET" (เหตุผลใน `cline.md`) · รายละเอียด: [`cline.md`](./cline.md) หัวข้อ "💸 Additional charges บวกยอดจริง"
+- **UUID PKs everywhere** — most models use `HasUuids`. When asserting UUID equality in tests, cast to `(string)` first.
+- **Draft/testing code** is marked with `🚧 DRAFT / TESTING` comment prefix — treat as non-production.
+- **API response shape:** success `{"status":"success","message":...}` · error `{"status":"error","message":...}`. Don't leak `$e->getMessage()` on 500s — return a generic message + `Log::error()`.
+- **Throttle:** `5,1` on login/booking/confirm; `10,1` on lookups.
+- **Audit log (state changes):** every `Booking::transitionStatus()` and `BookingRoom::transitionStatus()` writes a row to `status_change_logs` (polymorphic: `entity_type` = `booking`|`booking_room`, `entity_id`, `from_status`, `to_status`, `role`, `causer_id`, `created_at`). The log is written **inside** `transitionStatus()` — never bypass it with a direct `->status =` assignment, or the audit trail breaks. Read via `GET /api/v1/bookings/{id}/status-logs` (admin only). `causer_id` is `Auth::id()` and is **nullable** for system/queue transitions (e.g. `syncStatusFromRooms()`).
+- **🖼️ Image system (2026-08-19, 🔐 updated 26/10/26):** ไฟล์อยู่บน **private disk** (`storage/app/private/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ใน **`images` table** (polymorphic `imageable_*`). ดูรูปผ่าน route `images.file` = **signed URL อายุ 15 นาที + `auth:sanctum` คุมคู่กัน** — ผู้ขอต้องเป็น**เจ้าของรูปตาม imageable** (สลิป/evidence → เจ้าของ booking · รูป housekeeping → `assigned_to`) **หรือ admin** (ตรวจใน `ImageController::show` · type ไม่รู้จัก/org booking → admin เท่านั้น fail-closed) · frontend ใช้ fetch + Authorization header + blob URL (`<img src>` ใส่ token ไม่ได้). JSON ของ Image **ซ่อน field ภายใน** (`path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` — ผ่าน `$hidden` ยังใช้ได้ปกติฝั่ง server). สลิปผูกกับ `BookingConfirmation` ผ่าน `slipImage()` morph (column `slip_image` เดิมถูก drop แล้ว).
+  - **ลบ `Image` row = ไฟล์ถูกลบอัตโนมัติ** (model hook `deleting`) — อย่าลบไฟล์มือเองที่ call site (จะซ้ำซ้อน/fragile)
+  - ไม่มี generic upload endpoint โดยตั้งใจ — รูปเกิดจาก flow ของเจ้าของเสมอ (draft `POST /upload-image` ถูกถอดแล้ว)
+  - `app:cleanup-images` (02:30): sweep ไฟล์/row กำพร้า + ลบสลิป `rejected` เกิน `SLIP_RETENTION_DAYS` (default 30) — **สลิป `verified` ห้ามลบอัตโนมัติ** (หลักฐานการเงิน)
+  - อนาคตถ้า housekeeping อยากมีรูปก่อน/หลังเก็บห้อง → ใช้ `images` table นี้ (morph `HousekeepingTask`) อย่าสร้างตารางรูปใหม่ (`HousekeepingPhoto` ตอนนี้เป็น draft ลอยไม่มี route)
+- **🎟️ Discount system (2026-08-27):** ระบบส่วนลด v2.1 บริหารจัดการผ่าน `DiscountService` (`app/Services/Discount/DiscountService.php`) เป็น single source of truth
+  - ฐานคิดเงิน: **เฉพาะค่าห้อง** (`room_amount = rate × nights`) — addon (breakfast, extra_bed, early, late) ไม่โดนลด
+  - Types: `percent` (1-100), `fixed` (integer บาท ต่อ booking_room), `set_room_price` (integer บาท ราคาห้อง/คืน)
+  - Quotas: 1 eligible booking_room = 1 slot; ทั้ง global (`max_uses`) และ per-user (`max_uses_per_user`) นับรวม `held` + `used`; All-or-nothing (ถ้าโควตาเหลือไม่พอ K ห้อง จะ reject 422 ทั้งชุด)
+  - Single source of truth: **ห้าม insert `discount_redemptions` นอก `DiscountService`** (ยกเว้น transitionStatus hook `held → used` และ DB cascade)
+  - ไม่มี `DELETE /discounts/{id}` endpoint (FK restrict) เพื่อรักษา audit trail ทางการเงิน — ใช้ soft toggle (`PATCH /discounts/{id}/toggle`) แทน
+  - Endpoints ค้นหาและดูโค้ด (2026-09-07): `GET /discounts/{code}` (ดูรายตัวด้วย code name หรือ UUID), `GET /discounts?code=CODE` (exact match), `GET /discounts?search=TERM` (partial search) ใต้ `role:admin`
+  - SQLite caveat: `lockForUpdate()` เป็น no-op บน SQLite — กลไกกัน race ทำงานจริงบน PostgreSQL prod เหมือน precedent `RoomAllocator.php`
+- **🎫 KU SSO login (2026-09-07, ✅ implemented + merged `agust-11` 2026-09-23):** Keycloak realm `KU-Alllogin` — design/spec ทั้งหมด live ที่ `wayfinder/ku-sso/map.md` (map ปิดแล้ว — อ่านก่อนแตะ auth · **เลิก track จาก git 2026-10-14 — มีเฉพาะบนเครื่อง dev เดิม**) · `POST /auth/sso/exchange` (public, throttle `5,1`) แลก `code` + `code_verifier` เป็น Sanctum token ผ่าน `KuSsoService` (`app/Services/Sso/` — hand-rolled `Http` facade, **0 package**) · คู่มือฝั่ง frontend ที่ `docs/sso-frontend-guide.md`
+  - **Split-user model:** column `users.auth_provider` (`password`|`ku_sso`) + composite unique `(email, auth_provider)` — email เดียวมี account ได้หลาย provider · **ห้าม link identity** (req change 2026-09-01)
+  - `AuthController::login` มองเฉพาะ `auth_provider=password` เสมอ — อย่าถอด filter ออก · email unique ใน `StoreUserRequest`/`UpdateUserRequest` scope ต่อ provider
+  - First login KU SSO = user role `ku_member` · password สุ่มทิ้ง · KU tokens (access/id_token) ทิ้งหมดไม่เก็บ DB · config ที่ `config/ku_sso.php` ผูก `KU_SSO_*` จาก `.env` · **PKCE S256 enforced ฝั่ง Keycloak** — exchange ต้องรับ `code_verifier` จาก SPA แล้ว relay ต่อ · claims live-verified แล้ว (2026-09-08): บุคลากรมี claim `email` ตรง, นิสิต fallback `google-mail`/`office365-mail` (ดู ticket 02 Amendment 2) · **column `is_ku_member` ถูก drop แล้ว** (2026-09-08) — สถานะสมาชิกใช้ role `ku_member` เท่านั้น
+- **📊 Excel reports system (2026-10-05):** ระบบรายงาน Excel 15 ฉบับผ่าน `phpoffice/phpspreadsheet` 5.x ใช้ตรง ๆ — สถาปัตยกรรม Hybrid renderer แบ่ง Engine/Data ชัดเจน: engine กลาง template-driven (`ExcelReportRenderer`) อ่าน template JSON จาก `resources/report-templates/` วางโครงหน้า/styling/print setup (A4 landscape, repeat print title แถว 3, freezePane) ห้ามมี business query; และ `ReportData` 15 classes (`app/Services/ReportExcel/Data/`) จัดการ query/normalize แถว ห้ามวาง cell coordinates หรือ styling เอง. Endpoints เป็น 15 explicit routes `GET /api/v1/reports/{slug}/export` stream ไฟล์ทันทีใน memory (admin+staff ทุกใบ, housekeeping เพิ่ม 2 ใบแม่บ้าน `housekeeping` และ `housekeeping-v2`), throttle 10,1, filterRules validate เพดานช่วงวันที่ ≤ 366 วัน. รายละเอียดสถาปัตยกรรม/chokepoint การเงิน/ledger additional_charges ดูที่ [`cline.md`](./cline.md).
+
+## Multi-Client & Concurrency (หลายไคลเอนต์ + หลาย request พร้อมกัน)
+
+> API นี้ออกแบบเป็น **stateless token-based** รองรับหลาย client/device ต่อผู้ใช้หนึ่งคนโดยกำเนิด ด้านล่างคือสัญญา (contract) ที่ future agents ต้องรู้ก่อนแตะส่วนที่เกี่ยวกับ auth/booking พร้อมกัน
+
+- **Auth model = stateless Bearer tokens (Sanctum token mode)** — ไม่ใช่ SPA cookie/stateful mode.
+  - `config/cors.php`: `allowed_origins => ['*']`, `supports_credentials => false`, paths `['api/*', 'sanctum/csrf-cookie']`. ห้ามเปลี่ยนเป็น cookie mode โดยไม่รื้อทั้ง CORS + Sanctum stateful domains ก่อน
+  - `config/sanctum.php`: `'expiration' => 480` (**8 ชั่วโมง, SRS v2 REQ-001.4 — owner 2026-09-24**, env `SANCTUM_TOKEN_EXPIRATION_MINUTES`) — token เกิน 8 ชม. นับจาก `created_at` → 401 (hard expiry ไม่ใช่ sliding inactivity; test ที่ `SanctumTokenExpirationTest`)
+  - Default guard คือ `web` (session) แต่ทุก protected route ใช้ `auth:sanctum` ตรงๆ ใน `routes/api.php` → ใช้ token route จริง
+- **Token per client/device:** ทุกครั้งที่ `login`/`register` เรียก `createToken('ku_home_auth_token')` → **สร้าง token ใหม่เสมอ ไม่ revoke ของเดิม** → ผู้ใช้คนเดียวสามารถมี token หลายตัวใช้งานพร้อมกันได้ (multi-device/multi-tab/multi-client).
+  - `logout` ลบเฉพาะ `currentAccessToken()` เท่านั้น → token อื่นยังใช้ได้ (logout-on-one-device semantics). ห้ามเปลี่ยนเป็น `tokens()->delete()` โดยไม่ตั้งใจ ไม่งั้นถือว่า kick ออกจากทุก device
+  - ยังไม่มี "revoke all other tokens" / "single active session" policy — ถ้าจะเพิ่ม ให้เอา `DB::table('personal_access_tokens')->where(...)->delete()` หรือ `$user->tokens()->where('id','!=',$current)->delete()` ใน `AuthController::login`
+- **Throttle คือกำแพงแรกต้าน concurrency abuse:** `throttle:5,1` บน login/booking/confirm · `throttle:10,1` บน lookups (ลงทะเบียนใน `routes/api.php`). อย่าลบ throttle ออกเพื่อ "แก้ปัญหาช้า" — มันคือ rate-limit layer ไม่ใช่ perf bottleneck
+- **Concurrency / locking (สำคัญมาก):**
+  - **Atomic sequences:** `Booking::generateUniqueConfirmation()` ใช้ `booking_sequences` table + `SELECT ... FOR UPDATE` (`lockForUpdate()`) → collision-proof ต่อหลาย concurrent request. **อย่าใช้** `max()+1` หรือ `Str::random()` สุ่มทำเลข confirmation/receipt
+  - **`RoomAllocator::allocate()`** เรียก `lockForUpdate()` บน room pool (skip ใน SQLite test env เพราะ SQLite ไม่ support row lock) → กัน double-assign ห้องเดียวให้ 2 booking พร้อมกัน
+  - **`createBooking()` availability check — TOCTOU ✅ ปิดแล้วด้วย design (owner decision 2026-09-23):** availability count นับ `booking_rooms` ตั้งแต่ status `draft` และ flow ปัจจุบัน **สร้าง draft booking แบบ real-time ทันทีที่ผู้ใช้เริ่มจอง** — draft กิน slot ทันที → คำขอถัดไปเห็น draft และถูกตัดจำนวนห้องทันที หน้าต่าง race เหลือเพียงจังหวะ create-draft พร้อมกันเป๊ะมิลลิวินาที — **owner ยอมรับ risk นี้แล้ว ถือว่าเคลียร์ · ห้ามเติม `lockForUpdate` เอง** จะกลับมาแก้ได้เมื่อมีหลักฐาน overbooking จริงใน prod (ทางแก้ที่จดไว้: `Room::where('room_type_id',$rtId)->lockForUpdate()->count()` ก่อน count overlap แล้ว document ใน `cline.md`)
+  - **⏱️ Slot-holding set = `BookingRoom::scopeHoldingSlot()` (2026-09-24, REQ-008 + owner decision "draft + payment_deadline รวม 15 นาที"):** `payment_deadline` = **15 นาที** นับจากสร้าง draft (config `booking.payment_deadline_minutes`) — **draft ที่ deadline ผ่านไปแล้วไม่กิน slot อีก** (ปลดล็อกห้องเป็นว่างทันทีตอน query; `CleanupExpiredDrafts` schedule **ทุก 5 นาที** เป็นแค่ garbage-collect ลบ row). **(2026-10-27 fix slot leak / overbooking):** บิลที่ container เลย draft แล้ว (`pending`/`verify_error`/`paid`/`confirmed`) ห้อง `draft` ยึด slot เสมอโดยไม่สน deadline (เนื่องจาก verify/updateStatus ไม่ได้ย้ายสถานะห้อง ค้าง draft ตลอดชีวิตบิล · `complete` ไม่ยึด slot คืนห้องเข้า pool). ทุก query availability (BookingController 4 write paths + RoomController calendar ทั้งหมด + RoomAllocator/BookingPriority) ต้องใช้ `->holdingSlot()` — **ห้ามใช้ `whereIn('status', ['draft',...])` เอง** ไม่งั้นห้องที่หมดเวลายังล็อกค้าง
+  - **never** write `->status = ...` ตรงๆ บน `Booking`/`BookingRoom` (audit trail พัง) และ never assign `room_id` โดยไม่ผ่าน `RoomAllocator` (double-book risk)
+- **Queue driver = `database`** → jobs ทำงาน sequential ใน worker เดียวถ้าไม่ scale worker. ถ้าจะ scale worker หลายตัว ต้องแน่ใจว่าทุก state change ผ่าน `transitionStatus()` + atomic sequence เท่านั้น
+
+## State Machines (do not bypass)
+
+- **Booking (container):** `draft → pending → paid → confirmed → complete` (no `cancelled`; expired drafts — `payment_deadline` **15 นาที** — are hard-deleted by `CleanupExpiredDrafts` **every 5 minutes**; their slots are released instantly at query time via `BookingRoom::scopeHoldingSlot()`). `pending` **(2026-08-25)** = user ส่งสลิปแล้วรอ admin ตรวจ (mirror `BookingConfirmation`): submit → `draft → pending`; verify → `pending → paid → confirmed` (`is_paid=true` set ตอน verify เท่านั้น); reject → `pending → verify_error` (resubmit: `verify_error → pending`). `draft → paid` เหลือ admin/system เท่านั้น (เงินสดหน้าเคาน์เตอร์). Transitions via `Booking::transitionStatus()`. **(17/08/26)** owner/admin can also hard-delete a `draft` booking via `DELETE /bookings/{id}` (`BookingController@destroyBooking`) — deletion is NOT a state-machine transition but writes an audit log `draft → deleted`. `verify_error` ไม่ถูกลบโดย `CleanupExpiredDrafts` (รอ user ส่งสลิปใหม่เมื่อไหร่ก็ได้).
+- **BookingRoom (per-room):** `draft → confirmed → checked_in → checked_out` (+ `no_show`). check_in/out + status live on **BookingRoom**, not Booking. While **both** the BR and its parent booking are `draft`, the BR can be edited (`PUT /bookings/{bookingId}/rooms/{bookingRoomId}` — availability re-check + server-side repricing), batch-edited (`PUT /bookings/{bookingId}/rooms` — body `booking_rooms[]` with per-row `booking_room_id`, all-or-nothing, availability checked against the whole batch's final state — 2026-08-19), or removed (`DELETE .../rooms/{bookingRoomId}` — last room of a booking is refused 422). (2026-10-27: `mark-no-show` รองรับทั้งห้อง `draft` และ `confirmed` โดย promote `draft → confirmed → no_show`).
+- **Room:** `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` — all lowercase, via `Room::transitionStatusTo()`.
+- **HousekeepingTask:** `unassigned → accepted → in_progress → done` (done is **terminal/locked**) — via `HousekeepingTask::transitionStatus()`. Always pass `task_id`, not `room_id`.
+- **DiscountRedemption:** `held → used` — apply บน draft / createBooking → `held` (คงค้างตลอด `pending` / `verify_error` / resubmit); เมื่อ booking เข้า `paid` หรือ `confirmed` (verify ผ่าน หรือ เงินสด) → `used` ถาวรผ่าน hook ใน `Booking::transitionStatus()`. การปล่อย slot คืนอัตโนมัติผ่าน FK cascade เมื่อลบ booking, ลบ booking_room หรือลบโค้ด (`removeFromDraft`).
+
+## Housekeeping Dashboard — WebSocket CANCELLED (2026-09-23)
+
+> **Does the housekeeping dashboard need WebSocket?** — **No — final decision: WebSocket is removed from the roadmap entirely.**
+
+- **Phase A (DONE 2026-07-15):** task refactor + state machine + assign/accept + roles/routes + master stock — uses **polling**.
+- **Phase B: CANCELLED (owner decision 2026-09-23 — เดิมเป็น DEFERRED):** polling is the **final** design, not an interim one. ห้ามเสนอ Reverb/Echo/WebSocket ซ้ำ จะทำได้ต่อเมื่อ owner สั่งใหม่เท่านั้น.
+- Historical reasons (record, do not re-litigate): 1) **Auth gap (S-B5):** Echo/Reverb private channels need `/broadcasting/auth` (web guard/session), but this is an API-only + Sanctum project → private channels return 403. 2) **YAGNI:** no evidence polling is too slow. 3) **Cost:** Reverb server + queue worker + Echo client wiring.
+- Background detail lives in [`house_keep_plan.md`](./house_keep_plan.md).
+
+## Room Allocation (read before touching allocation)
+
+`app/Services/RoomAllocator/` — the **Hybrid+ (EA)** cluster algorithm (Phase 4, 2026-07-14). Replaces first-available greedy.
+
+- **`bed_preference` is a HARD constraint**, not a soft cost (was a bug — fixed). Filtering happens in every algorithm via `matchesBedPreference()`.
+- **`walkCost` is the Final Judge** (Σ pairwise walking distance) — used to rank across algorithms.
+- Weights/caps are env-tunable via `config/allocation.php`.
+- Reference R&D: `docs/algo_test/room-algorithm-playground-eav3.html` + `room-algorithm-flow-explained.md`.
+- `RoomAllocator` is bound in `AppServiceProvider` (must pass `Weights` value object — autowire fails on primitive `int`).
+
+## 🗺️ Wayfinder maps (planning tracker)
+
+งานที่ใหญ่จนต้อง **lock decision ก่อนเขียนโค้ด** ถูก chart เป็น wayfinder map บน tracker แบบ **local-markdown** — map ที่ยังเปิดถูก **track ใน git**, map ที่ปิดแล้วถูก **เลิก track (เข้า `.gitignore` ตั้งแต่ 2026-10-14)**:
+
+- Maps อยู่ที่ **`wayfinder/<effort>/`** ที่ root — `map.md` + `tickets/*.md` (+ `research/`, assets)
+  - 🟢 **ยังเปิด (tracked ใน git):** `excel-reports` (open), `google-integration` (active), `room-auto-assign-test` (open — baseline suite จบแล้ว ค้างรอ owner ตัดสิน findings 3 ข้อ: catch-all 422 / dead-code owner path / ไม่มี audit trail ตอน assign)
+  - ✅ **ปิดแล้ว — เลิก track ออกจาก git (ไฟล์ยังอยู่บนเครื่อง dev เดิม, fresh clone จะไม่มี):** `booking-room-amount` (2026-09-03), `room-type-rates` (2026-09-03), `booking-create-rules` (2026-09-16), `ku-sso` (2026-09-23 — KU SSO/Keycloak implemented แล้ว), `reserved-room-pool` + `room-state-periods` (2026-09-24 — reserved period model + flag `include_reserved`), `organization-bookings` (2026-09-25 — ตาราง organizations stopgap + admin จองแทน user/องค์กร + attach ทีหลัง), `booking-payment-types` (2026-09-25 — deposit/surcharge/round-up-to-tens), `srs-v2-gap-closure` (2026-10-22 — REQ ค้าง SRS v2 ปิดครบ 13 tickets · pricing tier v2 = `intdiv(x × month, 30)` เขต 20 คืน admin-only · กติกาที่ตัดสินแล้วห้าม re-litigate อ่าน ledger ใน [`cline.md`](./cline.md#📋-srs-v2-deviation-ledger-2026-10-14) + map บนเครื่อง dev เดิม)
+- แต่ละ ticket มี frontmatter: `label: wayfinder:<research|prototype|grilling|task>` · `type: HITL|AFK` · `status: open|closed` · `blocked-by:` · `assignee:` — **frontier** = open + blocked-by ปลดครบ + ยังไม่มี assignee
+- ธรรมเนียม: **1 ticket ต่อ 1 session** — claim ก่อนลงมือด้วยการใส่ `assignee:`; เมื่อ resolve แล้วเขียน resolution ลงตัว ticket → `status: closed` → append 1 บรรทัดใน "Decisions so far" ของ map แล้ว **commit การอัปเดต tracker ไปกับ branch ที่ทำงานอยู่เสมอ**
+- ⚠️ **ห้ามเก็บ map ใน `docs/`** (`.gitignore` ปิด `/docs/*` แบบ whitelist — map จะไม่ถูก track) และ **ห้ามย้าย map เข้า `.worktree/`** (checkout ใช้แล้วทิ้ง — map หายตอน cleanup) · map ที่ยังเปิดถูก track ผ่าน git → **ทุก worktree ใน `.worktree/*` เห็น map เปิดอัตโนมัติ** และ session ใน worktree ใช้/แก้ copy ของตัวเองได้เลย (map ที่ปิดแล้วถูก ignore — จะไม่ปรากฏใน worktree/fresh clone ใหม่)
+- 🧹 **ธรรมเนียมปิด map (2026-10-14):** เมื่อ map ปิดครบ (tickets หมด + `status: closed`) ให้เพิ่ม `/wayfinder/<effort>/` ลง `.gitignore` + `git rm -r --cached wayfinder/<effort>` — design record อยู่กับเครื่อง dev เดิม ไม่หนัก repo
+
+## Documents to read before sensitive edits
+
+- [`cline.md`](./cline.md) — full history, bug index (#1–#41), refactor changelogs. **Always read the relevant section first.**
+- [SRS v2 deviation ledger (ใน `cline.md`)](./cline.md#📋-srs-v2-deviation-ledger-2026-10-14) — บันทึกข้อยุติ SRS v2 acceptance contract: deviation 5 ข้อ + interpretation 2 ข้อ ที่ตัดสินแล้ว ห้าม re-litigate (อ่านก่อนแตะ requirement ของ SRS v2) · map `srs-v2-gap-closure` ปิดแล้ว (2026-10-22) เลิก track จาก git — อ่านได้บนเครื่อง dev เดิมที่ `wayfinder/srs-v2-gap-closure/` (ตั๋ว grilling/implement รายละเอียดอยู่ที่นั่น).
+- [`house_keep_plan.md`](./house_keep_plan.md) — housekeeping decisions D1–D3 + scrutinize findings S-B1…S-B7.
+- [`docs/api_guide.md`](./docs/api_guide.md) — API reference (state machines, enums, validation rules).
+- [`docs/database-er.md`](./docs/database-er.md) — ER diagram.
+- [`docs/project-status.md`](./docs/project-status.md) — per-module completion %.
+- [`wayfinder/ku-sso/map.md`](./wayfinder/ku-sso/map.md) — ✅ COMPLETED (2026-09-23) wayfinder map (KU SSO/Keycloak) — design record ของระบบ SSO ที่ implemented แล้ว · **เลิก track จาก git แล้ว (2026-10-14) — มีเฉพาะบนเครื่อง dev เดิม** · อ่านก่อนแตะ auth/SSO (ดูหัวข้อ "Wayfinder maps" ด้านบน).
+
+## Frozen / Deprecated (do not extend)
+
+- **`receipts` table is FROZEN (2026-07-24)** as read-only legacy — no new receipt rows, ever. New payment flow uses `booking_confirmations` (slip → admin verify/reject).
+- **`payments` table was UNFROZEN (2026-08-19)** to drop `payment_method` — the payment flow is now slip-image-only (no cash/credit_card/transfer distinction anywhere). `PaymentController::webhook` still returns **`410 GONE`**. `FrontDeskController::recordPayment` no longer creates receipts.
+- **Webhook has NO HMAC signature verification** (blocker #4) — waiting on payment gateway decision. Do not assume it's secure.
+- (`Image` upload เลิกเป็น draft แล้ว — ดู "Image system" ใน Critical Conventions · `Discount` เลิกเป็น draft แล้ว — ดู "Discount system (2026-08-27)" ใน Critical Conventions · `Excel reports` เลิกเป็น planned แล้ว — ดู "Excel reports system (2026-10-05)" ใน Critical Conventions)
+
+## Conventions
+
+- Code comments and some error messages are in **Thai** with emoji markers (✅ 🌟 🏨 🧹 🚧 ❄️) — match the surrounding style.
+- Currency in **integer baht, non-decimal** (2026-09-11, เดิมเป็น integer satang); dates ISO format.
+- Migrations are numbered `YYYY_MM_DD_HHMMSS_*.php`; UUID PKs; atomic sequence tables (`booking_sequences`, `receipt_sequences`) for confirmation/receipt numbers.
+
+## Task Execution & Progress Reporting Protocol (Sequential / Long Tasks)
+
+เมื่อทำงานที่มีหลายขั้นตอน (Sequential Tasks) หรืองานที่ใช้เวลานาน (Long-running Tasks / Multi-step Refactors / Command Executions):
+- **รายงานความคืบหน้าให้ผู้ใช้ทราบเป็นระยะ (Periodic Updates):**
+  1. 🔍 **What Discovered:** สิ่งที่ตรวจสอบพบหรือค้นพบจากการสำรวจโค้ด/ข้อมูล
+  2. 📋 **What Planned & What Will Do:** แผนงานที่จะทำต่อไปในแต่ละขั้นตอน
+  3. ✅ **What Succeeded:** สิ่งที่ทำเสร็จสมบูรณ์แล้วในแต่ละสเต็ป
+  4. ❌ **When Facing Failures / Errors:** เมื่อพบ error หรือคำสั่งล้มเหลว ให้อธิบายสิ่งที่พบเกี่ยวกับ error นั้น (Root Cause, บริบทข้อผิดพลาด, และแนวทางที่จะแก้) ให้ชัดเจนก่อนดำเนินการต่อ
+
+## Planned / Not-Yet-Implemented Features
+
+> 🚧 These are **roadmap items only** — not yet built. Treat as greenfield when implementing. Check `cline.md` for any in-progress notes before starting, and create a scrutinize-style plan first.
+
+- **Static dashboard** — overview/stats dashboard (occupancy, revenue, room status aggregates). The existing `DashboardController` is **housekeeping-task-only** (`/api/v1/dashboard/tasks*`) — do **not** confuse it with this. Likely a new controller + read-only aggregate queries (no new writes to existing state machines).
+- **Digital signature on physical documents** — capture/apply a digital signature onto a generated document (e.g. signed receipt/agreement). Consider where the signature image is stored (the `images` table is now production-ready — polymorphic, private disk, signed URLs; see "Image system" in Critical Conventions) and which roles (`admin`/`staff`) may sign. Verify any signature-bearing document's chain of custody against the relevant state machine (Booking/BookingRoom/Receipt).
+
+When starting any of the above: document the design decision + lib choice in `cline.md` before coding, and add a new entry here moving it from "Planned" to a real section once landed.
+
+## Migration gotchas
+
+Several refactors require **`php artisan migrate:fresh --seed`** (not just `migrate`) because seeders changed shape (e.g., 8 → 100 rooms). Always check `cline.md` "Migration Required" notes before pulling/running.

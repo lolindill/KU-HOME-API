@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
 class Payment extends Model
 {
@@ -13,15 +13,14 @@ class Payment extends Model
     protected $fillable = [
         'booking_id',
         'amount',
-        'payment_method',
         'status',
         'reference_number',
-        'received_by'
+        'received_by',
     ];
 
     /**
      * ✅ #30 Fixed: เปลี่ยน cast จาก decimal:2 เป็น integer
-     * มาตรฐานเดียวกันกับ Booking.total_amount = integer (satang/cents)
+     * มาตรฐานเดียวกันกับ Booking.total_amount = integer บาทล้วน (11/09/26: satang → baht)
      */
     protected $casts = [
         'amount' => 'integer',
@@ -32,10 +31,16 @@ class Payment extends Model
     {
         return $this->belongsTo(Booking::class);
     }
-    
+
     // 🌟 Relationship: พนักงานที่รับเงิน
     public function receiver()
     {
         return $this->belongsTo(User::class, 'received_by');
+    }
+
+    // 🌟 Fix L2 (03/07/26): inverse relationship ที่หายไป — Receipt เคยมี belongsTo(Payment) ฝ่ายเดียว
+    public function receipts()
+    {
+        return $this->hasMany(Receipt::class);
     }
 }

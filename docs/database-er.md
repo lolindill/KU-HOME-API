@@ -10,6 +10,7 @@
 ```mermaid
 erDiagram
     USERS ||--o{ BOOKINGS : "user_id (who booked)"
+    ORGANIZATIONS ||--o{ BOOKINGS : "organization_id (org booking, 25/09/26)"
     USERS ||--o{ HOUSEKEEPING_TASKS : "assigned_to"
     USERS ||--o{ PAYMENTS : "received_by"
     USERS ||--o{ PERSONAL_ACCESS_TOKENS : "tokenable_id"
@@ -23,6 +24,7 @@ erDiagram
     BOOKINGS ||--|{ BOOKING_ROOMS : "booking_id"
     BOOKINGS ||--o{ PAYMENTS : "booking_id"
     BOOKINGS ||--o{ RECEIPTS : "booking_id"
+    BOOKINGS ||--o{ BOOKING_CONFIRMATIONS : "booking_id"
 
     BOOKING_ROOMS ||--o| ADDONS : "booking_room_id"
 
@@ -34,13 +36,13 @@ erDiagram
     USERS {
         uuid id PK
         string name
-        string email UK "unique"
+        string email UK "composite unique (email, auth_provider)"
         string password "hashed"
         string role "default: user"
+        string auth_provider "default: password — password | ku_sso | google (อนาคต)"
         string title "nullable"
         string phone "nullable"
         string nationality "default: Thai"
-        boolean is_ku_member "default: false"
         boolean ver "default: false, verification flag"
         timestamp email_verified_at "nullable"
         remember_token remember_token
@@ -52,11 +54,11 @@ erDiagram
         uuid id PK
         string name_en
         string name_th
+        string description "nullable"
         integer max_guests
         boolean extra_bed_enabled "default: false"
         integer max_extra_beds "default: 0"
         integer extra_bed_price "default: 0"
-        integer rate_daily_general
         timestamp created_at
         timestamp updated_at
     }
@@ -76,14 +78,30 @@ erDiagram
     BOOKINGS {
         uuid id PK
         string confirmation UK "unique, nullable, format: YYYYMM-XXXXX"
-        uuid user_id FK "nullable, who booked"
+        uuid user_id FK "nullable, who booked — null = เฮดเปล่า/องค์กร (organization-bookings 25/09/26)"
+        uuid organization_id FK "nullable, restrict — org booking ผ่าน erp lookup (25/09/26)"
+        string customer_name "nullable — snapshot ผู้ติดต่อ/ผู้เข้าพัก (บังคับเมื่อ organize, 25/09/26)"
+        string customer_phone "nullable — snapshot เก็บติดต่อล้วน (25/09/26)"
+        string customer_email "nullable — snapshot เก็บติดต่อล้วน (25/09/26)"
         string source "default: online"
         date check_in
         date check_out
-        integer total_amount "satang/cents"
-        boolean is_paid "default: false"
+        integer total_amount "integer baht (was satang, changed 2026-09-11)"
+        string discount_code "nullable — โค้ดส่วนลดที่ใช้ (27/08/26)"
+        string payment_type "default: full — full | deposit | deferred (25/09/26)"
+        integer deposit_amount "nullable — ยอดมัดจำตั้งเอง, null = effective 50% เฉพาะ deposit (25/09/26)"
+        boolean is_paid "default: false — true เมื่อ SUM(payments) >= total_amount (25/09/26)"
         timestamp payment_deadline "nullable"
         string status "default: draft"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ORGANIZATIONS {
+        uuid id PK
+        string erp "unique, nullable — logical FK ไป ERP ภายนอก (ไม่มี DB constraint)"
+        string name
+        boolean is_active "default: true — toggle แทน DELETE (PgBoolean)"
         timestamp created_at
         timestamp updated_at
     }
@@ -93,10 +111,16 @@ erDiagram
         uuid booking_id FK
         uuid room_type_id FK
         uuid room_id FK "nullable, assigned at check-in"
-        json guests "nullable, array of {title,name,nationality,is_ku_member}"
-        integer children "default: 0"
-        integer rate_daily "nullable"
-        integer nights "nullable"
+        date check_in
+        date check_out
+        string status "default: draft (state machine lives here)"
+        string bed_preference "nullable, e.g. king_size (hard constraint for RoomAllocator)"
+        json guests "nullable, array of {title,name,firstName,lastName,nationality}"
+        string billing_address "nullable"
+        string billing_comment "nullable"
+        integer room_amount "default: 0, gross room price (integer baht, 27/08/26)"
+        integer discount_amount "default: 0, discount of this room (integer baht, 27/08/26)"
+        integer amount "default: 0, net total per room (integer baht, 03/09/26) — Σ amount == bookings.total_amount"
         timestamp created_at
         timestamp updated_at
     }
@@ -107,19 +131,23 @@ erDiagram
         integer extra_bed "default: 0"
         integer breakfast "default: 0"
         integer early_checkIn_price "default: 0"
+        integer early_hours "default: 0"
         integer late_checkOut_price "default: 0"
+        integer late_hours "default: 0"
         integer extra_bed_price "default: 0"
         integer breakfast_price "default: 0"
         timestamp created_at
         timestamp updated_at
     }
 
-    ADDON_RATES {
+    GLOBAL_RATES {
         uuid id PK
-        string code UK "unique, e.g. extra_bed"
+        string rate_type "daily | daily_ku | group | month | addon (added 22/07/26, default: addon)"
+        uuid room_type_id FK "nullable — null = addon rate (global), set = room rate per room type (cascade delete)"
+        string code "nullable — addon: e.g. extra_bed · group: min_5_rooms/min_10_rooms · daily/daily_ku/month: null (unique constraint dropped 03/09/26)"
         string name_en
         string name_th "nullable"
-        integer default_price "default: 0"
+        integer default_price "default: 0, integer baht"
         boolean is_active "default: true"
         timestamp created_at
         timestamp updated_at
@@ -128,24 +156,38 @@ erDiagram
     PAYMENTS {
         uuid id PK
         uuid booking_id FK
-        integer amount "satang/cents (was decimal, changed 2026-06-05)"
-        string payment_method "cash, credit_card, transfer"
+        integer amount "integer baht (was satang until 2026-09-11)"
         string status "default: completed"
         string reference_number "nullable"
         uuid received_by FK "nullable, staff who received"
         timestamp created_at
         timestamp updated_at
     }
+    🔓 UNFROZEN (19/08/26): ลบ payment_method แล้ว (flow เหลือสลิปอย่างเดียว) — receipts ยัง frozen
 
     RECEIPTS {
         uuid id PK
         string receipt_no UK "unique, format: YYYYMM-XXXXX"
         uuid booking_id FK
         uuid payment_id FK
-        integer amount "satang/cents (was decimal, changed 2026-06-05)"
+        integer amount "integer baht (was satang until 2026-09-11)"
         string billing_name "nullable"
         text billing_address "nullable"
         timestamp issued_at "default: current"
+        timestamp created_at
+        timestamp updated_at
+    }
+    ❄️ FROZEN (24/07/26): legacy table — read-only. ใช้ booking_confirmations แทน
+
+    BOOKING_CONFIRMATIONS {
+        uuid id PK
+        uuid booking_id FK "1:N with bookings (history)"
+        string slip_image "nullable, path ของไฟล์สลิป"
+        timestamp transfer_time "nullable, เวลาที่ลูกค้าแจ้งโอน"
+        string status "default: pending (pending|verified|rejected)"
+        uuid reviewed_by FK "nullable, admin ที่ review"
+        timestamp reviewed_at "nullable"
+        string review_note "nullable, เหตุผล reject"
         timestamp created_at
         timestamp updated_at
     }
@@ -183,9 +225,9 @@ erDiagram
 
     IMAGES {
         uuid id PK
-        string url
-        uuid imageable_id "nullable, polymorphic"
-        string imageable_type "nullable, polymorphic"
+        string url "appended attribute — signed URL 15 นาที (ไม่ใช่ column)"
+        uuid imageable_id "nullable, polymorphic — $hidden จาก JSON (26/10/26)"
+        string imageable_type "nullable, polymorphic — $hidden จาก JSON (26/10/26)"
         timestamp created_at
         timestamp updated_at
     }
@@ -297,15 +339,15 @@ erDiagram
 
 1. **Guests as JSON** (`booking_rooms.guests`)
    - รองรับผู้เข้าพักหลายคนต่อห้อง
-   - Format: `[{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai", "is_ku_member": false }]`
+   - Format: `[{ "title": "Mr.", "name": "สมชาย", "nationality": "Thai" }]`
    - Refactored: 2026-06-18 (ย้ายจาก `bookings` table)
 
-2. **Amount as Integer** (satang/cents)
-   - `payments.amount`, `receipts.amount`, `bookings.total_amount` ใช้ `integer` (satang/cents)
-   - Changed: 2026-06-05 (จาก `decimal` เดิม)
+2. **Amount as Integer Baht (non-decimal)**
+   - `payments.amount`, `receipts.amount`, `bookings.total_amount` ใช้ `integer` หน่วย **บาทล้วน** (เช่น `1200` = 1,200 บาท)
+   - Changed: 2026-06-05 (จาก `decimal` เดิม → integer satang) · 2026-09-11 (satang → integer baht ทั้งระบบ)
 
-3. **Addon Rates — Server-side Lookup**
-   - `addon_rates` table เก็บ default prices
+3. **Global Rates — Server-side Lookup** (renamed from `addon_rates`, 22/07/26)
+   - `global_rates` table เก็บ default prices ทั้ง room rate (`daily` / `daily_ku` / `group` / `month` — ผูก `room_type_id`) และ addon rate (`addon` — ใช้ `code`)
    - ไม่ trust client — server lookup rates ก่อนคำนวณ
 
 4. **Sequence Counters**
@@ -320,9 +362,10 @@ erDiagram
 
 | Field | Valid Values |
 |---|---|
-| `bookings.status` | `draft`, `paid`, `confirmed`, `checked_in`, `checked_out`, `cancelled`, `no_show`, `deleted` |
+| `bookings.status` | `draft`, `paid`, `confirmed`, `complete` |
 | `rooms.status` | `available`, `occupied`, `checkout_makeup`, `dirty`, `prep_checkin`, `maintenance`, `reserved_closed` |
-| `payments.status` | `pending`, `completed`, `failed` |
+| `payments.status` | `pending`, `completed`, `failed` (❄️ frozen) |
+| `booking_confirmations.status` | `pending`, `verified`, `rejected` |
 | `housekeeping_tasks.status` | `pending`, `in_progress`, `done` |
 | `housekeeping_inventories.condition` | `good`, `damaged`, `missing` |
 | `bookings.source` | `online`, `admin`, `line` |

@@ -1,0 +1,1092 @@
+{
+    "id": "housekeeping-report",
+    "name_th": "รายงานแม่บ้าน",
+    "name_en": "Housekeeping Report",
+    "category_th": "รายงานปฏิบัติการรายวัน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "หัวหน้าแม่บ้าน",
+        "พนักงานหน้าเคาน์เตอร์"
+    ],
+    "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print",
+    "register_note_th": null,
+    "register_displayed_data_th": "เลขห้อง, วันเวลาเช็คเอ้า, Status การเข้าพัก (IN/OUT/STAY/OUT OF ORDER), จำนวนวันเข้าพัก,จำนวนผู้เข้าพัก, ประเภทห้อง,โน๊ต,",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานแม่บ้าน",
+        "sheet_gid": "2034495805",
+        "extracted_at": "2026-09-22"
+    },
+    "variant": "v1 (ภาษาอังกฤษเชิงเทคนิค: Room Status / House Status)",
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "Date",
+            "type": "date",
+            "sample_value": "2026-09-09"
+        }
+    ],
+    "columns": [
+        {
+            "key": "room_no",
+            "label_th": "Room",
+            "type": "room_no"
+        },
+        {
+            "key": "room_status",
+            "label_th": "Room Status",
+            "type": "enum",
+            "options": [
+                "Vacant",
+                "Occupied",
+                "Out of Order"
+            ]
+        },
+        {
+            "key": "room_status_detail",
+            "label_th": "Room Status Detail",
+            "type": "text",
+            "nullable": true
+        },
+        {
+            "key": "house_status",
+            "label_th": "House Status",
+            "type": "enum",
+            "options": [
+                "Dirty",
+                "Clean",
+                "Inspected",
+                "Out of Order"
+            ],
+            "nullable": true
+        },
+        {
+            "key": "arrival",
+            "label_th": "Arrival",
+            "type": "date"
+        },
+        {
+            "key": "departure",
+            "label_th": "Departure",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "Night (จำนวนคืน)",
+            "type": "integer"
+        },
+        {
+            "key": "housekeeping_note",
+            "label_th": "Housekeeping Note",
+            "type": "text",
+            "nullable": true
+        }
+    ],
+    "sample_data": [
+        {
+            "room_no": "501",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "502",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "503",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "504",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "505",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "506",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Inspected",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-12",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "507",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "508",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "509",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-13",
+            "nights": 3,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "510",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-14",
+            "nights": 4,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "511",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-15",
+            "nights": 5,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "512",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-15",
+            "nights": 5,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "513",
+            "room_status": "Vacant",
+            "room_status_detail": "ห้องว่างและไม่มีเข้าพัก",
+            "house_status": null,
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "514",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Clean",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "515",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "516",
+            "room_status": "Out of Order",
+            "room_status_detail": "ปิดซ่อม",
+            "house_status": "Out of Order",
+            "arrival": null,
+            "departure": null,
+            "nights": null,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "517",
+            "room_status": "Occupied",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "518",
+            "room_status": "Occupied",
+            "room_status_detail": "Due Out",
+            "house_status": "Dirty",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "519",
+            "room_status": "Occupied",
+            "room_status_detail": "Due Out",
+            "house_status": "Dirty",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "520",
+            "room_status": "Occupied",
+            "room_status_detail": "Due Out",
+            "house_status": "Dirty",
+            "arrival": "2026-09-08",
+            "departure": "2026-09-09",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "601",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "602",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "603",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "604",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "605",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "606",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "607",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "608",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "609",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "610",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "611",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "612",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "613",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "614",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "615",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "616",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "617",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "618",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "619",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "620",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "701",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "702",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "703",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "704",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "705",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "706",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "707",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "708",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "709",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "710",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "711",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "712",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "713",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "714",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "715",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "716",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "717",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "718",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-11",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "719",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "720",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "801",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "802",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "803",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "804",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "805",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "806",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "807",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "808",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-11",
+            "nights": 2,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "809",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "810",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "811",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "812",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "813",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "814",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "815",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "816",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "817",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "818",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "819",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "820",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "901",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "902",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "903",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "904",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "905",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "906",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "907",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "908",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "909",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "910",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "911",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "912",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "913",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "914",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "915",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "916",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "917",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "918",
+            "room_status": "Vacant",
+            "room_status_detail": "Arrival / Due In / Vacant Dirty",
+            "house_status": "Dirty",
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "919",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        },
+        {
+            "room_no": "920",
+            "room_status": "Occupied",
+            "room_status_detail": null,
+            "house_status": null,
+            "arrival": "2026-09-09",
+            "departure": "2026-09-10",
+            "nights": 1,
+            "housekeeping_note": null
+        }
+    ],
+    "notes": [
+        "legend ในชีต: Room Status Detail ได้แก่ \"Arrival / Due In / Vacant Dirty\", \"Due Out\", \"ห้องว่างและไม่มีเข้าพัก\", \"ปิดซ่อม\"; House Status ได้แก่ Clean / Dirty / Inspected / Out of Order",
+        "มีอีกเวอร์ชันของรายงานนี้ (v2) ดูไฟล์ housekeeping-report-v2.json"
+    ]
+}

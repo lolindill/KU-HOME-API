@@ -2,29 +2,29 @@
 
 namespace App\Models;
 
-use Database\Factories\UserFactory;
+use App\Casts\PgBoolean;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens; 
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Sanctum\HasApiTokens;
 
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable, HasUuids;
+    use HasApiTokens, HasFactory, HasUuids, Notifiable;
 
     protected $fillable = [
         'name',
         'email',
+        'auth_provider', // 🎫 password | ku_sso | google (อนาคต) — split user ต่อ provider (wayfinder ticket 02)
         'password',
         'role',
-        'title',          
-        'phone',           
-        'nationality',    
-        'is_ku_member',
+        'title',
+        'phone',
+        'nationality',
         'ver',
     ];
 
@@ -33,8 +33,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
-            'is_ku_member' => 'boolean',
-            'ver' => 'boolean',
+            // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+            'ver' => PgBoolean::class,
         ];
     }
 
@@ -44,5 +44,6 @@ class User extends Authenticatable
     }
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 }

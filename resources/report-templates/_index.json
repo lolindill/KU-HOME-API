@@ -1,0 +1,204 @@
+{
+    "description": "ดัชนีเทมเพลตตารางรายงานระบบที่พัก (KU HOME) — แปลงจาก Google Sheets \"เอกสารระบบที่พัก_Document\"",
+    "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+    "extracted_at": "2026-09-22",
+    "schema_notes": [
+        "type \"money_baht\" = จำนวนเงิน integer หน่วยบาท (ตาม convention โปรเจกต์ KU HOME API)",
+        "type \"date\" = ISO-8601 ค.ศ. — ชีตต้นทางแสดงผลเป็น พ.ศ. (2569 = ค.ศ. 2026)",
+        "sample_data = ข้อมูลตัวอย่างจากชีตต้นทาง (mock) ใช้ทดสอบ frontend/renderer ได้",
+        "field เป็น snake_case ภาษาอังกฤษ, label_th = หัวคอลัมน์ต้นทางสำหรับแสดงผล"
+    ],
+    "reports": [
+        {
+            "id": "check-in-report",
+            "file": "report-templates/check-in-report.json",
+            "name_th": "รายงานห้องเข้าพัก",
+            "name_en": "Check-in Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel"
+        },
+        {
+            "id": "check-out-report",
+            "file": "report-templates/check-out-report.json",
+            "name_th": "รายงานห้องออก",
+            "name_en": "Check-out Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel"
+        },
+        {
+            "id": "daily-financial-report",
+            "file": "report-templates/daily-financial-report.json",
+            "name_th": "รายงานการเงินประจำวัน",
+            "name_en": "Financial Report",
+            "category_th": "รายงานการเงิน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "ฝ่ายบัญชี",
+                "แอดมิน",
+                "ผู้จัดการ"
+            ],
+            "output_format_th": "Export PDF/Excel เพื่อปิดยอดบัญชี"
+        },
+        {
+            "id": "deposit-report",
+            "file": "report-templates/deposit-report.json",
+            "name_th": "รายงานยอดมัดจำ",
+            "name_en": "ข้อมูลวันที่ 14 กันยายน 2569",
+            "category_th": "รายงานการเงิน",
+            "frequency_th": "รายวัน/ตามต้องการ",
+            "primary_users_th": [
+                "ฝ่ายบัญชี",
+                "ผู้จัดการ"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export Excel"
+        },
+        {
+            "id": "occupancy-report",
+            "file": "report-templates/occupancy-report.json",
+            "name_th": "รายงานการเข้าพัก",
+            "name_en": "Occupancy Report",
+            "category_th": "รายงานบริหารจัดการ",
+            "frequency_th": "รายสัปดาห์/รายเดือน",
+            "primary_users_th": [
+                "ผู้บริหาร",
+                "ผู้จัดการ"
+            ],
+            "output_format_th": "ดูหน้าจอ (กราฟ) + Export Excel"
+        },
+        {
+            "id": "breakfast-report",
+            "file": "report-templates/breakfast-report.json",
+            "name_th": "รายงานอาหารเช้า",
+            "name_en": "Breakfast Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์",
+                "แอดมิน"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "erp-transfer-report",
+            "file": "report-templates/erp-transfer-report.json",
+            "name_th": "รายงานการโอนระหว่างหน่วยงาน",
+            "name_en": "ERP Report",
+            "category_th": "รายงานการเงิน",
+            "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+            "primary_users_th": [
+                "แอดมิน",
+                "ฝ่ายบัญชี"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "housekeeping-report",
+            "file": "report-templates/housekeeping-report.json",
+            "name_th": "รายงานแม่บ้าน",
+            "name_en": "Housekeeping Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "หัวหน้าแม่บ้าน",
+                "พนักงานหน้าเคาน์เตอร์"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "housekeeping-report-v2",
+            "file": "report-templates/housekeeping-report-v2.json",
+            "name_th": "รายงานแม่บ้าน",
+            "name_en": "Housekeeping Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "หัวหน้าแม่บ้าน",
+                "พนักงานหน้าเคาน์เตอร์"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "room-status-report",
+            "file": "report-templates/room-status-report.json",
+            "name_th": "รายงานสถานะห้องพัก",
+            "name_en": "Real-time Room Status",
+            "category_th": null,
+            "frequency_th": null,
+            "primary_users_th": null,
+            "output_format_th": null
+        },
+        {
+            "id": "extra-bed-report",
+            "file": "report-templates/extra-bed-report.json",
+            "name_th": "รายงานเตียงเสริม",
+            "name_en": "Extra-Bed Report",
+            "category_th": "รายงานปฏิบัติการรายวัน",
+            "frequency_th": "รายวัน",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์",
+                "แอดมิน",
+                "หัวหน้าแม่บ้าน"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "supplies-report",
+            "file": "report-templates/supplies-report.json",
+            "name_th": "รายงานวัสดุสิ้นเปลื้อง",
+            "name_en": "Supplies Report",
+            "category_th": "รายงานบริหารจัดการ",
+            "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+            "primary_users_th": [
+                "แอดมิน",
+                "ฝ่ายบัญชี"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "out-of-service-room-report",
+            "file": "report-templates/out-of-service-room-report.json",
+            "name_th": "รายงานห้องชำรุด/บำรุงรักษา",
+            "name_en": "Out of Service-Room Report",
+            "category_th": "รายงานบำรุงรักษา",
+            "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์",
+                "แอดมิน",
+                "หัวหน้าแม่บ้าน",
+                "ช่าง"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "additional-charges-report",
+            "file": "report-templates/additional-charges-report.json",
+            "name_th": "รายการค่าปรับ/ขออุปกรณ์เพิ่มเติม",
+            "name_en": "Additional Charges Report",
+            "category_th": "รายงานบริหารจัดการ",
+            "frequency_th": "รายสัปดาห์/รายเดือน/ตามต้องการ",
+            "primary_users_th": [
+                "พนักงานหน้าเคาน์เตอร์",
+                "แอดมิน"
+            ],
+            "output_format_th": "ดูหน้าจอ + Export PDF/Excel + Print"
+        },
+        {
+            "id": "manager-report",
+            "file": "report-templates/manager-report.json",
+            "name_th": "รายงานผู้จัดการ (Manager's Report)",
+            "name_en": "Status",
+            "category_th": null,
+            "frequency_th": null,
+            "primary_users_th": null,
+            "output_format_th": null
+        }
+    ]
+}

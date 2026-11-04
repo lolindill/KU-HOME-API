@@ -1,5 +1,8 @@
 <?php
 
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Laravel\Sanctum\Http\Middleware\AuthenticateSession;
 use Laravel\Sanctum\Sanctum;
 
 return [
@@ -47,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => null,
+    // ⏱️ (2026-09-24, SRS v2 REQ-001.4): token อายุ 8 ชั่วโมง — เกินแล้วถือว่า expired (401)
+    //    เป็น hard expiry นับจาก created_at ของ token (ไม่ใช่ sliding inactivity) — ล็อกอินใหม่เพื่อใช้ต่อ
+    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION_MINUTES', 480),
 
     /*
     |--------------------------------------------------------------------------
@@ -76,9 +81,9 @@ return [
     */
 
     'middleware' => [
-        'authenticate_session' => Laravel\Sanctum\Http\Middleware\AuthenticateSession::class,
-        'encrypt_cookies' => Illuminate\Cookie\Middleware\EncryptCookies::class,
-        'validate_csrf_token' => Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+        'authenticate_session' => AuthenticateSession::class,
+        'encrypt_cookies' => EncryptCookies::class,
+        'validate_csrf_token' => ValidateCsrfToken::class,
     ],
 
 ];

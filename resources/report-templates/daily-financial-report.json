@@ -1,0 +1,310 @@
+{
+    "id": "daily-financial-report",
+    "name_th": "รายงานการเงินประจำวัน",
+    "name_en": "Financial Report",
+    "category_th": "รายงานการเงิน",
+    "frequency_th": "รายวัน",
+    "primary_users_th": [
+        "ฝ่ายบัญชี",
+        "แอดมิน",
+        "ผู้จัดการ"
+    ],
+    "output_format_th": "Export PDF/Excel เพื่อปิดยอดบัญชี",
+    "register_note_th": "ต้องกระทบยอดกับเงินสดจริงและระบบชำระเงินทุกสิ้นวัน",
+    "register_displayed_data_th": "รายรับ (แยกช่องทางที่ชำระ), เลขบุ๊กกิ้ง, ชื่อผู้จอง, ราคา, ราคารวม, จำนวนธุรกรรม",
+    "source": {
+        "workbook": "เอกสารระบบที่พัก_Document (Google Sheets)",
+        "google_sheets_id": "1v8euwEZZMnsSHmJuV5ZDu3bRE5NI0TTplAW8o_1m3bw",
+        "sheet_tab": "ตย.รายงานการเงินรายวัน",
+        "sheet_gid": "478897559",
+        "extracted_at": "2026-09-22"
+    },
+    "filters": [
+        {
+            "key": "date",
+            "label_th": "ประจำวันที่",
+            "type": "date",
+            "sample_value": "2026-09-09"
+        },
+        {
+            "key": "payment_channel",
+            "label_th": "ช่องทางการชำระ",
+            "type": "enum",
+            "options": [
+                "ทั้งหมด",
+                "สลิป (โอน/QR)",
+                "เงินสด"
+            ],
+            "sample_value": "ทั้งหมด"
+        }
+    ],
+    "columns": [
+        {
+            "key": "date",
+            "label_th": "วันที่",
+            "type": "date"
+        },
+        {
+            "key": "time",
+            "label_th": "เวลา",
+            "type": "time"
+        },
+        {
+            "key": "booking_no",
+            "label_th": "บุ๊กกิ้ง",
+            "type": "string"
+        },
+        {
+            "key": "room_no",
+            "label_th": "เลขห้อง",
+            "type": "room_no"
+        },
+        {
+            "key": "user_name",
+            "label_th": "ชื่อ USER",
+            "type": "string"
+        },
+        {
+            "key": "checkin_date",
+            "label_th": "วันที่เช็คอิน",
+            "type": "date"
+        },
+        {
+            "key": "checkout_date",
+            "label_th": "วันที่เช็คเอ้าท์",
+            "type": "date"
+        },
+        {
+            "key": "nights",
+            "label_th": "จำนวนคืน",
+            "type": "integer"
+        },
+        {
+            "key": "received_amount",
+            "label_th": "ยอดเงินโอน",
+            "type": "money_baht"
+        },
+        {
+            "key": "payment_status",
+            "label_th": "สถานะ",
+            "type": "enum",
+            "options": [
+                "เต็มจำนวน",
+                "มัดจำ 50%"
+            ]
+        },
+        {
+            "key": "payment_channel",
+            "label_th": "ช่องทางชำระเงิน",
+            "type": "enum",
+            "options": [
+                "สลิป (โอน/QR)",
+                "เงินสด"
+            ]
+        },
+        {
+            "key": "receipt_ref",
+            "label_th": "เลขอ้างอิงใบเสร็จพร้อมวันที่ (ในอนาคต)",
+            "type": "string",
+            "nullable": true
+        },
+        {
+            "key": "slip_photo",
+            "label_th": "รูปถ่ายสลิป",
+            "type": "text",
+            "nullable": true
+        }
+    ],
+    "summary": {
+        "total_items": 12,
+        "total_amount_baht": 16000
+    },
+    "sample_data": [
+        {
+            "date": "2026-09-09",
+            "time": "08:12",
+            "booking_no": "xxxxx",
+            "room_no": "501",
+            "user_name": "คุณมานิตย์ คำสวย",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "received_amount": 1000,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "08:15",
+            "booking_no": "xxxxx",
+            "room_no": "502",
+            "user_name": "คุณกันต์ ขยันจัง",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-13",
+            "nights": 2,
+            "received_amount": 1600,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "08:56",
+            "booking_no": "xxxxx",
+            "room_no": "503",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "nights": 1,
+            "received_amount": 1000,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "09:11",
+            "booking_no": "xxxxx",
+            "room_no": "504",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "nights": 1,
+            "received_amount": 1000,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "09:45",
+            "booking_no": "xxxxx",
+            "room_no": "510",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "nights": 1,
+            "received_amount": 1200,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "10:12",
+            "booking_no": "xxxxx",
+            "room_no": "710",
+            "user_name": "คุณฉัตรชัย สุขดี",
+            "checkin_date": "2026-09-11",
+            "checkout_date": "2026-09-12",
+            "nights": 1,
+            "received_amount": 1200,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "11:18",
+            "booking_no": "xxxxx",
+            "room_no": "711",
+            "user_name": "คุณธวัชชัย การงาน",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "received_amount": 1000,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "13:24",
+            "booking_no": "xxxxx",
+            "room_no": "716",
+            "user_name": "คุณพงศกร สีเหลือง",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "received_amount": 1000,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "14:02",
+            "booking_no": "xxxxx",
+            "room_no": "805",
+            "user_name": "คุณยุวดี คิดไว",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "received_amount": 800,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "14:13",
+            "booking_no": "xxxxx",
+            "room_no": "818",
+            "user_name": "คุณดวงใจ ต้นไม้",
+            "checkin_date": "2026-09-20",
+            "checkout_date": "2026-09-25",
+            "nights": 4,
+            "received_amount": 3000,
+            "payment_status": "มัดจำ 50%",
+            "payment_channel": "เงินสด",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "16:19",
+            "booking_no": "xxxxx",
+            "room_no": "909",
+            "user_name": "คุณพรพรรณ ใจดี",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-13",
+            "nights": 1,
+            "received_amount": 1700,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "บัตรเครดิต",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        },
+        {
+            "date": "2026-09-09",
+            "time": "19:07",
+            "booking_no": "xxxxx",
+            "room_no": "919",
+            "user_name": "คุณกนกพร สินใจ",
+            "checkin_date": "2026-09-12",
+            "checkout_date": "2026-09-15",
+            "nights": 3,
+            "received_amount": 1500,
+            "payment_status": "เต็มจำนวน",
+            "payment_channel": "QR Code",
+            "receipt_ref": null,
+            "slip_photo": "*รูปแนบสลิป*"
+        }
+    ],
+    "notes": [
+        "\"เลขอ้างอิงใบเสร็จพร้อมวันที่\" ระบุไว้ในชีตว่าเป็นช่องสำหรับอนาคต (ตอนนี้ว่าง)",
+        "หัวข้อต้นทาง \"ยอดเงินโอน\" ครอบคลุมทุกช่องทาง (มีเงินสด/บัตรในตัวอย่าง) — จึงตั้ง key เป็น received_amount ให้เป็นกลาง",
+        "⚠️ receipts table ของโปรเจกต์ถูก freeze เป็น legacy — ข้อมูลฝั่ง API ต้องอ้าง booking_confirmations (slip verify) แทน (ดู AGENTS.md)",
+        "📝 หมายเหตุ sheet-wins exception (owner ตัดสิน 2026-10-05 — excel-reports spec §6.1): ช่องทางชำระของชีตต้นทางเป็น QR Code/เงินสด/บัตรเครดิต แต่ระบบ derive จากจุดเขียน ledger ได้จริง 2 ค่า — \"สลิป (โอน/QR)\" (verify สลิป) | \"เงินสด\" (front-desk recordPayment) — ระบบ wins · receipt_ref คงคอลัมน์ไว้แต่รายงานแสดง \"-\" ทุกแถว รอระบบใบเสร็จใหม่ (ห้ามใช้ payments.reference_number แทน)"
+    ]
+}

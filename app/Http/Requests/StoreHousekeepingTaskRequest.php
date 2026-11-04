@@ -14,12 +14,10 @@ class StoreHousekeepingTaskRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'room_id'       => 'required|uuid|exists:rooms,id',
-            'assigned_to'   => 'nullable|uuid|exists:users,id',
-            'status'        => 'nullable|string|in:pending,in_progress,done',
-            'notes'         => 'nullable|string',
-            'checked_out_at' => 'nullable|date',
-            'completed_at'  => 'nullable|date',
+            'room_id' => 'required|uuid|exists:rooms,id',
+            'task_type' => 'nullable|string|in:pre_checkin,checkout,checkout_then_in,daily,monthly,group',
+            'notes' => 'nullable|string',
+            'scheduled_for' => 'nullable|date',
         ];
     }
 }

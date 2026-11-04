@@ -2,13 +2,18 @@
 
 namespace Tests\Feature;
 
-use Tests\TestCase;
+use App\Models\Addon;
 use App\Models\Booking;
+use App\Models\BookingRoom;
+use App\Models\Discount;
+use App\Models\GlobalRate;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use Tests\TestCase;
 
 class BookingTest extends TestCase
 {
@@ -16,22 +21,35 @@ class BookingTest extends TestCase
 
     private function createRoomType(): RoomType
     {
-        return RoomType::create([
+        $rt = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard Double',
             'name_th' => 'สแตนดาร์ด ดับเบิล',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
         ]);
+        // 🌟 Refactor (22/07/26): rate_daily_general ย้ายไป global_rates แล้ว — seed ที่นี่
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $rt->id,
+            'code' => null,
+            'name_en' => 'Standard Double Daily',
+            'default_price' => 1500,
+            'is_active' => true,
+        ]);
+
+        return $rt;
     }
+
+    // counter แทน rand() — เลขห้องสุ่มชนกันเองใน test เดียวกันแล้วทำ suite พังแบบสุ่ม (flaky)
+    private static int $roomSeq = 0;
 
     private function createRoom(RoomType $roomType, string $status = 'available'): Room
     {
         return Room::create([
             'id' => Str::uuid(),
             'room_type_id' => $roomType->id,
-            'room_number' => '10' . rand(1, 99),
+            'room_number' => '10'.(++self::$roomSeq),
             'status' => $status,
         ]);
     }
@@ -39,41 +57,89 @@ class BookingTest extends TestCase
     /**
      * 🌟 Refactor (18/06/26): Guest fields ย้ายไป booking_rooms แล้ว
      * ตอนนี้ Booking มีแค่ข้อมูลการจอง + user_id (คนจอง)
-     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON) + booking_rooms.children
+     * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON)
      */
     private function createBooking(array $overrides = []): Booking
     {
         $user = User::factory()->create();
 
+        // 🌟 Refactor (25/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
         $booking = Booking::create(array_merge([
             'user_id' => $user->id,
             'source' => 'online',
             'status' => 'draft',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'total_amount' => 4500,
         ], $overrides));
 
-        // สร้าง booking_room พร้อมข้อมูลผู้เข้าพัก
+        // สร้าง booking_room พร้อมข้อมูลผู้เข้าพัก + check_in/check_out
         $roomType = RoomType::create([
             'id' => Str::uuid(),
             'name_en' => 'Standard',
             'name_th' => 'สแตนดาร์ด',
             'max_guests' => 2,
             'extra_bed_enabled' => false,
-            'rate_daily_general' => 1500,
+        ]);
+        // 🌟 Refactor (22/07/26): seed room rate ใน global_rates
+        GlobalRate::create([
+            'rate_type' => 'daily',
+            'room_type_id' => $roomType->id,
+            'code' => null,
+            'name_en' => 'Standard Daily',
+            'default_price' => 1500,
+            'is_active' => true,
         ]);
 
-        \App\Models\BookingRoom::create([
+        BookingRoom::create([
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(2)->toDateString(),
+            'check_out' => now()->addDays(4)->toDateString(),
             'guests' => [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
-            'children' => 0,
             'rate_daily' => 1500,
-            'nights' => 2,
         ]);
+
+        return $booking;
+    }
+
+    /**
+     * 🌟 Helper สร้าง Draft Booking พร้อม BookingRoom และ Addon (ครบถ้วน)
+     */
+    private function createDraftBooking(User $user, RoomType $roomType, int $roomCount = 1, array $overrides = []): Booking
+    {
+        $booking = Booking::create(array_merge([
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 0,
+            'payment_deadline' => now()->addHours(24),
+        ], $overrides));
+
+        for ($i = 0; $i < $roomCount; $i++) {
+            $br = BookingRoom::create([
+                'booking_id' => $booking->id,
+                'room_type_id' => $roomType->id,
+                'room_id' => null,
+                'check_in' => now()->addDays(2)->toDateString(),
+                'check_out' => now()->addDays(4)->toDateString(),
+                'status' => 'draft',
+                'guests' => [
+                    ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
+                ],
+            ]);
+
+            // 📊 (05/10/26) canonical schema — sets default 0 · extra_beds_by_night null ·
+            //    snapshot ราคาเขียนโดย reprice()
+            Addon::create([
+                'booking_room_id' => $br->id,
+                'early_checkIn_price' => 0,
+                'late_checkOut_price' => 0,
+            ]);
+        }
+
+        // 2 คืน × 1500 ต่อห้อง
+        $booking->update(['total_amount' => 3000 * $roomCount]);
 
         return $booking->fresh(['bookingRooms']);
     }
@@ -89,16 +155,14 @@ class BookingTest extends TestCase
 
         $response = $this->postJson('/api/v1/bookings', [
             'source' => 'online',
-            'check_in' => now()->addDay()->toDateString(),
-            'check_out' => now()->addDays(3)->toDateString(),
             'booking_rooms' => [
                 [
                     'room_type_id' => $roomType->id,
-                    'quantity' => 1,
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
                     'guests' => [
                         ['title' => 'mr', 'name' => 'Ghost', 'nationality' => 'TH'],
                     ],
-                    'children' => 0,
                 ],
             ],
         ]);
@@ -116,25 +180,141 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => $user->name, 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
                     ],
                 ],
             ]);
 
         $response->assertStatus(201);
-        // 🌟 ตรวจว่าข้อมูลผู้เข้าพักถูกเก็บใน booking_rooms ไม่ใช่ bookings
-        $this->assertDatabaseHas('booking_rooms', [
-            'children' => 0,
+        $response->assertJsonPath('status', 'success');
+        $response->assertJsonCount(1, 'booking_rooms');
+        $response->assertJsonStructure([
+            'status',
+            'message',
+            'booking_id',
+            'confirmation',
+            'total_amount',
+            'payment_deadline',
+            'user_id',
+            'booking_rooms' => [
+                [
+                    'id',
+                    'booking_id',
+                    'room_type_id',
+                    'check_in',
+                    'check_out',
+                    'status',
+                    'guests',
+                    'addon',
+                ],
+            ],
         ]);
+
+        $this->assertNull($response->json('booking_rooms.0.room_type'));
+        $this->assertNull($response->json('booking_rooms.0.room'));
+
+        // 🛡️ Scrutinize: Verify booking linkage + total_amount calculated server-side
+        $this->assertDatabaseHas('bookings', [
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+        ]);
+
+        $booking = Booking::where('user_id', $user->id)->latest('created_at')->first();
+        $this->assertNotNull($booking, 'Booking should be created');
+
+        // 🛡️ Verify total_amount calculated server-side (2 nights × 1500 = 3000)
+        $this->assertEquals(3000, $booking->total_amount,
+            'Total amount must be calculated server-side, not trusted from client');
+
+        // 🧾 (03/09/26) amount = ยอดสุทธิต่อห้อง — invariant Σ amount == total_amount
+        $this->assertEquals(3000, $booking->fresh()->bookingRooms->first()->amount);
+        $this->assertEquals(3000, $response->json('booking_rooms.0.amount'));
+        $this->assertAmountInvariant($booking);
+
+        // 🛡️ Verify booking_rooms with correct room_type linkage + guests JSON
+        $this->assertDatabaseHas('booking_rooms', [
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+        ]);
+
+        $bookingRoom = BookingRoom::where('booking_id', $booking->id)->first();
+        $guests = is_string($bookingRoom->guests) ? json_decode($bookingRoom->guests, true) : $bookingRoom->guests;
+        $this->assertEquals($user->name, $guests[0]['name'] ?? null,
+            'Guest name must be stored in booking_rooms.guests JSON, not in bookings table');
+    }
+
+    public function test_authenticated_user_can_create_booking_with_first_and_last_name_and_contact_info(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'guests' => [
+                            [
+                                'title' => 'Mr.',
+                                'firstName' => 'Somchai',
+                                'lastName' => 'Prasert',
+                                'email' => 'somchai.p@ku.th',
+                                'phone' => '0812345678',
+                                'nationality' => 'TH',
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('status', 'success');
+        $response->assertJsonCount(1, 'booking_rooms');
+        $response->assertJsonPath('booking_rooms.0.guests.0.firstName', 'Somchai');
+        $response->assertJsonPath('booking_rooms.0.guests.0.lastName', 'Prasert');
+        $response->assertJsonPath('booking_rooms.0.guests.0.email', 'somchai.p@ku.th');
+        $response->assertJsonPath('booking_rooms.0.guests.0.phone', '0812345678');
+
+        $bookingRoom = BookingRoom::where('room_type_id', $roomType->id)->latest('created_at')->first();
+        $this->assertNotNull($bookingRoom);
+        $this->assertEquals('Mr. Somchai Prasert', $bookingRoom->primary_guest_name);
+    }
+
+    public function test_non_admin_cannot_spoof_source_admin(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $payload = [
+            'source' => 'admin',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(5)->toDateString(),
+                    'check_out' => now()->addDays(7)->toDateString(),
+                    'guests' => [['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH']],
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', $payload);
+        $response->assertStatus(201);
+
+        $booking = Booking::findOrFail($response->json('booking_id'));
+        $this->assertSame('online', $booking->source);
     }
 
     // ============================================
@@ -144,12 +324,22 @@ class BookingTest extends TestCase
     public function test_authenticated_user_can_get_own_bookings(): void
     {
         $user = User::factory()->create();
-        $this->createBooking(['user_id' => $user->id]);
-        $this->createBooking(['user_id' => $user->id]);
+        $bookingA = $this->createBooking(['user_id' => $user->id]);
+        $bookingB = $this->createBooking(['user_id' => $user->id]);
+
+        // 🛡️ Noise booking from different user — must NOT appear in results
+        $this->createBooking();
 
         $response = $this->actingAs($user, 'sanctum')
             ->getJson('/api/v1/bookings');
         $response->assertStatus(200);
+
+        // 🛡️ Scrutinize: Verify user only sees THEIR bookings (no cross-user leak)
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($bookingA->id, $bookingIds, 'User should see their own booking A');
+        $this->assertContains($bookingB->id, $bookingIds, 'User should see their own booking B');
+        $this->assertCount(2, $bookingIds,
+            'User should see exactly 2 bookings — other users\' bookings must be filtered out');
     }
 
     // ============================================
@@ -173,8 +363,11 @@ class BookingTest extends TestCase
         $this->actingAsAdmin();
         $booking = $this->createBooking(['status' => 'draft']);
 
+        // 🌟 Refactor (25/06/26): draft → confirmed is now VALID (admin walk-in skip paid)
+        // ต้องใช้ transition ที่ invalid จริงๆ ตาม container state machine
+        // draft → complete ข้ามขั้น paid/confirmed ไม่ได้ค่ะ
         $response = $this->putJson("/api/v1/bookings/update/{$booking->id}", [
-            'status' => 'confirmed', // draft → confirmed is invalid
+            'status' => 'complete',
         ]);
         $response->assertStatus(422);
     }
@@ -193,6 +386,141 @@ class BookingTest extends TestCase
         $response = $this->getJson('/api/v1/bookings?term=Test');
         $response->assertStatus(200);
         $response->assertJsonPath('status', 'success');
+    }
+
+    // ============================================
+    // ✅ Booking list: status filter (GET /bookings?status=)
+    // ============================================
+
+    public function test_admin_can_filter_bookings_by_status(): void
+    {
+        $this->actingAsAdmin();
+        $pending = $this->createBooking(['status' => 'pending']);
+        $this->createBooking(['status' => 'draft']);
+        $this->createBooking(['status' => 'confirmed']);
+
+        $response = $this->getJson('/api/v1/bookings?status=pending');
+        $response->assertStatus(200);
+        $response->assertJsonPath('search_criteria.status', 'pending');
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($pending->id, $bookingIds);
+        $this->assertCount(1, $bookingIds, 'ต้องเห็นเฉพาะ booking status=pending');
+    }
+
+    public function test_admin_can_filter_bookings_by_multiple_statuses(): void
+    {
+        $this->actingAsAdmin();
+        $pending = $this->createBooking(['status' => 'pending']);
+        $verifyError = $this->createBooking(['status' => 'verify_error']);
+        $this->createBooking(['status' => 'draft']);
+
+        $response = $this->getJson('/api/v1/bookings?status=pending,verify_error');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEqualsCanonicalizing(
+            [$pending->id, $verifyError->id],
+            $bookingIds->all(),
+            'comma-separated ต้องได้ทั้ง 2 สถานะ'
+        );
+    }
+
+    public function test_bookings_status_filter_rejects_invalid_status(): void
+    {
+        $this->actingAsAdmin();
+        $this->createBooking();
+
+        // ❌ cancelled ไม่มีแล้วใน container state machine — ต้อง 422 ไม่ใช่เงียบ ๆ คืน [] ค่ะ
+        $response = $this->getJson('/api/v1/bookings?status=cancelled');
+        $response->assertStatus(422);
+        $response->assertJsonPath('status', 'error');
+    }
+
+    public function test_user_can_filter_own_bookings_by_status(): void
+    {
+        $user = User::factory()->create();
+        $pending = $this->createBooking(['user_id' => $user->id, 'status' => 'pending']);
+        $this->createBooking(['user_id' => $user->id, 'status' => 'draft']);
+
+        // 🛡️ status filter ใช้ได้กับ user ทั่วไป — scope ที่ booking ของตัวเองเสมอ
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/bookings?status=pending');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEquals([$pending->id], $bookingIds->all());
+    }
+
+    // ============================================
+    // ✅ Booking list: payment_type filter (GET /bookings?payment_type=)
+    // ============================================
+
+    public function test_admin_can_filter_bookings_by_payment_type(): void
+    {
+        $this->actingAsAdmin();
+        $deposit = $this->createBooking(['payment_type' => 'deposit', 'status' => 'confirmed']);
+        $this->createBooking(['payment_type' => 'full', 'status' => 'confirmed']);
+        $this->createBooking(['payment_type' => 'full']);
+
+        $response = $this->getJson('/api/v1/bookings?payment_type=deposit');
+        $response->assertStatus(200);
+        $response->assertJsonPath('search_criteria.payment_type', 'deposit');
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($deposit->id, $bookingIds);
+        $this->assertCount(1, $bookingIds, 'ต้องเห็นเฉพาะ booking payment_type=deposit');
+
+        // 💳 combine กับ status filter ได้ (AND) — deposit ที่ confirmed ต้องหายเมื่อกรอง status=draft
+        $combined = $this->getJson('/api/v1/bookings?payment_type=deposit&status=draft');
+        $combined->assertStatus(200);
+        $this->assertCount(0, collect($combined->json('bookings')));
+    }
+
+    public function test_admin_can_filter_bookings_by_multiple_payment_types(): void
+    {
+        $this->actingAsAdmin();
+        $deposit = $this->createBooking(['payment_type' => 'deposit']);
+        $deferred = $this->createBooking(['payment_type' => 'deferred']);
+        $this->createBooking(['payment_type' => 'full']);
+
+        $response = $this->getJson('/api/v1/bookings?payment_type=deposit,deferred');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEqualsCanonicalizing(
+            [$deposit->id, $deferred->id],
+            $bookingIds->all(),
+            'comma-separated ต้องได้ทั้ง 2 type'
+        );
+    }
+
+    public function test_bookings_payment_type_filter_rejects_invalid_value(): void
+    {
+        $this->actingAsAdmin();
+        $this->createBooking();
+
+        // ❌ partial ไม่มีใน payment type enum — ต้อง 422 ไม่ใช่เงียบ ๆ คืน [] ค่ะ
+        $response = $this->getJson('/api/v1/bookings?payment_type=partial');
+        $response->assertStatus(422);
+        $response->assertJsonPath('status', 'error');
+    }
+
+    public function test_user_can_filter_own_bookings_by_payment_type(): void
+    {
+        $user = User::factory()->create();
+        $deposit = $this->createBooking(['user_id' => $user->id, 'payment_type' => 'deposit']);
+        $this->createBooking(['user_id' => $user->id, 'payment_type' => 'full']);
+        // บิล deposit ของคนอื่น — ห้ามโผล่แม้ filter ตรง
+        $this->createBooking(['payment_type' => 'deposit']);
+
+        // 🛡️ payment_type filter ใช้ได้กับ user ทั่วไป — scope ที่ booking ของตัวเองเสมอ
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/bookings?payment_type=deposit');
+        $response->assertStatus(200);
+
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertEquals([$deposit->id], $bookingIds->all());
     }
 
     // ============================================
@@ -216,16 +544,14 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDays(5)->toDateString(),
-                'check_out' => now()->addDay()->toDateString(), // check_out before check_in
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(5)->toDateString(),
+                        'check_out' => now()->addDay()->toDateString(), // check_out before check_in
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Test', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
                     ],
                 ],
             ]);
@@ -253,16 +579,14 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Spammer', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
                     ],
                 ],
             ]);
@@ -288,16 +612,14 @@ class BookingTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'Expired Guest', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
                     ],
                 ],
             ]);
@@ -321,16 +643,14 @@ class BookingTest extends TestCase
         $response = $this->actingAs($userB, 'sanctum')
             ->postJson('/api/v1/bookings', [
                 'source' => 'online',
-                'check_in' => now()->addDay()->toDateString(),
-                'check_out' => now()->addDays(3)->toDateString(),
                 'booking_rooms' => [
                     [
                         'room_type_id' => $roomType->id,
-                        'quantity' => 1,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
                         'guests' => [
                             ['title' => 'mr', 'name' => 'User B', 'nationality' => 'TH'],
                         ],
-                        'children' => 0,
                     ],
                 ],
             ]);
@@ -344,13 +664,2003 @@ class BookingTest extends TestCase
 
     public function test_create_booking_route_has_rate_limiting(): void
     {
-        $route = \Illuminate\Support\Facades\Route::getRoutes()->getByAction(
+        $route = Route::getRoutes()->getByAction(
             'App\Http\Controllers\Api\V1\BookingController@createBooking'
         );
 
         $this->assertNotNull($route, 'Route for createBooking should exist');
         $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
             'POST /bookings should have throttle:5,1 middleware');
+    }
+
+    public function test_add_rooms_route_has_rate_limiting(): void
+    {
+        $route = Route::getRoutes()->getByAction(
+            'App\Http\Controllers\Api\V1\BookingController@addRooms'
+        );
+
+        $this->assertNotNull($route, 'Route for addRooms should exist');
+        $this->assertContains('throttle:5,1', $route->gatherMiddleware(),
+            'POST /bookings/{bookingId}/rooms should have throttle:5,1 middleware');
+    }
+
+    // ============================================
+    // ✅ Delete draft booking (owner or admin) — DELETE /bookings/{id}
+    // ============================================
+
+    public function test_owner_can_delete_own_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $booking = $this->createBooking(['user_id' => $user->id]);
+        $brId = $booking->bookingRooms->first()->id;
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('status', 'success');
+
+        // 🛡️ hard delete cascade — หายทั้ง booking + BR
+        $this->assertDatabaseMissing('bookings', ['id' => $booking->id]);
+        $this->assertDatabaseMissing('booking_rooms', ['id' => $brId]);
+
+        // 📝 audit log draft → deleted เขียนไว้แม้ row หายแล้ว
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking',
+            'entity_id' => $booking->id,
+            'from_status' => 'draft',
+            'to_status' => 'deleted',
+        ]);
+    }
+
+    public function test_delete_draft_booking_cascades_addon_rows(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $brId = $booking->bookingRooms->first()->id;
+
+        $this->assertDatabaseHas('addons', ['booking_room_id' => $brId]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(200);
+        $this->assertDatabaseMissing('addons', ['booking_room_id' => $brId]);
+    }
+
+    public function test_user_cannot_delete_other_users_booking(): void
+    {
+        $booking = $this->createBooking(); // เจ้าของคนอื่น
+
+        $intruder = User::factory()->create();
+        $response = $this->actingAs($intruder, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_user_cannot_delete_non_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $booking = $this->createBooking(['user_id' => $user->id, 'status' => 'paid']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(422);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id, 'status' => 'paid']);
+    }
+
+    public function test_admin_can_delete_any_draft_booking(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(); // ของ user อื่น
+
+        $response = $this->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(200);
+        $this->assertDatabaseMissing('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_unauthenticated_user_cannot_delete_booking(): void
+    {
+        $booking = $this->createBooking();
+
+        $response = $this->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(401);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_delete_booking_unknown_id_returns_404(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson('/api/v1/bookings/'.Str::uuid());
+
+        $response->assertStatus(404);
+    }
+
+    public function test_cannot_delete_booking_with_additional_charges(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(); // draft booking
+        \App\Models\AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => User::factory()->create()->id,
+        ]);
+
+        $response = $this->deleteJson("/api/v1/bookings/{$booking->id}");
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_owner_cannot_delete_deferred_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $booking->update(['payment_type' => 'deferred']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_owner_cannot_delete_admin_sourced_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $booking->update(['source' => 'admin']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    // ============================================
+    // ✅ Add rooms to draft booking — POST /bookings/{bookingId}/rooms
+    // ============================================
+
+    public function test_owner_can_add_rooms_to_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType); // 1 ห้อง = 3000
+        $existingBrId = $booking->bookingRooms->first()->id;
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'guests' => [['title' => 'mr', 'name' => 'Added Guest', 'nationality' => 'TH']],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('status', 'success');
+        // 2 คืน × 1500 = 3000 เข้ายอดเดิม 3000 → 6000
+        $response->assertJsonPath('added_amount', 3000);
+        $response->assertJsonPath('total_amount', 6000);
+
+        // 🛡️ BR + Addon ของห้องใหม่ถูกสร้างจริง
+        $this->assertDatabaseCount('booking_rooms', 2);
+        $newBr = BookingRoom::where('booking_id', $booking->id)
+            ->where('id', '!=', $existingBrId)
+            ->first();
+        $this->assertNotNull($newBr);
+        $this->assertEquals('Added Guest', $newBr->guests[0]['name']);
+        $this->assertDatabaseHas('addons', ['booking_room_id' => $newBr->id]);
+
+        // 🧾 (03/09/26) ทุกห้องมี amount = 3000 → Σ = total_amount
+        $this->assertEquals(3000, $newBr->fresh()->amount);
+        $this->assertAmountInvariant($booking);
+    }
+
+    public function test_admin_can_add_rooms_to_any_draft_booking(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking(User::factory()->create(), $roomType);
+
+        $response = $this->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDay()->toDateString(),
+                    'check_out' => now()->addDays(3)->toDateString(),
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseCount('booking_rooms', 2);
+    }
+
+    public function test_user_cannot_add_rooms_to_other_users_booking(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType);
+
+        $intruder = User::factory()->create(); // role 'user' เหมือนเจ้าของ
+        $response = $this->actingAs($intruder, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(403);
+        $this->assertDatabaseCount('booking_rooms', 1); // ห้องใหม่ไม่ถูกสร้าง
+    }
+
+    public function test_unauthenticated_user_cannot_add_rooms(): void
+    {
+        $booking = $this->createBooking();
+
+        $response = $this->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $booking->bookingRooms->first()->room_type_id,
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(401);
+        $this->assertDatabaseCount('booking_rooms', 1);
+    }
+
+    public function test_add_rooms_to_non_draft_booking_returns_422(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1, ['status' => 'paid']);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertDatabaseCount('booking_rooms', 1);
+    }
+
+    public function test_add_rooms_unknown_booking_returns_404(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings/'.Str::uuid().'/rooms', [
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(404);
+    }
+
+    // ============================================
+    // ✅ Update booking room (draft only) — PUT /bookings/{bookingId}/rooms/{bookingRoomId}
+    // ============================================
+
+    public function test_owner_can_update_draft_booking_room_dates(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        $deadline = $booking->payment_deadline;
+
+        // ยืดจาก 2 คืน (+1..+3) เป็น 3 คืน (+5..+8) → 1500 × 3 = 4500
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'check_in' => now()->addDays(5)->toDateString(),
+                'check_out' => now()->addDays(8)->toDateString(),
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 4500);
+
+        $freshBr = $br->fresh();
+        $this->assertEquals(now()->addDays(5)->toDateString(), $freshBr->check_in->toDateString());
+        $this->assertEquals(now()->addDays(8)->toDateString(), $freshBr->check_out->toDateString());
+
+        // payment_deadline คงเดิม (เหมือน addRooms)
+        $this->assertTrue($booking->fresh()->payment_deadline->equalTo($deadline));
+    }
+
+    public function test_update_room_reprices_addons_server_side(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        // seed addon rates: extra_bed 100/คืน breakfast_200 50/ชุด/คืน early_checkin 100/ชม.
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 50, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // 📊 (05/10/26) 3 คืน + extra_bed 1 หลัง + breakfast legacy 2 ชุด (→ set_200) + early 2 ชม.
+        //    → (1500×3) + (100×1×3) + (50×2×3 คืน) + (100×2) = 4500+300+300+200 = 5300
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'check_in' => now()->addDays(5)->toDateString(),
+                'check_out' => now()->addDays(8)->toDateString(),
+                'extra_beds' => 1,
+                'addons' => ['breakfast' => 2, 'early_checkin' => 2],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 5300);
+
+        // 🛡️ ราคาถูกเขียนกลับลง Addon row ฝั่ง server เท่านั้น (canonical + snapshot โดย reprice)
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(2, $addon->breakfast_set_200); // legacy breakfast → set_200
+        $this->assertSame(300, $addon->breakfast_price); // 50 × 2 ชุด × 3 คืน
+        $this->assertSame(
+            [
+                now()->addDays(5)->toDateString() => 1,
+                now()->addDays(6)->toDateString() => 1,
+                now()->addDays(7)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(300, $addon->extra_bed_price); // 100 × 1 × 3 คืน
+        $this->assertSame(2, $addon->early_hours);
+        $this->assertSame(200, $addon->early_checkIn_price);
+
+        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 300 + 300 + 200 + 0 = 5300
+        $this->assertEquals(5300, $br->fresh()->amount);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🛏️ (08/09/26) Update extra_bed ต้องทำให้ total_amount เปลี่ยนตาม —
+     * draft 2 คืน (1500/คืน = 3000) + extra_bed rate 100/คืน → เพิ่ม 2 เตียง = +400
+     */
+    public function test_update_extra_bed_increases_total_amount(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+
+        // extra_bed 0 → 2 : extra_bed_price = 100 × 2 เตียง × 2 คืน = 400 → total = 3400
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3400);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        // 📊 legacy int → flat map ทุกคืน (2 คืน = คืน +2 และ +3)
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(2, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 2,
+                now()->addDays(3)->toDateString() => 2,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(400, $addon->extra_bed_price);
+
+        // amount = 3000 (ห้อง) − 0 + 400 = 3400
+        $this->assertEquals(3400, $br->fresh()->amount);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🛏️ (08/09/26) ลดจำนวน extra_bed ย้อนหลัง ต้องลด total_amount ลงด้วย —
+     * ต่อเนื่องจาก 2 เตียง (3400) → เหลือ 1 เตียง = −200 → 3200
+     */
+    public function test_update_extra_bed_decrease_lowers_total_amount(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // เริ่มจาก 2 เตียง → total = 3000 + 400 = 3400
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ])->assertStatus(200);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        // ลดเหลือ 1 เตียง → extra_bed_price = 100 × 1 × 2 = 200 → total = 3200
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3200);
+        $this->assertEquals(3200, $booking->fresh()->total_amount);
+
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🛏️ (08/09/26) ตั้ง extra_bed กลับเป็น 0 — total_amount ต้องกลับไปเท่าค่าห้องเปล่า
+     */
+    public function test_update_extra_bed_to_zero_restores_base_total(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 2],
+            ])->assertStatus(200);
+        $this->assertEquals(3400, $booking->fresh()->total_amount);
+
+        // ล้างเตียงเสริมหมด → กลับไป 3000 (ค่าห้องเปล่า)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['extra_bed' => 0],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3000);
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+
+        // extra_bed 0 → flat map ว่าง (column JSON = null) + snapshot 0
+        $addon = $br->fresh('addon')->addon;
+        $this->assertEmpty($addon->extra_beds_by_night);
+        $this->assertSame(0, $addon->extra_beds_max);
+        $this->assertSame(0, $addon->extra_bed_price);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🕐 (27/08/26): Early/Late check-in/out คิดราคาตามสูตรรายชั่วโมง (int 0-5 ชม.)
+     * ลบ boolean ออกจาก response และบันทึก early_hours / late_hours ใน Addon
+     */
+    public function test_create_booking_charges_early_late_by_hours(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        // seed early 150 / late 250 (baht per hour — integer baht)
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 150, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 250, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'addons' => ['early_checkin' => 2, 'late_checkout' => 1],
+                    ],
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        // ไม่ส่ง addons → hours เป็น 0 และราคา 0
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+
+        // ห้องที่เลือก → hours + ราคา = hours × rate; ไม่มี boolean บน booking_room
+        $response->assertJsonMissingPath('booking_rooms.0.early_checkin');
+        $response->assertJsonMissingPath('booking_rooms.0.late_checkout');
+        $response->assertJsonPath('booking_rooms.0.addon.early_hours', 2);
+        $response->assertJsonPath('booking_rooms.0.addon.late_hours', 1);
+        $response->assertJsonPath('booking_rooms.0.addon.early_checkIn_price', 300); // 2 × 150
+        $response->assertJsonPath('booking_rooms.0.addon.late_checkOut_price', 250); // 1 × 250
+
+        // ห้องที่ไม่เลือก → hours 0 + ราคา 0; ไม่มี boolean
+        $response->assertJsonMissingPath('booking_rooms.1.early_checkin');
+        $response->assertJsonMissingPath('booking_rooms.1.late_checkout');
+        $response->assertJsonPath('booking_rooms.1.addon.early_hours', 0);
+        $response->assertJsonPath('booking_rooms.1.addon.late_hours', 0);
+        $response->assertJsonPath('booking_rooms.1.addon.early_checkIn_price', 0);
+        $response->assertJsonPath('booking_rooms.1.addon.late_checkOut_price', 0);
+
+        // total = (1500×2)×2 ห้อง + 300 + 250 = 6550
+        $response->assertJsonPath('total_amount', 6550);
+
+        // 🧾 (03/09/26) amount รายห้อง: มี addon = 3000+300+250 = 3550 · ไม่มี addon = 3000
+        $booking = Booking::where('user_id', $user->id)->latest('created_at')->first();
+        $amounts = $booking->bookingRooms()->with('addon')->orderBy('check_in')->pluck('amount');
+        $this->assertEquals(3550, $amounts[0]);
+        $this->assertEquals(3000, $amounts[1]);
+        $this->assertAmountInvariant($booking);
+    }
+
+    public function test_create_booking_rejects_boolean_early_checkin(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(2)->toDateString(),
+                        'addons' => ['early_checkin' => true],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['booking_rooms.0.addons.early_checkin']);
+    }
+
+    public function test_create_booking_rejects_early_hours_out_of_range(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        // test 8 (เกิน 7)
+        $response1 = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(2)->toDateString(),
+                        'addons' => ['early_checkin' => 8],
+                    ],
+                ],
+            ]);
+        $response1->assertStatus(422);
+        $response1->assertJsonValidationErrors(['booking_rooms.0.addons.early_checkin']);
+
+        // test -1 (น้อยกว่า 0)
+        $response2 = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(2)->toDateString(),
+                        'addons' => ['early_checkin' => -1],
+                    ],
+                ],
+            ]);
+        $response2->assertStatus(422);
+        $response2->assertJsonValidationErrors(['booking_rooms.0.addons.early_checkin']);
+
+        // test 2.5 (ไม่ใช่ integer)
+        $response3 = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDay()->toDateString(),
+                        'check_out' => now()->addDays(2)->toDateString(),
+                        'addons' => ['early_checkin' => 2.5],
+                    ],
+                ],
+            ]);
+        $response3->assertStatus(422);
+        $response3->assertJsonValidationErrors(['booking_rooms.0.addons.early_checkin']);
+    }
+
+    /**
+     * 🛡️ Regression (26/08/26, 27/08/26): PUT แก้ห้องโดยไม่ส่ง addons key มาด้วย
+     * ต้องคงชั่วโมงและราคา early/late เดิมไว้
+     */
+    public function test_update_room_without_addons_key_keeps_early_late_prices(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // seed rate ปัจจุบันให้ตรงราคาที่เคยคิดไว้ (fallback จะ reprice ตาม rate ปัจจุบัน)
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 5000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 7000, 'is_active' => true,
+        ]);
+
+        // จำลอง addon ที่เคยเลือก early/late ไว้แล้ว (1 ชม. แต่ละอัน)
+        $br->addon->update([
+            'early_hours' => 1,
+            'early_checkIn_price' => 5000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 7000,
+        ]);
+        // 2 คืน × 1500 + 5000 + 7000 = 15000
+        $booking->update(['total_amount' => 15000]);
+
+        // แก้แค่ billing_comment — ไม่ส่ง addons / extra_beds มาเลย
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'billing_comment' => 'Need invoice',
+            ]);
+
+        $response->assertStatus(200);
+
+        // 🛡️ ราคาและชั่วโมง early/late ต้องถูกคงไว้ (ไม่หายเป็น 0)
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 1,
+            'early_checkIn_price' => 5000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 7000,
+        ]);
+        $response->assertJsonMissingPath('booking_room.early_checkin');
+        $response->assertJsonMissingPath('booking_room.late_checkout');
+        $response->assertJsonPath('booking_room.addon.early_hours', 1);
+        $response->assertJsonPath('booking_room.addon.late_hours', 1);
+        $response->assertJsonPath('total_amount', 15000);
+
+        // 🛡️ เคส 2: ส่ง addons ชัดๆ — ปิด early (0 ชม.) คง late (1 ชม.)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_checkin' => 0, 'late_checkout' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 0,
+            'early_checkIn_price' => 0,
+            'late_hours' => 1,
+            'late_checkOut_price' => 7000,
+        ]);
+        $response->assertJsonPath('booking_room.addon.early_hours', 0);
+        $response->assertJsonPath('booking_room.addon.late_hours', 1);
+        // total คิดใหม่ = 3000 (ห้อง 2 คืน) + 7000 (late) = 10000
+        $response->assertJsonPath('total_amount', 10000);
+    }
+
+    /**
+     * 🐛 (08/09/26) Bug repro จาก frontend จริง: ส่ง key `addon` (เอกพจน์ — mirror จาก response)
+     * เข้า batch endpoint — validation ไม่รู้จัก key นี้ → ตัดทิ้งเงียบๆ → extra_bed คงเดิม
+     * total_amount ไม่ขยับ แต่ API ตอบ 200 success (frontend เข้าใจว่าสำเร็จ)
+     */
+    public function test_batch_update_addon_singular_key_is_silently_ignored(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // payload ตาม input.png — `addon` เอกพจน์ (ผิด)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addon' => ['early_hours' => 0, 'extra_bed' => 1, 'late_hours' => 0],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        // เงียบสนิท: extra_bed ยัง 0 (map ว่าง), total คงเดิม 3000
+        $addon = $br->fresh('addon')->addon;
+        $this->assertEmpty($addon->extra_beds_by_night);
+        $this->assertSame(0, $addon->extra_bed_price);
+        $this->assertEquals(3000, $booking->fresh()->total_amount);
+    }
+
+    /**
+     * ✅ (08/09/26) JSON แบบที่ frontend ควรส่ง (`addons` พหูพจน์) —
+     * batch endpoint reprice ให้ extra_bed ครบและ total_amount ขยับตาม
+     */
+    public function test_batch_update_extra_bed_with_addons_plural_key_updates_total(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // payload แบบแก้แล้ว — `addons` พหูพจน์ (ถูก)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addons' => ['extra_bed' => 1, 'early_hours' => 0, 'late_hours' => 0],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        // extra_bed 1 เตียง × 100 × 2 คืน = 200 → total = 3000 + 200 = 3200
+        $response->assertJsonPath('total_amount', 3200);
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
+        $this->assertAmountInvariant($booking);
+    }
+
+    /**
+     * 🕐 Test batch updateRooms reprices early/late hours correctly,
+     * and preserves previous hours/prices when a room omits the 'addons' key (batch fallback).
+     */
+    public function test_update_rooms_batch_reprices_early_late_hours(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 100, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 200, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2);
+        [$br1, $br2] = $booking->bookingRooms->all();
+
+        // br2: ไม่ส่ง addons key → ต้อง fallback คงชั่วโมงเดิมจากแถว addon (resolveEarlyLate(null, $existing))
+        //    pre-seed early_hours = 2 เพื่อพิสูจน์ว่า fallback อ่าน "ชั่วโมง" ไม่ใช่ reset เป็น 0
+        //    (rate early = 100 → หลัง batch ต้องเป็น 2 ชม. × 100 = 200 บาท)
+        $br2->addon->update([
+            'early_hours' => 2,
+            'early_checkIn_price' => 200,
+        ]);
+
+        // br1: early 3 ชม. (300) + late 1 ชม. (200) = 500 addon + 3000 room = 3500
+        // br2: คงเดิม early 2 ชม. (200) = 200 addon + 3000 room = 3200
+        // total = 6700
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br1->id,
+                        'addons' => ['early_checkin' => 3, 'late_checkout' => 1],
+                    ],
+                    [
+                        'booking_room_id' => $br2->id,
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 6700);
+
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br1->id,
+            'early_hours' => 3,
+            'early_checkIn_price' => 300,
+            'late_hours' => 1,
+            'late_checkOut_price' => 200,
+        ]);
+
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br2->id,
+            'early_hours' => 2,
+            'early_checkIn_price' => 200,
+            'late_hours' => 0,
+            'late_checkOut_price' => 0,
+        ]);
+    }
+
+    /**
+     * 🔧 Regression (01/09/26): frontend ส่ง addons มาเป็นชื่อ column (early_hours/late_hours)
+     * + แถมราคาที่ client คิดเอง — เดิม validation ตัด key ทิ้งทำให้ "แก้ชั่วโมงแล้วไม่อัปเดต"
+     * ตอนนี้ backend รับ alias และ ignore ราคา (reprice ฝั่ง server เสมอ)
+     */
+    public function test_update_room_accepts_early_late_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 5000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        // เดิมมี breakfast 2 ชุด — payload ที่ frontend ส่งไม่มี breakfast → ต้องคงเดิม ไม่หายเป็น 0
+        $br->addon->update(['breakfast_set_200' => 2]);
+
+        // payload แบบเดียวกับที่ frontend (bookings.ts updateBookingRoomsInBooking) ส่งจริง
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => [
+                    'early_checkIn_price' => 20000, // ราคา client ส่งมาต้องถูก ignore
+                    'early_hours' => 3,
+                    'late_checkOut_price' => 10000,
+                    'late_hours' => 2,
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(3, $addon->early_hours);
+        $this->assertSame(30000, $addon->early_checkIn_price); // reprice ฝั่ง server: 3 × 10000
+        $this->assertSame(2, $addon->late_hours);
+        $this->assertSame(20000, $addon->late_checkOut_price); // 2 × 10000
+        $this->assertSame(2, $addon->breakfast_set_200);               // ไม่ส่งมา = คงเดิม
+        // breakfast คิด × คืน (05/10/26): 2 ชุด × 5000 × 2 คืน
+        $this->assertSame(20000, $addon->breakfast_price);
+        // total = ห้อง 3000 + breakfast 20000 + early 30000 + late 20000 = 73000
+        $response->assertJsonPath('total_amount', 73000);
+    }
+
+    /**
+     * 🔧 Regression (01/09/26): เคส batch update จาก report จริง — ส่ง alias hours ผ่าน
+     * PUT /bookings/{id}/rooms แล้ว addon ที่ผูกกับ booking room ต้องอัปเดตตาม
+     */
+    public function test_update_rooms_batch_accepts_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+        // สถานะเดิมตาม report: early 2 ชม. (20000) + late 1 ชม. (10000)
+        $br->addon->update([
+            'early_hours' => 2,
+            'early_checkIn_price' => 20000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 10000,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'addons' => [
+                            'early_checkIn_price' => 20000,
+                            'early_hours' => 1,
+                            'late_checkOut_price' => 10000,
+                            'late_hours' => 3,
+                        ],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 1,
+            'early_checkIn_price' => 10000,
+            'late_hours' => 3,
+            'late_checkOut_price' => 30000,
+        ]);
+    }
+
+    /**
+     * 🔧 (01/09/26): ถ้าส่งทั้ง canonical (early_checkin) และ alias (early_hours)
+     * canonical key ต้องชนะเสมอ — และ alias เกินขอบเขต 0-7 ต้อง 422
+     */
+    public function test_update_room_canonical_key_wins_over_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 1000, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_checkin' => 2, 'early_hours' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $br->id,
+            'early_hours' => 2,
+            'early_checkIn_price' => 2000,
+        ]);
+    }
+
+    public function test_update_room_rejects_out_of_range_hours_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_hours' => 8],
+            ]);
+
+        $response->assertJsonValidationErrors(['addons.early_hours']);
+    }
+
+    public function test_create_booking_accepts_early_late_hours_aliases(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'early_checkin',
+            'name_en' => 'Early Check-in', 'default_price' => 10000, 'is_active' => true,
+        ]);
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'late_checkout',
+            'name_en' => 'Late Check-out', 'default_price' => 10000, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'addons' => ['early_hours' => 2, 'late_hours' => 1],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('addons', [
+            'booking_room_id' => $response->json('booking_rooms.0.id'),
+            'early_hours' => 2,
+            'early_checkIn_price' => 20000,
+            'late_hours' => 1,
+            'late_checkOut_price' => 10000,
+        ]);
+    }
+
+    /**
+     * 🛏️ (04/09/26): input format = output format — extra bed อยู่ใน addons object เหมือน addon อื่น
+     * canonical `addons.extra_bed` ตรงกับ `addon.extra_bed` ตอน response
+     */
+    public function test_create_booking_accepts_extra_bed_inside_addons(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'addons' => ['extra_bed' => 1],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(201);
+
+        // 2 คืน × (100 extra bed) = 200 — ราคา server คิดจาก global_rates เสมอ
+        // 📊 (05/10/26) canonical: extra_beds_by_night map ครบทุกคืน + snapshot โดย reprice
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
+
+        // 3000 (ห้อง 2 คืน) + 200 = 3200
+        $this->assertEquals(3200, $response->json('total_amount'));
+
+        // input format = output format — echo กลับมาที่ addon (รายคืน: max accessor + map)
+        $this->assertEquals(1, $response->json('booking_rooms.0.addon.extra_beds_max'));
+        $this->assertCount(2, $response->json('booking_rooms.0.addon.extra_beds_by_night'));
+    }
+
+    /** 🛏️ ส่งทั้ง canonical + alias พร้อมกัน → canonical (addons.extra_bed) ชนะเสมอ */
+    public function test_update_room_extra_bed_addons_key_wins_over_legacy_alias(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'extra_bed',
+            'name_en' => 'Extra Bed', 'default_price' => 100, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'extra_beds' => 3,
+                'addons' => ['extra_bed' => 1],
+            ]);
+
+        $response->assertStatus(200);
+        // 📊 canonical addons.extra_bed ชนะ legacy extra_beds หัวห้อง — flat map 1 เตียงทุกคืน
+        $addon = $br->fresh('addon')->addon;
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertSame(
+            [
+                now()->addDays(2)->toDateString() => 1,
+                now()->addDays(3)->toDateString() => 1,
+            ],
+            $addon->extra_beds_by_night
+        );
+        $this->assertSame(200, $addon->extra_bed_price);
+        $this->assertAmountInvariant($booking);
+    }
+
+    public function test_update_room_rejects_when_no_availability(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType); // มีห้องเดียว
+
+        // booking ของคนอื่นยึดห้อง (ตัวเดียวที่มี) ช่วง +10..+12 ไว้
+        $other = User::factory()->create();
+        $otherBooking = $this->createDraftBooking($other, $roomType);
+        $otherBooking->bookingRooms->first()->update([
+            'check_in' => now()->addDays(10)->toDateString(),
+            'check_out' => now()->addDays(12)->toDateString(),
+        ]);
+
+        $user = User::factory()->create();
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // ย้ายไปทับช่วงที่เต็ม (+11..+13 คร่อม +10..+12) → 422
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'check_in' => now()->addDays(11)->toDateString(),
+                'check_out' => now()->addDays(13)->toDateString(),
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+
+        // วันที่ต้องไม่ถูกแก้ (rollback)
+        $this->assertEquals(now()->addDays(4)->toDateString(), $br->fresh()->check_out->toDateString());
+    }
+
+    public function test_update_room_blocked_when_booking_not_draft(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType, 1, ['status' => 'paid']);
+        $br = $booking->bookingRooms->first();
+
+        // 💳 (25/09/26, booking-payment-types ticket 10) — booking paid = โหมด surcharge
+        //    หลังจ่าย: user เจ้าของแก้ไม่ได้ (admin เท่านั้น) → 403 ชัดเจน
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'guests' => [['title' => 'mr', 'name' => 'New Name', 'nationality' => 'TH']],
+            ]);
+
+        $response->assertStatus(403);
+        $response->assertJson(['status' => 'error']);
+    }
+
+    public function test_update_room_of_another_booking_returns_404(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $bookingA = $this->createDraftBooking($user, $roomType);
+        $bookingB = $this->createDraftBooking($user, $roomType);
+        $brB = $bookingB->bookingRooms->first();
+
+        // BR ของ booking B แต่อ้างผ่าน booking A → 404
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$bookingA->id}/rooms/{$brB->id}", [
+                'guests' => [['title' => 'mr', 'name' => 'Hijack', 'nationality' => 'TH']],
+            ]);
+
+        $response->assertStatus(404);
+    }
+
+    public function test_user_cannot_update_other_users_booking_room(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $intruder = User::factory()->create();
+        $response = $this->actingAs($intruder, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'guests' => [['title' => 'mr', 'name' => 'Intruder', 'nationality' => 'TH']],
+            ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_update_guests_only_keeps_total(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'guests' => [
+                    ['title' => 'mr', 'name' => 'Updated Guest', 'nationality' => 'US'],
+                ],
+                'billing_comment' => 'Tax ID: 0105559999999',
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 3000);
+
+        $freshBr = $br->fresh();
+        $this->assertEquals('Updated Guest', $freshBr->guests[0]['name']);
+        $this->assertEquals('Tax ID: 0105559999999', $freshBr->billing_comment);
+    }
+
+    public function test_unauthenticated_user_cannot_update_booking_room(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+            'guests' => [['title' => 'mr', 'name' => 'Ghost Guest', 'nationality' => 'TH']],
+        ]);
+
+        $response->assertStatus(401);
+        $this->assertNotEquals('Ghost Guest', $br->fresh()->guests[0]['name']);
+    }
+
+    // ============================================
+    // ✅ Batch update booking rooms (draft only) — PUT /bookings/{bookingId}/rooms
+    // ============================================
+
+    public function test_owner_can_batch_update_booking_rooms(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        // seed breakfast_200 50/ชุด/คืน
+        GlobalRate::create([
+            'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
+            'name_en' => 'Breakfast Set 200', 'default_price' => 50, 'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2);
+        [$br1, $br2] = $booking->bookingRooms->all();
+        $deadline = $booking->payment_deadline;
+
+        // br1 ยืด 2→3 คืน (4500) · br2 เฉยๆ แต่เพิ่ม breakfast 2 ชุด (50×2×2 คืน = 200 → 3200)
+        // → total = 7700
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br1->id,
+                        'check_in' => now()->addDays(5)->toDateString(),
+                        'check_out' => now()->addDays(8)->toDateString(),
+                    ],
+                    [
+                        'booking_room_id' => $br2->id,
+                        'guests' => [['title' => 'mr', 'name' => 'Batch Guest', 'nationality' => 'TH']],
+                        'addons' => ['breakfast' => 2],
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('total_amount', 7700);
+        $response->assertJsonCount(2, 'booking_rooms');
+
+        $freshBr1 = $br1->fresh();
+        $this->assertEquals(now()->addDays(5)->toDateString(), $freshBr1->check_in->toDateString());
+        $this->assertEquals(now()->addDays(8)->toDateString(), $freshBr1->check_out->toDateString());
+
+        $freshBr2 = $br2->fresh();
+        $this->assertEquals('Batch Guest', $freshBr2->guests[0]['name']);
+        // 📊 legacy breakfast 2 → set_200 · คิด × คืน (2 ชุด × 50 × 2 คืน = 200)
+        $addon2 = $freshBr2->addon;
+        $this->assertSame(2, $addon2->breakfast_set_200);
+        $this->assertSame(200, $addon2->breakfast_price);
+
+        // payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
+        $this->assertTrue($booking->fresh()->payment_deadline->equalTo($deadline));
+
+        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+200 = 3200 → Σ = 7700
+        $this->assertEquals(4500, $freshBr1->amount);
+        $this->assertEquals(3200, $freshBr2->amount);
+        $this->assertAmountInvariant($booking);
+    }
+
+    public function test_user_cannot_batch_update_other_users_booking_rooms(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType, 2); // 2 ห้อง = 6000
+        [$br1, $br2] = $booking->bookingRooms->all();
+
+        $intruder = User::factory()->create(); // role 'user' เหมือนเจ้าของ
+        $response = $this->actingAs($intruder, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    ['booking_room_id' => $br1->id, 'billing_comment' => 'Hijack'],
+                    ['booking_room_id' => $br2->id, 'billing_comment' => 'Hijack'],
+                ],
+            ]);
+
+        $response->assertStatus(403);
+        // 🛡️ ห้ามมีการแก้ข้อมูลใดๆ ทั้งยอดและ BR
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id, 'total_amount' => 6000]);
+        $this->assertNotEquals('Hijack', $br1->fresh()->billing_comment);
+        $this->assertNotEquals('Hijack', $br2->fresh()->billing_comment);
+    }
+
+    public function test_batch_update_rejects_duplicate_booking_room_ids(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    ['booking_room_id' => $br->id, 'billing_comment' => 'A'],
+                    ['booking_room_id' => $br->id, 'billing_comment' => 'B'],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_batch_update_with_foreign_booking_room_id_returns_404(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $bookingA = $this->createDraftBooking($user, $roomType);
+        $bookingB = $this->createDraftBooking($user, $roomType);
+        $brA = $bookingA->bookingRooms->first();
+        $brB = $bookingB->bookingRooms->first();
+
+        // BR ของ booking B แอบอ้างผ่าน booking A → 404 ทั้ง batch และห้องของ A ต้องไม่ถูกแตะ
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$bookingA->id}/rooms", [
+                'booking_rooms' => [
+                    ['booking_room_id' => $brA->id, 'billing_comment' => 'Should not apply'],
+                    ['booking_room_id' => $brB->id, 'billing_comment' => 'Hijack'],
+                ],
+            ]);
+
+        $response->assertStatus(404);
+        $this->assertNotEquals('Should not apply', $brA->fresh()->billing_comment);
+    }
+
+    public function test_batch_update_atomic_rollback_when_room_not_draft(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2);
+        [$br1, $br2] = $booking->bookingRooms->all();
+        $br2->update(['status' => 'confirmed']);
+
+        // br1 draft ปกติ แต่ br2 confirmed → batch ต้อง fail ทั้งชุด โดย br1 ไม่ถูกแตะ
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    ['booking_room_id' => $br1->id, 'billing_comment' => 'New comment'],
+                    ['booking_room_id' => $br2->id, 'billing_comment' => 'Should fail'],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertNotEquals('New comment', $br1->fresh()->billing_comment);
+    }
+
+    public function test_batch_update_rejects_when_batch_overbooks_type(): void
+    {
+        $user = User::factory()->create();
+
+        // type T มีห้องจริงแค่ 1 ห้อง
+        $typeT = $this->createRoomType();
+        $this->createRoom($typeT);
+
+        // type T2 (อีก 1 ห้อง) — จะย้ายห้องนี้เข้า T ทับห้องเดิมที่ไม่ได้เปลี่ยน shape
+        $typeT2 = $this->createRoomType();
+        $this->createRoom($typeT2);
+
+        $booking = Booking::create([
+            'user_id' => $user->id,
+            'source' => 'online',
+            'status' => 'draft',
+            'total_amount' => 0,
+            'payment_deadline' => now()->addHours(24),
+        ]);
+
+        $roomX = BookingRoom::create([ // ห้อง X: type T +1..+3 (จะแก้แค่ guests — shape ไม่เปลี่ยน)
+            'booking_id' => $booking->id,
+            'room_type_id' => $typeT->id,
+            'room_id' => null,
+            'check_in' => now()->addDay()->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'draft',
+        ]);
+        $roomY = BookingRoom::create([ // ห้อง Y: type T2 → จะย้ายเข้า T ช่วงเดียวกัน
+            'booking_id' => $booking->id,
+            'room_type_id' => $typeT2->id,
+            'room_id' => null,
+            'check_in' => now()->addDay()->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'draft',
+        ]);
+
+        // final state: X (T, +1..+3) + Y (T, +1..+3) = 2 ห้อง แต่ type T มีจริงแค่ 1 → 422
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    ['booking_room_id' => $roomX->id, 'guests' => [['title' => 'mr', 'name' => 'X', 'nationality' => 'TH']]],
+                    ['booking_room_id' => $roomY->id, 'room_type_id' => $typeT->id],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+
+        // rollback — Y ยังเป็น type T2 เดิม, X ยังเป็น type T
+        $this->assertEquals($typeT2->id, (string) $roomY->fresh()->room_type_id);
+        $this->assertEquals($typeT->id, (string) $roomX->fresh()->room_type_id);
+    }
+
+    public function test_batch_update_rejects_invalid_dates_per_room(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // ส่งครบทั้งคู่ แต่ check_out ก่อน check_in → validation จับได้ (422)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'check_in' => now()->addDays(5)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+    }
+
+    public function test_batch_update_rejects_check_out_before_existing_check_in_when_check_in_not_sent(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first(); // check_in เดิม = +1
+
+        // ส่งแต่ check_out ย้อนหลังก่อน check_in เดิม → validation after:* เทียบไม่ได้
+        //    (ฟิลด์ check_in ไม่ได้ส่งมา) → controller effective-dates guard ต้องจับ (422)
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'check_out' => now()->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+
+        // rollback — check_out ต้องไม่ถูกแก้
+        $this->assertEquals(now()->addDays(4)->toDateString(), $br->fresh()->check_out->toDateString());
+    }
+
+    public function test_unauthenticated_user_cannot_batch_update_booking_rooms(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                ['booking_room_id' => $br->id, 'billing_comment' => 'Ghost Batch'],
+            ],
+        ]);
+
+        $response->assertStatus(401);
+        $this->assertNotEquals('Ghost Batch', $br->fresh()->billing_comment);
+    }
+
+    public function test_batch_update_booking_rooms_returns_mutated_rooms(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2);
+        [$br1, $br2] = $booking->bookingRooms->all();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br1->id,
+                        'check_in' => $br1->check_in->toDateString(), // identical
+                        'check_out' => $br1->check_out->toDateString(), // identical
+                        'billing_comment' => 'Updated Note 1',
+                    ],
+                    [
+                        'booking_room_id' => $br2->id,
+                        'bed_preference' => 'king_size',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonStructure([
+            'status',
+            'message',
+            'booking_id',
+            'booking_rooms' => [
+                '*' => [
+                    'id',
+                    'booking_id',
+                    'room_type_id',
+                    'check_in',
+                    'check_out',
+                    'status',
+                    'addon',
+                ],
+            ],
+            'total_amount',
+        ]);
+
+        $this->assertEquals('Updated Note 1', $br1->fresh()->billing_comment);
+        $this->assertEquals('king_size', $br2->fresh()->bed_preference);
+    }
+
+    public function test_batch_update_with_identical_dates_skips_availability_recheck(): void
+    {
+        // Only 1 room available of this type
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType, 1);
+        $br = $booking->bookingRooms->first();
+
+        // Send identical dates and room_type_id, only updating billing_address
+        $response = $this->actingAs($owner, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'room_type_id' => $roomType->id,
+                        'check_in' => $br->check_in->toDateString(),
+                        'check_out' => $br->check_out->toDateString(),
+                        'billing_address' => '123 Test St',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('123 Test St', $br->fresh()->billing_address);
+    }
+
+    // ============================================
+    // ✅ Delete booking room (draft only) — DELETE /bookings/{bookingId}/rooms/{bookingRoomId}
+    // ============================================
+
+    public function test_owner_can_delete_booking_room_from_draft_booking(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2); // 2 ห้อง = 6000
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}");
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('remaining_rooms', 1);
+        $response->assertJsonPath('total_amount', 3000);
+
+        // 🛡️ BR + Addon หายจริง, booking ยังอยู่
+        $this->assertDatabaseMissing('booking_rooms', ['id' => $br->id]);
+        $this->assertDatabaseMissing('addons', ['booking_room_id' => $br->id]);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id, 'status' => 'draft']);
+
+        // 📝 audit log
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking_room',
+            'entity_id' => $br->id,
+            'from_status' => 'draft',
+            'to_status' => 'deleted',
+        ]);
+
+        // 🧾 (03/09/26) ห้องที่เหลือ amount = 3000 == total_amount หลังลบ
+        $this->assertAmountInvariant($booking);
+    }
+
+    public function test_cannot_delete_last_booking_room(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}");
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+
+        // ห้อง + booking ต้องยังอยู่ครบ
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id]);
+        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+    }
+
+    public function test_delete_room_blocked_when_booking_not_draft(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 2, ['status' => 'paid']);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}");
+
+        $response->assertStatus(422);
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id]);
+    }
+
+    public function test_user_cannot_delete_other_users_booking_room(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType, 2);
+        $br = $booking->bookingRooms->first();
+
+        $intruder = User::factory()->create();
+        $response = $this->actingAs($intruder, 'sanctum')
+            ->deleteJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}");
+
+        $response->assertStatus(403);
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id]);
+    }
+
+    public function test_unauthenticated_user_cannot_delete_booking_room(): void
+    {
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+        $owner = User::factory()->create();
+        $booking = $this->createDraftBooking($owner, $roomType, 2);
+        $br = $booking->bookingRooms->first();
+
+        $response = $this->deleteJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}");
+
+        $response->assertStatus(401);
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id]);
+    }
+
+    // ============================================
+    // 🏨 Bed Preference Tests (Create & Add Rooms)
+    // ============================================
+
+    public function test_create_booking_persists_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
+                    'bed_preference' => 'king_size',
+                ],
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $bookingId = $response->json('booking_id');
+
+        $rooms = BookingRoom::where('booking_id', $bookingId)->orderBy('created_at')->get();
+        $this->assertCount(2, $rooms);
+        $this->assertEquals('king_size', $rooms[0]->bed_preference);
+        $this->assertNull($rooms[1]->bed_preference);
+    }
+
+    public function test_create_booking_rejects_invalid_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(2)->toDateString(),
+                    'check_out' => now()->addDays(4)->toDateString(),
+                    // 'twin' = ค่า vocabulary เก่า (pre-rename 27/08/26) — ต้องถูก reject
+                    'bed_preference' => 'twin',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['booking_rooms.0.bed_preference']);
+    }
+
+    public function test_add_rooms_persists_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1);
+        $existingBrId = $booking->bookingRooms->first()->id;
+
+        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(4)->toDateString(),
+                    'check_out' => now()->addDays(6)->toDateString(),
+                    'bed_preference' => 'king_size',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200);
+        $newRoom = BookingRoom::where('booking_id', $booking->id)
+            ->where('id', '!=', $existingBrId)
+            ->first();
+
+        $this->assertNotNull($newRoom);
+        $this->assertEquals('king_size', $newRoom->bed_preference);
+    }
+
+    public function test_add_rooms_rejects_invalid_bed_preference(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+
+        $booking = $this->createDraftBooking($user, $roomType, 1);
+
+        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/bookings/{$booking->id}/rooms", [
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => now()->addDays(4)->toDateString(),
+                    'check_out' => now()->addDays(6)->toDateString(),
+                    'bed_preference' => 'double',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['booking_rooms.0.bed_preference']);
+    }
+
+    /**
+     * 🛡️ (28/08/26 F2): แก้ไขห้องใน draft booking ที่ถือโค้ดส่วนลดจนหลุด eligibility ทั้งหมด
+     * ต้องส่ง 422 พร้อมคำแนะนำให้ DELETE /bookings/{id}/discount-code ก่อน
+     */
+    public function test_update_room_ineligible_for_discount_returns_actionable_error(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $discount = Discount::create([
+            'code' => 'STAYWINDOW',
+            'type' => 'percent',
+            'value' => 20,
+            'stay_from' => now()->addDays(2)->toDateString(),
+            'stay_until' => now()->addDays(5)->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        // ใส่โค้ดส่วนลดลง draft
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/discount-code", [
+                'code' => 'STAYWINDOW',
+            ])->assertStatus(200);
+
+        $this->assertSame('STAYWINDOW', $booking->fresh()->discount_code);
+
+        // ย้ายวันเข้าพักออกนอก stay_window (+10..+13) → ต้องได้ 422 พร้อมระบุวิธีลบโค้ด
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'check_in' => now()->addDays(10)->toDateString(),
+                'check_out' => now()->addDays(13)->toDateString(),
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonPath('message', 'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด STAYWINDOW อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ');
+
+        // วันที่ของห้องเดิมต้องถูก rollback
+        $this->assertEquals(now()->addDays(2)->toDateString(), $br->fresh()->check_in->toDateString());
+    }
+
+    /**
+     * 🛡️ (28/08/26 F2): Batch updateRooms ใน draft booking ที่ถือโค้ดส่วนลดจนหลุด eligibility
+     * ต้องส่ง 422 พร้อมคำแนะนำให้ DELETE /bookings/{id}/discount-code เช่นกัน
+     */
+    public function test_batch_update_rooms_ineligible_for_discount_returns_actionable_error(): void
+    {
+        $user = User::factory()->create();
+        $roomType = $this->createRoomType();
+        $this->createRoom($roomType);
+        $this->createRoom($roomType);
+
+        $discount = Discount::create([
+            'code' => 'BATCHWIN',
+            'type' => 'percent',
+            'value' => 15,
+            'stay_from' => now()->addDays(2)->toDateString(),
+            'stay_until' => now()->addDays(5)->toDateString(),
+            'is_active' => true,
+        ]);
+
+        $booking = $this->createDraftBooking($user, $roomType);
+        $br = $booking->bookingRooms->first();
+
+        $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/discount-code", [
+                'code' => 'BATCHWIN',
+            ])->assertStatus(200);
+
+        // Batch update ย้ายวันออกนอก stay window
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'check_in' => now()->addDays(10)->toDateString(),
+                        'check_out' => now()->addDays(12)->toDateString(),
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonPath('message', 'การแก้ไขทำให้การจองไม่เข้าเกณฑ์โค้ด BATCHWIN อีกต่อไป — กรุณาลบโค้ดส่วนลดก่อน (DELETE /bookings/'.$booking->id.'/discount-code) แล้วลองแก้ไขอีกครั้งค่ะ');
     }
 
     // 🌟 Refactor (18/06/26): lookup & requestPaymentForGuest routes ถูกลบแล้ว — ไม่มี public guest access

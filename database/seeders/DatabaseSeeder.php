@@ -17,7 +17,8 @@ class DatabaseSeeder extends Seeder
         $this->call([
             UserSeeder::class,
             RoomSeeder::class,
-            AddonRateSeeder::class,
+            GlobalRateSeeder::class,
+            DiscountSeeder::class,
         ]);
     }
 }

@@ -2,8 +2,25 @@
 
 namespace App\Http\Requests;
 
+use App\Models\BookingRoom;
+use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
+/**
+ * 🌟 (17/08/26): Request สำหรับแก้ไข booking room รายห้อง
+ *
+ * ใช้กับ PUT /bookings/{bookingId}/rooms/{bookingRoomId}
+ * — สองโหมด (guard ใน controller):
+ *   1) parent booking status='draft' + BR status='draft' — แก้ไขปกติ (เจ้าของหรือ admin)
+ *   2) 💳 (25/09/26, ticket 10) parent booking status='paid|confirmed' + BR draft|confirmed —
+ *      surcharge หลังจ่าย (admin เท่านั้น) — reprice ใหม่ ส่วนต่างเก็บต่อผ่าน recordPayment
+ *
+ * โครงสร้าง flat (ไม่ซ้อน booking_rooms.*) ต่างจาก StoreBookingRequest/AddBookingRoomsRequest
+ * เพราะแก้ทีละห้องด้วย bookingRoomId ที่ระบุใน path
+ *
+ * 🚫 ไม่มี booking_id / room_id / status — ห้าม user ตั้งเอง
+ *    (room_id ต้องผ่าน RoomAllocator เท่านั้น, status ต้องผ่าน transitionStatus)
+ */
 class UpdateBookingRoomRequest extends FormRequest
 {
     public function authorize(): bool
@@ -14,9 +31,126 @@ class UpdateBookingRoomRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'booking_id'    => 'sometimes|required|uuid|exists:bookings,id',
-            'room_type_id'  => 'sometimes|required|uuid|exists:room_types,id',
-            'room_id'       => 'nullable|uuid|exists:rooms,id',
+            'room_type_id' => 'sometimes|required|uuid|exists:room_types,id',
+            'check_in' => 'sometimes|required|date|'.BookingRule::checkInRule($this->user('sanctum')),
+            'check_out' => 'sometimes|required|date|after:check_in',
+            // 🛏️ (04/09/26): input format = output format — canonical คือ addons.extra_bed
+            //    extra_beds (หัวห้อง) = legacy alias เก็บไว้ให้ frontend เดิม (resolve ที่ BookingController)
+            'extra_beds' => 'nullable|integer|min:0',
+
+            // 👥 ข้อมูลผู้เข้าพัก
+            'guests' => 'nullable|array',
+            'guests.*.title' => 'nullable|string|max:50',
+            'guests.*.firstName' => 'nullable|string|max:255',
+            'guests.*.lastName' => 'nullable|string|max:255',
+            'guests.*.first_name' => 'nullable|string|max:255',
+            'guests.*.last_name' => 'nullable|string|max:255',
+            'guests.*.name' => 'nullable|string|max:255',
+            'guests.*.email' => 'nullable|string|email|max:255',
+            'guests.*.phone' => 'nullable|string|max:50',
+            'guests.*.nationality' => 'nullable|string|max:100',
+
+            // 🏨 bed preference สำหรับ allocation algorithm (king_size = ห้องชั้น 8 | null = any)
+            'bed_preference' => 'nullable|string|in:king_size',
+
+            // 🧾 Billing fields
+            'billing_address' => 'nullable|string|max:255',
+            'billing_comment' => 'nullable|string|max:255',
+
+            // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
+            'addons' => 'nullable|array',
+            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
+            //    extra_beds_by_night (map รายคืน) · normalize ที่ App\Services\Addon\AddonPricing
+            'addons.breakfast_sets' => 'nullable|array',
+            'addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
+            'addons.breakfast_sets.set_200' => 'nullable|integer|min:0',
+            'addons.extra_beds_by_night' => 'nullable|array',
+            'addons.extra_beds_by_night.*' => 'nullable|integer|min:0',
+            // legacy alias — เก็บไว้ให้ frontend เดิม
+            'addons.extra_bed' => 'nullable|integer|min:0',
+            'addons.breakfast' => 'nullable|integer|min:0',
+            'addons.early_checkin' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            'addons.late_checkout' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            // 🔧 (01/09/26): alias รองรับ frontend ที่ส่งชื่อ column (early_hours/late_hours) มาแทน canonical key
+            'addons.early_hours' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            'addons.late_hours' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+        ];
+    }
+
+    /**
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามแก้วันที่ให้
+     *    จำนวนคืน (final หลัง merge กับค่าเดิม) >= block_min_nights (20) → 422
+     *    guard เฉพาะเมื่อ payload แตะวันที่ — แก้ addon/guests อย่างเดียว = จำนวนคืนคงเดิม ไม่เข้าเขตตรวจ
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if (! $this->has('check_in') && ! $this->has('check_out')) {
+                return;
+            }
+
+            $existing = BookingRoom::find($this->route('bookingRoomId'));
+
+            BookingRule::guardMonthlyNights($validator, $this->user('sanctum'), [[
+                'check_in' => $this->input('check_in') ?? $existing?->check_in,
+                'check_out' => $this->input('check_out') ?? $existing?->check_out,
+            ]], '');
+        });
+    }
+
+    /**
+     * 🌟 ข้อความแจ้งเตือนภาษาไทย
+     */
+    public function messages(): array
+    {
+        return [
+            'room_type_id.required' => 'กรุณาระบุประเภทห้อง',
+            'room_type_id.exists' => 'ไม่พบประเภทห้องที่ระบุ',
+            'check_in.required' => 'กรุณาระบุวันที่เช็คอิน',
+            'check_in.after_or_equal' => BookingRule::checkInMessage($this->user('sanctum')),
+            'check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์',
+            'check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอิน',
+            'bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',
+            'addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.late_checkout.integer' => 'จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'addons.late_checkout.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.late_checkout.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.early_hours.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'addons.early_hours.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.early_hours.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.late_hours.integer' => 'จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'addons.late_hours.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'addons.late_hours.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
         ];
     }
 }

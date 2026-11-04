@@ -1,0 +1,145 @@
+<?php
+
+namespace App\Models;
+
+use App\Casts\PgBoolean;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * 🌟 Refactor (22/07/26): GlobalRate (renamed from AddonRate)
+ *
+ * ตารางเดียวเก็บหลายประเภท rate:
+ *   - rate_type = 'addon'   → global lookup (breakfast, extra_bed, ...) ใช้ code เป็น key
+ *   - rate_type = 'daily'   → room rate รายวัน ผูกกับ room_type_id
+ *   - rate_type = 'group'   → room rate สำหรับ group booking ผูกกับ room_type_id
+ *   - rate_type = 'month'   → room rate รายเดือน ผูกกับ room_type_id
+ *
+ * 🌟 (22/10/26): room rate rows เก็บ code = ชื่อ rate_type เสมอ (daily/daily_ku/month →
+ * code = rate_type เดียวกัน · group → min_5_rooms/min_10_rooms) และ room_type_id = <id>
+ * addon rate rows จะมี code = <slug> และ room_type_id = NULL
+ */
+class GlobalRate extends Model
+{
+    use HasFactory, HasUuids;
+
+    protected $table = 'global_rates';
+
+    protected $fillable = [
+        'rate_type',
+        'room_type_id',
+        'code',
+        'name_en',
+        'name_th',
+        'default_price',
+        'is_active',
+    ];
+
+    protected $casts = [
+        'default_price' => 'integer',
+        // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
+        'is_active' => PgBoolean::class,
+    ];
+
+    /**
+     * Room rate rows ผูกกับ RoomType (addon rows จะเป็น NULL)
+     */
+    public function roomType(): BelongsTo
+    {
+        return $this->belongsTo(RoomType::class, 'room_type_id', 'id');
+    }
+
+    // ----------------------------------------------------------------------
+    // Addon rate lookups (rate_type = 'addon')
+    // ----------------------------------------------------------------------
+
+    /**
+     * ดึงราคา default ของ addon ตาม code (เช่น 'breakfast', 'extra_bed')
+     * ถ้าไม่พบหรือ inactive จะคืน 0
+     *
+     * Filter เฉพาะ rate_type='addon' เพื่อกัน query ไปโดน room rate rows
+     */
+    public static function getPrice(string $code): int
+    {
+        // 🌟 Fix PostgreSQL (03/07/26): where ใช้ DB::raw('TRUE') แทน PHP true
+        $rate = self::where('code', $code)
+            ->where('rate_type', 'addon')
+            ->whereRaw('is_active = TRUE')
+            ->first();
+
+        return $rate ? $rate->default_price : 0;
+    }
+
+    /**
+     * ดึง addon rate หลายตัวพร้อมกัน (cache-friendly)
+     * คืน associative array [code => price]
+     */
+    public static function getPrices(array $codes): array
+    {
+        return self::whereIn('code', $codes)
+            ->where('rate_type', 'addon')
+            ->whereRaw('is_active = TRUE')
+            ->pluck('default_price', 'code')
+            ->toArray();
+    }
+
+    // ----------------------------------------------------------------------
+    // Room rate lookups (rate_type = 'daily' | 'group' | 'month')
+    // ----------------------------------------------------------------------
+
+    /**
+     * ดึง room rate ตาม RoomType + rate_type (+ optional code)
+     * ถ้าไม่พบหรือ inactive จะคืน 0
+     *
+     * @param  RoomType|string  $roomType  Model instance หรือ room_type_id
+     * @param  string  $rateType  'daily' | 'daily_ku' | 'group' | 'month'
+     * @param  string|null  $code  รหัสกลุ่ม (เช่น 'min_5_rooms', 'min_10_rooms')
+     */
+    public static function getRoomRate($roomType, string $rateType = 'daily', ?string $code = null): int
+    {
+        $roomTypeId = $roomType instanceof RoomType ? $roomType->id : $roomType;
+
+        $query = self::where('room_type_id', $roomTypeId)
+            ->where('rate_type', $rateType)
+            ->whereRaw('is_active = TRUE');
+
+        if ($code !== null) {
+            $query->where('code', $code);
+        } else {
+            // 🌟 (22/10/26): convention ใหม่ — code = ชื่อ rate_type (migration 2026_10_22_131500)
+            // ยังรับแถว code NULL เดิมด้วย (tolerant) — กันช่วง transition ระหว่าง deploy โค้ดใหม่
+            // ก่อน migrate ไม่งั้นราคาคิดได้ 0
+            $query->where(function ($q) use ($rateType) {
+                $q->where('code', $rateType)->orWhereNull('code');
+            });
+        }
+
+        $rate = $query->first();
+
+        return $rate ? $rate->default_price : 0;
+    }
+
+    /**
+     * ดึง daily rate ที่มีผลบังคับใช้ตามสิทธิ์ของผู้ใช้ (User role)
+     * - ถ้า $user->role === 'ku_member' → ลองดึงเรท 'daily_ku' ก่อน
+     * - ถ้าไม่มี 'daily_ku' (หรือเป็น 0 หรือ inactive) หรือผู้ใช้ไม่ใช่ ku_member → fallback ไป 'daily'
+     *
+     * @param  RoomType|string  $roomType  Model instance หรือ room_type_id
+     * @param  User|null  $user  ผู้ใช้ที่ทำการจอง
+     */
+    public static function getEffectiveDailyRate($roomType, ?User $user = null): int
+    {
+        $roomTypeId = $roomType instanceof RoomType ? $roomType->id : $roomType;
+
+        if ($user && $user->role === 'ku_member') {
+            $kuRate = self::getRoomRate($roomTypeId, 'daily_ku');
+            if ($kuRate > 0) {
+                return $kuRate;
+            }
+        }
+
+        return self::getRoomRate($roomTypeId, 'daily');
+    }
+}

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\BookingRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreBookingRequest extends FormRequest
@@ -11,35 +12,156 @@ class StoreBookingRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $user = $this->user('sanctum');
+        if ((! $user || $user->role !== 'admin') && $this->input('source') === 'admin') {
+            $this->merge(['source' => 'online']);
+        }
+    }
+
     public function rules(): array
     {
+        // 🏛️ (20/10/26, amendment ของ organization-bookings ticket 02 — owner ตัดสินใหม่):
+        //    room cap ใช้ role ของผู้ล็อกอิน (auth) เสมอ — admin จองแทน user (โหมด A) ก็ไม่โดน cap
+        //    เดิม (25/09/26) คิดจาก role ของ target user · draft-dedup/ราคา daily_ku ยังใช้ target ตามเดิม
+        $bookingRoomsRules = ['required', 'array'];
+        if ($roomCapRule = BookingRule::roomCapRule($this->user('sanctum'))) {
+            $bookingRoomsRules[] = $roomCapRule;
+        }
+
         return [
-            'source'             => 'required|string|in:online,admin,line',
-            'check_in'           => 'required|date|after_or_equal:today',
-            'check_out'          => 'required|date|after:check_in',
+            'source' => 'required|string|in:online,admin,line',
+
+            // 🏛️ (25/09/26, organization-bookings ticket 02): โหมด A จองแทน —
+            //    ระบุ user ปลายทางด้วย UUID · ส่งได้เฉพาะ admin (ตรวจสิทธิ์ 403 ใน controller)
+            'user' => 'nullable|uuid|exists:users,id',
+
+            // 🏛️ (25/09/26, organization-bookings ticket 03): โหมด org — จองให้องค์กรโดยไม่ผูก account
+            //    `organize` = erp code string → server lookup เป็น FK organization_id (ไม่เก็บ erp บน bookings
+            //    ตาม replaceability contract ของ ticket 01) · lookup ไม่เจอ/inactive → 422 (ใน controller)
+            //    cross-field: user×organize mutually exclusive + organize บังคับ customer_name — ตรวจใน controller
+            //    customer_name โดยไม่มี organize = โหมด B เฮดเปล่าระบุคนเข้าพัก (ticket 02)
+            'organize' => 'nullable|string|max:100',
+            'customer_name' => 'nullable|string|max:255',
+            'customer_phone' => 'nullable|string|max:50',
+            'customer_email' => 'nullable|string|email|max:255',
 
             // 🌟 Refactor (18/06/26): ข้อมูลผู้เข้าพักย้ายไปอยู่ใน booking_rooms (รองรับหลายคน/ห้อง)
             // bookings ไม่รับ guest fields แล้ว
 
-            'booking_rooms'                  => 'required|array',
-            'booking_rooms.*.room_type_id'   => 'required|uuid|exists:room_types,id',
-            'booking_rooms.*.quantity'       => 'required|integer|min:1',
-            'booking_rooms.*.extra_beds'     => 'nullable|integer|min:0',
+            // 🌟 Refactor (25/06/26): 1 array entry = 1 ห้อง (ไม่มี quantity multiplier แล้ว)
+            // 🌟 Refactor (02/07/26): check_in/check_out ย้ายไป BR-level (แต่ละห้องต่างวันได้)
+            // 🚪 Room cap (16/09/26): ลิมิตห้องต่อ booking สำหรับ non-admin
+            'booking_rooms' => $bookingRoomsRules,
+            'booking_rooms.*.room_type_id' => 'required|uuid|exists:room_types,id',
+            'booking_rooms.*.check_in' => 'required|date|'.BookingRule::checkInRule($this->user('sanctum')),
+            'booking_rooms.*.check_out' => 'required|date|after:booking_rooms.*.check_in',
+            // 🛏️ (04/09/26): input format = output format — canonical คือ addons.extra_bed
+            //    extra_beds (หัวห้อง) = legacy alias เก็บไว้ให้ frontend เดิม (resolve ที่ BookingController)
+            'booking_rooms.*.extra_beds' => 'nullable|integer|min:0',
 
             // 👥 ข้อมูลผู้เข้าพักในแต่ละห้อง (array ของ guests)
             // รองรับหลายคนต่อห้อง; ถ้าไม่ส่งมา ระบบจะใช้ชื่อผู้จอง (user) เป็น default
-            'booking_rooms.*.guests'                 => 'nullable|array',
-            'booking_rooms.*.guests.*.title'         => 'nullable|string|max:50',
-            'booking_rooms.*.guests.*.name'          => 'nullable|string|max:255',
-            'booking_rooms.*.guests.*.nationality'   => 'nullable|string|max:100',
-            'booking_rooms.*.guests.*.is_ku_member'  => 'nullable|boolean',
-            'booking_rooms.*.children'               => 'nullable|integer|min:0',
+            'booking_rooms.*.guests' => 'nullable|array',
+            'booking_rooms.*.guests.*.title' => 'nullable|string|max:50',
+            'booking_rooms.*.guests.*.firstName' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.lastName' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.first_name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.last_name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.name' => 'nullable|string|max:255',
+            'booking_rooms.*.guests.*.email' => 'nullable|string|email|max:255',
+            'booking_rooms.*.guests.*.phone' => 'nullable|string|max:50',
+            'booking_rooms.*.guests.*.nationality' => 'nullable|string|max:100',
 
-            'booking_rooms.*.addons'                    => 'nullable|array',
-            'booking_rooms.*.addons.breakfast'           => 'nullable|integer|min:0',
-            'booking_rooms.*.addons.early_checkin'       => 'nullable|boolean',
-            'booking_rooms.*.addons.late_checkout'       => 'nullable|boolean',
+            // 🏨 bed preference สำหรับ allocation algorithm (king_size = ห้องชั้น 8 | null = any)
+            'booking_rooms.*.bed_preference' => 'nullable|string|in:king_size',
+
+            // 🧾 Billing fields (04/08/26)
+            'booking_rooms.*.billing_address' => 'nullable|string|max:255',
+            'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
+
+            'booking_rooms.*.addons' => 'nullable|array',
+            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
+            //    extra_beds_by_night (map รายคืน) · legacy breakfast/extra_bed ยังรับ
+            //    (normalize: canonical → legacy → ค่าเดิม ที่ App\Services\Addon\AddonPricing)
+            'booking_rooms.*.addons.breakfast_sets' => 'nullable|array',
+            'booking_rooms.*.addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.breakfast_sets.set_200' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.extra_beds_by_night' => 'nullable|array',
+            'booking_rooms.*.addons.extra_beds_by_night.*' => 'nullable|integer|min:0',
+            // legacy alias — เก็บไว้ให้ frontend เดิม
+            'booking_rooms.*.addons.extra_bed' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.breakfast' => 'nullable|integer|min:0',
+            'booking_rooms.*.addons.early_checkin' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            'booking_rooms.*.addons.late_checkout' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            // 🔧 (01/09/26): alias รองรับ frontend ที่ส่งชื่อ column (early_hours/late_hours) มาแทน canonical key
+            'booking_rooms.*.addons.early_hours' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+            'booking_rooms.*.addons.late_hours' => [
+                'nullable', 'integer', 'min:0', 'max:7',
+                function ($attribute, $value, $fail) {
+                    if (is_bool($value)) {
+                        $fail('จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ');
+                    }
+                },
+            ],
+
+            // 🎟️ Discount (27/08/26)
+            'discount_code' => 'nullable|string|max:50',
+
+            // 💳 booking-payment-types (25/09/26): ตั้งได้ admin/system เท่านั้น —
+            //    ตรวจสิทธิ์ใน controller (input มี field ใดตัวหนึ่ง → non-admin 403)
+            //    deposit_amount มีความหมายเฉพาะ deposit — cross-field ตรวจใน controller
+            'payment_type' => 'nullable|in:full,deposit,deferred',
+            'deposit_amount' => 'nullable|integer|min:1',
+
+            // 📊 (05/10/26, excel-reports spec ticket 09): ตั้งได้ admin/system เท่านั้น — ตรวจสิทธิ์ 403 ใน controller
+            'invoice_requested_at' => 'nullable|date',
+            'special_request' => 'nullable|string|max:2000',
+            'comment' => 'nullable|string|max:2000',
+            'is_complimentary' => 'nullable|boolean',
         ];
+    }
+
+    /**
+     * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามส่งห้องที่
+     *    จำนวนคืน >= block_min_nights (20) → 422 (เขตรายเดือนเป็นเขตของ admin)
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            BookingRule::guardMonthlyNights(
+                $validator,
+                $this->user('sanctum'),
+                collect($this->input('booking_rooms', []))
+                    ->map(fn ($room) => [
+                        'check_in' => $room['check_in'] ?? null,
+                        'check_out' => $room['check_out'] ?? null,
+                    ])
+                    ->all()
+            );
+        });
     }
 
     /**
@@ -48,18 +170,43 @@ class StoreBookingRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'source.required'                => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
-            'source.in'                      => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
-            'check_in.required'              => 'กรุณาระบุวันที่เช็คอิน',
-            'check_in.after_or_equal'        => 'วันที่เช็คอินต้องไม่เป็นวันในอดีต',
-            'check_out.required'             => 'กรุณาระบุวันที่เช็คเอาท์',
-            'check_out.after'                => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอิน',
-            'booking_rooms.required'         => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
-            'booking_rooms.array'            => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
+            'source.required' => 'กรุณาระบุแหล่งที่มาของการจอง (online, admin, line)',
+            'source.in' => 'แหล่งที่มาต้องเป็น online, admin หรือ line เท่านั้น',
+            'organize.max' => 'รหัสองค์กร (organize) ต้องไม่เกิน 100 ตัวอักษรค่ะ 🏛️',
+            'customer_name.max' => 'ชื่อผู้ติดต่อ/ผู้เข้าพัก (customer_name) ต้องไม่เกิน 255 ตัวอักษรค่ะ 🏛️',
+            'customer_phone.max' => 'เบอร์โทรศัพท์ต้องไม่เกิน 50 ตัวอักษรค่ะ 🏛️',
+            'customer_email.email' => 'รูปแบบอีเมลไม่ถูกต้องค่ะ 🏛️',
+            'customer_email.max' => 'อีเมลต้องไม่เกิน 255 ตัวอักษรค่ะ 🏛️',
+            'discount_code.max' => 'รหัสส่วนลดต้องไม่เกิน 50 ตัวอักษร',
+            'payment_type.in' => 'ประเภทการชำระเงินต้องเป็น full, deposit หรือ deferred เท่านั้นค่ะ 💳',
+            'deposit_amount.integer' => 'ยอดมัดจำต้องเป็นตัวเลขจำนวนเต็ม (บาท) ค่ะ 💳',
+            'deposit_amount.min' => 'ยอดมัดจำต้องมากกว่า 0 บาทค่ะ 💳',
+            'invoice_requested_at.date' => 'วันที่ขอใบแจ้งหนี้ต้องเป็นรูปแบบวันที่ที่ถูกต้องค่ะ 🧾',
+            'special_request.max' => 'คำขอพิเศษต้องไม่เกิน 2000 ตัวอักษรค่ะ 📝',
+            'comment.max' => 'หมายเหตุต้องไม่เกิน 2000 ตัวอักษรค่ะ 📝',
+            'is_complimentary.boolean' => 'สถานะ complimentary ต้องเป็น true หรือ false ค่ะ 💳',
+            'booking_rooms.required' => 'กรุณาระบุห้องที่ต้องการจองอย่างน้อย 1 ห้อง',
+            'booking_rooms.array' => 'รูปแบบข้อมูลห้องที่จองไม่ถูกต้อง',
+            'booking_rooms.max' => BookingRule::roomCapMessage($this->user('sanctum')),
             'booking_rooms.*.room_type_id.required' => 'กรุณาระบุประเภทห้อง',
-            'booking_rooms.*.room_type_id.exists'   => 'ไม่พบประเภทห้องที่ระบุ',
-            'booking_rooms.*.quantity.required'     => 'กรุณาระบุจำนวนห้อง',
-            'booking_rooms.*.quantity.min'          => 'จำนวนห้องต้องอย่างน้อย 1 ห้อง',
+            'booking_rooms.*.room_type_id.exists' => 'ไม่พบประเภทห้องที่ระบุ',
+            'booking_rooms.*.check_in.required' => 'กรุณาระบุวันที่เช็คอินของแต่ละห้อง',
+            'booking_rooms.*.check_in.after_or_equal' => BookingRule::checkInMessage($this->user('sanctum')),
+            'booking_rooms.*.check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์ของแต่ละห้อง',
+            'booking_rooms.*.check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอินของห้องนั้น',
+            'booking_rooms.*.bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',
+            'booking_rooms.*.addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'booking_rooms.*.addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_checkout.integer' => 'จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'booking_rooms.*.addons.late_checkout.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_checkout.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.early_hours.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'booking_rooms.*.addons.early_hours.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.early_hours.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_hours.integer' => 'จำนวนชั่วโมง late check-out ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
+            'booking_rooms.*.addons.late_hours.min' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
+            'booking_rooms.*.addons.late_hours.max' => 'ชั่วโมง late check-out ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
         ];
     }
 }
