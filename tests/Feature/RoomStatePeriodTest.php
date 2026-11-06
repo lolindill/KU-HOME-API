@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdditionalCharge;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\Room;
@@ -379,7 +380,7 @@ class RoomStatePeriodTest extends TestCase
             paymentDeadline: now()->addMinutes(15),
         );
 
-        \App\Models\AdditionalCharge::create([
+        AdditionalCharge::create([
             'id' => Str::uuid(),
             'booking_id' => $draft->id,
             'transaction_date' => now()->toDateString(),
@@ -798,8 +799,9 @@ class RoomStatePeriodTest extends TestCase
             'end_date' => null,
         ]);
 
-        $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
-            'assigned_rooms' => [$room->id],
+        // 🛎️ (2026-11-06) per-room endpoint — มอบหมายห้องด้วย room_id
+        $this->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/check-in", [
+            'room_id' => $room->id,
         ])->assertStatus(422)->assertJson(['status' => 'error']);
 
         // ไม่มีอะไร transition
@@ -830,8 +832,8 @@ class RoomStatePeriodTest extends TestCase
             'end_date' => null,
         ]);
 
-        $this->postJson("/api/v1/front-desk/{$booking->id}/check-in", [
-            'assigned_rooms' => [$room->id],
+        $this->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/check-in", [
+            'room_id' => $room->id,
         ])->assertStatus(200);
 
         $this->assertSame('checked_in', $br->fresh()->status);

@@ -2629,22 +2629,36 @@ Creates a booking + immediately checks in. Used when a guest arrives at the hote
 
 ---
 
-### POST `/front-desk/{bookingId}/check-in` — Check-in guest
+### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/check-in` — Check-in (per-room)
 
-🔒 **Admin only**
+🔒 **Admin + Staff**
 
-Assigns rooms (if not yet assigned) and transitions booking to `checked_in`.
+> ⚠️ **(2026-11-06) Breaking change** — แทนที่ `POST /front-desk/{bookingId}/check-in` (booking-level) ทั้งหมด เช็คอิน "**รายห้อง**" (booking_room) — บิล multi-room แขกมาถึงไม่พร้อมกันเช็คอินย่อยได้ เรียกซ้ำทีละห้องจนครบ
+
+Assigns the room (if not yet assigned) and transitions the booking_room to `checked_in`.
 
 **Request Body:**
 ```json
 {
-  "assigned_rooms": ["room-uuid-1", "room-uuid-2"]
+  "room_id": "room-uuid"
 }
 ```
 
-> - `assigned_rooms` is optional but if provided, **count must match** the number of booking_rooms
-> - Each room's `room_type_id` must match the booked room type
-> - Can send single UUID as string; server will normalize to array
+> - `room_id` is **optional** — ไม่ส่ง = ใช้ห้องที่ผูกไว้แล้ว (`booking_rooms.room_id`), ส่งมา = มอบหมาย/เปลี่ยนห้องตอนเช็คอิน
+> - ห้องต้องตรง `room_type_id` กับที่จองไว้ + ไม่มี booking อื่น (holdingSlot) ทับช่วงพัก + ไม่ติด **maintenance period** ทับช่วงพัก
+
+**Guards (state machine):**
+
+| เงื่อนไข | ผลลัพธ์ |
+|---|---|
+| BR ยังเป็น `draft` | promote เป็น `confirmed` แล้ว `checked_in` ต่อให้ (two-step) |
+| BR `checked_in` อยู่แล้ว | `422` — เช็คอินซ้ำไม่ได้ |
+| BR `checked_out` / `no_show` | `422` |
+| Booking `draft` | `400` — ต้องบันทึกการชำระเงินก่อน (draft → paid) |
+| Booking `pending` / `verify_error` | `422` — ต้องเป็น paid หรือ confirmed |
+| Booking `paid` | ผ่าน — **ห้องแรกที่เช็คอิน promote บิล → `confirmed`** |
+| Booking `complete` | `422` — บิลปิดแล้ว |
+| `bookingRoomId` ไม่ใช่ลูกของบิลนี้ | `404` |
 
 **Response `200`:**
 ```json
@@ -2652,7 +2666,8 @@ Assigns rooms (if not yet assigned) and transitions booking to `checked_in`.
   "status": "success",
   "message": "Check-in completed successfully! 🎉",
   "booking_id": "booking-uuid",
-  "booking_status": "checked_in",
+  "booking_status": "confirmed",
+  "booking_room_id": "booking-room-uuid",
   "room_updates": [
     {
       "room_number": "101",
@@ -2664,13 +2679,17 @@ Assigns rooms (if not yet assigned) and transitions booking to `checked_in`.
 
 ---
 
-### POST `/front-desk/{bookingId}/check-out` — Check-out guest
+### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/check-out` — Check-out (per-room)
 
-🔒 **Admin only**
+🔒 **Admin + Staff**
 
-Requires all payments to be completed. Auto-creates housekeeping tasks.
+> ⚠️ **(2026-11-06) Breaking change** — แทนที่ `POST /front-desk/{bookingId}/check-out` (booking-level) ทั้งหมด เช็คเอาท์ "**รายห้อง**" — บิล multi-room แขกออกไม่พร้อมกันได้
+>
+> 💰 **มติ "ตั้งแต่ห้องแรก" (2026-11-06):** เช็คเอาท์ห้องไหนก็ตาม **ต้องชำระครบทั้งบิลก่อน** (`paid ≥ total_amount + charges_total`) — กติกาการเงินเดิมเป๊ะ ไม่มีการแบ่งยอดรายห้อง
+>
+> 💳 **ยกเว้นบิล `payment_type=deferred` (ค้างชำระ):** checkout ได้แม้ยอดค้าง (ทั้งค่าห้องและ additional charges) — ห้องเข้า `checkout_makeup` ตามปกติ โดย `is_paid` คง `false` จนกว่าจะชำระครบ เก็บยอดค้างต่อภายหลังผ่าน `POST /front-desk/{bookingId}/payment` (บิล `complete` จ่ายครบแล้วระบบจะ set `is_paid=true` ให้เอง ไม่มีการ transition สถานะ)
 
-> 💳 **ยกเว้นบิล `payment_type=deferred` (ค้างชำระ, 2026-11-06):** checkout ได้แม้ยอดค้าง (ทั้งค่าห้องและ additional charges) — ห้องเข้า `checkout_makeup` + booking `complete` ตามปกติ โดย `is_paid` คง `false` จนกว่าจะชำระครบ เก็บยอดค้างต่อภายหลังผ่าน `POST /front-desk/{bookingId}/payment` (บิล `complete` จ่ายครบแล้วระบบจะ set `is_paid=true` ให้เอง ไม่มีการ transition สถานะ)
+ห้องเข้า `checkout_makeup` + auto-create housekeeping task · เมื่อทุกห้องในบิลจบ (`checked_out` หรือ `no_show` หมด) ระบบปิดบิล `complete` ให้อัตโนมัติ
 
 **Request Body:**
 ```json
@@ -2680,13 +2699,22 @@ Requires all payments to be completed. Auto-creates housekeeping tasks.
 }
 ```
 
+**Guards (state machine):**
+
+| เงื่อนไข | ผลลัพธ์ |
+|---|---|
+| BR ต้องเป็น `checked_in` | อื่น ๆ → `422` |
+| ยอดค้าง (non-deferred) | `400` — `ยังมีรายการค้างชำระอยู่ X บาท...` |
+| `bookingRoomId` ไม่ใช่ลูกของบิลนี้ | `404` |
+
 **Response `200`:**
 ```json
 {
   "status": "success",
   "message": "Check-out completed successfully. สร้างงานให้ทีมแม่บ้านเรียบร้อยค่ะ!",
   "booking_id": "booking-uuid",
-  "booking_status": "checked_out",
+  "booking_status": "complete",
+  "booking_room_id": "booking-room-uuid",
   "room_updates": [
     {
       "room_number": "101",
@@ -3613,6 +3641,12 @@ Returns tasks with status `pending` or `in_progress`.
 > `room_type_id` ได้เมื่อ type ใหม่ **แพงกว่าเท่านั้น** (upgrade-only) · BR **คงสถานะ `checked_in`**
 > (การย้ายไม่ใช่ transition — จด audit ผ่าน note row ใน `status_change_logs`) · ห้องเก่า
 > `occupied → checkout_makeup` + งานแม่บ้าน · ห้องใหม่ `→ occupied` · รายละเอียด endpoint ดูหัว Front Desk Operations
+>
+> 🛎️ **(2026-11-06) Per-room check-in/check-out:** `confirmed → checked_in` (`check-in`) และ
+> `checked_in → checked_out` (`check-out`) ทำผ่าน `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/check-in|check-out`
+> (admin+staff) — **แทนที่ booking-level `POST /front-desk/{bookingId}/check-in|check-out` ทั้งหมด** บิล multi-room
+> เช็คอิน/เอาท์รายห้องได้ · ห้องแรกเช็คอิน promote container `paid → confirmed` · เช็คเอาท์ทุกครั้งต้องชำระครบทั้งบิล
+> (deferred ยกเว้น — มติ "ตั้งแต่ห้องแรก") · ห้องสุดท้ายที่จบ container ปิด `complete` เอง (auto-sync เดิม)
 
 ---
 
@@ -3735,12 +3769,12 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
   }'
 ```
 
-**Check-in (Front Desk):**
+**Check-in (Front Desk, per-room — 2026-11-06):**
 ```bash
-curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/check-in \
+curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/rooms/booking-room-uuid/check-in \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 1|admin_token_here" \
-  -d '{"assigned_rooms":["room-uuid-1"]}'
+  -d '{"room_id":"room-uuid-1"}'
 ```
 
 ---
