@@ -565,16 +565,20 @@ class FrontDeskController extends Controller
                 throw new \Exception('ยังมีห้องที่ไม่ได้ Check-in อยู่ค่ะ จะ Check-out ไม่ได้น้า');
             }
 
-            // ตรวจสอบยอดชำระเงิน
-            $totalPaid = Payment::where('booking_id', $bookingId)
-                ->where('status', 'completed')
-                ->sum('amount');
+            // 💳 (2026-11-06) บิล deferred (ค้างชำระ) ข้ามการตรวจยอดค้างตอน Check-out —
+            //    เก็บเงินปลายทางทีหลังผ่าน recordPayment ได้ (บิล complete จ่ายครบแล้วจะ set is_paid=true ตามปกติ)
+            if ($booking->payment_type !== 'deferred') {
+                // ตรวจสอบยอดชำระเงิน
+                $totalPaid = Payment::where('booking_id', $bookingId)
+                    ->where('status', 'completed')
+                    ->sum('amount');
 
-            $grandTotal = $booking->total_amount + $booking->charges_total;
+                $grandTotal = $booking->total_amount + $booking->charges_total;
 
-            if ($totalPaid < $grandTotal) {
-                $pendingAmount = $grandTotal - $totalPaid;
-                throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
+                if ($totalPaid < $grandTotal) {
+                    $pendingAmount = $grandTotal - $totalPaid;
+                    throw new \Exception("ยังมีรายการค้างชำระอยู่ {$pendingAmount} บาทค่ะนายท่าน กรุณารับชำระเงินก่อนนะคะ");
+                }
             }
 
             $roomUpdates = [];
