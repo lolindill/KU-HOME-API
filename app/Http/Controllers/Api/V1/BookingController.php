@@ -1960,6 +1960,8 @@ class BookingController extends Controller
                 ->whereRaw('LOWER(customer_name) LIKE ?', [$lowerEscaped]);
         };
 
+        // 🔍 (06/11/26) term ค้นเลข confirmation ด้วย (format YYYYMM-XXXXX — partial LIKE)
+        //    scope ปลอดภัย: non-admin โดน where('user_id') ตั้งแต่ต้นทาง เห็นเฉพาะบิลตัวเอง
         return $query->where(function ($q) use ($escaped, $term, $guestNameFilter, $customerNameFilter) {
             if (Str::isUuid($term)) {
                 $q->where('user_id', $term)
@@ -1967,12 +1969,14 @@ class BookingController extends Controller
                         $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                     })
                     ->orWhere($customerNameFilter)
+                    ->orWhere('confirmation', 'LIKE', '%'.$escaped.'%')
                     ->orWhereHas('bookingRooms', $guestNameFilter);
             } else {
                 $q->whereHas('user', function ($userQuery) use ($escaped) {
                     $userQuery->where('name', 'LIKE', '%'.$escaped.'%');
                 })
                     ->orWhere($customerNameFilter)
+                    ->orWhere('confirmation', 'LIKE', '%'.$escaped.'%')
                     ->orWhereHas('bookingRooms', $guestNameFilter);
             }
         });

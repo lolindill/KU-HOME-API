@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdditionalCharge;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
@@ -386,6 +387,43 @@ class BookingTest extends TestCase
         $response = $this->getJson('/api/v1/bookings?term=Test');
         $response->assertStatus(200);
         $response->assertJsonPath('status', 'success');
+    }
+
+    // ============================================
+    // 🔍 Booking search by confirmation number (GET /bookings?term=YYYYMM-XXXXX)
+    // ============================================
+
+    public function test_admin_can_search_bookings_by_confirmation_number(): void
+    {
+        $this->actingAsAdmin();
+        $november = $this->createBooking(['confirmation' => '202611-00042']);
+        $october = $this->createBooking(['confirmation' => '202610-00007']);
+        $this->createBooking();
+
+        // ค้นเลขเต็ม — ต้องเจอบิลเดียว
+        $response = $this->getJson('/api/v1/bookings?term=202611-00042');
+        $response->assertStatus(200);
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($november->id, $bookingIds);
+        $this->assertCount(1, $bookingIds, 'ค้นเลข confirmation เต็ม ต้องเจอบิลเดียว');
+
+        // ค้นบางส่วน (เลขลำดับท้าย) — LIKE partial ต้องเจอ และไม่ตีคู่หลุด
+        $response = $this->getJson('/api/v1/bookings?term=00007');
+        $response->assertStatus(200);
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($october->id, $bookingIds);
+        $this->assertNotContains($november->id, $bookingIds);
+    }
+
+    public function test_user_cannot_see_other_users_booking_via_confirmation_search(): void
+    {
+        $owner = User::factory()->create(['role' => 'user']);
+        $this->createBooking(['user_id' => $owner->id, 'confirmation' => '202611-00099']);
+
+        $this->actingAsUser();
+        $response = $this->getJson('/api/v1/bookings?term=202611-00099');
+        $response->assertStatus(200);
+        $this->assertCount(0, $response->json('bookings'), 'ค้นเลข confirmation ของคนอื่น ต้องไม่เห็นบิลค่ะ');
     }
 
     // ============================================
@@ -789,7 +827,7 @@ class BookingTest extends TestCase
     {
         $this->actingAsAdmin();
         $booking = $this->createBooking(); // draft booking
-        \App\Models\AdditionalCharge::create([
+        AdditionalCharge::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'transaction_date' => now()->toDateString(),

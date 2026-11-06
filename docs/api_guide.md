@@ -1195,7 +1195,7 @@ curl -s -H "Accept: application/json" \
 
 | Param             | Type   | Description                                          |
 |-------------------|--------|------------------------------------------------------|
-| `term`            | string | Search by user name, UUID, guest name, or `customer_name` (org booking / เฮดเปล่า — 2026-09-25) |
+| `term`            | string | Search by user name, UUID, guest name, or `customer_name` (org booking / เฮดเปล่า — 2026-09-25) · 🔍 ค้น**เลข confirmation** ได้ด้วย — format `YYYYMM-XXXXX` (เช่น `term=202611-00042` หรือ partial `term=00042`) (06/11/26) · non-admin เห็นเฉพาะบิลตัวเองตาม scope เดิม |
 | `check_in`        | date   | Filter start date                                    |
 | `check_out`       | date   | Filter end date                                      |
 | `room_type`       | uuid   | Filter by room type (or `all` for no filter — default)|
