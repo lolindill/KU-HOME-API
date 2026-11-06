@@ -30,6 +30,11 @@ use Illuminate\Support\Facades\Storage;
  * 🌟 Refactor (25/08/26): reject เปลี่ยน booking เป็น 'verify_error' แทนการกลับ draft — ไม่ถูก cleanup ลบ
  *
  * 1:N — 1 booking มีได้หลาย confirmation (history) แต่มี pending ได้ทีละ 1 row (guard กัน spam)
+ *
+ * 💳 (06/11/26, owner — ย้อนมติ 25/09/26): บิล **deferred** รับสลิปผ่าน confirm ได้แล้วทุกสถานะหลัก
+ *    (draft/verify_error/paid/confirmed — เก็บยอดค้างเป็นงวดด้วยสลิปได้) · ผู้ส่งเป็น **admin**
+ *    → instant-verify (confirmation verified + ledger จุดที่ 4 + บิล confirmed ทันที) ·
+ *    เจ้าของส่ง → flow เดิม (pending รอ verify) · บิล full/deposit คงเดิมทุกอย่าง
  */
 class BookingConfirmationController extends Controller
 {
@@ -45,28 +50,36 @@ class BookingConfirmationController extends Controller
 
         $booking = Booking::findOrFail($bookingId);
 
-        // 💳 (25/09/26, ticket 05 หัวข้อ 3 — owner ตัดสิน): deferred บล็อกสลิป ก่อน state guard เดิม —
-        //    deferred มีช่องเดียวคือ admin confirm (PUT /bookings/update/{id}) หรือลบ draft
-        //    (verify_error เกิดจาก deferred ไม่ได้อยู่แล้ว — draft ก็ block)
-        if ($booking->payment_type === 'deferred') {
-            return $this->error('booking ค้างชำระ — รอแอดมินอนุมัติ ไม่รับสลิปค่ะนายท่าน 💳', 422);
-        }
+        // 💳 (06/11/26, owner — ย้อนมติ 25/09/26 "deferred บล็อกสลิป"): บิล deferred รับสลิปผ่าน endpoint นี้ได้แล้ว
+        //    (FE AdminConfirm แนบสลิปทุกครั้งที่ add/update บิล) — state guard ขยายตาม payment_type
+        $isDeferred = $booking->payment_type === 'deferred';
 
-        // ownership check (เจ้าของหรือ admin เท่านั้น)
+        // ownership check (เจ้าของหรือ admin เท่านั้น) — deferred โหมด B (user_id null) เหลือ admin เท่านั้น
         if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
             return $this->error('ไม่มีสิทธิ์ส่งหลักฐานการชำระสำหรับ booking นี้ค่ะ', 403);
         }
 
-        // state guard — รับเฉพาะ draft หรือ verify_error (หลัง reject booking จะเป็น verify_error เพื่อส่งใหม่)
-        if (! in_array($booking->status, ['draft', 'verify_error'], true)) {
+        // state guard — บิลปกติรับเฉพาะ draft/verify_error (หลัง reject booking จะเป็น verify_error เพื่อส่งใหม่)
+        // 💳 deferred รับเพิ่ม paid/confirmed (เก็บยอดค้างเป็นงวดด้วยสลิปได้) — 'pending' ยังกันด้วย
+        //    existing-pending guard (สลิปค้างสูงสุด 1) · บิล full/deposit ที่จ่ายแล้วเก็บต่อผ่าน recordPayment เท่านั้น
+        $allowedStates = $isDeferred
+            ? ['draft', 'verify_error', 'paid', 'confirmed']
+            : ['draft', 'verify_error'];
+        if (! in_array($booking->status, $allowedStates, true)) {
+            $hint = $isDeferred
+                ? 'รับเฉพาะ draft, verify_error, paid หรือ confirmed (pending = มีสลิปรอตรวจอยู่)'
+                : 'รับเฉพาะ draft หรือ verify_error เท่านั้น';
+
             return $this->error(
-                "ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' (รับเฉพาะ draft หรือ verify_error เท่านั้น)",
+                "ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' ({$hint})",
                 422
             );
         }
 
         // payment_deadline guard (ตรวจเฉพาะ draft — verify_error ส่งใหม่ได้แม้หมด deadline)
-        if ($booking->status === 'draft' && $booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
+        // 💳 (06/11/26): deferred ไม่มีวันหมดอายุ — CleanupExpiredDrafts ยกเว้น deferred อยู่แล้ว
+        //    (ยึด slot ต่อแม้เลย 15 นาที) จึงต้องข้าม deadline guard ไม่งั้นบิล deferred เกิน 15 นาทีส่งสลิปไม่ได้
+        if (! $isDeferred && $booking->status === 'draft' && $booking->payment_deadline && Carbon::now()->isAfter($booking->payment_deadline)) {
             return $this->error('หมดเวลาชำระเงินแล้วค่ะ ไม่สามารถดำเนินการได้', 422);
         }
 
@@ -98,8 +111,8 @@ class BookingConfirmationController extends Controller
 
             $booking = Booking::with('bookingRooms')->where('id', $bookingId)->lockForUpdate()->firstOrFail();
 
-            if (! in_array($booking->status, ['draft', 'verify_error'], true)) {
-                throw new \Exception("ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' (รับเฉพาะ draft หรือ verify_error เท่านั้น)", 422);
+            if (! in_array($booking->status, $allowedStates, true)) {
+                throw new Exception("ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}'", 422);
             }
 
             $existingPending = BookingConfirmation::where('booking_id', $booking->id)
@@ -107,7 +120,7 @@ class BookingConfirmationController extends Controller
                 ->lockForUpdate()
                 ->exists();
             if ($existingPending) {
-                throw new \Exception('มีหลักฐานการชำระที่รอตรวจสอบอยู่แล้ว — รอแอดมินตรวจสอบก่อนค่ะนายท่าน', 422);
+                throw new Exception('มีหลักฐานการชำระที่รอตรวจสอบอยู่แล้ว — รอแอดมินตรวจสอบก่อนค่ะนายท่าน', 422);
             }
 
             // 🖼️ (19/08/26): เก็บไฟล์ slip บน private disk (storage/app/private/slips — เว็บเปิดตรงๆ ไม่ได้)
@@ -115,28 +128,84 @@ class BookingConfirmationController extends Controller
             $slipFile = $request->file('slip_image');
             $slipPath = $slipFile->store('slips', 'local');
 
-            // สร้าง row ใหม่เสมอ (1:N history — ไม่ upsert)
-            $confirmation = BookingConfirmation::create([
-                'booking_id' => $booking->id,
-                'transfer_time' => $validated['transfer_time'] ?? null,
-                // 💳 (25/09/26, ticket 04 ชั้น A): ยอดที่ user แจ้งต่อครั้งส่งสลิป (08/10/26 → nullable)
-                'amount' => $validated['amount'] ?? null,
-                'status' => 'pending',
-            ]);
+            // 💳 (06/11/26, owner): admin ส่งสลิปบิล deferred = **ยืนยันทันที** (instant-verify) —
+            //    confirmation verified + เขียน ledger จุดที่ 4 + บิล confirmed ตาม state machine
+            //    · เจ้าของส่ง หรือ บิล full/deposit → flow เดิม (pending รอ admin verify)
+            $isInstantVerify = $isDeferred && $user->role === 'admin';
 
-            // 🖼️ metadata รูปลง images table — morph ผูกกับ confirmation นี้
-            $image = $confirmation->slipImage()->create([
-                'path' => $slipPath,
-                'disk' => 'local',
-                'mime_type' => $slipFile->getMimeType(),
-                'size' => $slipFile->getSize(),
-                'original_name' => $slipFile->getClientOriginalName(),
-                'uploaded_by' => $user->id,
-            ]);
+            $payment = null;
+            if ($isInstantVerify) {
+                // สร้าง row ใหม่เสมอ (1:N history — ไม่ upsert) — verified ทันที + ผู้รีวิว = admin ผู้ส่ง
+                $confirmation = BookingConfirmation::create([
+                    'booking_id' => $booking->id,
+                    'transfer_time' => $validated['transfer_time'] ?? null,
+                    'amount' => $validated['amount'] ?? null,
+                    'status' => 'verified',
+                    'reviewed_by' => $user->id,
+                    'reviewed_at' => now(),
+                ]);
 
-            // booking transition draft → pending (รอ admin ตรวจสลิป)
-            // 🌟 Refactor (25/08/26): 'paid' + is_paid จะเกิดตอน admin verify เท่านั้น ไม่ใช่ตอน submit
-            $booking->transitionStatus('pending', $user->role);
+                // 🖼️ metadata รูปลง images table — morph ผูกกับ confirmation นี้
+                $image = $confirmation->slipImage()->create([
+                    'path' => $slipPath,
+                    'disk' => 'local',
+                    'mime_type' => $slipFile->getMimeType(),
+                    'size' => $slipFile->getSize(),
+                    'original_name' => $slipFile->getClientOriginalName(),
+                    'uploaded_by' => $user->id,
+                ]);
+
+                // 💳 ledger จุดที่ 4 (จดใน cline.md — มติ 06/11/26): เขียนเมื่อแจ้ง amount เท่านั้น —
+                //    deferred ไม่แจ้ง amount ≠ จ่ายครบ (ต่างจาก fallback ของ full ใน verify())
+                //    · is_paid = SUM(payments) ≥ total + charges (pattern เดียวกับ verify)
+                $ledgerAmount = $validated['amount'] ?? null;
+                if ($ledgerAmount !== null) {
+                    $payment = Payment::create([
+                        'booking_id' => $booking->id,
+                        'amount' => $ledgerAmount,
+                        'status' => 'completed',
+                        'reference_number' => $confirmation->id,
+                        'received_by' => $user->id,
+                    ]);
+
+                    $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount + $booking->charges_total]);
+                }
+
+                // transitions — เส้นทางที่ matrix อนุญาต (admin): draft→confirmed (walk-in เดิม)
+                // · verify_error→pending→paid→confirmed · paid→confirmed · confirmed คงสถานะ
+                if ($booking->status === 'draft') {
+                    $booking->transitionStatus('confirmed', $user->role);
+                } elseif ($booking->status === 'verify_error') {
+                    $booking->transitionStatus('pending', $user->role);
+                    $booking->transitionStatus('paid', $user->role);
+                    $booking->transitionStatus('confirmed', $user->role);
+                } elseif ($booking->status === 'paid') {
+                    $booking->transitionStatus('confirmed', $user->role);
+                }
+            } else {
+                // flow เดิม — สร้าง row ใหม่เสมอ (1:N history — ไม่ upsert)
+                $confirmation = BookingConfirmation::create([
+                    'booking_id' => $booking->id,
+                    'transfer_time' => $validated['transfer_time'] ?? null,
+                    // 💳 (25/09/26, ticket 04 ชั้น A): ยอดที่ user แจ้งต่อครั้งส่งสลิป (08/10/26 → nullable)
+                    'amount' => $validated['amount'] ?? null,
+                    'status' => 'pending',
+                ]);
+
+                // 🖼️ metadata รูปลง images table — morph ผูกกับ confirmation นี้
+                $image = $confirmation->slipImage()->create([
+                    'path' => $slipPath,
+                    'disk' => 'local',
+                    'mime_type' => $slipFile->getMimeType(),
+                    'size' => $slipFile->getSize(),
+                    'original_name' => $slipFile->getClientOriginalName(),
+                    'uploaded_by' => $user->id,
+                ]);
+
+                // booking transition draft → pending (รอ admin ตรวจสลิป)
+                // 🌟 Refactor (25/08/26): 'paid' + is_paid จะเกิดตอน admin verify เท่านั้น ไม่ใช่ตอน submit
+                $booking->transitionStatus('pending', $user->role);
+            }
 
             DB::commit();
 
@@ -144,13 +213,19 @@ class BookingConfirmationController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
+                // 💳 (06/11/26): admin ส่งสลิป deferred = ยืนยันทันที ไม่ได้ "รอตรวจ"
+                'message' => $isInstantVerify
+                    ? 'ยืนยันการชำระเงินทันที (admin) — บิลอัปเดตสถานะตาม state machine แล้วค่ะนายท่าน'
+                    : 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
                 'confirmation_id' => $confirmation->id,
                 'confirmation_status' => $confirmation->status,
                 // 💳 (25/09/26, ticket 05 หัวข้อ 3): echo ยอดที่แจ้ง + ยอดที่ระบบคาด + สถานะ
                 'amount' => $confirmation->amount,
                 'expected_amount' => $freshBooking->expected_amount,
                 'booking_status' => $freshBooking->status,
+                // 💳 (06/11/26): ledger row ที่เขียนทันทีเมื่อ admin ส่งสลิป deferred พร้อมแจ้งยอด
+                //    (null เมื่อไม่แจ้ง amount หรือไม่ใช่ instant-verify path)
+                'payment_recorded' => $payment?->fresh(),
                 // 💳 envelope 4 field ของ booking
                 'payment_type' => $freshBooking->payment_type,
                 'deposit_amount' => $freshBooking->deposit_amount,
@@ -193,7 +268,7 @@ class BookingConfirmationController extends Controller
                 ->firstOrFail();
 
             if ($confirmation->status !== 'pending') {
-                throw new \Exception("Confirmation is already {$confirmation->status}", 422);
+                throw new Exception("Confirmation is already {$confirmation->status}", 422);
             }
 
             $confirmation->transitionStatus('verified', $user->role);
@@ -301,7 +376,7 @@ class BookingConfirmationController extends Controller
                 ->firstOrFail();
 
             if ($confirmation->status !== 'pending') {
-                throw new \Exception("Confirmation is already {$confirmation->status}", 422);
+                throw new Exception("Confirmation is already {$confirmation->status}", 422);
             }
 
             $confirmation->transitionStatus('rejected', $user->role);
