@@ -255,8 +255,17 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
         // 🛎️ Front Desk Operations (check-in, check-out, counter payment)
         Route::prefix('front-desk')->group(function () {
-            Route::post('/{bookingId}/check-in', [FrontDeskController::class, 'checkIn']);
-            Route::post('/{bookingId}/check-out', [FrontDeskController::class, 'checkOut']);
+            // 🛎️ Per-room check-in/check-out (2026-11-06 — แทนที่ booking-level เดิมทั้งหมด):
+            //    เช็คอิน/เอาท์ "รายห้อง" (booking_room) — บิล multi-room แขกมาถึง/จ่ายไม่พร้อมกันได้
+            //    · check-in ห้องแรก promote บิล paid → confirmed · บิล complete ปิดรับ check-in
+            //    · check-out ทุกครั้งตรวจยอดรวมทั้งบิล (deferred ยกเว้น — มติ "ตั้งแต่ห้องแรก")
+            //    · ห้องสุดท้ายที่จบ syncStatusFromRooms ปิดบิล complete เอง
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/check-in', [FrontDeskController::class, 'checkInRoom'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/check-out', [FrontDeskController::class, 'checkOutRoom'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
 
             // 🚪 In-stay room move (2026-11-04) — ย้ายห้องจริงหลัง check-in + เปลี่ยนประเภทห้องแบบ upgrade-only

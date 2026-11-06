@@ -148,8 +148,11 @@ class FrontDeskController extends Controller
         }
     }
 
-    // 🛎️ 2. Check-In (BR-level)
-    public function checkIn(Request $request, $bookingId)
+    // 🛎️ 2. Check-In (per-booking-room) — (2026-11-06) แทนที่ booking-level เดิมทั้งหมด:
+    //    เช็คอิน "รายห้อง" — บิล multi-room แขกมาถึงไม่พร้อมกันเช็คอินย่อยได้
+    //    · ห้องแรกที่เข้า promote บิล paid → confirmed · บิล complete ปิดรับ check-in
+    //    · body {room_id?} = มอบหมาย/เปลี่ยนห้องตอนเช็คอิน · ไม่ส่ง = ใช้ห้องที่ผูกไว้ (BR.room_id)
+    public function checkInRoom(Request $request, $bookingId, $bookingRoomId)
     {
         // 🌟 Defense-in-depth: ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
         $user = $request->user();
@@ -160,122 +163,119 @@ class FrontDeskController extends Controller
             ], 403);
         }
 
-        if (is_string($request->input('assigned_rooms'))) {
-            $request->merge([
-                'assigned_rooms' => [$request->input('assigned_rooms')],
-            ]);
-        }
         $validated = $request->validate([
-            'assigned_rooms' => 'nullable|array',
-            'assigned_rooms.*' => 'required|uuid|exists:rooms,id',
+            'room_id' => 'nullable|uuid|exists:rooms,id',
         ]);
 
         try {
             DB::beginTransaction();
 
-            $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
+            $booking = Booking::findOrFail($bookingId);
+
+            // 🌟 scope ผ่านบิลเสมอ — bookingRoomId ของบิลอื่น = 404 (pattern เดียวกับ changeRoom)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
 
             $userId = $user->id;
             $userRole = $user->role;
 
-            // จับคู่ห้องพัก
-            if (! empty($validated['assigned_rooms'])) {
-                $assignedRooms = $validated['assigned_rooms'];
-                $bookingRooms = $booking->bookingRooms;
-
-                if (count($assignedRooms) !== $bookingRooms->count()) {
-                    throw new \Exception('จำนวนห้องที่ส่งมา ('.count($assignedRooms).') ไม่ตรงกับจำนวนห้องที่จองไว้ ('.$bookingRooms->count().') ค่ะนายท่าน');
-                }
-
-                foreach ($bookingRooms as $index => $bRoom) {
-                    $assignedRoom = Room::lockForUpdate()->findOrFail($assignedRooms[$index]);
-
-                    // ✅ #32 Fixed: ตรวจว่าห้องที่ assign ตรงกับ room type ที่จองไว้
-                    if ($assignedRoom->room_type_id !== $bRoom->room_type_id) {
-                        throw new \Exception(
-                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
-                            'ไม่ตรงกับประเภทห้องที่จองไว้ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ'
-                        );
-                    }
-
-                    // ⏱️ (2026-10-27) overlap guard — ห้าม assign ห้องที่มี BR อื่น (holdingSlot) ยึดทับช่วงพัก
-                    //    ปิดช่องจองซ้ำตอนเช็คอินด้วยมือ (auto-assign มี allocator กันให้อยู่แล้ว)
-                    $overlap = $assignedRoom->bookingRooms()
-                        ->where('booking_rooms.id', '!=', $bRoom->id)
-                        ->holdingSlot()
-                        ->where('check_in', '<', $bRoom->check_out)
-                        ->where('check_out', '>', $bRoom->check_in)
-                        ->exists();
-                    if ($overlap) {
-                        throw new \Exception(
-                            "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
-                            "({$bRoom->check_in->toDateString()} – {$bRoom->check_out->toDateString()}) ".
-                            'ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาเลือกห้องอื่นด้วย assigned_rooms นะคะ',
-                            422
-                        );
-                    }
-
-                    $bRoom->update(['room_id' => $assignedRooms[$index]]);
-                }
-
-                $booking->load('bookingRooms');
+            // 🌟 Guard สถานะห้อง (BR): เช็คอินได้เฉพาะ draft/confirmed (draft จะถูก promote ต่อไป)
+            if ($bookingRoom->status === 'checked_in') {
+                throw new \Exception(
+                    "ไม่สามารถเช็คอินได้ค่ะนายท่าน ห้องรายการจอง ID {$bookingRoom->id} ถูกเช็คอินไปแล้ว ไม่สามารถเช็คอินซ้ำได้นะคะ",
+                    422
+                );
             }
-
-            $roomUpdates = [];
-
-            foreach ($booking->bookingRooms as $bRoom) {
-                if (! $bRoom->room_id) {
-                    throw new \Exception("ไม่สามารถเช็คอินได้ค่ะ รายการจอง ID {$bRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักค่ะนายท่าน");
-                }
-
-                $room = Room::lockForUpdate()->findOrFail($bRoom->room_id);
-
-                // 🗓️ (24/09/26) room-state-periods: ห้องปลายทางมี maintenance period ทับช่วงพัก
-                //    ของ BR → reject (reserved period **ไม่บล็อก** — booking include_reserved ของ
-                //    admin ถูกต้องแล้ว · ฟรอนต์ย้ายแขกด้วย assigned_rooms ที่มีอยู่)
-                //    (ปิดช่องเก่า "เช็คอินห้องสถานะ maintenance หลุดผ่าน" ด้วย — สถานะถูกถอดไปแล้ว)
-                if (RoomStatePeriod::where('room_id', $room->id)
-                    ->overlapping($bRoom->check_in, $bRoom->check_out, RoomStatePeriod::KIND_MAINTENANCE)
-                    ->exists()) {
-                    throw new \Exception(
-                        "ห้อง {$room->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
-                        "({$bRoom->check_in->toDateString()} – {$bRoom->check_out->toDateString()}) ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาย้ายห้องด้วย assigned_rooms นะคะ",
-                        422
-                    );
-                }
-
-                // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
-                $room->transitionStatusTo('occupied', $userId);
-
-                // 🌟 Refactor (25/06/26): BR state machine → checked_in
-                //    BR ต้องเป็น confirmed ก่อน — ถ้ายังเป็น draft ให้ confirmed ก่อน
-                if ($bRoom->status === 'draft') {
-                    $bRoom->transitionStatus('confirmed', $userRole);
-                }
-                $bRoom->transitionStatus('checked_in', $userRole);
-
-                $roomUpdates[] = [
-                    'room_number' => $room->room_number,
-                    'new_status' => $room->status,
-                ];
+            if (! in_array($bookingRoom->status, ['draft', 'confirmed'])) {
+                throw new \Exception(
+                    "ไม่สามารถเช็คอินได้ค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}' แล้ว (รับเฉพาะ draft หรือ confirmed เท่านั้นนะคะ)",
+                    422
+                );
             }
 
             // 🌟 Fix scrutinize (29/06/26): ลบ bypass state machine
             // Booking container ต้องผ่าน flow ปกติ: draft → (record payment) → paid → (check-in) → confirmed
             // ห้ามข้ามขั้นตอนการชำระเงิน — staff ต้อง record payment ก่อนทุกครั้ง
+            // 🌟 (2026-11-06) per-room: ห้องแรกที่เข้าเป็นตัว promote บิล paid → confirmed
             if ($booking->status === 'draft') {
                 throw new \Exception(
                     'ไม่สามารถเช็คอินได้ค่ะนายท่าน เนื่องจากรายการจองยังไม่ได้รับชำระเงิน '.
                     'กรุณาบันทึกการรับชำระเงินก่อน (draft → paid) แล้วจึงกลับมาเช็คอินนะคะ'
                 );
-            } elseif ($booking->status === 'paid') {
-                $booking->transitionStatus('confirmed', $userRole);
-            } elseif ($booking->status !== 'confirmed') {
+            } elseif (in_array($booking->status, ['pending', 'verify_error'])) {
                 throw new \Exception(
                     "ไม่สามารถเช็คอินได้ค่ะนายท่าน สถานะการจองปัจจุบันคือ '{$booking->status}' (ต้องเป็น paid หรือ confirmed เท่านั้นนะคะ)",
                     422
                 );
+            } elseif ($booking->status === 'complete') {
+                throw new \Exception(
+                    'ไม่สามารถเช็คอินได้ค่ะนายท่าน รายการจองนี้ปิดบิล (complete) เรียบร้อยแล้วนะคะ',
+                    422
+                );
+            } elseif ($booking->status === 'paid') {
+                $booking->transitionStatus('confirmed', $userRole);
             }
+
+            // 🌟 จับคู่ห้องพัก: ส่ง room_id มา = มอบหมายห้องตอนเช็คอิน (เปลี่ยนจากที่ผูกไว้ได้)
+            if (! empty($validated['room_id']) && $validated['room_id'] !== $bookingRoom->room_id) {
+                $assignedRoom = Room::lockForUpdate()->findOrFail($validated['room_id']);
+
+                // ✅ #32 Fixed: ตรวจว่าห้องที่ assign ตรงกับ room type ที่จองไว้
+                if ($assignedRoom->room_type_id !== $bookingRoom->room_type_id) {
+                    throw new \Exception(
+                        "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
+                        'ไม่ตรงกับประเภทห้องที่จองไว้ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ'
+                    );
+                }
+
+                // ⏱️ (2026-10-27) overlap guard — ห้าม assign ห้องที่มี BR อื่น (holdingSlot) ยึดทับช่วงพัก
+                //    ปิดช่องจองซ้ำตอนเช็คอินด้วยมือ (auto-assign มี allocator กันให้อยู่แล้ว)
+                $overlap = $assignedRoom->bookingRooms()
+                    ->where('booking_rooms.id', '!=', $bookingRoom->id)
+                    ->holdingSlot()
+                    ->where('check_in', '<', $bookingRoom->check_out)
+                    ->where('check_out', '>', $bookingRoom->check_in)
+                    ->exists();
+                if ($overlap) {
+                    throw new \Exception(
+                        "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
+                        "({$bookingRoom->check_in->toDateString()} – {$bookingRoom->check_out->toDateString()}) ".
+                        'ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาเลือกห้องอื่นด้วย room_id นะคะ',
+                        422
+                    );
+                }
+
+                $bookingRoom->update(['room_id' => $validated['room_id']]);
+            }
+
+            if (! $bookingRoom->room_id) {
+                throw new \Exception("ไม่สามารถเช็คอินได้ค่ะ รายการจอง ID {$bookingRoom->id} ยังไม่ได้ระบุหมายเลขห้องพักค่ะนายท่าน");
+            }
+
+            $room = Room::lockForUpdate()->findOrFail($bookingRoom->room_id);
+
+            // 🗓️ (24/09/26) room-state-periods: ห้องปลายทางมี maintenance period ทับช่วงพัก
+            //    ของ BR → reject (reserved period **ไม่บล็อก** — booking include_reserved ของ
+            //    admin ถูกต้องแล้ว · ฟรอนต์ย้ายแขกด้วย room_id ที่มีอยู่)
+            //    (ปิดช่องเก่า "เช็คอินห้องสถานะ maintenance หลุดผ่าน" ด้วย — สถานะถูกถอดไปแล้ว)
+            if (RoomStatePeriod::where('room_id', $room->id)
+                ->overlapping($bookingRoom->check_in, $bookingRoom->check_out, RoomStatePeriod::KIND_MAINTENANCE)
+                ->exists()) {
+                throw new \Exception(
+                    "ห้อง {$room->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
+                    "({$bookingRoom->check_in->toDateString()} – {$bookingRoom->check_out->toDateString()}) ไม่สามารถเช็คอินได้ค่ะนายท่าน กรุณาย้ายห้องด้วย room_id นะคะ",
+                    422
+                );
+            }
+
+            // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
+            $room->transitionStatusTo('occupied', $userId);
+
+            // 🌟 Refactor (25/06/26): BR state machine → checked_in
+            //    BR ต้องเป็น confirmed ก่อน — ถ้ายังเป็น draft ให้ confirmed ก่อน
+            if ($bookingRoom->status === 'draft') {
+                $bookingRoom->transitionStatus('confirmed', $userRole);
+            }
+            $bookingRoom->transitionStatus('checked_in', $userRole);
 
             DB::commit();
 
@@ -284,7 +284,13 @@ class FrontDeskController extends Controller
                 'message' => 'Check-in completed successfully! 🎉',
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
-                'room_updates' => $roomUpdates,
+                'booking_room_id' => $bookingRoom->id,
+                'room_updates' => [
+                    [
+                        'room_number' => $room->room_number,
+                        'new_status' => $room->status,
+                    ],
+                ],
             ], 200);
 
         } catch (ModelNotFoundException $e) {
@@ -537,8 +543,11 @@ class FrontDeskController extends Controller
         }
     }
 
-    // 🧹 3. Check-Out (BR-level)
-    public function checkOut(Request $request, $bookingId)
+    // 🧹 3. Check-Out (per-booking-room) — (2026-11-06) แทนที่ booking-level เดิมทั้งหมด:
+    //    เช็คเอาท์ "รายห้อง" — บิล multi-room แขกออกไม่พร้อมกันได้
+    //    · มติ "ตั้งแต่ห้องแรก": ทุกครั้งตรวจยอดรวมทั้งบิล (deferred ยกเว้น) — กติกาการเงินเดิมเป๊ะ
+    //    · ห้องสุดท้ายที่จบ → syncStatusFromRooms ปิดบิล complete เอง
+    public function checkOutRoom(Request $request, $bookingId, $bookingRoomId)
     {
         // 🌟 Fix L4 (03/07/26): defense-in-depth — ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
         $user = $request->user();
@@ -557,16 +566,22 @@ class FrontDeskController extends Controller
         try {
             DB::beginTransaction();
 
-            $booking = Booking::with('bookingRooms')->findOrFail($bookingId);
+            $booking = Booking::findOrFail($bookingId);
 
-            // 🌟 Refactor (25/06/26): เช็คที่ BR-level ว่าทุกห้อง checked_in หรือไม่
-            $allCheckedIn = $booking->bookingRooms->every(fn ($br) => $br->status === 'checked_in');
-            if (! $allCheckedIn) {
-                throw new \Exception('ยังมีห้องที่ไม่ได้ Check-in อยู่ค่ะ จะ Check-out ไม่ได้น้า');
+            // 🌟 scope ผ่านบิลเสมอ — bookingRoomId ของบิลอื่น = 404 (pattern เดียวกับ changeRoom)
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+
+            // 🌟 Refactor (25/06/26): เช็คที่ BR-level — เช็คเอาท์ได้เฉพาะห้องที่ checked_in
+            if ($bookingRoom->status !== 'checked_in') {
+                throw new \Exception(
+                    "ไม่สามารถเช็คเอาท์ได้ค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}' (ต้องเป็น checked_in เท่านั้นนะคะ)",
+                    422
+                );
             }
 
             // 💳 (2026-11-06) บิล deferred (ค้างชำระ) ข้ามการตรวจยอดค้างตอน Check-out —
             //    เก็บเงินปลายทางทีหลังผ่าน recordPayment ได้ (บิล complete จ่ายครบแล้วจะ set is_paid=true ตามปกติ)
+            //    🌟 มติ (06/11/26) "ตั้งแต่ห้องแรก": เช็คเอาท์ห้องไหนก็ตามต้องชำระครบทั้งบิลก่อนเสมอ
             if ($booking->payment_type !== 'deferred') {
                 // ตรวจสอบยอดชำระเงิน
                 $totalPaid = Payment::where('booking_id', $bookingId)
@@ -581,18 +596,12 @@ class FrontDeskController extends Controller
                 }
             }
 
-            $roomUpdates = [];
+            $room = $bookingRoom->room_id ? Room::findOrFail($bookingRoom->room_id) : null;
 
-            foreach ($booking->bookingRooms as $bRoom) {
-                if (! $bRoom->room_id) {
-                    continue;
-                }
+            // 🌟 Refactor (25/06/26): BR state machine → checked_out
+            $bookingRoom->transitionStatus('checked_out', $user->role);
 
-                $room = Room::findOrFail($bRoom->room_id);
-
-                // 🌟 Refactor (25/06/26): BR state machine → checked_out
-                $bRoom->transitionStatus('checked_out', $user->role);
-
+            if ($room) {
                 // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง → checkout_makeup
                 $room->transitionStatusTo('checkout_makeup', $validated['verified_by']);
 
@@ -620,15 +629,11 @@ class FrontDeskController extends Controller
                 } else {
                     $task = null;
                 }
-
-                $roomUpdates[] = [
-                    'room_number' => $room->room_number,
-                    'room_status' => $room->status,
-                    'housekeeping_task_id' => $task?->id,
-                ];
+            } else {
+                $task = null;
             }
 
-            // 🌟 Auto-sync booking container → complete ถ้า BR ทุกห้องจบแล้ว
+            // 🌟 Auto-sync booking container → complete ถ้า BR ทุกห้องจบแล้ว (checked_out|no_show)
             $booking->syncStatusFromRooms();
 
             DB::commit();
@@ -638,8 +643,24 @@ class FrontDeskController extends Controller
                 'message' => 'Check-out completed successfully. สร้างงานให้ทีมแม่บ้านเรียบร้อยค่ะ!',
                 'booking_id' => $booking->id,
                 'booking_status' => $booking->status,
-                'room_updates' => $roomUpdates,
+                'booking_room_id' => $bookingRoom->id,
+                'room_updates' => [
+                    [
+                        'room_number' => $room?->room_number,
+                        'room_status' => $room?->status,
+                        'housekeeping_task_id' => $task?->id,
+                    ],
+                ],
             ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+            $modelName = class_basename($e->getModel());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => "ไม่พบข้อมูล {$modelName} ที่ระบุในระบบค่ะนายท่าน",
+            ], 404);
 
         } catch (\Exception $e) {
             return $this->handleCatch('Check-out', $e);
