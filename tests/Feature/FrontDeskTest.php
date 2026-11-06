@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdditionalCharge;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
@@ -296,7 +297,7 @@ class FrontDeskTest extends TestCase
             'status' => 'completed',
         ]);
 
-        \App\Models\AdditionalCharge::create([
+        AdditionalCharge::create([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'transaction_date' => now()->toDateString(),
@@ -313,6 +314,84 @@ class FrontDeskTest extends TestCase
 
         $response->assertStatus(400);
         $this->assertEquals('checked_in', $br->fresh()->status);
+    }
+
+    /**
+     * 💳 (2026-11-06) บิล deferred (ค้างชำระ) Check-out ได้แม้ยอดค้าง — เก็บเงินปลายทางทีหลัง
+     *    เคสนี้: ไม่มี payment เลย + มี additional charge ค้างด้วย → ยัง checkout ผ่าน
+     */
+    public function test_deferred_booking_can_check_out_with_unpaid_balance(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'occupied');
+        $booking = $this->createBooking([
+            'status' => 'confirmed',
+            'is_paid' => false,
+            'total_amount' => 3000,
+            'payment_type' => 'deferred',
+        ]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
+
+        // ไม่มี Payment เลย + มี additional charge ค้าง 500 → outstanding = 3500
+        AdditionalCharge::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'transaction_date' => now()->toDateString(),
+            'item_name' => 'Broken glass',
+            'qty' => 1,
+            'price' => 500,
+            'charge_type' => 'damage',
+            'recorded_by' => $admin->id,
+        ]);
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('complete', $booking->fresh()->status);
+        $this->assertEquals('checked_out', $br->fresh()->status);
+        $this->assertEquals('checkout_makeup', $room->fresh()->status);
+        // is_paid คง false จนกว่าจะชำระครบจริง (REQ-042/044 — เก็บต่อผ่าน recordPayment)
+        $this->assertFalse($booking->fresh()->is_paid);
+        $this->assertEquals(3500, $booking->fresh()->outstanding_amount);
+    }
+
+    /**
+     * 💳 (2026-11-06) บิล deferred จ่ายบางส่วนแล้วก็ Check-out ได้ — outstanding เหลือส่วนที่ขาด
+     */
+    public function test_deferred_booking_can_check_out_partially_paid(): void
+    {
+        $admin = $this->createAdmin();
+        $this->actingAs($admin, 'sanctum');
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'occupied');
+        $booking = $this->createBooking([
+            'status' => 'confirmed',
+            'is_paid' => false,
+            'total_amount' => 3000,
+            'payment_type' => 'deferred',
+        ]);
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'checked_in');
+
+        Payment::create([
+            'id' => Str::uuid(),
+            'booking_id' => $booking->id,
+            'amount' => 1000,
+            'status' => 'completed',
+        ]);
+
+        $response = $this->postJson("/api/v1/front-desk/{$booking->id}/check-out", [
+            'verified_by' => $admin->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('complete', $booking->fresh()->status);
+        $this->assertEquals('checked_out', $br->fresh()->status);
+        $this->assertFalse($booking->fresh()->is_paid);
+        $this->assertEquals(2000, $booking->fresh()->outstanding_amount);
     }
 
     /**

@@ -2670,6 +2670,8 @@ Assigns rooms (if not yet assigned) and transitions booking to `checked_in`.
 
 Requires all payments to be completed. Auto-creates housekeeping tasks.
 
+> 💳 **ยกเว้นบิล `payment_type=deferred` (ค้างชำระ, 2026-11-06):** checkout ได้แม้ยอดค้าง (ทั้งค่าห้องและ additional charges) — ห้องเข้า `checkout_makeup` + booking `complete` ตามปกติ โดย `is_paid` คง `false` จนกว่าจะชำระครบ เก็บยอดค้างต่อภายหลังผ่าน `POST /front-desk/{bookingId}/payment` (บิล `complete` จ่ายครบแล้วระบบจะ set `is_paid=true` ให้เอง ไม่มีการ transition สถานะ)
+
 **Request Body:**
 ```json
 {
@@ -2901,7 +2903,7 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 - **ชั้น B** — ภาพรวมจ่ายแล้ว/ค้าง **derive จาก ledger ล้วน ไม่มี column** — `payments` = ledger เดียวของ "เงินที่เข้าจริง" · **เขียนได้ 3 จุดเท่านั้น:** ① `PUT /booking-confirmations/{id}/verify` (สลิปผ่าน) ② `POST /front-desk/{id}/payment` (เงินสด) ③ `POST /payments` (mock QR)
 - **`is_paid`** = `SUM(payments) ≥ total_amount + charges_total` — "จ่ายครบ" เท่านั้น (💸 15/10/26 — `charges_total` (Σ `additional_charges`) append มากับ booking ทุก response เสมอ · deposit งวดแรกผ่าน ≠ is_paid) · ตั้งจริงตอน verify / recordPayment / QR · สร้าง/แก้/ลบ charge → recompute อัตโนมัติ (`Booking::syncIsPaid()`)
 - **`expected_amount`** (ยอดต้องชำระ ณ ตอนนี้ — ใช้ใน confirm/verify/pending list) = `paid_amount === 0 && payment_type === 'deposit' ? deposit_amount : outstanding_amount`
-- **Check-in/out ไม่มี hard guard เรื่องเงิน** — เข้าพัก/ปิด booking ได้แม้ยอดค้าง (การตามเก็บเป็นกระบวนการ ไม่ใช่ระบบบล็อก)
+- **Check-in ไม่มี hard guard เรื่องเงิน** — เข้าพักได้แม้ยอดค้าง (การตามเก็บเป็นกระบวนการ ไม่ใช่ระบบบล็อก) · **Check-out มี guard ชำระครบ** (`paid ≥ total_amount + charges_total` ไม่ครบ → 400) — **ยกเว้นบิล `deferred`** (2026-11-06 — checkout ทั้งที่ยอดค้างได้ ดูหัว check-out endpoint)
 - **deadline / cleanup:** ทุก type ใช้ `payment_deadline` 15 นาทีเหมือนกัน — แต่ draft `deferred` **ยกเว้น `CleanupExpiredDrafts`** และ **ยึด slot ต่อ** จน admin อนุมัติหรือลบ (จุดประสงค์ของ deferred = การันตีห้องให้องค์กรก่อนชำระ)
 
 ### 💵 กติกาปัดเศษขึ้นหลักสิบ (REQ-015/016) — 25/09/26
