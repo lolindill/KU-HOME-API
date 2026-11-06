@@ -1887,7 +1887,7 @@ curl -s -H "Accept: application/json" \
 🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
-💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · booking `deferred` **บล็อกสลิป 422** (มีช่องเดียวคือ admin อนุมัติ)
+💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · 💳 **(06/11/26, ย้อนมติ 25/09/26)** booking `deferred` **รับสลิปผ่าน endpoint นี้แล้วทุกสถานะหลัก** (draft/verify_error/paid/confirmed — เก็บยอดค้างเป็นงวดได้) — **admin ส่ง = ยืนยันทันที** (instant-verify: confirmation `verified` + เขียน ledger เมื่อแจ้ง amount + บิล confirmed), **เจ้าของส่ง = flow เดิม** (`pending` รอ verify) · บิล `full`/`deposit` คงเดิมทุกอย่าง (paid/confirmed ยัง 422 — เก็บท้ายบิลผ่าน `POST /front-desk/{bookingId}/payment`)
 
 🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
 
@@ -1932,12 +1932,14 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 > 💳 `expected_amount` = ยอดที่ระบบคาดว่าต้องชำระ ณ ตอนนี้ (deposit งวดแรก = ยอดมัดจำ, กรณีอื่น = `outstanding_amount`) · 4 field `payment_type/deposit_amount/paid_amount/outstanding_amount` ส่งทุก response ของ booking ทุก role
 
 **Guards** (422 on failure):
-- ❌ **payment_type = `deferred`** — booking ค้างชำระ รอแอดมินอนุมัติ ไม่รับสลิป (ตรวจก่อน guard อื่น)
-- ❌ Booking ไม่ใช่ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่)
-- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft`, `verify_error` ส่งใหม่ได้แม้หมด deadline)
-- ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam)
+- ❌ Booking ไม่อยู่ในสถานะที่รับ — บิล `full`/`deposit`: รับเฉพาะ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่) · บิล `deferred` (💳 06/11/26): รับเพิ่ม `paid` และ `confirmed` (เก็บยอดค้างเป็นงวด) — `pending` ยังไม่รับทุก type
+- ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft` ของบิล full/deposit, `verify_error` ส่งใหม่ได้แม้หมด deadline · 💳 **deferred ไม่มีวันหมดอายุ** — ข้าม guard นี้)
+- ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam, ใช้กับ deferred ด้วย)
 - ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
 - ❌ ไม่ส่ง `amount` / amount < 1 (💳 ใหม่ 25/09/26)
+- ❌ Ownership — บิล deferred โหมด B (`user_id = null`) ผู้ที่ไม่ใช่ admin ส่งไม่ได้ → **403**
+
+💳 **Instant-verify (admin ส่งสลิปบิล deferred — 06/11/26)**: response เป็น `confirmation_status: "verified"` + `booking_status: "confirmed"` ทันที (ไม่รอ verify) + field `payment_recorded` = payments row ที่เขียน (null เมื่อไม่แจ้ง amount) · เส้นทางสถานะ: `draft→confirmed` · `verify_error→pending→paid→confirmed` · `paid→confirmed` · `confirmed` คงสถานะ
 
 ---
 
@@ -2093,7 +2095,7 @@ Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 `draft`, `paid`, `confirmed`, `complete`
 
 > 🌟 **Refactor (25/06/26)**: `checked_in`/`checked_out`/`no_show` moved to **BookingRoom-level**. The booking container only tracks `draft` → `paid` → `confirmed` → `complete`.
-> 💳 **(25/09/26) deferred approval**: booking `deferred` อนุมัติผ่าน endpoint **นี้เท่านั้น** (ตั้ง `status=confirmed` — transition `draft → confirmed` walk-in path เดิม) — ไม่มี endpoint/state ใหม่ · response เพิ่ม `payment_type`, `deposit_amount`, `paid_amount`, `outstanding_amount`
+> 💳 **(25/09/26) deferred approval**: booking `deferred` อนุมัติผ่าน endpoint นี้ (ตั้ง `status=confirmed` — transition `draft → confirmed` walk-in path เดิม) — ไม่มี endpoint/state ใหม่ · response เพิ่ม `payment_type`, `deposit_amount`, `paid_amount`, `outstanding_amount` · 💳 **(06/11/26)** ไม่ใช่ช่องทางเดียวอีกแล้ว — admin แนบสลิปอนุมัติได้ผ่าน `POST /bookings/{id}/confirm` โดยตรง (instant-verify ดูหัวข้อ confirm) · endpoint นี้ยังใช้ได้สำหรับอนุมัติแบบไม่แนบสลิป
 
 **Response `200`:**
 ```json

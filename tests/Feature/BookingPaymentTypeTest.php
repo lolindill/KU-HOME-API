@@ -23,7 +23,9 @@ use Tests\TestCase;
  * ครอบคลุม wayfinder/booking-payment-types tickets 01–05:
  *   - full regression 0% (flow เดิม + ledger row จาก verify)
  *   - deposit (effective 50% / ยอดกำหนดเอง · verify → is_paid false · เก็บส่วนเหลือผ่าน recordPayment)
- *   - deferred (บล็อกสลิป · admin อนุมัติ draft → confirmed · เก็บปลายทาง)
+ *   - deferred (💳 06/11/26 ย้อนมติ 25/09/26: รับสลิปผ่าน confirm แล้วทุกสถานะหลัก —
+ *     admin ส่ง = instant-verify + ledger จุดที่ 4 · เจ้าของส่ง = pending รอ verify ·
+ *     approve แบบไม่แนบสลิปผ่าน PUT /bookings/update/{id} คงเดิม)
  *   - สิทธิ์ payment fields (admin/system เท่านั้น — non-admin 403)
  *   - PUT /bookings/{id} (endpoint ใหม่ — draft only)
  *   - reject → ส่งสลิปใหม่ (row ใหม่ · ledger ไม่เปลี่ยน)
@@ -382,10 +384,12 @@ class BookingPaymentTypeTest extends TestCase
     }
 
     // =========================================================
-    // ⏸️ deferred
+    // ⏸️ deferred — 💳 (06/11/26, owner ย้อนมติ 25/09/26) รับสลิปผ่าน confirm แล้ว
+    //    admin ส่ง = instant-verify (confirmed + ledger จุดที่ 4) · เจ้าของส่ง = pending รอ verify
+    //    · รับได้ทุกสถานะหลัก draft/verify_error/paid/confirmed · deadline ไม่ผลัก deferred
     // =========================================================
 
-    public function test_deferred_blocks_slip_and_confirms_via_admin(): void
+    public function test_deferred_admin_slip_instant_verifies_draft_and_confirms(): void
     {
         $roomType = $this->roomTypeSetup();
         $admin = $this->admin();
@@ -396,31 +400,196 @@ class BookingPaymentTypeTest extends TestCase
 
         $booking = Booking::findOrFail($created->json('booking_id'));
 
-        // 💳 deferred บล็อกสลิป 422 — ก่อน state guard เดิม (draft ก็ block)
+        // 💳 admin ส่งสลิปบิล deferred (draft) = ยืนยันทันที — 201 + verified + confirmed
         $this->submitSlip($booking, $admin, 1500)
-            ->assertStatus(422)
-            ->assertJsonPath('status', 'error');
-        $this->assertEquals(0, BookingConfirmation::where('booking_id', $booking->id)->count());
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('payment_type', 'deferred')
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0);
 
-        // admin อนุมัติผ่าน updateStatus เดิม — draft → confirmed (ข้าม paid) ไม่มี endpoint ใหม่
+        // ledger จุดที่ 4 — เขียนทันทีใน confirm (reference = confirmation UUID)
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->assertSame('verified', $confirmation->status);
+        $this->assertNotNull($confirmation->reviewed_by, 'instant-verify ต้องมี reviewed_by = admin ผู้ส่ง');
+        $this->assertDatabaseHas('payments', [
+            'booking_id' => $booking->id,
+            'amount' => 1500,
+            'status' => 'completed',
+            'reference_number' => $confirmation->id,
+        ]);
+        $this->assertTrue($booking->fresh()->is_paid);
+    }
+
+    public function test_deferred_admin_slip_without_amount_confirms_without_ledger(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deferred']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // ไม่แจ้ง amount → verified + confirmed แต่ไม่มีเหตุการณ์เงิน (deferred ไม่เดายอด — ต่างจาก full)
+        ($this->actingAs($admin, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('payment_recorded', null)
+            ->assertJsonPath('amount', null)
+            ->assertJsonPath('paid_amount', 0)
+            ->assertJsonPath('outstanding_amount', 1500);
+
+        $this->assertSame(0, Payment::where('booking_id', $booking->id)->count(), 'deferred สลิปไม่แจ้งยอด = ไม่มี ledger row');
+        $this->assertFalse($booking->fresh()->is_paid);
+    }
+
+    public function test_deferred_owner_slip_goes_pending_then_verify_confirms(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        // โหมด A — admin สร้างบิล deferred ให้ user (user_id ผูก owner)
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, [
+                'payment_type' => 'deferred',
+                'user' => $owner->id,
+            ]));
+        $created->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $this->assertSame($owner->id, $booking->user_id);
+
+        // เจ้าของส่งสลิป → flow ปกติ — pending รอ admin verify (ไม่ instant)
+        $this->submitSlip($booking, $owner, 1500)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'pending')
+            ->assertJsonPath('booking_status', 'pending');
+
+        // admin verify → pending → paid → confirmed + ledger (สาย verify เดิม)
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('paid_amount', 1500);
+
+        $this->assertTrue($booking->fresh()->is_paid);
+        $this->assertEquals(1, Payment::where('booking_id', $booking->id)->count());
+    }
+
+    public function test_deferred_confirmed_bill_accepts_installment_slip(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deferred']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // อนุมัติก่อนแบบไม่แนบสลิป (flow เดิม — PUT /bookings/update/{id})
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/update/{$booking->id}", ['status' => 'confirmed'])
             ->assertStatus(200)
             ->assertJsonPath('booking_status', 'confirmed')
-            ->assertJsonPath('payment_type', 'deferred')
-            ->assertJsonPath('paid_amount', 0)
             ->assertJsonPath('outstanding_amount', 1500);
 
-        $this->assertFalse($booking->fresh()->is_paid);
-
-        // เก็บเงินปลายทาง — สถานะคง confirmed จนครบยอด
-        $this->actingAs($admin, 'sanctum')
-            ->postJson("/api/v1/front-desk/{$booking->id}/payment", ['amount' => 1500])
+        // 💳 บิล deferred ที่ confirmed แล้วส่งสลิปเก็บยอดค้างเป็นงวดได้ — คงสถานะ confirmed
+        $this->submitSlip($booking, $admin, 500)
             ->assertStatus(201)
-            ->assertJsonPath('booking_is_paid', true)
-            ->assertJsonPath('booking_status', 'confirmed');
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('paid_amount', 500)
+            ->assertJsonPath('outstanding_amount', 1000);
 
+        $this->assertFalse($booking->fresh()->is_paid, 'งวด 500 ยังไม่ครบ 1500 — is_paid false');
+
+        // งวดที่สองครบยอด → is_paid true
+        $this->submitSlip($booking, $admin, 1000)->assertStatus(201);
         $this->assertTrue($booking->fresh()->is_paid);
+        $this->assertEquals(2, Payment::where('booking_id', $booking->id)->count(), 'ledger 2 rows — 2 งวดสลิป');
+    }
+
+    public function test_deferred_draft_accepts_slip_past_deadline(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deferred']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->travel(16)->minutes(); // เลย payment_deadline 15 นาที
+
+        // 💳 deferred ไม่มีวันหมดอายุ — CleanupExpiredDrafts ยกเว้น สลิปจึงต้องส่งได้ (ไม่โดน deadline guard)
+        $this->submitSlip($booking, $admin, 1500)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed');
+    }
+
+    public function test_full_confirmed_bill_still_blocks_slip_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $user = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // จ่ายและยืนยันครบแบบ flow ปกติ
+        $this->submitSlip($booking, $user, 1500)->assertStatus(201);
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->actingAs($this->admin(), 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200);
+
+        // 💳 regression — บิล full/deposit ที่ confirmed แล้วยังไม่รับสลิป (เก็บต่อผ่าน recordPayment เท่านั้น)
+        $this->submitSlip($booking, $user, 100)
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+    }
+
+    public function test_deferred_mode_b_null_user_blocks_non_admin_403(): void
+    {
+        $roomType = $this->roomTypeSetup();
+
+        // โหมด B — admin ไม่ส่ง user → user_id null (เฮดเปล่า)
+        $created = $this->actingAs($this->admin(), 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deferred']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $this->assertNull($booking->user_id);
+
+        // user ที่ไม่ใช่เจ้าของ (user_id เป็น null) → 403 ownership
+        $this->submitSlip($booking, User::factory()->create(['role' => 'user']), 1500)
+            ->assertStatus(403);
+    }
+
+    public function test_deferred_second_slip_while_pending_is_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, [
+                'payment_type' => 'deferred',
+                'user' => $owner->id,
+            ]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // สลิปแรก → pending
+        $this->submitSlip($booking, $owner, 750)->assertStatus(201);
+
+        // สลิปซ้อนขณะ pending ยังไม่ถูกตรวจ → 422 (guard กัน spam ใช้กับ deferred ด้วย)
+        $this->submitSlip($booking, $owner, 750)
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+        $this->assertEquals(1, BookingConfirmation::where('booking_id', $booking->id)->count());
     }
 
     // =========================================================
