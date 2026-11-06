@@ -109,6 +109,7 @@ class UpdateBookingRoomRequest extends FormRequest
      * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามแก้วันที่ให้
      *    จำนวนคืน (final หลัง merge กับค่าเดิม) >= block_min_nights (20) → 422
      *    guard เฉพาะเมื่อ payload แตะวันที่ — แก้ addon/guests อย่างเดียว = จำนวนคืนคงเดิม ไม่เข้าเขตตรวจ
+     *    🗓️ (06/11/26): ทุก role รวม admin ห้ามแก้วันที่ให้จำนวนคืน (final) > monthly_max_nights (90) → 422
      */
     public function withValidator($validator): void
     {

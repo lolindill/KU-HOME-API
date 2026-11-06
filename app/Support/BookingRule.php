@@ -98,7 +98,19 @@ class BookingRule
     }
 
     /**
-     * 🌙 Guard เขตรายเดือน — เติม validation error ถ้า non-admin ส่งห้องที่จำนวนคืน (final) >= cap
+     * 🗓️ เพดานบนของเขตรายเดือน (config monthly_max_nights = 90 คืน)
+     * ใช้กับ **ทุก role รวม admin** — จองรายเดือน/จองเหมายาวสุด 90 วัน
+     */
+    public static function monthlyMaxNights(): int
+    {
+        return (int) config('booking.monthly_max_nights', 90);
+    }
+
+    /**
+     * 🌙 Guard เขตรายเดือน — เติม validation error 2 กฎ:
+     *    1) non-admin ส่งห้องที่จำนวนคืน (final) >= cap (20) → 422 (เขตรายเดือนเป็นของ admin)
+     *    2) ทุก role รวม admin ส่งห้องที่จำนวนคืน (final) > max (90) → 422
+     *       (จองรายเดือน/จองเหมายาวสุด 90 คืน — config monthly_max_nights)
      *
      * $pairs = รายการ ['check_in' => 'Y-m-d', 'check_out' => 'Y-m-d'] ที่ merge กับค่าเดิมแล้ว
      *          (create/addRooms = จาก payload · edit = payload ?? ค่าเดิมของ booking_room)
@@ -110,9 +122,7 @@ class BookingRule
     public static function guardMonthlyNights($validator, ?User $user, array $pairs, string $prefix = 'booking_rooms'): void
     {
         $cap = static::monthlyNightsCap($user);
-        if ($cap === PHP_INT_MAX) {
-            return;
-        }
+        $max = static::monthlyMaxNights();
 
         foreach ($pairs as $i => $pair) {
             if (empty($pair['check_in']) || empty($pair['check_out'])) {
@@ -126,11 +136,17 @@ class BookingRule
                 continue;
             }
 
+            $key = $prefix === '' ? 'check_out' : "{$prefix}.{$i}.check_out";
+
             if ($nights >= $cap) {
-                $key = $prefix === '' ? 'check_out' : "{$prefix}.{$i}.check_out";
                 $validator->errors()->add(
                     $key,
                     "การจองตั้งแต่ {$cap} คืนขึ้นไป (จองรายเดือน/จองเหมา — ห้องนี้ {$nights} คืน) เป็นเขตบริการของผู้ดูแลระบบ กรุณาติดต่อผู้ดูแลค่ะ 🌙"
+                );
+            } elseif ($nights > $max) {
+                $validator->errors()->add(
+                    $key,
+                    "การจองรายเดือน/จองเหมา สามารถจองได้สูงสุด {$max} คืน (ห้องนี้ {$nights} คืน) หากต้องการพักนานกว่านี้ กรุณาแบ่งการจองหรือติดต่อผู้ดูแลค่ะ 🗓️"
                 );
             }
         }

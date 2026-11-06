@@ -147,6 +147,7 @@ class StoreBookingRequest extends FormRequest
     /**
      * 🌙 (22/10/26, srs-v2-gap-closure ticket 09): เขตรายเดือน — non-admin ห้ามส่งห้องที่
      *    จำนวนคืน >= block_min_nights (20) → 422 (เขตรายเดือนเป็นเขตของ admin)
+     *    🗓️ (06/11/26): ทุก role รวม admin ห้ามส่งห้องที่จำนวนคืน > monthly_max_nights (90) → 422
      */
     public function withValidator($validator): void
     {

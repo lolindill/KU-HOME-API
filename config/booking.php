@@ -52,9 +52,14 @@ return [
     //    - non-admin: ห้อง x >= 20 คืน → 422 reject (เขตรายเดือนเป็นของ admin)
     //    - admin: ห้อง x >= 20 คืน → คิดราคาแบบรายเดือน intdiv(x × month_rate, 30)
     //      (เดือนเต็ม + เศษคิดรายวันแบบเดือน month÷30 — ดู DiscountService::reprice)
+    //
+    //    🗓️ (06/11/26): เพดานบนของเขตรายเดือน — monthly_max_nights (90):
+    //    ห้อง x > 90 คืน → 422 reject **ทุก role รวม admin** (จองรายเดือน/จองเหมา
+    //    ยาวสุดแค่ 90 วัน — เกินนี้ต้องแบ่งเป็นหลาย booking) · บิลสั้น < 20 คืนไม่เกี่ยว
     // =========================================================
     'monthly_min_nights' => (int) env('BOOKING_MONTHLY_MIN_NIGHTS', 30),
     'block_min_nights' => (int) env('BOOKING_BLOCK_MIN_NIGHTS', 20),
+    'monthly_max_nights' => (int) env('BOOKING_MONTHLY_MAX_NIGHTS', 90),
 
     // =========================================================
     // 🚧 Mock Routes (DRAFT / TESTING — branch split main/dev, 2026-11-04)
