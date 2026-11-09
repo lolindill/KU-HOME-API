@@ -62,6 +62,20 @@ return [
     'monthly_max_nights' => (int) env('BOOKING_MONTHLY_MAX_NIGHTS', 90),
 
     // =========================================================
+    // 👥 Group Booking & Booking Type (จองเป็นกลุ่ม / derived booking_type)
+    //    booking_type ระดับ Booking container (derived — ไม่มี column):
+    //    - monthly = มี booking_room ใดห้องหนึ่ง nights >= block_min_nights (20)
+    //    - group   = ไม่มีห้องเขต monthly แต่จำนวน booking_rooms >= group_min_rooms (5)
+    //    - daily   = ที่เหลือ
+    //    (priority: monthly > group > daily)
+    //
+    //    นอกจากนี้ group_min_rooms (5) และ group_large_min_rooms (10)
+    //    ยังใช้กำหนดชั้นราคากลุ่ม min_5_rooms / min_10_rooms ใน DiscountService
+    // =========================================================
+    'group_min_rooms' => (int) env('BOOKING_GROUP_MIN_ROOMS', 5),
+    'group_large_min_rooms' => (int) env('BOOKING_GROUP_LARGE_MIN_ROOMS', 10),
+
+    // =========================================================
     // 🚧 Mock Routes (DRAFT / TESTING — branch split main/dev, 2026-11-04)
     //    เปิด register route /api/v1/mock/* สำหรับ frontend test
     //    default false = prod-safe ตาม DELETION PLAN ของ MockController —
