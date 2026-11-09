@@ -95,13 +95,17 @@ class Room extends Model
      *    (อ้างอิง $allowedTransitions ด้านล่างซึ่ง key = target status, value = allowed sources)
      *
      * available → occupied, dirty, prep_checkin
-     * occupied → checkout_makeup, prep_checkin
+     * occupied → checkout_makeup, dirty, prep_checkin
      * checkout_makeup → occupied, available, prep_checkin
-     * dirty → available, prep_checkin
+     * dirty → occupied, available, prep_checkin
      * prep_checkin → occupied, available, dirty
      *
      * ⚠️ ห้าม occupied → available ตรง ๆ — ห้องที่แขกออกต้องผ่าน checkout_makeup/dirty
      *    (งานแม่บ้าน done แล้วจึงกลับ available ผ่าน DashboardController::updateStatus)
+     *
+     * 🚪 (2026-11-09): เปิด 2 ทิศ — ① dirty → occupied (change-room/check-in รับห้อง dirty)
+     *    ② occupied → dirty (ย้ายห้องกลางทาง ห้องเก่า → dirty แทน checkout_makeup)
+     *    · walk-in ยังเข้ม — explicit check available/prep_checkin
      */
     public function transitionStatusTo(string $newStatus, ?string $updatedByUserId = null)
     {
@@ -117,11 +121,14 @@ class Room extends Model
         //    🧹 Phase A (15/07/26): prep_checkin เพิ่ม 'checkout_makeup' เป็น source
         //       (DailyRoomMaintenance prep ห้อง checkout_makeup ที่แขกเข้าพรุ่งนี้ได้)
         //    🗓️ (24/09/26): ถอด reserved_closed + maintenance ออก — ดู room-state-periods
+        //    🚪 (2026-11-09): เปิด 2 ทิศ — occupied รับ 'dirty' (แขกยอมเข้าห้องที่ยังไม่เก็บ
+        //       · change-room/check-in) + dirty รับ 'occupied' (ย้ายห้องกลางทาง ห้องเก่า → dirty)
+        //       · walk-in ยังเข้มเหมือนเดิม (explicit check available/prep_checkin)
         $allowedTransitions = [
-            'occupied' => ['available', 'prep_checkin'],
+            'occupied' => ['available', 'prep_checkin', 'dirty'],
             'checkout_makeup' => ['occupied'],
             'available' => ['checkout_makeup', 'dirty', 'prep_checkin'],
-            'dirty' => ['available', 'prep_checkin'],
+            'dirty' => ['available', 'prep_checkin', 'occupied'],
             'prep_checkin' => ['available', 'dirty', 'occupied', 'checkout_makeup'],
         ];
 

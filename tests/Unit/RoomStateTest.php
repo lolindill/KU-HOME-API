@@ -150,11 +150,21 @@ class RoomStateTest extends TestCase
         $this->assertEquals('prep_checkin', $room->fresh()->status);
     }
 
-    public function test_cannot_go_from_dirty_to_occupied(): void
+    public function test_dirty_to_occupied_is_valid(): void
     {
-        $this->expectException(\Exception::class);
+        // 🚪 (2026-11-09): dirty → occupied allowed — change-room/check-in รับห้อง dirty ได้
         $room = $this->createRoom('dirty');
         $room->transitionStatusTo('occupied');
+        $this->assertEquals('occupied', $room->fresh()->status);
+    }
+
+    public function test_occupied_to_dirty_is_valid(): void
+    {
+        // 🚪 (2026-11-09): occupied → dirty allowed — ย้ายห้องกลางทาง ห้องเก่า → dirty
+        //    (แทน checkout_makeup เดิม)
+        $room = $this->createRoom('occupied');
+        $room->transitionStatusTo('dirty');
+        $this->assertEquals('dirty', $room->fresh()->status);
     }
 
     public function test_cannot_go_from_checkout_makeup_to_dirty(): void

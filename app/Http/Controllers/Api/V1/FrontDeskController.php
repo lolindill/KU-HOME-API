@@ -267,6 +267,24 @@ class FrontDeskController extends Controller
                 );
             }
 
+            // 🧹 (2026-11-09) ห้อง dirty ที่เช็คอินเข้า → เปิด task 'daily' ให้แม่บ้านก่อน
+            //    transition ("call housekeeping task first" — มติ owner) · duplicate-guard
+            //    · ครอบทั้งเคสส่ง room_id ใหม่และใช้ห้องที่ผูกไว้ (จุดเดียวหลังจับคู่ห้องแล้ว)
+            if ($room->status === 'dirty') {
+                $dirtyTaskExists = HousekeepingTask::where('room_id', $room->id)
+                    ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                    ->exists();
+                if (! $dirtyTaskExists) {
+                    HousekeepingTask::create([
+                        'id' => Str::uuid(),
+                        'room_id' => $room->id,
+                        'task_type' => 'daily',
+                        'status' => 'unassigned',
+                        'notes' => 'Auto: checked into dirty room ('.$room->room_number.') — cleaning required',
+                    ]);
+                }
+            }
+
             // 🌟 ใช้ state machine เปลี่ยนสถานะห้อง
             $room->transitionStatusTo('occupied', $userId);
 
@@ -309,7 +327,11 @@ class FrontDeskController extends Controller
 
     // 🚪 2.5 Change Room (In-stay room move, BR-level) — 2026-11-04
     //    ย้ายห้องจริง (room_id) หลัง check-in ได้ · เปลี่ยน room_type_id ได้เมื่อ type ใหม่แพงกว่า
-    //    เท่านั้น (upgrade-only) · ห้องเก่า → checkout_makeup + งานแม่บ้าน (mirror checkOut)
+    //    เท่านั้น (upgrade-only) · ห้องเก่า → dirty + งานแม่บ้าน 'checkout'
+    //    🚪 (2026-11-09): ① รับ BR confirmed (มีเลขห้องผูกไว้) — บิล paid/confirmed ย้ายล่วงหน้าได้
+    //    โดยไม่แตะสถานะห้องทั้งสองฝั่ง · ② ห้องปลายทางรับ dirty — in-stay: เปิด task 'daily'
+    //    ให้ห้องใหม่ก่อน transition → occupied · BR confirmed: คง dirty + task 'daily' รอเก็บ
+    //    · ห้องเก่า in-stay เดิม checkout_makeup → เปลี่ยนเป็น dirty (มติ owner)
     public function changeRoom(Request $request, $bookingId, $bookingRoomId)
     {
         // 🌟 Defense-in-depth: ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
@@ -334,18 +356,23 @@ class FrontDeskController extends Controller
             // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
             $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
 
-            // 🛡️ Guard: booking ต้อง confirmed (BR checked_in มาจาก flow check-in เสมอ)
-            if ($booking->status !== 'confirmed') {
+            // 🛡️ Guard: BR ต้อง checked_in หรือ confirmed — ย้ายได้ทั้งกลางทางและก่อนเช็คอิน
+            //    (2026-11-09): รับ BR confirmed ที่มีเลขห้องผูกไว้แล้ว — สลับห้องล่วงหน้าได้
+            if (! in_array($bookingRoom->status, ['confirmed', 'checked_in'])) {
                 throw new \Exception(
-                    "ย้ายห้องได้เฉพาะรายการจองที่เข้าพักแล้ว (confirmed) เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$booking->status}'",
+                    "ย้ายห้องได้เฉพาะห้องที่เช็คอินแล้ว (checked_in) หรือยืนยันแล้ว (confirmed) เท่านั้นค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}'",
                     422
                 );
             }
 
-            // 🛡️ Guard: BR ต้อง checked_in — ย้ายได้เฉพาะกลางทางเท่านั้น
-            if ($bookingRoom->status !== 'checked_in') {
+            // 🛡️ Guard: booking ตามสถานะ BR — BR checked_in มาจาก flow check-in (บิล confirmed) เสมอ
+            //    (2026-11-09): BR confirmed ยังไม่เข้าพัก → บิล paid หรือ confirmed ก็ย้ายได้
+            $isInStay = $bookingRoom->status === 'checked_in';
+            $allowedBookingStatuses = $isInStay ? ['confirmed'] : ['paid', 'confirmed'];
+            if (! in_array($booking->status, $allowedBookingStatuses)) {
                 throw new \Exception(
-                    "ย้ายห้องได้เฉพาะห้องที่เช็คอินแล้ว (checked_in) เท่านั้นค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}'",
+                    'ย้ายห้องได้เฉพาะรายการจองสถานะ \''.implode('\' หรือ \'', $allowedBookingStatuses).
+                    "' เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$booking->status}'",
                     422
                 );
             }
@@ -360,9 +387,10 @@ class FrontDeskController extends Controller
 
             // 🌟 lock ทั้งบิล + ห้องเก่า + ห้องใหม่ แล้ว re-check กัน race กับ check-in/check-out พร้อมกัน
             $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
-            if ($locked->status !== 'confirmed') {
+            if (! in_array($locked->status, $allowedBookingStatuses)) {
                 throw new \Exception(
-                    "ย้ายห้องได้เฉพาะรายการจองที่เข้าพักแล้ว (confirmed) เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$locked->status}'",
+                    'ย้ายห้องได้เฉพาะรายการจองสถานะ \''.implode('\' หรือ \'', $allowedBookingStatuses).
+                    "' เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$locked->status}'",
                     422
                 );
             }
@@ -370,8 +398,9 @@ class FrontDeskController extends Controller
             $oldRoom = Room::lockForUpdate()->findOrFail($bookingRoom->room_id);
             $newRoom = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
 
-            // 🛡️ ห้องใหม่ต้องพร้อมเข้าพัก — transition → occupied ถูกกฎ state machine เสมอ
-            if (! in_array($newRoom->status, ['available', 'prep_checkin'])) {
+            // 🛡️ ห้องใหม่ต้องพร้อมรับแขก — transition → occupied ถูกกฎ state machine เสมอ
+            //    (2026-11-09): รับ dirty ด้วย — แขกยอมเข้าห้องที่ยังไม่เก็บ (occupied รับ dirty แล้ว)
+            if (! in_array($newRoom->status, ['available', 'prep_checkin', 'dirty'])) {
                 throw new \Exception(
                     "ห้องหมายเลข {$newRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$newRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน",
                     422
@@ -436,33 +465,73 @@ class FrontDeskController extends Controller
                 }
             }
 
-            // 🚪 Commit การย้าย — BR คงสถานะ checked_in (สถานะไม่เปลี่ยน จึงไม่ผ่าน transitionStatus)
+            // 🚪 Commit การย้าย — BR คงสถานะเดิม (สถานะไม่เปลี่ยน จึงไม่ผ่าน transitionStatus)
             $bookingRoom->update([
                 'room_id' => $newRoom->id,
                 'room_type_id' => $newRoom->room_type_id,
             ]);
 
-            // 🧹 ห้องเก่า → checkout_makeup + งานแม่บ้าน (mirror checkOut — แขกย้ายออก = ห้องต้องเก็บ)
+            // 🧹 ห้องเก่า (in-stay) → dirty + งานแม่บ้าน task_type 'checkout' — แขกย้ายออก = ห้องต้องเก็บ
             //    duplicate-guard: ถ้ามี active task อยู่แล้วไม่สร้างซ้ำ (Fix S-B2 pattern)
-            $oldRoom->transitionStatusTo('checkout_makeup', $user->id);
-            $activeExists = HousekeepingTask::where('room_id', $oldRoom->id)
-                ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
-                ->exists();
-
+            //    (2026-11-09): เดิม checkout_makeup → เปลี่ยนเป็น dirty (owner มติ) · เฉพาะ
+            //    in-stay เท่านั้น — BR confirmed แขกยังไม่เคยเข้าพัก = ไม่มี checkout
+            //    → ปล่อยห้องเก่าคงสถานะเดิม ไม่เปิดงานแม่บ้าน
             $housekeepingTaskId = null;
-            if (! $activeExists) {
-                $task = HousekeepingTask::create([
-                    'id' => Str::uuid(),
-                    'room_id' => $oldRoom->id,
-                    'task_type' => 'checkout',
-                    'status' => 'unassigned',
-                    'notes' => $validated['notes'] ?? ('Auto-generated from room change ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'),
-                ]);
-                $housekeepingTaskId = $task->id;
-            }
+            $newRoomHousekeepingTaskId = null;
+            if ($isInStay) {
+                $oldRoom->transitionStatusTo('dirty', $user->id);
+                $activeExists = HousekeepingTask::where('room_id', $oldRoom->id)
+                    ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                    ->exists();
 
-            // 🌟 ห้องใหม่ → occupied
-            $newRoom->transitionStatusTo('occupied', $user->id);
+                if (! $activeExists) {
+                    $task = HousekeepingTask::create([
+                        'id' => Str::uuid(),
+                        'room_id' => $oldRoom->id,
+                        'task_type' => 'checkout',
+                        'status' => 'unassigned',
+                        'notes' => $validated['notes'] ?? ('Auto-generated from room change ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'),
+                    ]);
+                    $housekeepingTaskId = $task->id;
+                }
+
+                // 🧹 ห้องปลายทาง dirty → เปิด task 'daily' ให้แม่บ้านก่อน transition (มติ 2026-11-09
+                //    "call housekeeping task first") · ห้อง available/prep_checkin ไม่ต้อง
+                if ($newRoom->status === 'dirty') {
+                    $newRoomTaskExists = HousekeepingTask::where('room_id', $newRoom->id)
+                        ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                        ->exists();
+                    if (! $newRoomTaskExists) {
+                        $newRoomTask = HousekeepingTask::create([
+                            'id' => Str::uuid(),
+                            'room_id' => $newRoom->id,
+                            'task_type' => 'daily',
+                            'status' => 'unassigned',
+                            'notes' => 'Auto: guest moved into dirty room ('.$oldRoom->room_number.' → '.$newRoom->room_number.') — cleaning required',
+                        ]);
+                        $newRoomHousekeepingTaskId = $newRoomTask->id;
+                    }
+                }
+
+                // 🌟 ห้องใหม่ → occupied (dirty ผ่าน — machine รับ dirty→occupied แล้ว 2026-11-09)
+                $newRoom->transitionStatusTo('occupied', $user->id);
+            } elseif ($newRoom->status === 'dirty') {
+                // 🧹 BR confirmed — ห้องปลายทาง dirty ที่แขกจะเข้า: เปิด task 'daily' ทันที
+                //    (ห้องคง dirty รอแม่บ้านเก็บก่อนเช็คอินจริงตาม flow ปกติ)
+                $newRoomTaskExists = HousekeepingTask::where('room_id', $newRoom->id)
+                    ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
+                    ->exists();
+                if (! $newRoomTaskExists) {
+                    $newRoomTask = HousekeepingTask::create([
+                        'id' => Str::uuid(),
+                        'room_id' => $newRoom->id,
+                        'task_type' => 'daily',
+                        'status' => 'unassigned',
+                        'notes' => 'Auto: dirty room pre-assigned via room change ('.$oldRoom->room_number.' → '.$newRoom->room_number.') — cleaning required',
+                    ]);
+                    $newRoomHousekeepingTaskId = $newRoomTask->id;
+                }
+            }
 
             // 💰 Reprice ทั้งบิล (full-stay) — chokepoint เดียวกับ surcharge (ticket 10)
             //    type ใหม่แพงขึ้น = ส่วนต่างเข้า outstanding เก็บต่อผ่าน front-desk / check-out
@@ -493,15 +562,15 @@ class FrontDeskController extends Controller
                 $locked->update(['is_paid' => false]);
             }
 
-            // 📝 Audit — note row ของ BR (from=to=checked_in · note เล่าการย้าย)
+            // 📝 Audit — note row ของ BR (from=to=สถานะ BR เดิม · note เล่าการย้าย)
             //    (2026-11-04) convention extension: row นี้เขียนตรงใน controller ไม่ผ่าน
             //    transitionStatus เพราะสถานะ BR ไม่เปลี่ยน — note column ถูกใช้เป็นครั้งแรก
             //    · room transitions ถูก log เองผ่าน Room::transitionStatusTo (entity_type=room)
             StatusChangeLog::create([
                 'entity_type' => 'booking_room',
                 'entity_id' => $bookingRoom->id,
-                'from_status' => 'checked_in',
-                'to_status' => 'checked_in',
+                'from_status' => $bookingRoom->status,
+                'to_status' => $bookingRoom->status,
                 'role' => $user->role,
                 'causer_id' => $user->id,
                 'note' => 'ย้ายห้อง '.$oldRoom->room_number.' → '.$newRoom->room_number
@@ -527,6 +596,7 @@ class FrontDeskController extends Controller
                 'paid_amount' => $paidAmount,
                 'outstanding_amount' => $locked->fresh()->outstanding_amount,
                 'housekeeping_task_id' => $housekeepingTaskId,
+                'new_room_housekeeping_task_id' => $newRoomHousekeepingTaskId,
             ], 200);
 
         } catch (ModelNotFoundException $e) {

@@ -24,6 +24,9 @@ use Tests\TestCase;
  *    check-in + เปลี่ยนประเภทห้องแบบ upgrade-only (type ใหม่ต้องแพงกว่า)
  * 2. PUT /bookings/{bookingId}/rooms/{bookingRoomId} (surcharge mode) — เปลี่ยน room_type_id
  *    ได้แม้ room_id ถูกจัดแล้ว เมื่อ upgrade-only (ปลด room_id = null รอ auto-assign)
+ *
+ * 🚪 (2026-11-09): ขยาย change-room — รับ BR confirmed (สลับเลขห้องก่อนเช็คอิน · ไม่แตะ
+ *    สถานะห้องทั้งสองฝั่ง ไม่สร้างงานแม่บ้าน) + ห้องปลายทาง dirty (occupied รับ dirty แล้ว)
  */
 class ChangeRoomTest extends TestCase
 {
@@ -130,14 +133,16 @@ class ChangeRoomTest extends TestCase
             'status' => 'checked_in',
         ]);
 
-        // ห้องเก่า → checkout_makeup + งานแม่บ้าน · ห้องใหม่ → occupied
-        $this->assertSame('checkout_makeup', $oldRoom->fresh()->status);
+        // 🧹 ห้องเก่า → dirty (2026-11-09: เดิม checkout_makeup) + งานแม่บ้าน 'checkout' · ห้องใหม่ → occupied
+        $this->assertSame('dirty', $oldRoom->fresh()->status);
         $this->assertSame('occupied', $newRoom->fresh()->status);
         $this->assertDatabaseHas('housekeeping_tasks', [
             'room_id' => $oldRoom->id,
             'task_type' => 'checkout',
             'status' => 'unassigned',
         ]);
+        // ปลายทาง available → ไม่มี task ห้องใหม่
+        $this->assertNull($response->json('new_room_housekeeping_task_id'));
 
         // same-type move → ยอดไม่เปลี่ยน
         $this->assertSame(0, $response->json('surcharge_amount'));
@@ -148,7 +153,7 @@ class ChangeRoomTest extends TestCase
             'entity_type' => 'room',
             'entity_id' => $oldRoom->id,
             'from_status' => 'occupied',
-            'to_status' => 'checkout_makeup',
+            'to_status' => 'dirty',
         ]);
         $this->assertDatabaseHas('status_change_logs', [
             'entity_type' => 'room',
@@ -203,10 +208,11 @@ class ChangeRoomTest extends TestCase
         $this->assertFalse($booking->fresh()->is_paid);
         $this->assertAmountInvariant($booking->fresh());
 
-        // ห้องเก่ายังต้องเก็บ (checkout_makeup + task) และห้องใหม่ occupied
-        $this->assertSame('checkout_makeup', $oldRoom->fresh()->status);
+        // ห้องเก่ายังต้องเก็บ (dirty + task — 2026-11-09: เดิม checkout_makeup) และห้องใหม่ occupied
+        $this->assertSame('dirty', $oldRoom->fresh()->status);
         $this->assertSame('occupied', $newRoom->fresh()->status);
         $this->assertDatabaseHas('housekeeping_tasks', ['room_id' => $oldRoom->id, 'task_type' => 'checkout']);
+        $this->assertNull($response->json('new_room_housekeeping_task_id'));
     }
 
     // ============================================
@@ -241,7 +247,8 @@ class ChangeRoomTest extends TestCase
         $oldRoom = $this->createRoom($standard, 'occupied');
         $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'checked_in');
 
-        foreach (['occupied', 'dirty', 'checkout_makeup'] as $status) {
+        // 🚪 (2026-11-09): dirty ถูกถอดออก — ห้อง dirty ย้ายเข้าได้แล้ว (occupied รับ dirty)
+        foreach (['occupied', 'checkout_makeup'] as $status) {
             $newRoom = $this->createRoom($standard, $status);
 
             $response = $this->actingAs($this->createStaff(), 'sanctum')
@@ -308,19 +315,154 @@ class ChangeRoomTest extends TestCase
         $this->assertStringContainsString('เกินจำนวนสูงสุด', $response->json('message'));
     }
 
-    public function test_change_room_requires_checked_in_booking_room(): void
+    // 🚪 (2026-11-09): BR confirmed ย้ายได้แล้ว — guard ใหม่ reject เฉพาะ draft/no_show/checked_out
+    public function test_change_room_rejects_booking_room_outside_confirmed_or_checked_in(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
         $booking = $this->createBooking(['total_amount' => 3000]);
         $oldRoom = $this->createRoom($standard, 'available');
+        $newRoom = $this->createRoom($standard, 'available');
+
+        foreach (['draft', 'no_show', 'checked_out'] as $brStatus) {
+            $br = $this->createBookingRoom($booking, $standard, $oldRoom, $brStatus);
+
+            $response = $this->actingAs($this->createStaff(), 'sanctum')
+                ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+            $response->assertStatus(422);
+            $this->assertStringContainsString($brStatus, $response->json('message'));
+        }
+    }
+
+    // ============================================
+    // 🚪 3. BR confirmed — สลับเลขห้องก่อนเช็คอิน + ห้องปลายทาง dirty (2026-11-09)
+    // ============================================
+
+    public function test_staff_can_move_confirmed_booking_room_before_checkin_without_touching_rooms(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+        $booking = $this->createBooking(['status' => 'paid', 'total_amount' => 3000, 'is_paid' => true]);
+        $oldRoom = $this->createRoom($standard, 'available');
         $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'confirmed'); // ยังไม่เช็คอิน
         $newRoom = $this->createRoom($standard, 'available');
+        Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
 
-        $response->assertStatus(422);
-        $this->assertStringContainsString('checked_in', $response->json('message'));
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+
+        // BR คง confirmed แต่ชี้ห้องใหม่
+        $this->assertDatabaseHas('booking_rooms', [
+            'id' => $br->id,
+            'room_id' => $newRoom->id,
+            'room_type_id' => $standard->id,
+            'status' => 'confirmed',
+        ]);
+
+        // ห้องทั้งสองฝั่งไม่ถูก transition — แขกยังไม่เคยเข้าพัก = ไม่มี checkout
+        $this->assertSame('available', $oldRoom->fresh()->status);
+        $this->assertSame('available', $newRoom->fresh()->status);
+        $this->assertDatabaseCount('housekeeping_tasks', 0);
+        $this->assertNull($response->json('housekeeping_task_id'));
+        $this->assertNull($response->json('new_room_housekeeping_task_id'));
+
+        // ไม่มี room status log (ไม่มี transition) — มีแค่ note row ของ BR (from=to=confirmed)
+        $this->assertSame(0, StatusChangeLog::where('entity_type', 'room')->count());
+        $noteRow = StatusChangeLog::where('entity_type', 'booking_room')
+            ->where('entity_id', $br->id)
+            ->whereNotNull('note')
+            ->first();
+        $this->assertNotNull($noteRow, 'ควรมี audit note row ของ booking_room');
+        $this->assertSame('confirmed', $noteRow->from_status);
+        $this->assertSame('confirmed', $noteRow->to_status);
+        $this->assertStringContainsString($oldRoom->room_number, $noteRow->note);
+        $this->assertStringContainsString($newRoom->room_number, $noteRow->note);
+
+        // same-type move → ยอดไม่เปลี่ยน is_paid คงเดิม
+        $this->assertSame(0, $response->json('surcharge_amount'));
+        $this->assertTrue($booking->fresh()->is_paid);
+
+        $this->assertAmountInvariant($booking->fresh());
+    }
+
+    public function test_confirmed_booking_room_can_move_into_dirty_room(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+        $booking = $this->createBooking(['total_amount' => 3000]);
+        $oldRoom = $this->createRoom($standard, 'available');
+        $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'confirmed');
+        $newRoom = $this->createRoom($standard, 'dirty');
+
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+
+        // BR confirmed → ห้องใหม่คง dirty รอแม่บ้านเก็บก่อนเช็คอิน · ห้องเก่าไม่ถูกแตะ
+        $this->assertSame('dirty', $newRoom->fresh()->status);
+        $this->assertSame('available', $oldRoom->fresh()->status);
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $newRoom->id]);
+
+        // 🧹 ห้อง dirty ปลายทาง → task 'daily' เปิดทันที (มติ 2026-11-09 ทุก flow ที่แขกจะอยู่ dirty)
+        $this->assertDatabaseHas('housekeeping_tasks', [
+            'room_id' => $newRoom->id,
+            'task_type' => 'daily',
+            'status' => 'unassigned',
+        ]);
+        $this->assertNotNull($response->json('new_room_housekeeping_task_id'));
+        $this->assertNull($response->json('housekeeping_task_id'));
+    }
+
+    public function test_checked_in_room_can_move_into_dirty_room(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+        $booking = $this->createBooking(['total_amount' => 3000]);
+        $oldRoom = $this->createRoom($standard, 'occupied');
+        $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'checked_in');
+        $newRoom = $this->createRoom($standard, 'dirty');
+
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+
+        // in-stay → ห้องใหม่ occupied จาก dirty (machine รับ dirty→occupied แล้ว)
+        $this->assertSame('occupied', $newRoom->fresh()->status);
+        // ห้องเก่า → dirty (2026-11-09: เดิม checkout_makeup)
+        $this->assertSame('dirty', $oldRoom->fresh()->status);
+
+        // task ครบ 2 ตัว: ห้องเก่า 'checkout' + ห้อง dirty ปลายทาง 'daily' (สร้างก่อน transition)
+        $this->assertDatabaseHas('housekeeping_tasks', [
+            'room_id' => $oldRoom->id,
+            'task_type' => 'checkout',
+            'status' => 'unassigned',
+        ]);
+        $this->assertDatabaseHas('housekeeping_tasks', [
+            'room_id' => $newRoom->id,
+            'task_type' => 'daily',
+            'status' => 'unassigned',
+        ]);
+        $this->assertNotNull($response->json('housekeeping_task_id'));
+        $this->assertNotNull($response->json('new_room_housekeeping_task_id'));
+        $this->assertNotSame(
+            $response->json('housekeeping_task_id'),
+            $response->json('new_room_housekeeping_task_id')
+        );
+
+        // audit room: เก่า occupied → dirty · ใหม่ dirty → occupied
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'room',
+            'entity_id' => $oldRoom->id,
+            'from_status' => 'occupied',
+            'to_status' => 'dirty',
+        ]);
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'room',
+            'entity_id' => $newRoom->id,
+            'from_status' => 'dirty',
+            'to_status' => 'occupied',
+        ]);
     }
 
     public function test_change_room_rejects_same_room(): void

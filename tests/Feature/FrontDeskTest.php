@@ -194,6 +194,53 @@ class FrontDeskTest extends TestCase
         $this->assertEquals('occupied', $room->fresh()->status);
     }
 
+    // 🧹 (2026-11-09) เช็คอินเข้าห้อง dirty — machine รับ dirty→occupied + ระบบเปิด task 'daily'
+    //    ให้แม่บ้านก่อน transition ("call housekeeping task first" — มติ owner)
+
+    public function test_check_in_with_room_id_into_dirty_room_creates_housekeeping_task(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'dirty');
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        $br = $this->createBookingRoom($booking, $roomType, null, 'confirmed');
+
+        // มอบหมายห้อง dirty ตอนเช็คอินด้วย room_id
+        $response = $this->postJson($this->checkInEndpoint($booking, $br), [
+            'room_id' => $room->id,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('checked_in', $br->fresh()->status);
+        $this->assertEquals('occupied', $room->fresh()->status);
+        $this->assertDatabaseHas('housekeeping_tasks', [
+            'room_id' => $room->id,
+            'task_type' => 'daily',
+            'status' => 'unassigned',
+        ]);
+    }
+
+    public function test_check_in_using_pre_assigned_dirty_room_creates_housekeeping_task(): void
+    {
+        $this->actingAsAdmin();
+        $roomType = $this->createRoomType();
+        $room = $this->createRoom($roomType, 'dirty');
+        $booking = $this->createBooking(['status' => 'confirmed']);
+        // BR ผูกห้อง dirty ไว้แล้ว (assign ก่อนเช็คอิน) — เช็คอินโดยไม่ส่ง room_id
+        $br = $this->createBookingRoom($booking, $roomType, $room, 'confirmed');
+
+        $response = $this->postJson($this->checkInEndpoint($booking, $br));
+
+        $response->assertStatus(200);
+        $this->assertEquals('checked_in', $br->fresh()->status);
+        $this->assertEquals('occupied', $room->fresh()->status);
+        $this->assertDatabaseHas('housekeeping_tasks', [
+            'room_id' => $room->id,
+            'task_type' => 'daily',
+            'status' => 'unassigned',
+        ]);
+    }
+
     /**
      * 🌟 NEW (scrutinize 29/06/26): Bug fix #1 — check-in ต้องปฏิเสธ draft booking
      * ก่อนหน้านี้ code เดิม bypass state machine ทำให้ draft → confirmed ได้โดยข้ามการชำระเงิน
