@@ -1924,29 +1924,20 @@ class BookingController extends Controller
 
         // 🌟 Refactor (18/06/26): ลบ guest_name (ย้ายไป booking_rooms.guests แล้ว) — ค้นผ่าน user กับ primary_guest_name แทน
         // 🌟 Fix scrutinize (29/06/26): JSON_EXTRACT ใช้ได้แค่ MySQL/SQLite — ทำให้ cross-DB compatible
+        // 🌟 Fix (09/11/26): ค้น guest ทุกคนใน array ไม่ใช่แค่ [0] — รองรับทั้ง pgsql / sqlite / fallback
         $lowerEscaped = '%'.strtolower($escaped).'%';
         $guestNameFilter = function ($brQuery) use ($lowerEscaped) {
             $driver = DB::getDriverName();
-            if (in_array($driver, ['mysql', 'sqlite'])) {
-                $brQuery->where(function ($q) use ($lowerEscaped) {
-                    $q->whereRaw('LOWER(JSON_EXTRACT(guests, "$[0].name")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].firstName")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].lastName")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].first_name")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].last_name")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].email")) LIKE ?', [$lowerEscaped])
-                        ->orWhereRaw('LOWER(JSON_EXTRACT(guests, "$[0].phone")) LIKE ?', [$lowerEscaped]);
-                });
-            } elseif ($driver === 'pgsql') {
-                $brQuery->where(function ($q) use ($lowerEscaped) {
-                    $q->whereRaw("LOWER(guests #>> '{0,name}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,firstName}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,lastName}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,first_name}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,last_name}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,email}') LIKE ?", [$lowerEscaped])
-                        ->orWhereRaw("LOWER(guests #>> '{0,phone}') LIKE ?", [$lowerEscaped]);
-                });
+            if ($driver === 'pgsql') {
+                $brQuery->whereRaw(
+                    "EXISTS (SELECT 1 FROM json_array_elements(guests) g WHERE LOWER(COALESCE(g->>'name', '')) LIKE ? OR LOWER(COALESCE(g->>'firstName', '')) LIKE ? OR LOWER(COALESCE(g->>'lastName', '')) LIKE ? OR LOWER(COALESCE(g->>'first_name', '')) LIKE ? OR LOWER(COALESCE(g->>'last_name', '')) LIKE ? OR LOWER(COALESCE(g->>'email', '')) LIKE ? OR LOWER(COALESCE(g->>'phone', '')) LIKE ?)",
+                    array_fill(0, 7, $lowerEscaped)
+                );
+            } elseif ($driver === 'sqlite') {
+                $brQuery->whereRaw(
+                    "EXISTS (SELECT 1 FROM json_each(booking_rooms.guests) je WHERE LOWER(COALESCE(json_extract(je.value, '$.name'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.firstName'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.lastName'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.first_name'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.last_name'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.email'), '')) LIKE ? OR LOWER(COALESCE(json_extract(je.value, '$.phone'), '')) LIKE ?)",
+                    array_fill(0, 7, $lowerEscaped)
+                );
             } else {
                 // Fallback: search across whole JSON blob (less precise but safe)
                 $brQuery->whereRaw('LOWER(CAST(guests AS TEXT)) LIKE ?', [$lowerEscaped]);

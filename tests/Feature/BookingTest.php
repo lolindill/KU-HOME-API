@@ -60,7 +60,7 @@ class BookingTest extends TestCase
      * ตอนนี้ Booking มีแค่ข้อมูลการจอง + user_id (คนจอง)
      * ข้อมูลผู้เข้าพักเก็บใน booking_rooms.guests (JSON)
      */
-    private function createBooking(array $overrides = []): Booking
+    private function createBooking(array $overrides = [], ?array $guests = null): Booking
     {
         $user = User::factory()->create();
 
@@ -95,7 +95,7 @@ class BookingTest extends TestCase
             'room_type_id' => $roomType->id,
             'check_in' => now()->addDays(2)->toDateString(),
             'check_out' => now()->addDays(4)->toDateString(),
-            'guests' => [
+            'guests' => $guests ?? [
                 ['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH'],
             ],
             'rate_daily' => 1500,
@@ -387,6 +387,103 @@ class BookingTest extends TestCase
         $response = $this->getJson('/api/v1/bookings?term=Test');
         $response->assertStatus(200);
         $response->assertJsonPath('status', 'success');
+    }
+
+    public function test_admin_can_search_bookings_by_second_guest_first_name(): void
+    {
+        $this->actingAsAdmin();
+        $targetBooking = $this->createBooking([], [
+            ['title' => 'mr', 'firstName' => 'Primary', 'lastName' => 'One'],
+            ['title' => 'ms', 'firstName' => 'SecondLady', 'lastName' => 'Two'],
+        ]);
+        $otherBooking = $this->createBooking([], [
+            ['title' => 'mr', 'firstName' => 'Other', 'lastName' => 'Person'],
+        ]);
+
+        $response = $this->getJson('/api/v1/bookings?term=SecondLady');
+        $response->assertStatus(200);
+        $bookingIds = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($targetBooking->id, $bookingIds);
+        $this->assertNotContains($otherBooking->id, $bookingIds);
+    }
+
+    public function test_admin_can_search_bookings_by_second_guest_email_or_phone(): void
+    {
+        $this->actingAsAdmin();
+        $targetBooking = $this->createBooking([], [
+            ['title' => 'mr', 'firstName' => 'First', 'lastName' => 'Guest', 'email' => 'first@kuhome.com', 'phone' => '0810000001'],
+            ['title' => 'ms', 'firstName' => 'Second', 'lastName' => 'Guest', 'email' => 'secondguest@kuhome.com', 'phone' => '0829999999'],
+        ]);
+        $otherBooking = $this->createBooking([], [
+            ['title' => 'mr', 'firstName' => 'Third', 'lastName' => 'Guest', 'email' => 'third@kuhome.com', 'phone' => '0830000003'],
+        ]);
+
+        // ค้นหาด้วย email ของ guest คนที่สอง (guests[1])
+        $responseEmail = $this->getJson('/api/v1/bookings?term=secondguest@kuhome.com');
+        $responseEmail->assertStatus(200);
+        $emailBookingIds = collect($responseEmail->json('bookings'))->pluck('id');
+        $this->assertContains($targetBooking->id, $emailBookingIds);
+        $this->assertNotContains($otherBooking->id, $emailBookingIds);
+
+        // ค้นหาด้วย phone ของ guest คนที่สอง (guests[1])
+        $responsePhone = $this->getJson('/api/v1/bookings?term=0829999999');
+        $responsePhone->assertStatus(200);
+        $phoneBookingIds = collect($responsePhone->json('bookings'))->pluck('id');
+        $this->assertContains($targetBooking->id, $phoneBookingIds);
+        $this->assertNotContains($otherBooking->id, $phoneBookingIds);
+    }
+
+    public function test_admin_search_guest_negative_case_does_not_return_unrelated_booking(): void
+    {
+        $this->actingAsAdmin();
+        $bookingAlpha = $this->createBooking([], [
+            ['title' => 'mr', 'first_name' => 'Somchai', 'last_name' => 'Jaidee'],
+            ['title' => 'ms', 'first_name' => 'Somsri', 'last_name' => 'Rukchat'],
+        ]);
+        $bookingBeta = $this->createBooking([], [
+            ['title' => 'mr', 'first_name' => 'Wichai', 'last_name' => 'Maneerat'],
+            ['title' => 'ms', 'first_name' => 'Malee', 'last_name' => 'Dokmai'],
+        ]);
+
+        // ค้นหา Somsri (แขกคนที่ 2 ของ Alpha) — ต้องเจอ Alpha แต่ไม่เจอ Beta
+        $responseAlpha = $this->getJson('/api/v1/bookings?term=Somsri');
+        $responseAlpha->assertStatus(200);
+        $idsAlpha = collect($responseAlpha->json('bookings'))->pluck('id');
+        $this->assertContains($bookingAlpha->id, $idsAlpha);
+        $this->assertNotContains($bookingBeta->id, $idsAlpha);
+
+        // ค้นหา Malee (แขกคนที่ 2 ของ Beta) — ต้องเจอ Beta แต่ไม่เจอ Alpha
+        $responseBeta = $this->getJson('/api/v1/bookings?term=Malee');
+        $responseBeta->assertStatus(200);
+        $idsBeta = collect($responseBeta->json('bookings'))->pluck('id');
+        $this->assertContains($bookingBeta->id, $idsBeta);
+        $this->assertNotContains($bookingAlpha->id, $idsBeta);
+    }
+
+    public function test_admin_can_search_bookings_by_primary_guest_regression(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking([], [
+            ['title' => 'mr', 'name' => 'PrimaryMaster', 'firstName' => 'PrimaryMaster', 'lastName' => 'Tester', 'email' => 'primarymaster@kuhome.com', 'phone' => '0851112233'],
+            ['title' => 'ms', 'firstName' => 'SecondaryLady', 'lastName' => 'Tester'],
+        ]);
+        $otherBooking = $this->createBooking([], [
+            ['title' => 'mr', 'name' => 'UnrelatedMaster'],
+        ]);
+
+        // ค้นหา primary guest (guests[0]) ด้วยชื่อ
+        $response = $this->getJson('/api/v1/bookings?term=PrimaryMaster');
+        $response->assertStatus(200);
+        $ids = collect($response->json('bookings'))->pluck('id');
+        $this->assertContains($booking->id, $ids);
+        $this->assertNotContains($otherBooking->id, $ids);
+
+        // ค้นหา primary guest (guests[0]) ด้วย email
+        $responseEmail = $this->getJson('/api/v1/bookings?term=primarymaster@kuhome.com');
+        $responseEmail->assertStatus(200);
+        $idsEmail = collect($responseEmail->json('bookings'))->pluck('id');
+        $this->assertContains($booking->id, $idsEmail);
+        $this->assertNotContains($otherBooking->id, $idsEmail);
     }
 
     // ============================================
