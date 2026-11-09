@@ -70,8 +70,31 @@ class Booking extends Model
      * payments = ledger เดียวของ "เงินที่เข้าจริง" (verify / recordPayment / QR — 3 จุดเขียนเท่านั้น)
      * ส่งทุก response ทุก role — ไม่มี column เก็บ จึงไม่มีทาง drift
      * 💸 (15/10/26, ticket 13) เพิ่ม charges_total — Σ additional_charges (REQ-042/044)
+     * 🏷️ (09/11/26) เพิ่ม booking_type — derived ประเภทการจอง (daily|group|monthly)
      */
-    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total'];
+    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total', 'booking_type'];
+
+    /**
+     * 🏷️ ประเภทการจองระดับบิล (derived — mirror 3 เขตราคา: monthly > group > daily)
+     *    - monthly = มี booking_room ใดห้องหนึ่ง nights >= block_min_nights (20)
+     *    - group   = ไม่มีห้องเขต monthly แต่จำนวน booking_rooms >= group_min_rooms (5)
+     *    - daily   = ที่เหลือ
+     *    (priority: monthly > group > daily)
+     */
+    public function getBookingTypeAttribute(): string
+    {
+        $rooms = $this->bookingRooms;
+
+        if ($rooms->contains(fn ($br) => $br->nights >= (int) config('booking.block_min_nights', 20))) {
+            return 'monthly';
+        }
+
+        if ($rooms->count() >= (int) config('booking.group_min_rooms', 5)) {
+            return 'group';
+        }
+
+        return 'daily';
+    }
 
     // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
     // ใช้สำหรับ Receipt billing_name และแสดงผล — สำรองด้วย user.name

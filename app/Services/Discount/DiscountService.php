@@ -217,7 +217,9 @@ class DiscountService
                 // ชั้นจำนวนห้อง (admin เท่านั้น) — group ทับ daily/daily_ku ทั้งบิลสั้นและ
                 // เคส fallback รายเดือนที่ไม่มีเรท month · org booking (userless) → daily
                 if ($isAdminPath) {
-                    $groupCode = $billRoomCount >= 10 ? 'min_10_rooms' : ($billRoomCount >= 5 ? 'min_5_rooms' : null);
+                    $groupCode = $billRoomCount >= (int) config('booking.group_large_min_rooms', 10)
+                        ? 'min_10_rooms'
+                        : ($billRoomCount >= (int) config('booking.group_min_rooms', 5) ? 'min_5_rooms' : null);
                     if ($groupCode !== null) {
                         $groupRate = GlobalRate::getRoomRate($br->roomType, 'group', $groupCode);
                         if ($groupRate > 0) {

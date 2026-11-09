@@ -333,7 +333,7 @@ class BookingConfirmationController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ยืนยันการชำระเงินเรียบร้อย — booking confirmed',
-                'confirmation' => $confirmation->fresh(['slipImage']),
+                'confirmation' => $confirmation->fresh(['slipImage', 'booking.bookingRooms']),
                 // 💳 (25/09/26, ticket 05 หัวข้อ 4): expected vs claimed (soft — admin ตัดสินเอง)
                 'expected_amount' => $freshBooking->expected_amount,
                 'claimed_amount' => $confirmation->amount,
@@ -399,7 +399,7 @@ class BookingConfirmationController extends Controller
             return response()->json([
                 'status' => 'success',
                 'message' => 'ปฏิเสธสลิป — booking เปลี่ยนสถานะเป็น verify_error รอผู้จองแจ้งใหม่',
-                'confirmation' => $confirmation->fresh(['slipImage']),
+                'confirmation' => $confirmation->fresh(['slipImage', 'booking.bookingRooms']),
                 'booking_status' => $freshBooking->status,
                 // 💳 (25/09/26, ticket 05 หัวข้อ 5): envelope 4 field — ค่าไม่เปลี่ยน (ไม่มี payments row)
                 //    ส่งเพื่อ consistency กับ verify/response อื่น
@@ -429,7 +429,7 @@ class BookingConfirmationController extends Controller
         // 💳 (25/09/26, ticket 05 หัวข้อ 6): booking ถูก eager load แล้ว → accessor expected_amount
         //    (appends ของ BookingConfirmation) ทำงานโดยไม่เพิ่ม query — admin เห็นคู่
         //    expected (ระบบคำนวณ) vs amount (claimed ที่ user แจ้ง) ตั้งแต่หน้า dashboard
-        $confirmations = BookingConfirmation::with(['booking.user', 'reviewer', 'slipImage'])
+        $confirmations = BookingConfirmation::with(['booking.user', 'booking.bookingRooms', 'reviewer', 'slipImage'])
             ->where('status', 'pending')
             ->orderBy('created_at', 'asc') // เก่าก่อน (FIFO)
             ->paginate(15);

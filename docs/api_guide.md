@@ -1321,6 +1321,7 @@ curl -s -H "Accept: application/json" \
 > ⏱️ **(24/09/26) Draft Lock 15 นาที (REQ-008 — เดิม 24 ชม.)**: สร้าง booking แล้วระบบล็อกห้องไว้ให้ **15 นาที** (config: `booking.payment_deadline_minutes`) เพื่อกรอกข้อมูลและชำระเงิน — เลยกำหนด draft จะ **ไม่กิน slot อีก** (ห้องกลับเป็น "ว่าง" ทันทีใน availability ทุก endpoint ผ่าน `BookingRoom::scopeHoldingSlot()`) และ row จะถูกลบโดย `CleanupExpiredDrafts` (schedule ทุก 5 นาที). การส่งสลิปบน draft ที่หมดเวลา = 422 (`verify_error` ส่งใหม่ได้แม้หมด deadline). **(2026-10-27 fix slot leak / overbooking):** สำหรับบิลที่ container เลย draft แล้ว (`pending`, `verify_error`, `paid`, `confirmed`) ห้อง `draft` จะ**ยึด slot เสมอโดยไม่สน deadline** (เพราะ flow ออนไลน์ verify สลิป / updateStatus ไม่ได้ย้ายสถานะห้อง ห้องจึงค้าง draft ตลอดชีวิตบิล · `complete` ไม่ยึด slot คืนห้องเข้า pool)
 > 🗓️ **(24/09/26) จองรายเดือน / จองเหมา (Long stay — REQ-026/027)**: จองยาวได้ **ไม่จำกัดจำนวนคืน** (ราคา = daily rate × จำนวนคืน) — response `booking_rooms.*` มี field derived ใหม่: `nights` (จำนวนคืน) และ `stay_type`: **`monthly`** (≥ 30 คืน — จองรายเดือน, config `booking.monthly_min_nights`), **`block`** (≥ 21 คืน — จองเหมา ใช้กติกาเดียวกับรายเดือน, config `booking.block_min_nights`), **`daily`** (อื่น ๆ). ใช้โค้ดส่วนลดกับค่าห้องได้ตามปกติ (REQ-026 — ส่วนลดคิดเฉพาะ `room_amount`). 🚧 การชำระแบบมัดจำ/ค้างชำระของ long stay อยู่ระหว่าง design ในแมป `wayfinder/booking-payment-types`
 >   - 🔄 **supersede บางส่วน — (22/10/26) Pricing tier v2 + (06/11/26) เพดาน 90 คืน**: ห้อง x ≥ 20 คืนเป็น**เขตของ admin** (non-admin → 422 · ราคาคิดแบบรายเดือน `intdiv(x × month, 30)`) และห้อง x **> 90 คืน → 422 reject ทุก role รวม admin** (`booking.monthly_max_nights`) — กติกาเต็มอยู่หัวข้อท้ายไฟล์ "🌙 Pricing tier v2"
+>   - 🏷️ **(09/11/26) Booking-level `booking_type`**: response ระดับ booking container เพิ่ม field derived `booking_type` (`daily` | `group` | `monthly`) mirror 3 เขตราคา: `monthly` (มีห้องใดห้องหนึ่ง nights ≥ 20 คืน), `group` (ไม่มีห้องเขต monthly แต่จำนวนห้อง ≥ 5 ห้อง, config `booking.group_min_rooms`), และ `daily` (อื่น ๆ) โดยมี priority: monthly > group > daily
 > 🏨 **(24/09/26) Capacity denominator = sellable pool + flag `include_reserved`**: availability check ของ endpoint นี้นับ denominator จาก **ห้องขายได้จริงต่อช่วงเข้าพักของแต่ละ BR** — ตัดห้องติด maintenance period เสมอ และห้องติด reserved period ด้วย (🐛 bug fix เดิมนับห้องกายภาพทั้ง type ทำให้จองทะลุ pool ที่ assign ได้) · admin ส่ง `include_reserved=true` (top-level body field) เพื่อขยาย pool เป็น sellable + reserved ได้ — สัญญาเต็มหัวข้อ "Flag `include_reserved`" ในหมวด Rooms · flag **ไม่ถูก persist** ลง booking
 > 💳 **(25/09/26) Payment types (เต็มจำนวน / มัดจำ / ค้างชำระ)**: รับ optional `payment_type` (`full|deposit|deferred`) และ `deposit_amount` (บาท ≥ 1) — **ตั้งได้ admin/system เท่านั้น** (input มี field ใด field หนึ่ง → non-admin 403) · ไม่ส่ง = `full` เสมอ (flow เดิม regression 0%) · `deposit_amount` มีความหมายเฉพาะ `deposit` (422 ถ้าส่งกับ type อื่น) · `payment_type=deposit` ที่ไม่ส่ง `deposit_amount` = ระบบคิด **50%** ของ `total_amount` (config `booking.deposit_percent`, ปัดขึ้นหลักสิบ) · `payment_type=deferred` = ค้างชำระ รอ admin อนุมัติ (สลิปถูกบล็อก) · response เพิ่ม envelope: `payment_type` + `deposit_amount` (effective) + `paid_amount` + `outstanding_amount` — ส่งทุก response ของ booking ทุก role (รายละเอียดหัวข้อ "💳 Payment types")
 
@@ -1951,7 +1952,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "optional reason" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "id": "...", "url": "<signed URL 15 นาที>", "mime_type": "image/jpeg", "size": 184320, "original_name": "slip.jpg", "category": "slip" } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": { "id": "...", "url": "<signed URL 15 นาที>", "mime_type": "image/jpeg", "size": 184320, "original_name": "slip.jpg", "category": "slip" }, "booking": { ..., "booking_type": "daily" } }, "expected_amount": 0, "claimed_amount": 1500, "payment_recorded": { ...payments row }, "booking_status": "confirmed", "booking_is_paid": true, "payment_type": "full", "deposit_amount": null, "paid_amount": 1500, "outstanding_amount": 0 }`
 
 > 🖼️ **(26/10/26)** `slip_image` JSON ซ่อน field ภายในแล้ว (`path`, `disk`, `imageable_id`, `imageable_type`, `uploaded_by`, `metadata` ไม่ serialize) — เหลือ `id`, `mime_type`, `size`, `original_name`, `category`, timestamps, `url`
 
@@ -1965,7 +1966,7 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 **Request Body**: `{ "review_note": "slip ไม่ชัด" }`
 
-**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...} }, "booking_status": "verify_error", "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ... }`
+**Response 200**: `{ "status": "success", "confirmation": { ..., "slip_image": {...}, "booking": { ..., "booking_type": "daily" } }, "booking_status": "verify_error", "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ... }`
 
 > 💳 reject **ไม่เขียน payments row** (ยังไม่รับเงิน) — ยอด 4 field ส่งกลับเพื่อ consistency (ค่าไม่เปลี่ยน)
 
@@ -1973,11 +1974,11 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 ### GET `/booking-confirmations/pending` — Admin dashboard list
 
-🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `reviewer`, `slipImage`
+🔒 **Admin only** · Paginated (15/page, FIFO oldest-first) · eager-loads `booking.user`, `booking.bookingRooms`, `reviewer`, `slipImage`
 
 💳 **(25/09/26)**: แต่ละ row มี `amount` (ยอด user แจ้ง — claimed) + `expected_amount` (ระบบคำนวณจาก booking: deposit งวดแรก = ยอดมัดจำ / กรณีอื่น = outstanding) — admin เห็นคู่เทียบตั้งแต่หน้า list
 
-**Response 200**: `{ "status": "success", "confirmations": { paginated data } }`
+**Response 200**: `{ "status": "success", "confirmations": { "data": [ { ..., "booking": { ..., "booking_type": "daily" } } ] } }`
 
 ---
 
@@ -3274,6 +3275,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `total_amount`     | integer   | In baht (no decimals — integer since 2026-06-05)        |
 | `is_paid`          | boolean   | Default: false                                          |
 | `payment_deadline` | datetime  | For draft bookings (15 min from creation — REQ-008, 2026-09-24) |
+| `booking_type`     | string    | Derived ($appends): `daily` \| `group` \| `monthly` (mirror 3 เขตราคากลุ่ม/รายเดือน — 2026-11-09) |
 | `created_at`       | timestamp |                                                         |
 | `updated_at`       | timestamp |                                                         |
 

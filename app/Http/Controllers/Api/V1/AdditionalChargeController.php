@@ -104,7 +104,7 @@ class AdditionalChargeController extends Controller
             return response()->json(array_merge([
                 'status' => 'success',
                 'message' => 'บันทึกรายการค่าใช้จ่ายเรียบร้อยแล้วค่ะ 💸',
-                'additional_charge' => $charge->fresh(['booking', 'bookingRoom.room', 'recorder']),
+                'additional_charge' => $charge->fresh(['booking.bookingRooms', 'bookingRoom.room', 'recorder']),
             ], $this->moneySnapshot($booking)), 201);
         } catch (\Exception $e) {
             Log::error('Failed to store additional charge: '.$e->getMessage());
@@ -143,7 +143,7 @@ class AdditionalChargeController extends Controller
             return response()->json(array_merge([
                 'status' => 'success',
                 'message' => 'แก้ไขรายการเรียบร้อยแล้วค่ะ',
-                'additional_charge' => $charge->fresh(['booking', 'bookingRoom.room', 'recorder']),
+                'additional_charge' => $charge->fresh(['booking.bookingRooms', 'bookingRoom.room', 'recorder']),
             ], $this->moneySnapshot($booking)), 200);
         } catch (ModelNotFoundException $e) {
             return response()->json([

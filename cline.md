@@ -2486,3 +2486,21 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 **Wire-format note:** key `email_verified_at: null` หายจาก response ที่ serialize User เต็ม (`POST /auth/sso/exchange`, `POST /auth/sso/exchange-google`, `UserController` ทุก method, `BookingController` attach user) — ค่าเป็น null มาตลอด ไม่มี test assert → ปลอดภัย
 
 **No endpoint breakage** — ไม่มี route/logic พึ่งพาคอลัมน์นี้
+
+## 🏷️ Derived `Booking.booking_type` container attribute (2026-11-09)
+
+- **Owner decisions:**
+  1. เพิ่ม derived attribute `booking_type` บน `App\Models\Booking` (`$appends`) — wire format ส่ง string `'daily' | 'group' | 'monthly'`
+  2. นิยาม mirror 3 เขตราคา:
+     - `monthly`: มี booking_room ใดห้องหนึ่ง nights ≥ `booking.block_min_nights` (20)
+     - `group`: ไม่มีห้องเขต monthly แต่จำนวน booking_rooms ≥ `booking.group_min_rooms` (5)
+     - `daily`: ที่เหลือ
+     - priority: monthly > group > daily (บิล mixed 4 ห้องสั้น + 1 ห้อง 20 คืน → 'monthly')
+  3. ไม่มี migration — derived attribute บริหารผ่าน `$appends` + accessor `getBookingTypeAttribute()` อ่าน `$this->bookingRooms`
+- **Config & DiscountService:**
+  - เพิ่ม config keys ใน `config/booking.php`: `'group_min_rooms' => 5`, `'group_large_min_rooms' => 10`
+  - Refactor `DiscountService::reprice()` บรรทัด groupCode ให้อ่านจาก config keys ใหม่ (default เท่าเดิม 100%)
+- **N+1 Eager loading chokepoints:**
+  - `BookingConfirmationController`: `pending` เพิ่ม `booking.bookingRooms` ใน eager load · `verify`/`reject` เพิ่ม `booking.bookingRooms` ใน `$confirmation->fresh(['slipImage', 'booking.bookingRooms'])`
+  - `AdditionalChargeController`: `store`/`update` เพิ่ม `booking.bookingRooms` ใน `$charge->fresh(['booking.bookingRooms', ...])`
+- **Tests & Docs:** `tests/Feature/BookingTypeTest.php` 8 เคส ครอบคลุม daily/monthly/group, boundaries 19/20 คืน และ 4/5 ห้อง, mixed priority, nested verify/pending, regression stay_type · อัปเดต `docs/api_guide.md`
