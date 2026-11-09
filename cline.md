@@ -259,8 +259,8 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### User (`app/Models/User.php`)
 - **Primary Key**: UUID (`$incrementing = false`, `$keyType = 'string'`)
-- **Fillable**: name, email, password, role, title, phone, nationality, is_ku_member, ver
-- **Casts**: email_verified_at→datetime, password→hashed, is_ku_member→boolean, ver→boolean
+- **Fillable**: name, email, password, role, title, phone, nationality, auth_provider, ver
+- **Casts**: password→hashed, ver→PgBoolean
 
 #### Booking (`app/Models/Booking.php`)
 - **Primary Key**: UUID (HasUuids trait)
@@ -2470,3 +2470,18 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Test:** `FrontDeskTest` รื้อชุด check-in/out ยิง per-room URL (URL helper `checkInEndpoint()`/`checkOutEndpoint()` แบบ ChangeRoomTest) — scenario เดิมครบ (draft/pending/verify_error reject, wrong type, overlap holdingSlot, staff, deferred ค้าง/บางส่วน, integration, housekeeping task, 403 matrix) + **ใหม่ 5 เคส**: multi-room เช็คอินทีละห้อง (ห้องแรก promote `paid → confirmed` อีกห้องยัง confirmed), multi-room ปิดบิลเฉพาะห้องสุดท้าย (เช็คเอาท์ห้องแรกโดน block เมื่อยอดไม่ครบ — มติตั้งแต่ห้องแรก), complete reject check-in, double check-in 422, BR บิลอื่น 404, check-out BR ไม่ checked_in 422 · แก้ `RoomStatePeriodTest` 2 gate tests → per-room URL + `room_id` · suite ยิง 38 (FrontDesk) + 26 (RoomStatePeriod) passed
 - **Docs:** `docs/api_guide.md` — หัว Front Desk Operations แทน 2 endpoint sections เป็น per-room (guards table ครบ + breaking-change note) · เพิ่ม note ใน BookingRoom State Machine · curl example ใช้ per-room · ส่วน "Handoff Ticket 03/04" เป็นบันทึกประวัติศาสตร์ **ไม่แก้** (อ้าง route เก่าตามยุค) · AGENTS.md ปรับ bullet Front Desk ใน State Machines
 - **⚠️ Breaking change สำหรับ frontend (ku-home):** ต้องย้ายไปเรียก `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/check-in|check-out` — เดิม `assigned_rooms: [uuids]` → ใหม่ `room_id: uuid` ต่อห้อง · route เก่า **404 ทันที** (ไม่มี deprecation window — มติแทนที่ทั้งหมด)
+
+## 🪦 Drop `users.email_verified_at` — legacy Laravel scaffold (2026-11-09)
+
+**Motivation:** คอลัมน์มาจาก base migration ของ Laravel scaffold ล้วน ๆ — **ไม่เคยถูกใช้ใน flow ใดเลย**: ไม่มี email verification flow (ไม่ implement `MustVerifyEmail`), ไม่อยู่ใน `$fillable`, ไม่มี controller/service/test/seeder อ่านหรือเขียน → ค่าเป็น `null` ตลอดชีวิต production. การ verify email ที่แท้จริงเกิดที่ claim ฝั่ง SSO provider (Google `email_verified` claim — fail-closed 422 ใน `GoogleSsoService`) ไม่เกี่ยวกับคอลัมน์นี้ (⚠️ ห้ามสับสนกับ `is_ku_member` ที่ drop ไปแล้ว 2026-09-08 — คนละตัว)
+
+**ไฟล์ที่เปลี่ยน:**
+1. `database/migrations/2026_11_09_100000_drop_email_verified_at_from_users_table.php` (ใหม่) — `dropColumn` ตาม pattern `2026_09_08_120000_drop_is_ku_member_from_users_table.php` · `down()` คืน `timestamp()->nullable()`
+2. `app/Models/User.php` — ลบ cast `email_verified_at→datetime`
+3. `database/factories/UserFactory.php` — ลบ field ใน `definition()` + ลบ state `unverified()` (ยืนยันแล้ว: ไม่มี test ใช้ state นี้)
+4. `docs/database-er.md` — ลบบรรทัดออกจาก ER diagram users table
+5. cline.md หัว "Key Models > User" — เก็บกวาด casts/fillable ที่ stale ค้างจาก drop `is_ku_member` (2026-09-08) ด้วย
+
+**Wire-format note:** key `email_verified_at: null` หายจาก response ที่ serialize User เต็ม (`POST /auth/sso/exchange`, `POST /auth/sso/exchange-google`, `UserController` ทุก method, `BookingController` attach user) — ค่าเป็น null มาตลอด ไม่มี test assert → ปลอดภัย
+
+**No endpoint breakage** — ไม่มี route/logic พึ่งพาคอลัมน์นี้

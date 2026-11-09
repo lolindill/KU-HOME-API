@@ -31,7 +31,6 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
             'password' => 'hashed',
             // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
             'ver' => PgBoolean::class,

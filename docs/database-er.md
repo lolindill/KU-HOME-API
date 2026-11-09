@@ -44,7 +44,6 @@ erDiagram
         string phone "nullable"
         string nationality "default: Thai"
         boolean ver "default: false, verification flag"
-        timestamp email_verified_at "nullable"
         remember_token remember_token
         timestamp created_at
         timestamp updated_at
