@@ -324,8 +324,16 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $br = $booking->bookingRooms()->first();
         DB::table('booking_rooms')->where('id', $br->id)->update(['status' => 'checked_in']);
 
-        $this->putRoom($booking, ['room_type_id' => $typeB->id])
+        $res = $this->putRoom($booking, ['room_type_id' => $typeB->id])
             ->assertStatus(422);
+
+        $res->assertJsonFragment([
+            'status' => 'error',
+            'message' => 'ห้องเข้าพักแล้วรับเฉพาะการเพิ่ม/แก้ addon เท่านั้นค่ะ 🏨',
+        ]);
+        $this->assertEquals(0, $br->fresh()->addon->breakfast_set_100);
+        $this->assertEquals(0, $br->fresh()->addon->breakfast_set_200);
+        $this->assertNotEquals($typeB->id, $br->fresh()->room_type_id);
     }
 
     // =========================================================
