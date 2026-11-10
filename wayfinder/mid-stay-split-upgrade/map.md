@@ -8,7 +8,7 @@ status: open
 
 ## Destination
 
-Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ที่ `checked_in`/`confirmed` ออกเป็นสองช่วง:
+Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ของบิลที่ยังไม่ปิด (container `confirmed`/`draft` — BR `checked_in`/`confirmed`/`draft`) ออกเป็นสองช่วง:
 **BR-1** ถูกตัด `check_out` สั้นลงถึง `split_date` (คง tier/สัญญาเดิม ราคาสัดส่วนตามคืนที่เหลือ) + **BR-2** ใหม่ช่วงครึ่งหลังบน `room_type` ที่ tier สูงกว่า (ราคา manual หรือ computed) — ผ่าน `reprice()` override จบด้วย surcharge envelope
 เสร็จเมื่อ: endpoint ทำงานครบตาม [tickets/01](tickets/01-implement-split-upgrade.md) · suite [tickets/02](tickets/02-tests-split-upgrade.md) ผ่านครบ + ไม่มี regression · เอกสาร [tickets/03](tickets/03-docs.md) อัปเดตครบ
 
@@ -25,9 +25,9 @@ Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ที�
 
 ## Locked decisions — grill-me session 2026-11-10 (8 มติ ห้าม re-litigate โดยไม่มีเหตุผลใหม่)
 
-1. **Scope:** BR สถานะ `checked_in` + `confirmed` (confirmed = staff มีเครื่องมือจัดบิลก่อนเช็คอินโดยไม่ต้องรอ admin mode 2)
-2. **split_date:** ต้องอยู่ใน `(check_in, check_out)` เคร่งครัด — ครึ่งละ ≥ 1 คืน · **ย้อนหลังได้** (เคสจริง: กรอกเอกสารช้ากว่าวันย้ายจริง) · อนาคตได้ (BR-2 confirmed ยึด slot ผ่าน `holdingSlot()`)
-3. **พิธีกรรม: Manual ทุกกรณี** — split สร้างโครงเท่านั้น (trim BR-1 + BR-2 `confirmed` เสมอ ไม่ auto เช็คอิน/เอาท์ ไม่ auto ย้ายสถานะห้อง) · front desk เช็คเอาท์ BR-1 / เช็คอิน BR-2 เองวันจริงด้วย flow ปกติ
+1. **Scope (แก้รอบสอง 2026-11-10):** **container `confirmed` หรือ `draft` เท่านั้น** (เดิม `paid|confirmed` — ตัด `paid` ออก เพิ่ม `draft`) · container `confirmed` → BR `checked_in|confirmed` · container `draft` → BR `draft` (BR-2 mirror สถานะบริบท)
+2. **split_date (แก้รอบสอง 2026-11-10):** ต้องอยู่ใน `(check_in, check_out)` เคร่งครัด — ครึ่งละ ≥ 1 คืน · **ต้อง ≥ วันนี้ ห้ามย้อนหลัง** (เพิกถอน backdated ของรอบแรก) · อนาคตได้ (BR-2 ยึด slot ผ่าน `holdingSlot()`)
+3. **พิธีกรรม: Manual ทุกกรณี** — split สร้างโครงเท่านั้น (trim BR-1 + BR-2 สถานะ mirror: `confirmed` ภายใต้บิล `confirmed` / `draft` ภายใต้บิล `draft` — ไม่ auto เช็คอิน/เอาท์ ไม่ auto ย้ายสถานะห้อง) · front desk เช็คเอาท์ BR-1 / เช็คอิน BR-2 เองวันจริงด้วย flow ปกติ
 4. **Money guard:** airtight — รวมแล้วต้องไม่ลด (รายละเอียดสูตรเทียบที่ ticket 01: ใช้ส่วนค่าห้องก่อนปัดเป็นตัวเทียบ exact เลี่ยง artifact `RoundToTen`)
 5. **ราคา = สัญญาสัดส่วน + manual ครึ่งหลัง:** BR-1 `room_amount ใหม่ = intdiv(room_amount₀ × n₁, n₀)` (คงเรทสัญญา ไม่คำนวณจาก global_rates) · BR-2 ใช้ `price_per_night` ที่กรอก (**admin only**) หรือ computed `getEffectiveDailyRate` ของ tier ใหม่ (staff) · ทั้งหมดไหลผ่าน `reprice()` ด้วย override map — chokepoint ยังเขียน `amount` ทางเดียว · upgrade-only: tier ใหม่ต้องแพงกว่า + manual price ≥ เรทเฉลี่ยคืนของ BR-1 (ceil)
 6. **ส่วนลด:** บิลที่มี `discount_code`/redemption (held หรือ used) → **422 ใน v1** (ข้อความชัด)
@@ -37,6 +37,7 @@ Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ที�
 ## Decisions so far
 
 - (2026-11-10) grilling session: ล็อกมติทั้ง 8 ข้อข้างบน + สำรวจโค้ดยืนยันว่าพิธี manual บนวันย้อนหลังทำงานได้ (ไม่มี date validation ใน checkIn/checkOut) — spec ฉบับเต็มอยู่ที่ tickets/01
+- (2026-11-10 รอบสอง) owner แก้ 2 มติ: (1) container gate = **`confirmed|draft`** — ตัด `paid`, เพิ่ม `draft` (2) **ห้าม split_date ย้อนหลัง** — ต้อง ≥ วันนี้ · tickets 01/02 sync ตามแล้ว
 
 ## Not yet specified
 

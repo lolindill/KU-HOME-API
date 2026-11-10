@@ -20,6 +20,8 @@ blocked-by: ["01-implement-split-upgrade.md"]
 - [ ] 404 bookingRoomId ของบิลอื่น (scope ผ่านบิลเสมอ)
 
 **Validation 422**
+- [ ] container ไม่ใช่ `confirmed|draft` (`paid`/`pending`/`verify_error`/`complete`) → 422 (มติ #1 รอบสอง)
+- [ ] split_date < วันนี้ → 422 (ห้ามย้อนหลัง — มติ #2 รอบสอง)
 - [ ] split_date ออกนอก `(check_in, check_out)` ทั้งสองขอบ + เท่ากับ check_in/check_out เป๊ะ
 - [ ] room_type_id = เดิม (ไม่ใช่ upgrade) / tier ต่ำกว่า / ไม่มีจริง
 - [ ] `price_per_night` โดน staff ยิง → 422 · admin ยิงแต่ต่ำกว่า `ceil(room_amount₀/n₀)` → 422
@@ -30,7 +32,7 @@ blocked-by: ["01-implement-split-upgrade.md"]
 
 **Happy path (admin + staff แยกเคส)**
 - [ ] checked_in วันนี้: BR-1 trim + BR-2 `confirmed` · BR-1 คง `checked_in` (ไม่มี auto ceremony — มติ #3) · ห้องกายภาพทั้งสองสถานะเดิม
-- [ ] backdated: split_date < วันนี้ ผ่านได้ ผลเหมือนข้างบน
+- [ ] draft container: BR-2 ได้ `draft` mirror + BR-1 ยังแก้ผ่าน updateRoom โหมด 1 ได้หลัง split · และเคส draft ที่มี discount_code → 422 ตามมติ #6
 - [ ] future: BR-2 confirmed + room_id ถูกยึด — ยิง check-in ห้องเดียวกันด้วย BR อื่น (บิลมือสาม) ทับช่วง → โดน overlap guard 422
 - [ ] admin กรอก price_per_night: total = intdiv(room_amount₀×n₁,n₀) + price×n₂ + addon → surcharge envelope ตรงสูตร + outstanding/max(0,…) ถูก
 - [ ] staff ไม่กรอก price: BR-2 ใช้ computed `getEffectiveDailyRate` ของ tier ใหม่
