@@ -3,7 +3,7 @@ label: wayfinder:task
 type: HITL
 title: "Split BookingController — 2,393 บรรทัด / 14 public methods + 7 helpers / /bookings กระจาย 4 middleware blocks"
 summary: ตัดสินแบ่ง BookingController เป็นหลาย controller ตาม audience จริง — move-only ไม่แตะ URL/response
-status: open
+status: closed *(2026-11-11 — split 3-way ตาม audience เสร็จ · merge dev `d45bc65`)*
 assignee: kevii (orchestrator session 2026-11-11 — dispatch antigravity/gemini-3.8-flash @ .worktree/split-booking-controller)
 blocked-by: []
 ---
@@ -101,4 +101,8 @@ blocked-by: []
 
 ## Resolution
 
-(open — ยังไม่ได้ทำ)
+✅ **ปิดแล้ว 2026-11-11** — split 3-way ตาม Option A + `BookingAssignmentController` แยก ตามมติ lock ด้านบน · dispatch antigravity/gemini-3.8-flash ผ่าน hub ใน worktree `split-booking-controller` · agent commit `346433e` + orchestrator review fix `1ec1cf9` (restore tombstone comment 2 บรรทัดหลุดตอนย้าย autoAssignRooms) · merge dev `d45bc65`
+
+**ผลตรวจ orchestrator (วัดเองทุกชั้น ไม่เชื่อ report agent):** suite **916/3,860** เขียว = เท่า baseline เป๊ะ (**0 test edits**) · `pint --dirty` PASS · route-parity `route:list --json` **113→113 เส้น URL+verb IDENTICAL** · action swap เป๊ะ 4 (`updateStatus`/`updateBookingPayment`/`statusLogs` → `BookingManagementController` · `autoAssignRooms` → `BookingAssignmentController`) · line-multiset fidelity = ต่างแค่ boilerplate + comment ที่ restore แล้ว
+
+Acceptance criteria: ✅ URL/verb/response คงเดิมทุกเส้น · ✅ suite ผ่านโดยไม่แก้ test · ✅ pint ผ่าน · ✅ จด inventory ใน cline.md + AGENTS.md · ✅ ไม่ต้องมี api_patches (ไม่แตะ URL — patch note จะเกิดตอน ticket 03)

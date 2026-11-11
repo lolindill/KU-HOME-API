@@ -3,7 +3,7 @@ label: wayfinder:task
 type: HITL
 title: "Split FrontDeskController — 1,500 บรรทัด / 9 methods + 2 helpers / ครอบ 3 domain"
 summary: แบ่ง FrontDeskController 3 domain เป็น FrontDesk/RoomMove/CheckinEvidence — ตัดสินการแชร์ handleCatch ข้ามคลาส
-status: open
+status: closed *(2026-11-11 — split 3-way ตาม domain เสร็จ · merge dev `ec04fb4`)*
 assignee: kevii (orchestrator session 2026-11-11 — dispatch antigravity/gemini-3.8-flash @ .worktree/split-front-desk-controller)
 blocked-by: []
 ---
@@ -95,4 +95,8 @@ blocked-by: []
 
 ## Resolution
 
-(open — ยังไม่ได้ทำ)
+✅ **ปิดแล้ว 2026-11-11** — split 3-way ตาม Option A (FrontDesk + RoomMove + CheckinEvidence) + `handleCatch` duplicate ตาม precedent ตามมติ lock ด้านบน · dispatch antigravity/gemini-3.8-flash ผ่าน hub ใน worktree `split-front-desk-controller` · agent commit `310646e` · merge dev `ec04fb4` (conflict เดียวที่ import block — เก็บ use ครบทั้ง 2 branch)
+
+**ผลตรวจ orchestrator (วัดเองทุกชั้น ไม่เชื่อ report agent):** suite **916/3,860** เขียว = เท่า baseline เป๊ะ (**0 test edits**) · `pint --dirty` PASS · route-parity **113→113 เส้น URL+verb IDENTICAL** · action swap เป๊ะ 4 (change-room/split-upgrade → `RoomMoveController` · evidence ×2 → `CheckinEvidenceController`) · line-multiset fidelity = ต่างแค่ handleCatch duplicate (**byte-identical ทุกบรรทัด** — changeRoom ยังเรียกใช้) + boilerplate — สะอาด 100% · `splitUpgrade` ~423 บรรทัดย้ายทั้ง method ตรง ๆ ไม่ถูก break
+
+Acceptance criteria: ✅ URL/verb/response คงเดิมทุกเส้น · ✅ suite ผ่านโดยไม่แก้ test · ✅ pint ผ่าน · ✅ จด inventory ใน cline.md + AGENTS.md · ✅ ไม่ต้องมี api_patches (ไม่แตะ URL — patch note จะเกิดตอน ticket 04 ตามลำดับ merge ที่ lock ไว้)
