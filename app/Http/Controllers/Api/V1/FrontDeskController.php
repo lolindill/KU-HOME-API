@@ -22,6 +22,7 @@ use App\Services\RoomAllocator\RoomAllocator;
 use App\Support\BookingRule;
 use App\Support\IncludeReservedGate;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -840,6 +841,9 @@ class FrontDeskController extends Controller
                     }
                 }
 
+                // 🌟 ดักจับ late_hours ก่อน update ที่ BR-1 — อ่านหลัง update = ได้ 0 เสมอ (instance เดิมโดน mutate)
+                $lateHoursToCarry = (int) ($addon->late_hours ?? 0);
+
                 $addon->update([
                     'extra_beds_by_night' => ! empty($br1Beds) ? $br1Beds : null,
                     'late_hours' => 0,
@@ -851,7 +855,7 @@ class FrontDeskController extends Controller
                     'breakfast_set_200' => $addon->breakfast_set_200 ?? 0,
                     'extra_beds_by_night' => ! empty($br2Beds) ? $br2Beds : null,
                     'early_hours' => 0,
-                    'late_hours' => $addon->late_hours ?? 0,
+                    'late_hours' => $lateHoursToCarry,
                 ]);
             }
 
@@ -903,8 +907,10 @@ class FrontDeskController extends Controller
 
                 $br2->update(['room_id' => $assignedRoom->id]);
             } else {
-                // Auto-allocate รับ Collection (RoomAllocator.php:49)
-                $allocatorResult = app(RoomAllocator::class)->allocate(collect([$br2]));
+                // Auto-allocate — allocate() type-hint Eloquent Collection (RoomAllocator.php:49)
+                // ต้องครอบ instance จริงของ $br2 (loadMissing addon+roomType ทำงานกับตัว model ตัวเดิม)
+                // ห้าม collect() (Support\Collection → TypeError) หรือ hydrate() (สำเนา detached — attribute หลุด)
+                $allocatorResult = app(RoomAllocator::class)->allocate(new Collection([$br2]));
                 if (! $allocatorResult->ok || empty($allocatorResult->assignments[$br2->id])) {
                     throw new \Exception(
                         "ไม่สามารถจัดหาห้องว่างสำหรับประเภทห้อง {$newRoomType->name_en} ในช่วงเวลาดังกล่าวได้ค่ะนายท่าน 😭",
@@ -938,13 +944,16 @@ class FrontDeskController extends Controller
                 );
             }
 
-            // Ledger guard copy precedent (BookingController.php:920-934 / FrontDeskController.php:553-563):
+            // Ledger guard copy precedent (BookingController.php:920-934 / FrontDeskController.php:553-563)
+            // 🌟 overpay-safe (scrutinize edge "บิล overpay"): บิลที่ paid > total+charges อยู่ก่อนแล้ว
+            //    ต้องผ่าน ไม่ false-fire — split ลดยอดไม่ได้ (money guard ครอบ pair + BR อื่น freeze)
+            //    จึงยิง 422 เฉพาะเมื่อสมดุลหลัง split (new+charges) แย่ลงกว่าก่อน split (previous+charges ≥ paid)
             $lockedFresh = $locked->fresh();
             $newTotal = (int) $lockedFresh->total_amount;
             $chargesTotal = (int) $lockedFresh->charges_total;
             $paidAmount = (int) $lockedFresh->paid_amount;
 
-            if ($newTotal + $chargesTotal < $paidAmount) {
+            if ($newTotal + $chargesTotal < $paidAmount && $previousTotal + $chargesTotal >= $paidAmount) {
                 throw new \Exception(
                     'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
                     422
@@ -1020,7 +1029,9 @@ class FrontDeskController extends Controller
                 'status' => 'error',
                 'message' => 'ไม่พบข้อมูลการจองหรือห้องพักที่ระบุค่ะนายท่าน 🥺',
             ], 404);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // 🌟 \Throwable ไม่ใช่ \Exception — TypeError/Error กลาง transaction ต้อง rollback เสมอ
+            //    ไม่งั้น transaction ค้างเปิด (พิสูจน์แล้วใน test suite: "already an active transaction" cascade)
             DB::rollBack();
             $code = $e->getCode();
             if (in_array($code, [401, 403, 404, 422])) {
