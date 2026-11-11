@@ -14,6 +14,7 @@ use App\Models\RoomStatePeriod;
 use App\Models\RoomType;
 use App\Models\StatusChangeLog;
 use App\Models\User;
+use App\Services\Discount\DiscountService;
 use App\Support\BookingRule;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -23,8 +24,8 @@ use Tests\TestCase;
 /**
  * 🔀 FrontDeskSplitUpgradeTest — HTTP Feature test suite สำหรับ POST /api/v1/front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade
  *
- * อ้างอิง: wayfinder/mid-stay-split-upgrade/tickets/02-tests-split-upgrade.md
- * ครอบคลุม Auth/scope, Validation 422, Happy path (admin + staff), และ Money guard (มติ #10) + Float semantics (มติ #9)
+ * อ้างอิง: tier-endpoints-v2 มติ v2 ข้อ 5 (pure same-tier split บน route เดิม)
+ * ครอบคลุม Auth/scope, Validation 422, Pure same-tier split (admin + staff), และ Total amount invariant (surcharge = 0)
  */
 class FrontDeskSplitUpgradeTest extends TestCase
 {
@@ -169,6 +170,11 @@ class FrontDeskSplitUpgradeTest extends TestCase
         return "/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/split-upgrade";
     }
 
+    protected function createAdmin(): User
+    {
+        return User::factory()->create(['role' => 'admin']);
+    }
+
     // =========================================================
     // 🔒 1. Auth & Scope
     // =========================================================
@@ -181,7 +187,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $response = $this->postJson($this->endpoint($booking, $br), [
             'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-            'room_type_id' => (string) Str::uuid(),
         ]);
 
         $response->assertStatus(401);
@@ -190,59 +195,47 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_non_admin_non_staff_role_returns_403(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $owner = User::factory()->create(['role' => 'user']);
-        $booking = $this->createBooking(['user' => $owner]);
+        $booking = $this->createBooking();
         $br = $this->createBookingRoom($booking, $standard);
 
-        $roles = ['guest', 'housekeeping', 'ku_member'];
+        $roles = ['user', 'guest', 'ku_member', 'housekeeping', 'system'];
         foreach ($roles as $role) {
             $user = $this->createUserWithRole($role);
-            $response = $this->actingAs($user, 'sanctum')->postJson($this->endpoint($booking, $br), [
-                'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-                'room_type_id' => $deluxe->id,
-            ]);
+            $response = $this->actingAs($user, 'sanctum')
+                ->postJson($this->endpoint($booking, $br), [
+                    'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
+                ]);
+
             $response->assertStatus(403);
         }
-
-        // เจ้าของบิล (owner) ที่ไม่ใช่ admin/staff ก็ต้องโดน 403
-        $responseOwner = $this->actingAs($owner, 'sanctum')->postJson($this->endpoint($booking, $br), [
-            'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-            'room_type_id' => $deluxe->id,
-        ]);
-        $responseOwner->assertStatus(403);
     }
 
     public function test_cross_booking_room_id_returns_404(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
+        $booking1 = $this->createBooking();
+        $booking2 = $this->createBooking();
+        $br2 = $this->createBookingRoom($booking2, $standard);
 
-        $bookingA = $this->createBooking();
-        $bookingB = $this->createBooking();
-        $brA = $this->createBookingRoom($bookingA, $standard);
-        $brB = $this->createBookingRoom($bookingB, $standard);
-
-        // ส่ง bookingA แต่ส่ง bookingRoomId ของ bookingB
+        // ยิงหา booking1 แต่ส่ง br2 ที่อยู่ใต้ booking2 -> 404
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson("/api/v1/front-desk/{$bookingA->id}/rooms/{$brB->id}/split-upgrade", [
+            ->postJson("/api/v1/front-desk/{$booking1->id}/rooms/{$br2->id}/split-upgrade", [
                 'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-                'room_type_id' => $deluxe->id,
             ]);
 
         $response->assertStatus(404);
     }
 
     // =========================================================
-    // 🛡️ 2. Validation 422
+    // 🛡️ 2. Validation & Edge Guards
     // =========================================================
 
     public function test_container_invalid_status_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
 
-        $invalidStatuses = ['paid', 'pending', 'verify_error', 'complete'];
+        // บิลสถานะที่ไม่ใช่ confirmed/draft เช่น pending, paid, cancelled, completed
+        $invalidStatuses = ['pending', 'cancelled', 'completed'];
         foreach ($invalidStatuses as $status) {
             $booking = $this->createBooking(['status' => $status]);
             $br = $this->createBookingRoom($booking, $standard);
@@ -250,7 +243,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
             $response = $this->actingAs($this->createAdmin(), 'sanctum')
                 ->postJson($this->endpoint($booking, $br), [
                     'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-                    'room_type_id' => $deluxe->id,
                 ]);
 
             $response->assertStatus(422)
@@ -261,52 +253,52 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_split_date_in_past_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-
         $today = Carbon::today(BookingRule::TIMEZONE);
+
+        // จองย้อนหลัง 5 วัน ถึง อนาคตอีก 2 วัน
         $booking = $this->createBooking();
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
+        $br = $this->createBookingRoom($booking, $standard, null, 'checked_in', 1, [
             'check_in' => $today->copy()->subDays(5)->toDateString(),
-            'check_out' => $today->copy()->addDays(5)->toDateString(),
+            'check_out' => $today->copy()->addDays(2)->toDateString(),
         ]);
+
+        // split_date ย้อนหลัง (เมื่อวาน)
+        $pastDate = $today->copy()->subDay()->toDateString();
 
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
-                'split_date' => $today->copy()->subDay()->toDateString(), // เมื่อวาน (อดีต)
-                'room_type_id' => $deluxe->id,
+                'split_date' => $pastDate,
             ]);
 
         $response->assertStatus(422)
             ->assertJsonPath('status', 'error');
+        $this->assertStringContainsString('อดีต', $response->json('message'));
     }
 
     public function test_split_date_out_of_bounds_or_equal_to_edges_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-
         $today = Carbon::today(BookingRule::TIMEZONE);
-        $checkIn = $today->copy()->addDays(2);
-        $checkOut = $today->copy()->addDays(6);
+        $checkIn = $today->copy()->addDays(2)->toDateString();
+        $checkOut = $today->copy()->addDays(6)->toDateString();
 
         $booking = $this->createBooking();
         $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
-            'check_in' => $checkIn->toDateString(),
-            'check_out' => $checkOut->toDateString(),
+            'check_in' => $checkIn,
+            'check_out' => $checkOut,
         ]);
 
         $invalidDates = [
-            $checkIn->copy()->subDay()->toDateString(), // ก่อน check_in
-            $checkIn->toDateString(),                    // เท่ากับ check_in เป๊ะ
-            $checkOut->toDateString(),                   // เท่ากับ check_out เป๊ะ
-            $checkOut->copy()->addDay()->toDateString(), // หลัง check_out
+            $checkIn,                             // เท่ากับ check_in พอดี
+            $checkOut,                            // เท่ากับ check_out พอดี
+            $today->copy()->addDay()->toDateString(), // ก่อน check_in
+            $today->copy()->addDays(7)->toDateString(), // หลัง check_out
         ];
 
         foreach ($invalidDates as $invalidDate) {
             $response = $this->actingAs($this->createAdmin(), 'sanctum')
                 ->postJson($this->endpoint($booking, $br), [
                     'split_date' => $invalidDate,
-                    'room_type_id' => $deluxe->id,
                 ]);
 
             $response->assertStatus(422)
@@ -314,67 +306,31 @@ class FrontDeskSplitUpgradeTest extends TestCase
         }
     }
 
-    public function test_invalid_room_type_returns_422(): void
-    {
-        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $suite = $this->createRoomTypeWithRate('Suite', 2, 800); // เรทต่ำกว่า
-        $booking = $this->createBooking();
-        $br = $this->createBookingRoom($booking, $standard);
-        $splitDate = Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString();
-
-        // 1. room_type_id เดิม
-        $resSame = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), [
-                'split_date' => $splitDate,
-                'room_type_id' => $standard->id,
-            ]);
-        $resSame->assertStatus(422);
-
-        // 2. tier ต่ำกว่า
-        $resLower = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), [
-                'split_date' => $splitDate,
-                'room_type_id' => $suite->id,
-            ]);
-        $resLower->assertStatus(422);
-
-        // 3. uuid ไม่มีจริง
-        $resNotExist = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), [
-                'split_date' => $splitDate,
-                'room_type_id' => (string) Str::uuid(),
-            ]);
-        $resNotExist->assertStatus(422);
-    }
-
-    public function test_price_per_night_validation_staff_and_admin(): void
+    public function test_sending_room_type_id_or_price_per_night_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
         $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
         $booking = $this->createBooking();
-        // 4 คืน room_amount = 4000 -> ceil(4000/4) = 1000
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
-            'room_amount' => 4000,
-        ]);
+        $br = $this->createBookingRoom($booking, $standard);
         $splitDate = Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString();
 
-        // staff ใส่ price_per_night -> 422
-        $resStaff = $this->actingAs($this->createStaff(), 'sanctum')
+        // 1. ส่ง room_type_id -> 422 ชี้ PUT โหมด 2 / change-room
+        $resType = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
                 'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
-        $resStaff->assertStatus(422);
+        $resType->assertStatus(422);
+        $this->assertStringContainsString('same-tier', $resType->json('message'));
 
-        // admin ใส่ price_per_night ต่ำกว่า ceil(a0 / n0) -> ต่ำกว่า 1000 เช่น 900 -> 422
-        $resAdminLow = $this->actingAs($this->createAdmin(), 'sanctum')
+        // 2. ส่ง price_per_night -> 422 ชี้ PUT โหมด 2 / change-room
+        $resPrice = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 900,
+                'price_per_night' => 1200,
             ]);
-        $resAdminLow->assertStatus(422);
+        $resPrice->assertStatus(422);
+        $this->assertStringContainsString('same-tier', $resPrice->json('message'));
     }
 
     public function test_pin_room_id_mismatched_room_type_returns_422_before_other_checks(): void
@@ -384,119 +340,137 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $booking = $this->createBooking();
         $br = $this->createBookingRoom($booking, $standard);
-        $standardRoom = $this->createRoom($standard, 'available'); // ห้องประเภท standard
+        $deluxeRoom = $this->createRoom($deluxe, 'available'); // ห้องประเภท deluxe ต่างจาก standard
 
-        // ส่ง room_type_id = deluxe แต่ pin room_id ของ standard
+        // pin room_id ของ deluxe แต่ BR-1 เป็น standard -> 422 ผิดประเภทห้อง
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
-                'room_type_id' => $deluxe->id,
-                'room_id' => $standardRoom->id,
+                'room_id' => $deluxeRoom->id,
             ]);
 
         $response->assertStatus(422)
             ->assertJsonPath('status', 'error');
+        $this->assertStringContainsString('ไม่ตรงกับประเภทห้องเดิม', $response->json('message'));
     }
 
-    public function test_staff_computed_path_rate_lower_than_remaining_contract_returns_422_with_admin_hint(): void
+    public function test_pin_same_room_as_br1_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        // tier ใหม่เรท 2000
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2000);
+        $room = $this->createRoom($standard, 'occupied');
 
-        $booking = $this->createBooking(['total_amount' => 12000]);
-        // สัญญาเดิมสูงมาก เช่น 12,000 บาทสำหรับ 4 คืน (เฉลี่ย 3,000 บาท/คืน)
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
-            'room_amount' => 12000,
-        ]);
+        $booking = $this->createBooking();
+        $br = $this->createBookingRoom($booking, $standard, $room, 'checked_in');
 
-        // split ที่วันที่ 1 (n1 = 1 คืน, n2 = 3 คืน)
-        // a0 = 12000, a1 = intdiv(12000 * 1, 4) = 3000
-        // minBr2Needed = 12000 - 3000 = 9000
-        // แต่ tier ใหม่ computed_rate = 2000 -> 2000 * 3 = 6000 < 9000!
-        $splitDate = Carbon::today(BookingRule::TIMEZONE)->addDay()->toDateString();
-
-        $response = $this->actingAs($this->createStaff(), 'sanctum')
+        // pin room_id ซ้ำกับห้องของ BR-1 -> 422
+        $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
-                'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
+                'split_date' => Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString(),
+                'room_id' => $room->id,
             ]);
 
         $response->assertStatus(422)
             ->assertJsonPath('status', 'error');
-        $this->assertStringContainsString('price_per_night', $response->json('message'));
+        $this->assertStringContainsString('ห้องเดิม', $response->json('message'));
     }
 
     public function test_booking_with_discount_returns_422(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
+        $today = Carbon::today(BookingRule::TIMEZONE);
 
-        // 1. discount_code บน booking
-        $bookingWithCode = $this->createBooking(['discount_code' => 'DISC10']);
-        $brA = $this->createBookingRoom($bookingWithCode, $standard);
-        $splitDate = Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString();
+        $booking = $this->createBooking();
+        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
+            'discount_amount' => 500,
+        ]);
 
-        $resCode = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson($this->endpoint($bookingWithCode, $brA), [
-                'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-            ]);
-        $resCode->assertStatus(422);
-
-        // 2. discount_redemptions บน booking_room
-        $bookingWithRedemption = $this->createBooking();
-        $brB = $this->createBookingRoom($bookingWithRedemption, $standard);
         $discount = Discount::create([
             'id' => Str::uuid(),
-            'code' => 'TESTREDEMP',
+            'code' => 'TEST500',
             'type' => 'fixed',
-            'value' => 200,
+            'value' => 500,
             'is_active' => true,
         ]);
+
         DiscountRedemption::create([
             'id' => Str::uuid(),
             'discount_id' => $discount->id,
-            'booking_room_id' => $brB->id,
-            'user_id' => $bookingWithRedemption->user_id,
+            'booking_id' => $booking->id,
+            'booking_room_id' => $br->id,
+            'user_id' => $booking->user_id,
             'status' => 'held',
         ]);
 
+        $splitDate = $today->copy()->addDays(2)->toDateString();
+
         $resRedemp = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->postJson($this->endpoint($bookingWithRedemption, $brB), [
+            ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
         $resRedemp->assertStatus(422);
     }
 
-    public function test_guest_count_exceeding_new_room_type_max_guests_returns_422(): void
+    public function test_auto_allocate_excludes_br1_room(): void
     {
-        $standard = $this->createRoomTypeWithRate('Standard', 4, 1000);
-        // tier ใหม่รับได้แค่ 2 คน
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
 
-        $booking = $this->createBooking();
-        // มีผู้เข้าพัก 3 คน
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 3);
-        $splitDate = Carbon::today(BookingRule::TIMEZONE)->addDays(2)->toDateString();
+        $room1 = $this->createRoom($standard, 'occupied');
+        $room2 = $this->createRoom($standard, 'available');
 
+        $today = Carbon::today(BookingRule::TIMEZONE);
+        $booking = $this->createBooking(['total_amount' => 4000]);
+        $br = $this->createBookingRoom($booking, $standard, $room1, 'checked_in', 1, [
+            'room_amount' => 4000,
+            'check_in' => $today->toDateString(),
+            'check_out' => $today->copy()->addDays(4)->toDateString(),
+        ]);
+
+        $splitDate = $today->copy()->addDays(2)->toDateString();
+
+        // ไม่ pin room_id -> ระบบต้อง auto-allocate ให้ BR-2 แต่ต้องไม่เลือก room1
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
 
-        $response->assertStatus(422)
-            ->assertJsonPath('status', 'error');
-        $this->assertStringContainsString('เกินจำนวนสูงสุดที่รองรับได้', $response->json('message'));
+        $response->assertStatus(200);
+
+        $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
+        $this->assertSame((string) $room2->id, (string) $br2->room_id);
+        $this->assertNotSame((string) $room1->id, (string) $br2->room_id);
+    }
+
+    public function test_br1_without_room_spawns_br2_without_room(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
+        $this->createRoom($standard, 'available');
+
+        $today = Carbon::today(BookingRule::TIMEZONE);
+        $booking = $this->createBooking(['total_amount' => 4000]);
+        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
+            'room_amount' => 4000,
+            'check_in' => $today->toDateString(),
+            'check_out' => $today->copy()->addDays(4)->toDateString(),
+        ]);
+
+        $splitDate = $today->copy()->addDays(2)->toDateString();
+
+        // BR-1 ไม่มีห้อง ไม่ pin -> BR-2 ต้องได้ room_id = null
+        $response = $this->actingAs($this->createAdmin(), 'sanctum')
+            ->postJson($this->endpoint($booking, $br), [
+                'split_date' => $splitDate,
+            ]);
+
+        $response->assertStatus(200);
+
+        $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
+        $this->assertNull($br2->room_id);
     }
 
     public function test_extra_beds_by_night_in_second_half_exceeding_max_extra_beds_returns_422(): void
     {
-        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000, 3);
-        // tier ใหม่ max_extra_beds = 1
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500, 1);
+        // standard max_extra_beds = 1
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000, 1);
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking();
@@ -506,7 +480,7 @@ class FrontDeskSplitUpgradeTest extends TestCase
         ]);
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
-        // คืน split_date (+2) มี extra bed = 2 เตียง (เกิน 1 ของ tier ใหม่)
+        // คืน split_date (+2) มี extra bed = 2 เตียง (เกิน 1 ของ standard)
         Addon::create([
             'booking_room_id' => $br->id,
             'extra_beds_by_night' => [
@@ -518,7 +492,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
 
         $response->assertStatus(422)
@@ -528,7 +501,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_allocation_failure_or_maintenance_returns_422_and_rolls_back(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 4000]);
@@ -545,11 +517,10 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // 1. กรณีไม่มีห้อง deluxe ใน pool เลย (allocate fail)
+        // 1. กรณีไม่มีห้อง standard อื่นใน pool เลย (auto-allocate fail)
         $responseFail = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
         $responseFail->assertStatus(422);
 
@@ -560,9 +531,9 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $this->assertSame(1, Addon::where('booking_room_id', $br->id)->count());
 
         // 2. กรณี pin room_id ที่ติด maintenance period
-        $deluxeRoom = $this->createRoom($deluxe, 'available');
+        $standardRoom2 = $this->createRoom($standard, 'available');
         RoomStatePeriod::create([
-            'room_id' => $deluxeRoom->id,
+            'room_id' => $standardRoom2->id,
             'kind' => RoomStatePeriod::KIND_MAINTENANCE,
             'start_date' => $splitDate,
             'end_date' => $today->copy()->addDays(4)->toDateString(),
@@ -571,8 +542,7 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $responseMaint = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'room_id' => $deluxeRoom->id,
+                'room_id' => $standardRoom2->id,
             ]);
         $responseMaint->assertStatus(422);
 
@@ -582,17 +552,16 @@ class FrontDeskSplitUpgradeTest extends TestCase
     }
 
     // =========================================================
-    // ✨ 3. Happy Path
+    // ✨ 3. Happy Path (Pure same-tier)
     // =========================================================
 
     public function test_happy_path_checked_in_today_split_by_admin(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $oldRoom = $this->createRoom($standard, 'occupied');
-        $newRoom = $this->createRoom($deluxe, 'available');
+        $newRoom = $this->createRoom($standard, 'available');
 
         $booking = $this->createBooking(['total_amount' => 4000]);
         Payment::create(['booking_id' => $booking->id, 'amount' => 4000, 'status' => 'completed']);
@@ -607,13 +576,13 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
                 'room_id' => $newRoom->id,
             ]);
 
         $response->assertStatus(200)
-            ->assertJsonPath('status', 'success');
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('total_amount', 4000)
+            ->assertJsonPath('surcharge_amount', 0);
 
         // BR-1: check_out trimmed ถึง split_date และยังคง status 'checked_in'
         $brFresh = $br->fresh();
@@ -621,17 +590,17 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $this->assertSame('checked_in', $brFresh->status);
         $this->assertSame(2000, (int) $brFresh->room_amount); // intdiv(4000 * 2, 4)
 
-        // BR-2: สร้างขึ้นใหม่ status 'confirmed', room_type deluxe, room_id ชี้ newRoom
+        // BR-2: สร้างขึ้นใหม่ status 'confirmed', room_type standard เดียวกัน, room_id ชี้ newRoom
         $br2 = BookingRoom::where('booking_id', $booking->id)
             ->where('id', '!=', $br->id)
             ->firstOrFail();
 
         $this->assertSame('confirmed', $br2->status);
-        $this->assertSame((string) $deluxe->id, (string) $br2->room_type_id);
+        $this->assertSame((string) $standard->id, (string) $br2->room_type_id);
         $this->assertSame((string) $newRoom->id, (string) $br2->room_id);
         $this->assertSame($splitDate, $br2->check_in->toDateString());
         $this->assertSame($today->copy()->addDays(4)->toDateString(), $br2->check_out->toDateString());
-        $this->assertSame(3000, (int) $br2->room_amount); // 1500 * 2
+        $this->assertSame(2000, (int) $br2->room_amount); // 4000 - 2000
 
         // สถานะห้องกายภาพทั้งสองห้องต้องคงเดิม (ไม่มี auto-checkout/checkin ตามมติ #3)
         $this->assertSame('occupied', $oldRoom->fresh()->status);
@@ -641,8 +610,7 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_happy_path_draft_container_split_and_discount_block(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['status' => 'draft', 'total_amount' => 4000]);
@@ -657,7 +625,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
 
         $response->assertStatus(200);
@@ -679,14 +646,13 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_future_split_holding_slot_overlap_guard(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $futureIn = $today->copy()->addDays(10);
         $futureOut = $today->copy()->addDays(14);
         $splitDate = $today->copy()->addDays(12)->toDateString();
 
-        $deluxeRoom = $this->createRoom($deluxe, 'available');
+        $standardRoom = $this->createRoom($standard, 'available');
 
         $booking = $this->createBooking();
         $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
@@ -694,25 +660,24 @@ class FrontDeskSplitUpgradeTest extends TestCase
             'check_out' => $futureOut->toDateString(),
         ]);
 
-        // split ในอนาคต ให้ BR-2 ได้ deluxeRoom
+        // split ในอนาคต ให้ BR-2 ได้ standardRoom
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'room_id' => $deluxeRoom->id,
+                'room_id' => $standardRoom->id,
             ]);
         $response->assertStatus(200);
 
-        // บิลมือสามพยายาม check-in ห้อง deluxeRoom ในช่วงเวลาทับซ้อนกับ BR-2
+        // บิลมือสามพยายาม check-in ห้อง standardRoom ในช่วงเวลาทับซ้อนกับ BR-2
         $bookingThird = $this->createBooking(['status' => 'confirmed']);
-        $brThird = $this->createBookingRoom($bookingThird, $deluxe, null, 'confirmed', 1, [
+        $brThird = $this->createBookingRoom($bookingThird, $standard, null, 'confirmed', 1, [
             'check_in' => $splitDate,
             'check_out' => $futureOut->toDateString(),
         ]);
 
         $checkInRes = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson("/api/v1/front-desk/{$bookingThird->id}/rooms/{$brThird->id}/check-in", [
-                'room_id' => $deluxeRoom->id,
+                'room_id' => $standardRoom->id,
             ]);
 
         // ต้องโดน overlap guard ปฏิเสธ 422
@@ -720,52 +685,50 @@ class FrontDeskSplitUpgradeTest extends TestCase
             ->assertJsonPath('status', 'error');
     }
 
-    public function test_admin_manual_price_surcharge_envelope_and_outstanding(): void
+    public function test_same_tier_split_preserves_total_amount_invariant_and_zero_surcharge(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
-        $booking = $this->createBooking(['total_amount' => 4000]);
-        Payment::create(['booking_id' => $booking->id, 'amount' => 4000, 'status' => 'completed']);
+        // จำลองยอด 5000 บาท 5 คืน (คืนละ 1000 บาท)
+        $booking = $this->createBooking(['total_amount' => 5000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 5000, 'status' => 'completed']);
         $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
-            'room_amount' => 4000,
+            'room_amount' => 5000,
+            'amount' => 5000,
             'check_in' => $today->toDateString(),
-            'check_out' => $today->copy()->addDays(4)->toDateString(),
+            'check_out' => $today->copy()->addDays(5)->toDateString(),
         ]);
 
+        // split ที่ 2 คืน (n1 = 2, n2 = 3, n0 = 5)
+        // a1 = intdiv(5000 * 2, 5) = 2000
+        // a2 = 5000 - 2000 = 3000
+        // รวมกันได้ 5000 พอดีเป๊ะ ไม่เกิดเศษเพนนี/ปัดสิบ
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // admin manual price = 1800 บาท/คืน
-        // a0 = 4000 (4 คืน) -> a1 = intdiv(4000 * 2, 4) = 2000
-        // a2 = 1800 * 2 = 3600
-        // newTotal = 2000 + 3600 = 5600
-        // previousTotal = 4000 -> surcharge = 1600
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1800,
             ]);
 
         $response->assertStatus(200)
             ->assertJsonPath('status', 'success')
-            ->assertJsonPath('previous_total_amount', 4000)
-            ->assertJsonPath('total_amount', 5600)
-            ->assertJsonPath('surcharge_amount', 1600)
-            ->assertJsonPath('paid_amount', 4000)
-            ->assertJsonPath('outstanding_amount', 1600)
-            ->assertJsonPath('split_summary.br1_new.room_amount', 2000)
-            ->assertJsonPath('split_summary.br2.price_per_night', 1800)
-            ->assertJsonPath('split_summary.br2.nights', 2);
+            ->assertJsonPath('previous_total_amount', 5000)
+            ->assertJsonPath('total_amount', 5000)
+            ->assertJsonPath('surcharge_amount', 0)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('split_summary.br1_new.room_amount', 2000);
+
+        $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
+        $this->assertSame(3000, (int) $br2->room_amount);
+        $this->assertSame(5000, (int) $booking->fresh()->total_amount);
     }
 
-    public function test_staff_computed_path_uses_effective_daily_rate(): void
+    public function test_staff_can_split_pure_same_tier(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 4000]);
@@ -777,25 +740,23 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // staff ยิงไม่ใส่ price_per_night
+        // staff ยิง split สำเร็จ
         $response = $this->actingAs($this->createStaff(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
             ]);
 
         $response->assertStatus(200)
-            ->assertJsonPath('split_summary.br2.price_per_night', 1500);
+            ->assertJsonPath('status', 'success');
 
         $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
-        $this->assertSame(3000, (int) $br2->room_amount); // 1500 * 2
+        $this->assertSame(2000, (int) $br2->room_amount);
     }
 
     public function test_addon_reslice_extra_beds_breakfast_early_late(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $d0 = $today->toDateString();
@@ -825,12 +786,14 @@ class FrontDeskSplitUpgradeTest extends TestCase
             'late_hours' => 3,
         ]);
 
+        // ซิงก์ total_amount ใน booking กับ addon ก่อนเริ่ม split
+        app(DiscountService::class)->reprice($booking);
+        $booking->refresh();
+
         // split ที่ d2
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $d2,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $response->assertStatus(200);
@@ -859,8 +822,7 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_audit_status_change_logs_created(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $admin = $this->createAdmin();
         $today = Carbon::today(BookingRule::TIMEZONE);
@@ -876,8 +838,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($admin, 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
                 'notes' => 'Special VIP split',
             ]);
 
@@ -911,15 +871,14 @@ class FrontDeskSplitUpgradeTest extends TestCase
             ->whereNotNull('note')
             ->firstOrFail();
 
-        $this->assertStringContainsString('split-upgrade: spawned', $br2NoteLog->note);
+        $this->assertStringContainsString('split: spawned', $br2NoteLog->note);
         $this->assertStringContainsString('Special VIP split', $br2NoteLog->note);
     }
 
     public function test_invariant_sum_amount_equals_total_amount_and_booking_type_mirror(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 4000]);
@@ -935,8 +894,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $bookingFresh = $booking->fresh();
@@ -955,8 +912,7 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_multi_room_booking_other_rooms_untouched_and_availability(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 8000]);
@@ -978,8 +934,6 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br1), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
         $response->assertStatus(200);
 
@@ -990,11 +944,9 @@ class FrontDeskSplitUpgradeTest extends TestCase
     public function test_repeat_split_on_spawned_br2_succeeds(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $suite = $this->createRoomTypeWithRate('Suite', 2, 2500);
 
-        $this->createRoom($deluxe, 'available');
-        $this->createRoom($suite, 'available');
+        $this->createRoom($standard, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 6000]);
@@ -1004,37 +956,33 @@ class FrontDeskSplitUpgradeTest extends TestCase
             'check_out' => $today->copy()->addDays(6)->toDateString(),
         ]);
 
-        // Split ครั้งแรกที่วันที่ 2 (standard -> deluxe)
+        // Split ครั้งแรกที่วันที่ 2
         $splitDate1 = $today->copy()->addDays(2)->toDateString();
         $res1 = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br1), [
                 'split_date' => $splitDate1,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
         $res1->assertStatus(200);
 
         $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br1->id)->firstOrFail();
         $br2->transitionStatus('checked_in', 'admin');
 
-        // Split ครั้งที่ 2 บน BR-2 ที่ checked_in แล้ว (deluxe -> suite) ที่วันที่ 4
+        // Split ครั้งที่ 2 บน BR-2 ที่ checked_in แล้ว ที่วันที่ 4
         $splitDate2 = $today->copy()->addDays(4)->toDateString();
         $res2 = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br2), [
                 'split_date' => $splitDate2,
-                'room_type_id' => $suite->id,
-                'price_per_night' => 2500,
             ]);
         $res2->assertStatus(200);
 
         $this->assertSame(3, BookingRoom::where('booking_id', $booking->id)->count());
+        $this->assertSame(6000, (int) $booking->fresh()->total_amount);
     }
 
     public function test_deferred_payment_split_succeeds(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         // บิล deferred ยังไม่จ่ายเงิน (paid_amount = 0)
@@ -1054,24 +1002,22 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $response->assertStatus(200);
-        // ยอด outstanding เพิ่มตาม total ใหม่ (5000)
-        $this->assertSame(5000, (int) $booking->fresh()->outstanding_amount);
+        // total คงเดิม 4000 และ outstanding คงเดิม 4000
+        $this->assertSame(4000, (int) $booking->fresh()->total_amount);
+        $this->assertSame(4000, (int) $booking->fresh()->outstanding_amount);
     }
 
     // =========================================================
-    // 💰 4. Money Guard & Float Semantics
+    // 💰 4. Invariant & Composition
     // =========================================================
 
     public function test_pin_freeze_invariant_crossing_group_threshold(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         // เซ็ต group rate min_5_rooms ให้ถูกกว่า daily (เช่น 800 บาท)
         GlobalRate::create([
@@ -1103,37 +1049,36 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $brs[0]), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $response->assertStatus(200);
 
-        // มติ #10: ห้องอื่นๆ (br1, br2, br3) ต้องคง room_amount เดิมทุกตัว (4000 บาท) ไม่หลุดไปใช้ group rate 800
+        // ห้องอื่นๆ (br1, br2, br3) ต้องคง room_amount เดิมทุกตัว (4000 บาท) ไม่หลุดไปใช้ group rate 800
         for ($i = 1; $i < 4; $i++) {
             $this->assertSame(4000, (int) $brs[$i]->fresh()->room_amount);
         }
+        $this->assertSame(16000, (int) $booking->fresh()->total_amount);
     }
 
     public function test_pair_guard_failure_rolls_back(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
+        $room = $this->createRoom($standard, 'occupied');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         $booking = $this->createBooking(['total_amount' => 8000]);
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
+        $br = $this->createBookingRoom($booking, $standard, $room, 'checked_in', 1, [
             'room_amount' => 8000,
             'check_in' => $today->toDateString(),
             'check_out' => $today->copy()->addDays(4)->toDateString(),
         ]);
 
-        // พยายามยิง staff computed ที่เรทไม่พอ
+        // ส่ง room_id ซ้ำห้องเดิมของ BR-1 ทำให้ error 422
         $splitDate = $today->copy()->addDays(2)->toDateString();
-        $response = $this->actingAs($this->createStaff(), 'sanctum')
+        $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
+                'room_id' => $room->id,
             ]);
 
         $response->assertStatus(422);
@@ -1143,11 +1088,10 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $this->assertSame(1, BookingRoom::where('booking_id', $booking->id)->count());
     }
 
-    public function test_ledger_guard_and_is_paid_reset(): void
+    public function test_split_keeps_is_paid_true_and_zero_surcharge(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         // บิล paid ครบแล้ว (is_paid = true, paid = 4000)
@@ -1161,27 +1105,24 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // split เพิ่มยอดเป็น 5000 (surcharge = 1000)
+        // pure same-tier split surcharge = 0 -> is_paid ต้องคง true ไม่ reset
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $response->assertStatus(200);
 
-        // is_paid ต้องถูก reset เป็น false ทันทีเพราะมียอดค้างชำระ
         $bookingFresh = $booking->fresh();
-        $this->assertFalse((bool) $bookingFresh->is_paid);
-        $this->assertSame(1000, (int) $bookingFresh->outstanding_amount);
+        $this->assertTrue((bool) $bookingFresh->is_paid);
+        $this->assertSame(0, (int) $bookingFresh->outstanding_amount);
+        $this->assertSame(4000, (int) $bookingFresh->total_amount);
     }
 
     public function test_overpay_bill_passes_without_422_and_clamps_outstanding_zero(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $this->createRoom($standard, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
         // บิล overpay: จ่ายมา 10,000 แต่ยอด total แค่ 4000
@@ -1195,28 +1136,29 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // newTotal = 5000 (< paid 10,000) -> ledger guard ต้องไม่ false-fire!
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 1500,
             ]);
 
         $response->assertStatus(200);
         $this->assertSame(0, (int) $booking->fresh()->outstanding_amount);
+        $this->assertSame(4000, (int) $booking->fresh()->total_amount);
     }
 
-    public function test_float_semantics_reprice_after_split_recomputes_from_current_rates(): void
+    public function test_composition_split_then_change_room_on_br1(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
-        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
-        $this->createRoom($deluxe, 'available');
+        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2000);
+
+        $roomStandard1 = $this->createRoom($standard, 'occupied');
+        $roomStandard2 = $this->createRoom($standard, 'available');
+        $roomDeluxe = $this->createRoom($deluxe, 'available');
 
         $today = Carbon::today(BookingRule::TIMEZONE);
-        $booking = $this->createBooking(['total_amount' => 4000]);
+        $booking = $this->createBooking(['total_amount' => 4000, 'is_paid' => true]);
         Payment::create(['booking_id' => $booking->id, 'amount' => 4000, 'status' => 'completed']);
-        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed', 1, [
+        $br = $this->createBookingRoom($booking, $standard, $roomStandard1, 'checked_in', 1, [
             'room_amount' => 4000,
             'check_in' => $today->toDateString(),
             'check_out' => $today->copy()->addDays(4)->toDateString(),
@@ -1224,39 +1166,26 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $splitDate = $today->copy()->addDays(2)->toDateString();
 
-        // 1. Split สำเร็จ (manual price 2000 บาท/คืน)
-        // a1 = 2000, a2 = 2000 * 2 = 4000 -> total = 6000
+        // 1. Split pure same-tier -> BR-1 (2 คืน 2000) + BR-2 (2 คืน 2000)
         $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), [
                 'split_date' => $splitDate,
-                'room_type_id' => $deluxe->id,
-                'price_per_night' => 2000,
+                'room_id' => $roomStandard2->id,
             ])
             ->assertStatus(200);
 
-        $br1Fresh = $br->fresh();
-        $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
-        $this->assertSame(2000, (int) $br1Fresh->room_amount);
-        $this->assertSame(4000, (int) $br2->room_amount);
+        $this->assertSame(2000, (int) $br->fresh()->room_amount);
 
-        // 2. เปลี่ยน daily rate ของ Standard และ Deluxe ใน GlobalRate
-        GlobalRate::where('room_type_id', $standard->id)->where('rate_type', 'daily')->update(['default_price' => 1200]);
-        GlobalRate::where('room_type_id', $deluxe->id)->where('rate_type', 'daily')->update(['default_price' => 1800]);
-
-        // 3. เรียก updateRoom โหมด 3 (เพิ่ม addon breakfast) บน BR-1
-        $updateRes = $this->actingAs($this->createAdmin(), 'sanctum')
-            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
-                'addons' => [
-                    'breakfast_sets' => ['set_100' => 1],
-                ],
+        // 2. Composition: นำ BR-1 ที่ checked_in อยู่ ไปเปลี่ยนเป็น Deluxe ผ่าน change-room
+        $changeRes = $this->actingAs($this->createAdmin(), 'sanctum')
+            ->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/change-room", [
+                'room_id' => $roomDeluxe->id,
             ]);
 
-        $updateRes->assertStatus(200);
-
-        // มติ #9 Float semantics: reprice ครั้งถัดไปจะคิดค่าห้องใหม่จาก global_rates ในวันนี้
-        // BR-1: 1200 * 2 = 2400 (เดิม 2000)
-        // BR-2: 1800 * 2 = 3600 (เดิม 4000 จาก manual price)
-        $this->assertSame(2400, (int) $br->fresh()->room_amount);
-        $this->assertSame(3600, (int) $br2->fresh()->room_amount);
+        $changeRes->assertStatus(200);
+        $this->assertTrue($changeRes->json('room_type_changed'));
+        // BR-1 2 คืน × 2000 = 4000, BR-2 2 คืน × 1000 = 2000 -> total 6000
+        $this->assertSame(6000, (int) $booking->fresh()->total_amount);
+        $this->assertSame(2000, (int) $booking->fresh()->outstanding_amount);
     }
 }

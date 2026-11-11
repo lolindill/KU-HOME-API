@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\GlobalRate;
-use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
@@ -219,11 +218,12 @@ class ChangeRoomTest extends TestCase
     // 🚫 3. Guards ของ change-room
     // ============================================
 
-    public function test_change_room_rejects_cheaper_room_type(): void
+    public function test_change_room_allows_downgrade_with_no_refund_and_is_paid_true(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
         $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2500);
-        $booking = $this->createBooking(['total_amount' => 5000]);
+        $booking = $this->createBooking(['total_amount' => 5000, 'is_paid' => true]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 5000, 'status' => 'completed']);
         $oldRoom = $this->createRoom($deluxe, 'occupied');
         $br = $this->createBookingRoom($booking, $deluxe, $oldRoom, 'checked_in');
         $newRoom = $this->createRoom($standard, 'available');
@@ -231,13 +231,29 @@ class ChangeRoomTest extends TestCase
         $response = $this->actingAs($this->createStaff(), 'sanctum')
             ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
 
-        $response->assertStatus(422);
-        $this->assertStringContainsString('แพงกว่า', $response->json('message'));
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+        $this->assertTrue($response->json('room_type_changed'));
 
-        // ไม่มีอะไรถูกแตะ (rollback ทั้ง transaction)
-        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $oldRoom->id]);
-        $this->assertSame('occupied', $oldRoom->fresh()->status);
-        $this->assertSame('available', $newRoom->fresh()->status);
+        // BR ลดเป็น standard + ชี้ห้อง standard
+        $this->assertDatabaseHas('booking_rooms', [
+            'id' => $br->id,
+            'room_id' => $newRoom->id,
+            'room_type_id' => $standard->id,
+            'status' => 'checked_in',
+        ]);
+
+        // 💰 full-stay reprice downgrade: 1500 × 2 คืน = 3000 · surcharge -2000 · ค้างชำระ 0 · is_paid syncIsPaid true
+        $this->assertSame(3000, $response->json('total_amount'));
+        $this->assertSame(5000, $response->json('previous_total_amount'));
+        $this->assertSame(-2000, $response->json('surcharge_amount'));
+        $this->assertSame(0, $response->json('outstanding_amount'));
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
+        $this->assertAmountInvariant($booking->fresh());
+
+        // ห้องเก่า dirty + task checkout และห้องใหม่ occupied
+        $this->assertSame('dirty', $oldRoom->fresh()->status);
+        $this->assertSame('occupied', $newRoom->fresh()->status);
+        $this->assertDatabaseHas('housekeeping_tasks', ['room_id' => $oldRoom->id, 'task_type' => 'checkout']);
     }
 
     public function test_change_room_rejects_room_not_ready_for_checkin(): void
@@ -315,19 +331,37 @@ class ChangeRoomTest extends TestCase
         $this->assertStringContainsString('เกินจำนวนสูงสุด', $response->json('message'));
     }
 
-    // 🚪 (2026-11-09): BR confirmed ย้ายได้แล้ว — guard ใหม่ reject เฉพาะ draft/no_show/checked_out
-    public function test_change_room_rejects_booking_room_outside_confirmed_or_checked_in(): void
+    // 🚪 (tier-endpoints-v2 มติ v2 ข้อ 7): BR draft ที่มีห้องแล้ว ย้ายได้ก่อนเช็คอิน (เหมือน confirmed)
+    //    ส่วน draft ที่ไม่มีห้อง → 422 ชี้ไม่มีห้องให้ย้ายออก, no_show/checked_out → 422
+    public function test_change_room_gate_supports_draft_with_room_and_rejects_others(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
-        $booking = $this->createBooking(['total_amount' => 3000]);
+        $booking = $this->createBooking(['status' => 'paid', 'total_amount' => 3000, 'is_paid' => true]);
         $oldRoom = $this->createRoom($standard, 'available');
         $newRoom = $this->createRoom($standard, 'available');
+        Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
 
-        foreach (['draft', 'no_show', 'checked_out'] as $brStatus) {
-            $br = $this->createBookingRoom($booking, $standard, $oldRoom, $brStatus);
+        // 1. draft + มีห้อง → 200 (re-point ล้วน ไม่แตะห้องกายภาพ ไม่มี task)
+        $brDraftWithRoom = $this->createBookingRoom($booking, $standard, $oldRoom, 'draft');
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $brDraftWithRoom), ['room_id' => $newRoom->id]);
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+        $this->assertDatabaseHas('booking_rooms', ['id' => $brDraftWithRoom->id, 'room_id' => $newRoom->id, 'status' => 'draft']);
+        $this->assertDatabaseCount('housekeeping_tasks', 0);
+
+        // 2. draft + ไม่มีห้อง → 422
+        $brDraftWithoutRoom = $this->createBookingRoom($booking, $standard, null, 'draft');
+        $resNoRoom = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $brDraftWithoutRoom), ['room_id' => $newRoom->id]);
+        $resNoRoom->assertStatus(422);
+        $this->assertStringContainsString('ไม่มีห้องให้ย้ายออก', $resNoRoom->json('message'));
+
+        // 3. no_show, checked_out → 422
+        foreach (['no_show', 'checked_out'] as $brStatus) {
+            $brOther = $this->createBookingRoom($booking, $standard, $oldRoom, $brStatus);
 
             $response = $this->actingAs($this->createStaff(), 'sanctum')
-                ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+                ->postJson($this->endpoint($booking, $brOther), ['room_id' => $newRoom->id]);
 
             $response->assertStatus(422);
             $this->assertStringContainsString($brStatus, $response->json('message'));
@@ -404,13 +438,9 @@ class ChangeRoomTest extends TestCase
         $this->assertSame('available', $oldRoom->fresh()->status);
         $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $newRoom->id]);
 
-        // 🧹 ห้อง dirty ปลายทาง → task 'daily' เปิดทันที (มติ 2026-11-09 ทุก flow ที่แขกจะอยู่ dirty)
-        $this->assertDatabaseHas('housekeeping_tasks', [
-            'room_id' => $newRoom->id,
-            'task_type' => 'daily',
-            'status' => 'unassigned',
-        ]);
-        $this->assertNotNull($response->json('new_room_housekeeping_task_id'));
+        // 🧹 (tier-endpoints-v2 มติ v2 ข้อ 4): BR confirmed = re-point ล้วน ไม่แตะสถานะห้องกายภาพทั้งเก่า/ใหม่ ไม่สร้าง task
+        $this->assertDatabaseCount('housekeeping_tasks', 0);
+        $this->assertNull($response->json('new_room_housekeeping_task_id'));
         $this->assertNull($response->json('housekeeping_task_id'));
     }
 
@@ -498,86 +528,69 @@ class ChangeRoomTest extends TestCase
     // 🎫 4. updateRoom surcharge mode — upgrade type ปลดห้อง
     // ============================================
 
-    public function test_surcharge_update_room_can_upgrade_type_and_releases_assigned_room(): void
+    public function test_surcharge_update_room_rejects_when_room_assigned_and_points_to_change_room(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
         $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2500);
         $booking = $this->createBooking(['total_amount' => 3000, 'is_paid' => true]);
         $assignedRoom = $this->createRoom($standard, 'available'); // pre-check-in — ยังไม่ occupied
-        $deluxeRoom = $this->createRoom($deluxe, 'available'); // ปลายทาง — availability ต้องผ่าน
         $br = $this->createBookingRoom($booking, $standard, $assignedRoom, 'confirmed');
         Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
 
+        // 🎫 (tier-endpoints-v2 มติ v2 ข้อ 3): BR ที่มีเลขห้องจริงแล้ว ห้ามยิง PUT โหมด 2 → 422 ชี้ไป change-room
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'room_type_id' => $deluxe->id,
             ]);
 
-        $response->assertStatus(200)->assertJsonPath('status', 'success');
-
-        // ปลด room_id = null รอ auto-assign จัด type ใหม่ · type อัปเกรดแล้ว
-        $this->assertDatabaseHas('booking_rooms', [
-            'id' => $br->id,
-            'room_id' => null,
-            'room_type_id' => $deluxe->id,
-        ]);
-
-        // 💰 reprice: 2500 × 2 = 5000 · ค้างชำระ 2000 · is_paid reset
-        $this->assertSame(5000, $response->json('total_amount'));
-        $this->assertSame(2000, $response->json('surcharge_amount'));
-        $this->assertSame(2000, $response->json('outstanding_amount'));
-        $this->assertFalse($booking->fresh()->is_paid);
-        $this->assertAmountInvariant($booking->fresh());
-
-        // ห้องเก่า pre-check-in — ไม่แตะ status / ไม่สร้าง task
-        $this->assertSame('available', $assignedRoom->fresh()->status);
-        $this->assertSame(0, HousekeepingTask::where('room_id', $assignedRoom->id)->count());
-
-        // audit note row บอกการปลดห้อง + upgrade
-        $noteRow = StatusChangeLog::where('entity_type', 'booking_room')
-            ->where('entity_id', $br->id)
-            ->whereNotNull('note')
-            ->first();
-        $this->assertNotNull($noteRow);
-        $this->assertStringContainsString($assignedRoom->room_number, $noteRow->note);
-        $this->assertStringContainsString('Deluxe', $noteRow->note);
+        $response->assertStatus(422);
+        $this->assertStringContainsString('change-room', $response->json('message'));
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $assignedRoom->id]);
     }
 
-    public function test_surcharge_update_room_rejects_downgrade_type_when_room_assigned(): void
+    public function test_surcharge_update_room_allows_downgrade_when_no_room_assigned(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
         $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2500);
-        $booking = $this->createBooking(['total_amount' => 5000]);
-        $assignedRoom = $this->createRoom($deluxe, 'available');
-        $br = $this->createBookingRoom($booking, $deluxe, $assignedRoom, 'confirmed');
+        $booking = $this->createBooking(['total_amount' => 5000, 'is_paid' => true]);
+        $standardRoom = $this->createRoom($standard, 'available');
+        $br = $this->createBookingRoom($booking, $deluxe, null, 'confirmed'); // ไม่มีเลขห้อง
+        Payment::create(['booking_id' => $booking->id, 'amount' => 5000, 'status' => 'completed']);
 
+        // 🎫 (tier-endpoints-v2 มติ v2 ข้อ 1 & 3): BR ไม่มีห้อง ยิง downgrade ในโหมด 2 ผ่าน + syncIsPaid
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'room_type_id' => $standard->id,
             ]);
 
-        $response->assertStatus(422);
-        $this->assertStringContainsString('แพงกว่า', $response->json('message'));
-        // ห้องยังผูกเดิม ไม่ถูกปลด
-        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $assignedRoom->id]);
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_type_id' => $standard->id]);
+        $this->assertSame(3000, (int) $booking->fresh()->total_amount);
+        $this->assertSame(-2000, $response->json('surcharge_amount'));
+        $this->assertSame(0, $response->json('outstanding_amount'));
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
     }
 
-    public function test_surcharge_update_room_still_blocks_dates_when_room_assigned(): void
+    public function test_surcharge_update_room_allows_dates_when_no_room_assigned(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
-        $booking = $this->createBooking(['total_amount' => 3000]);
-        $assignedRoom = $this->createRoom($standard, 'available');
-        $br = $this->createBookingRoom($booking, $standard, $assignedRoom, 'confirmed');
+        $booking = $this->createBooking(['total_amount' => 3000, 'is_paid' => true]);
+        $room = $this->createRoom($standard, 'available');
+        $br = $this->createBookingRoom($booking, $standard, null, 'confirmed'); // ไม่มีห้อง
+        Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
+
+        $newCheckIn = now()->addDays(5)->toDateString();
+        $newCheckOut = now()->addDays(7)->toDateString();
 
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
-                'check_in' => now()->addDays(3)->toDateString(),
-                'check_out' => now()->addDays(5)->toDateString(),
+                'check_in' => $newCheckIn,
+                'check_out' => $newCheckOut,
             ]);
 
-        $response->assertStatus(422);
-        $this->assertStringContainsString('ปลดการจัดห้อง', $response->json('message'));
-        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $assignedRoom->id]);
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+        $this->assertSame($newCheckIn, $br->fresh()->check_in->toDateString());
+        $this->assertSame($newCheckOut, $br->fresh()->check_out->toDateString());
     }
 
     public function test_draft_mode_can_still_change_room_type_freely(): void
