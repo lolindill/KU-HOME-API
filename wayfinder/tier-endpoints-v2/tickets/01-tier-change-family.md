@@ -3,7 +3,7 @@ label: wayfinder:task
 type: AFK
 title: "PUT BR โหมด 2 ต่อยอด (change-tier) + change-room ขยาย gate — downgrade-no-refund + staff manual price"
 status: open
-assignee:
+assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: []
 ---
 
