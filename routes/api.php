@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\BookingAssignmentController;
 use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
 use App\Http\Controllers\Api\V1\BookingManagementController;
+use App\Http\Controllers\Api\V1\CheckinEvidenceController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DiscountController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\RoomMoveController;
 use App\Http\Controllers\Api\V1\RoomStatePeriodController;
 use App\Http\Controllers\Api\V1\SsoController;
 use App\Http\Controllers\Api\V1\StockController;
@@ -287,12 +289,12 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
 
             // 🚪 In-stay room move (2026-11-04) — ย้ายห้องจริงหลัง check-in + เปลี่ยนประเภทห้องแบบ upgrade-only
-            Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [FrontDeskController::class, 'changeRoom'])
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [RoomMoveController::class, 'changeRoom'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
 
             // 🔀 Mid-stay split-upgrade (2026-11-11) — แบ่งช่วงพักครึ่งหนึ่งย้ายขึ้น tier สูงกว่า
-            Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [FrontDeskController::class, 'splitUpgrade'])
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [RoomMoveController::class, 'splitUpgrade'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
 
@@ -301,9 +303,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 04): address ตรงด้วย
             //    booking-rooms/{id} ต่างจากพี่น้อง nested {bookingId}/rooms/{bookingRoomId}
             //    — รอ unify พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking)
-            Route::post('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'uploadEvidence'])
+            Route::post('/booking-rooms/{id}/evidence', [CheckinEvidenceController::class, 'uploadEvidence'])
                 ->where('id', '[0-9a-f\-]{36}');
-            Route::get('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'getEvidences'])
+            Route::get('/booking-rooms/{id}/evidence', [CheckinEvidenceController::class, 'getEvidences'])
                 ->where('id', '[0-9a-f\-]{36}');
         });
     });
