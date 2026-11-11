@@ -3,7 +3,7 @@ label: wayfinder:task
 type: AFK
 title: "implement POST /front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade"
 status: open
-assignee:
+assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: []
 ---
 
