@@ -30,6 +30,7 @@ status: open
 
 - (2026-11-11) owner sketch "split same tier + change tier อีกทาง" + grill 5 คำถาม (downgrade-no-refund / staff manual price / change-tier scope / refactor route เดิม / ต่อยอด PUT โหมด 2 ไม่เพิ่ม endpoint) + เพิ่มมติ 6 coverage matrix — มติ v2 supersede มติ #5/#11 ของ map เดิมบางส่วน (ล็อกในข้อ 2-5)
 - (2026-11-11 หลัง review 01) orchestrator พบ dead-end (BR ก่อนเช็คอิน = draft เสมอ ไม่มี path ไป confirmed ก่อน check-in) → owner มติ ข้อ 7: เพิ่ม draft(+room_id) เข้า change-room gate แก้เลยใน branch นี้ — งานแนบท้าย ticket 01 (Amendment)
+- (2026-11-11) tickets 01-03 ปิดครบ: implement `bd898af` + split `1cae64a` + amendment `b8bf90d` + tests `de2e878` — full suite **917 passed / 0 failed** · superseded 24 ตัว re-target ครบ · เหลือ ticket 04 (docs โดย orchestrator)
 
 ## Not yet specified
 

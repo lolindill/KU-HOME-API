@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "split-upgrade refactor → pure same-tier split (route เดิม)"
-status: open
-assignee:
+status: closed *(2026-11-11 — refactor 1cae64a — review ผ่าน)*
+assignee: antigravity (agent-hub, session เดียวกับ ticket 01)
 blocked-by: []
 ---
 
@@ -46,3 +46,15 @@ split_date อดีต/ขอบ/นอกช่วง · บิล paid/pendin
 ## Definition of done
 
 endpoint semantics ใหม่ครบ + guard invariant total คงที่ · pint สะอาด · full suite เดิมผ่าน — suite เดิม 30 เคสของ split จะ **fail ทั้งก้อนที่ assert ของใหม่** (room_type_id ฯลฯ) — นับเป็น expected: **หยุดรายงาน** อย่าแก้ tests เอง (ticket 03 re-target) · เคส suite เดิมที่ครอบพฤติกรรมคงเดิม (สถานะ/ส่วนลด/rollback/audit) ต้องยังผ่าน
+
+## Resolution (2026-11-11)
+
+Implement โดย antigravity (session เดียวกับ ticket 01) — commit **`1cae64a`**:
+- ตัด room_type_id + price_per_night — ตรวจ `$request->has()` **ก่อน validate อื่น** → 422 ชี้ PUT โหมด 2 / change-room
+- สูตร `br1 = intdiv(a₀ × n₁, n₀)` + `br2 = a₀ − br1` + **guard invariant** total เพี้ยน → throw rollback
+- BR-2 room: pin ตรวจ ≠ ห้อง BR-1 (ก่อน type) → type → status → maintenance → overlap ตามลำดับ · auto-allocate exclude ห้อง BR-1 ผ่าน **param ใหม่ `allocate(..., array $excludeRoomIds = [])`** (backward-compatible — `RoomAllocator::loadRoomPool` เติม `whereNotIn`)
+- BR-1 ไม่มี room: pin validate ปกติ / ไม่ pin → room_id null
+- คงเดิม: gate สถานะ, split_date window + tz, บล็อกส่วนลด, addon re-slice (late capture), ceremony BR-2, audit note rows (เล่า same-tier + เลขห้องเก่า→ใหม่), catch \Throwable, envelope (surcharge_amount = 0)
+- GlobalRate import ถอดสะอาด (ไม่เหลือผู้ใช้ในไฟล์)
+
+Review (ZCode): ตรง มติ v2 ข้อ 5 ทุกจุด · pint สะอาด · suite 881 ผ่าน / 16 fail ของ split suite เดิมจำแนกครบว่าล้วนส่ง payload เก่า → superseded (ticket 03 re-target) · ไม่มี impl bug

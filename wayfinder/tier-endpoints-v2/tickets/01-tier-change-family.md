@@ -2,7 +2,7 @@
 label: wayfinder:task
 type: AFK
 title: "PUT BR โหมด 2 ต่อยอด (change-tier) + change-room ขยาย gate — downgrade-no-refund + staff manual price"
-status: open
+status: closed *(2026-11-11 — implement bd898af + amendment มติ ข้อ 7 b8bf90d — review ผ่าน)*
 assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: []
 ---
@@ -52,3 +52,11 @@ Review 01 (`bd898af`) ผ่าน แต่ orchestrator พบ dead-end: BR �
 - พฤติกรรม draft เหมือน confirmed ทุกอย่าง: re-point ล้วน ไม่แตะห้องกายภาพ ไม่สร้าง task · price_per_night ใช้ได้ · audit "pre-checkin move"
 - ปรับข้อความ error ของ gate ให้ระบุ draft (ที่มีห้อง) — ไทย+emoji
 - ticket 03 ต้องมี tests ครอบกรณี draft+room ด้วย
+
+## Resolution (2026-11-11)
+
+Implement โดย antigravity (agent-hub session 906b2ed7) 2 commits:
+- **`bd898af`** — PUT โหมด 2 ต่อยอด (role admin+staff, manual price_per_night, scope room_id=null + 422 ชี้ change-room, param room_id → 422, guests cap reword มติ #11, extra_beds cap รายคืน, downgrade → outstanding clamp + syncIsPaid + surcharge ติดลบได้, audit direction+ราคา) + change-room ถอด upgrade-only + manual price + เงินมติ ข้อ 1 + ceremony gate isInStay (ถอด dirty-task branch ของ confirmed ตามมติ ข้อ 4)
+- **`b8bf90d`** — amendment มติ ข้อ 7: gate รับ BR draft+room_id (ปิด dead-end: BR ก่อนเช็คอิน = draft เสมอ)
+
+Review (ZCode orchestrator): ตรง มติ v2 ข้อ 1-4+7 ทุกจุด · pint สะอาด · full suite 897→880 ผ่าน — fail 8 ตัวจำแนกครบแล้วว่าล้วน superseded (ledger-guard เดิม / releaseRoom / upgrade-only / dirty-task confirmed / gate draft เดิม) → ticket 03 re-target ครบ · ไม่มี impl bug
