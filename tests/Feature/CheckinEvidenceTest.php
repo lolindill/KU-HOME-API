@@ -98,7 +98,7 @@ class CheckinEvidenceTest extends TestCase
         $file = UploadedFile::fake()->create('id_card.jpg', 100, 'image/jpeg');
 
         $response = $this->actingAs($this->staff, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'id_card',
                 'note' => 'บัตรประชาชนนายทดสอบ',
@@ -143,7 +143,7 @@ class CheckinEvidenceTest extends TestCase
         $pdf = UploadedFile::fake()->create('registration_form.pdf', 250, 'application/pdf');
 
         $response = $this->actingAs($this->admin, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $pdf,
                 'type' => 'registration',
             ]);
@@ -169,7 +169,7 @@ class CheckinEvidenceTest extends TestCase
             $file = UploadedFile::fake()->create("doc_{$type}.png", 50, 'image/png');
 
             $response = $this->actingAs($this->staff, 'sanctum')
-                ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+                ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                     'file' => $file,
                     'type' => $type,
                 ]);
@@ -189,7 +189,7 @@ class CheckinEvidenceTest extends TestCase
         $file = UploadedFile::fake()->create('id.jpg', 50, 'image/jpeg');
 
         $response = $this->actingAs($this->user, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'id_card',
             ]);
@@ -203,7 +203,7 @@ class CheckinEvidenceTest extends TestCase
         $file = UploadedFile::fake()->create('id.jpg', 50, 'image/jpeg');
 
         $response = $this->actingAs($this->housekeeping, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'id_card',
             ]);
@@ -216,7 +216,7 @@ class CheckinEvidenceTest extends TestCase
         $bookingRoom = $this->createBookingRoom('checked_in');
         $file = UploadedFile::fake()->create('id.jpg', 50, 'image/jpeg');
 
-        $response = $this->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+        $response = $this->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
             'file' => $file,
             'type' => 'id_card',
         ]);
@@ -235,7 +235,7 @@ class CheckinEvidenceTest extends TestCase
             $file = UploadedFile::fake()->create("test_{$state}.jpg", 50, 'image/jpeg');
 
             $response = $this->actingAs($this->staff, 'sanctum')
-                ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+                ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                     'file' => $file,
                     'type' => 'id_card',
                 ]);
@@ -251,7 +251,7 @@ class CheckinEvidenceTest extends TestCase
             $file = UploadedFile::fake()->create("test_{$invalidState}.jpg", 50, 'image/jpeg');
 
             $response = $this->actingAs($this->staff, 'sanctum')
-                ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+                ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                     'file' => $file,
                     'type' => 'id_card',
                 ]);
@@ -273,7 +273,7 @@ class CheckinEvidenceTest extends TestCase
         $file = UploadedFile::fake()->create('id.jpg', 50, 'image/jpeg');
 
         $response = $this->actingAs($this->staff, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'invalid_passport_type',
             ]);
@@ -287,7 +287,7 @@ class CheckinEvidenceTest extends TestCase
         $bookingRoom = $this->createBookingRoom('checked_in');
 
         $response = $this->actingAs($this->staff, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'type' => 'id_card',
             ]);
 
@@ -301,7 +301,7 @@ class CheckinEvidenceTest extends TestCase
         $file = UploadedFile::fake()->create('document.txt', 10, 'text/plain');
 
         $response = $this->actingAs($this->staff, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'id_card',
             ]);
@@ -321,7 +321,7 @@ class CheckinEvidenceTest extends TestCase
 
         // อัปโหลด 1 รูป
         $this->actingAs($this->staff, 'sanctum')
-            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+            ->postJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence", [
                 'file' => $file,
                 'type' => 'id_card',
                 'note' => 'รูปบัตร ปชช.',
@@ -329,7 +329,7 @@ class CheckinEvidenceTest extends TestCase
 
         // ดึงรายการ evidence ผ่าน GET
         $response = $this->actingAs($this->staff, 'sanctum')
-            ->getJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence");
+            ->getJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence");
 
         $response->assertStatus(200)
             ->assertJsonStructure([
@@ -366,13 +366,106 @@ class CheckinEvidenceTest extends TestCase
         $bookingRoom = $this->createBookingRoom('checked_in');
 
         $response = $this->actingAs($this->user, 'sanctum')
-            ->getJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence");
+            ->getJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/{$bookingRoom->id}/evidence");
 
         $response->assertStatus(403);
     }
 
     // ============================================================
-    // 6) Retention Policy (365 วัน) & Cleanup Command
+    // 6) Nested Addressing & Scope Guards (ticket 04)
+    // ============================================================
+
+    public function test_upload_evidence_returns_404_when_booking_room_does_not_belong_to_booking(): void
+    {
+        $bookingRoom = $this->createBookingRoom('checked_in');
+
+        // บิลที่สองที่ไม่มี bookingRoom นี้
+        $otherBooking = Booking::create([
+            'user_id' => $this->user->id,
+            'confirmation' => 'BK-'.strtoupper(bin2hex(random_bytes(4))),
+            'source' => 'online',
+            'status' => 'confirmed',
+            'total_amount' => 1200,
+        ]);
+
+        $file = UploadedFile::fake()->create('id_card.jpg', 100, 'image/jpeg');
+
+        $response = $this->actingAs($this->staff, 'sanctum')
+            ->postJson("/api/v1/front-desk/{$otherBooking->id}/rooms/{$bookingRoom->id}/evidence", [
+                'file' => $file,
+                'type' => 'id_card',
+            ]);
+
+        $response->assertStatus(404)
+            ->assertJson([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูลห้องพักที่ระบุในระบบค่ะนายท่าน',
+            ]);
+    }
+
+    public function test_get_evidences_returns_404_when_booking_room_does_not_belong_to_booking(): void
+    {
+        $bookingRoom = $this->createBookingRoom('checked_in');
+
+        // บิลที่สองที่ไม่มี bookingRoom นี้
+        $otherBooking = Booking::create([
+            'user_id' => $this->user->id,
+            'confirmation' => 'BK-'.strtoupper(bin2hex(random_bytes(4))),
+            'source' => 'online',
+            'status' => 'confirmed',
+            'total_amount' => 1200,
+        ]);
+
+        $response = $this->actingAs($this->staff, 'sanctum')
+            ->getJson("/api/v1/front-desk/{$otherBooking->id}/rooms/{$bookingRoom->id}/evidence");
+
+        $response->assertStatus(404)
+            ->assertJson([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูลห้องพักที่ระบุในระบบค่ะนายท่าน',
+            ]);
+    }
+
+    public function test_evidence_endpoints_reject_non_uuid_with_router_404(): void
+    {
+        $bookingRoom = $this->createBookingRoom('checked_in');
+        $file = UploadedFile::fake()->create('id_card.jpg', 100, 'image/jpeg');
+
+        // Non-UUID bookingId
+        $this->actingAs($this->staff, 'sanctum')
+            ->postJson("/api/v1/front-desk/not-a-uuid/rooms/{$bookingRoom->id}/evidence", [
+                'file' => $file,
+                'type' => 'id_card',
+            ])
+            ->assertStatus(404);
+
+        // Non-UUID bookingRoomId
+        $this->actingAs($this->staff, 'sanctum')
+            ->getJson("/api/v1/front-desk/{$bookingRoom->booking_id}/rooms/not-a-uuid/evidence")
+            ->assertStatus(404);
+    }
+
+    public function test_legacy_flat_evidence_routes_are_removed_and_return_404(): void
+    {
+        $bookingRoom = $this->createBookingRoom('checked_in');
+        $file = UploadedFile::fake()->create('id_card.jpg', 100, 'image/jpeg');
+
+        // POST เส้นเก่าถูกถอดออกแล้ว
+        $this->actingAs($this->staff, 'sanctum')
+            ->postJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence", [
+                'file' => $file,
+                'type' => 'id_card',
+            ])
+            ->assertStatus(404);
+
+        // GET เส้นเก่าถูกถอดออกแล้ว
+        $this->actingAs($this->staff, 'sanctum')
+            ->getJson("/api/v1/front-desk/booking-rooms/{$bookingRoom->id}/evidence")
+            ->assertStatus(404);
+    }
+
+    // ============================================================
+    // 7) Retention Policy (365 วัน) & Cleanup Command
     // ============================================================
 
     public function test_cleanup_deletes_evidences_older_than_365_days(): void

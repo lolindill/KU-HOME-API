@@ -17,7 +17,7 @@ class CheckinEvidenceController extends Controller
      * 🛎️ 6. Upload Check-in Evidence (REQ-033 — admin+staff)
      * อัปโหลดบัตร ปชช. / registration / PDPA ผูกกับ BookingRoom (เก็บ 365 วัน)
      */
-    public function uploadEvidence(UploadCheckinEvidenceRequest $request, string $id)
+    public function uploadEvidence(UploadCheckinEvidenceRequest $request, string $bookingId, string $bookingRoomId)
     {
         $user = $request->user();
         if (! $user || ! in_array($user->role, ['admin', 'staff'], true)) {
@@ -28,7 +28,9 @@ class CheckinEvidenceController extends Controller
         }
 
         try {
-            $bookingRoom = BookingRoom::findOrFail($id);
+            $bookingRoom = BookingRoom::where('id', $bookingRoomId)
+                ->where('booking_id', $bookingId)
+                ->firstOrFail();
 
             // 🛡️ State guard: อนุญาต confirmed, checked_in, checked_out
             // (draft ยังไม่ยืนยัน / no_show ไม่ได้เข้าพัก)
@@ -108,7 +110,7 @@ class CheckinEvidenceController extends Controller
      * 🛎️ 7. Get Check-in Evidences (REQ-033 — admin+staff)
      * ดึงรายการหลักฐานการเข้าพักพร้อม signed URL (อายุ 15 นาที)
      */
-    public function getEvidences(Request $request, string $id)
+    public function getEvidences(Request $request, string $bookingId, string $bookingRoomId)
     {
         $user = $request->user();
         if (! $user || ! in_array($user->role, ['admin', 'staff'], true)) {
@@ -119,7 +121,9 @@ class CheckinEvidenceController extends Controller
         }
 
         try {
-            $bookingRoom = BookingRoom::findOrFail($id);
+            $bookingRoom = BookingRoom::where('id', $bookingRoomId)
+                ->where('booking_id', $bookingId)
+                ->firstOrFail();
 
             $evidences = $bookingRoom->evidences()
                 ->orderBy('created_at', 'desc')

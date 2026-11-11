@@ -2412,7 +2412,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 | REQ-007/019 | 02 guest cap | cap `max_guests` ทุก write path + ≥1 คนตอน confirm | batch ตรวจ final state · ห้ามบังคับ guests ตอน create draft |
 | REQ-031 | 03 front-desk staff | `role:admin,staff` บน check-in/out + **payment + assign-rooms** | walk-in / mark-no-show คง admin-only · เพิ่ม `staff` ใน validTransitions ของ Booking/BookingRoom เฉพาะเส้นทางบริการ 24 ชม. |
 | REQ-023 | 04 auto-assign T-2 | `DailyRoomMaintenance` assign ล่วงหน้า 2 วัน ผ่าน RoomAllocator | fail-safe ต่อ booking (ห้องไม่พอ = log ทิ้งไว้ ไม่ crash) |
-| REQ-033 | 05 check-in evidence | `POST/GET /front-desk/booking-rooms/{id}/evidence` (morph `BookingRoom`) | state guard `confirmed/checked_in/checked_out` · retention 365 วัน ต่อ `app:cleanup-images` · เพิ่ม column `images.metadata` (JSON) |
+| REQ-033 | 05 check-in evidence | `POST/GET /front-desk/{bookingId}/rooms/{bookingRoomId}/evidence` (morph `BookingRoom`) | state guard `confirmed/checked_in/checked_out` · retention 365 วัน ต่อ `app:cleanup-images` · เพิ่ม column `images.metadata` (JSON) · unify addressing 2026-11-11 |
 | REQ-042/044 | 12 (grill) + 13 (impl) — 15/10/26 | charges บวกยอดจริง: `charges_total` append + `outstanding/is_paid` รวม charges + `syncIsPaid()` recompute + `booking_room_id` nullable + `charge_type='addon'` + `GET /bookings/{id}/additional-charges` | `total_amount` คงค่าห้องล้วน · เก็บเงินผ่าน `recordPayment` เท่านั้น · ทุกสถานะ · ไม่มีรูปหลักฐาน (interpretation ข้อ 9) · deposit ไม่ขยับ |
 | REQ-048 | 06 housekeeping photos | `POST/GET /dashboard/tasks/{id}/photos` (morph `HousekeepingTask`) | drop ตาราง dead scaffold `housekeeping_photos` · เพิ่ม column `images.category` · cap before/after 5+5 · retention 90 วัน |
 | REQ-051/052 | 07 stock | CRUD `/stock` + derived status ok/low/out + `stock_movements` + `CleanupStockMovements` (03:00) | soft delete (คง audit trail 1 ปี) · housekeeping อ่านอย่างเดียว · เติม `SuppliesReportData` เต็ม |
@@ -2581,4 +2581,17 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **routes/api.php:** เปลี่ยนแค่ `use` (2 บรรทัด/branch) + FQCN swap 4 เส้น/branch — รวม 8 action swap จาก `BookingController`/`FrontDeskController` เดิม
 - **การพิสูจน์ของ orchestrator review (ไม่เชื่อ report agent — วัดเองทุกชั้น):** baseline ก่อน dispatch = **916 tests / 3,860 assertions** เขียวทั้ง 2 worktree (⚠️ suite จริงคือ **916** ไม่ใช่ 917 เพราะ PaymentTest รวม 2 test 410-tombstone เป็น 1 pin ใหม่ตอน zero-risk commit `d51e9be`) · หลังงาน agent: suite 916/3,860 เท่าเดิมทั้ง 2 branch + `pint --dirty` PASS · **route-parity:** `route:list --json` เทียบ baseline = 113→113 เส้น, URL+verb **IDENTICAL**, action swap เป๊ะ 4/branch · **line-multiset fidelity** (เทียบทุกบรรทัด old vs union ใหม่): ตั๋ว 01 ต่างแค่ boilerplate (php/namespace/use สำเนา×3/class braces) — ตรวจเจอ tombstone comment 2 บรรทัด (`lookupBooking ถูกลบแล้ว` + `showById`) หลุดตอนย้าย autoAssignRooms → orchestrator restore + commit `1ec1cf9` · ตั๋ว 02 ต่างแค่ handleCatch duplicate (byte-identical ทุกบรรทัด) + boilerplate — สะอาด 100% · acceptance gate บน dev หลัง merge: pint PASS + suite 916/3,860 + route-parity 113 identical / swaps 8
 - **Commits:** agent ตั๋ว 01 = `346433e` (+ review fix `1ec1cf9`) บน `feature/split-booking-controller` · agent ตั๋ว 02 = `310646e` บน `feature/split-front-desk-controller` · merge dev = `d45bc65` + `ec04fb4` (conflict เดียว: import block เก็บทั้ง 2 use เรียงตัวอักษร) · **0 test edits** ตาม acceptance · ไม่ต้องมี api_patches — move-only ไม่แตะ URL (patch note เกิดตอน tickets 03/04 เท่านั้น)
+
+## 🪪 Unify Evidence Addressing — ticket 04 (2026-11-11 — api-route-hygiene, breaking URL)
+
+- **Context:** ย้าย `POST /front-desk/booking-rooms/{id}/evidence` และ `GET /front-desk/booking-rooms/{id}/evidence` ให้เป็น nested addressing รูปแบบเดียวกับพี่น้องใน prefix `front-desk` (`check-in`, `check-out`, `change-room`, `split-upgrade`) ได้แก่ `/front-desk/{bookingId}/rooms/{bookingRoomId}/evidence`
+- **มติ owner lock (2026-11-11 — ห้าม re-litigate):**
+  1. ทางเลือก (a): ย้าย address เป็น nested + ถอดเส้นเดิมทิ้งทันที (ไม่ทิ้ง tombstone)
+  2. Constraint router: ใช้ `whereUuid(['bookingId', 'bookingRoomId'])` คุมคู่
+  3. Controller signature: `uploadEvidence(UploadCheckinEvidenceRequest $request, string $bookingId, string $bookingRoomId)` และ `getEvidences(Request $request, string $bookingId, string $bookingRoomId)`
+  4. Lookup & Guard: `BookingRoom::where('id', $bookingRoomId)->where('booking_id', $bookingId)->firstOrFail()` → คืน **404 (ไม่ใช่ 403)** เมื่อ BR ไม่อยู่ใต้ booking นี้ เพื่อป้องกันการ enumerate และ tampering ข้ามบิล ตาม precedent ownership
+  5. พฤติกรรมเดิมคงเป๊ะ 100%: 365-day retention ต่อ `app:cleanup-images` · RBAC `admin,staff` · signed URL 15 นาที + ownership check ต่อ `images.file` · `RequireJsonAccept` คุมตามปกติ (ไม่ exempt)
+- **Frontend caller verification:** Reverse index snapshot 2026-11-06 (`api_pages README`): **zero caller** ของเส้น evidence ทั้ง POST/GET → ไม่ต้องประสาน frontend ล่วงหน้า (บันทึก limitation snapshot ไว้ใน patch note `docs/api_patches/2026-11-11-unify-evidence-addressing.md`)
+- **Suite:** baseline 916 → **920 passed** (เพิ่ม 4 tests: BR mismatch 404 ทั้ง POST/GET, non-uuid router 404, legacy flat route removal 404)
+
 
