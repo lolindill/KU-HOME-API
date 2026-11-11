@@ -11,7 +11,6 @@ use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
-use App\Models\GlobalRate;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
@@ -698,13 +697,24 @@ class BookingController extends Controller
                 if (! in_array($bookingRoom->status, ['draft', 'confirmed', 'checked_in'], true)) {
                     throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ', 422);
                 }
+
+                // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 3): โหมด 2 (post-payment change-tier) ต้องไม่มี room_id
+                if (! $isCheckedIn) {
+                    if ($request->has('room_id')) {
+                        throw new \Exception('ไม่สามารถระบุเลขห้องผ่านการแก้ไขห้องได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
+                    }
+
+                    if ($bookingRoom->room_id !== null) {
+                        throw new \Exception('ห้องนี้มีเลขห้องจัดไว้แล้ว ไม่สามารถแก้ไขประเภทห้องผ่านหน้านี้ได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
+                    }
+                }
             } elseif ($bookingRoom->status !== 'draft') {
                 throw new \Exception('ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องไม่ได้อยู่ในสถานะ draft ค่ะ', 422);
             }
 
             // 🔐 Role guard ละเอียดตามโหมด:
             // 1) checked_in mode (mid-stay addon-only): admin หรือ staff เท่านั้น (owner/non-admin/non-staff = 403)
-            // 2) post-payment mode (pre-checkin surcharge): admin เท่านั้น (staff/owner = 403)
+            // 2) post-payment mode (pre-checkin surcharge / change-tier): admin หรือ staff เท่านั้น (tier-endpoints-v2 มติ v2 ข้อ 2)
             // 3) draft mode: เจ้าของ booking หรือ admin เท่านั้น (staff = 403)
             if ($isCheckedIn) {
                 if (! in_array($user->role, ['admin', 'staff'], true)) {
@@ -714,10 +724,10 @@ class BookingController extends Controller
                     ], 403);
                 }
             } elseif ($postPayment) {
-                if ($user->role !== 'admin') {
+                if (! in_array($user->role, ['admin', 'staff'], true)) {
                     return response()->json([
                         'status' => 'error',
-                        'message' => 'แก้ไขห้องหลังชำระเงินแล้ว (surcharge) ต้องเป็นแอดมินเท่านั้นค่ะนายท่าน 🔒',
+                        'message' => 'แก้ไขห้องหลังชำระเงินแล้ว (surcharge) ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นค่ะนายท่าน 🔒',
                     ], 403);
                 }
             } else {
@@ -748,6 +758,8 @@ class BookingController extends Controller
 
                 // 💳 ticket 10 — ยอดรวมก่อนแก้ (ใช้คำนวณส่วนต่าง surcharge)
                 $previousTotal = (int) $locked->total_amount;
+                $previousRoomAmount = (int) $bookingRoom->room_amount;
+                $previousRoomTypeId = $bookingRoom->room_type_id;
 
                 // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing + guests cap)
                 $effectiveTypeId = $validated['room_type_id'] ?? $bookingRoom->room_type_id;
@@ -758,11 +770,7 @@ class BookingController extends Controller
                     ? Carbon::parse($validated['check_out'])->toDateString()
                     : $bookingRoom->check_out->toDateString();
 
-                $releaseRoom = false;
-                $oldRoomNumber = null;
-                $newRoomTypeName = null;
-
-                // 🏨 (10/11/26) ห้องเข้าพักแล้ว (checked_in): ข้ามการตรวจ guests cap, availability, room release
+                // 🏨 (10/11/26) ห้องเข้าพักแล้ว (checked_in): ข้ามการตรวจ guests cap, availability
                 if (! $isCheckedIn) {
                     // 🎯 Merge ฟิลด์ที่ส่งมาลง BR — เช็คค่าเดิมใน DB เพื่ออัปเดตเฉพาะฟิลด์ที่เปลี่ยนจริง
                     $dirtyFields = [];
@@ -786,10 +794,16 @@ class BookingController extends Controller
                     }
 
                     // 👥 ชั้น 1 (REQ-007/019): ตรวจจำนวน guests เทียบกับ max_guests ของประเภทห้อง
+                    //    (tier-endpoints-v2: โหมด 2 reword บอกทางแก้ มติ #11 · draft mode คงข้อความเดิม)
                     $effectiveGuests = array_key_exists('guests', $validated) ? $validated['guests'] : $bookingRoom->guests;
                     if (! empty($effectiveGuests) && is_array($effectiveGuests)) {
                         $roomType = RoomType::find($effectiveTypeId);
-                        if ($roomType && count($effectiveGuests) > $roomType->max_guests) {
+                        if ($roomType && $roomType->max_guests !== null && count($effectiveGuests) > $roomType->max_guests) {
+                            $guestCount = count($effectiveGuests);
+                            if ($postPayment && ! $isCheckedIn) {
+                                throw new \Exception("ผู้เข้าพัก {$guestCount} คน เกินจำนวนสูงสุดที่รองรับได้ ({$roomType->max_guests} คน) ของห้องประเภท {$roomType->name_en} — สามารถปรับลดผู้เข้าพักในคำขอแก้ไขนี้ หรือเลือกประเภทห้องอื่นได้ค่ะ 👥", 422);
+                            }
+
                             throw new \Exception("ผู้เข้าพักเกินจำนวนสูงสุด {$roomType->max_guests} คนของห้องประเภทนี้ค่ะ 🥺", 422);
                         }
                     }
@@ -799,35 +813,6 @@ class BookingController extends Controller
                     $shapeChanged = isset($dirtyFields['room_type_id'])
                         || isset($dirtyFields['check_in'])
                         || isset($dirtyFields['check_out']);
-
-                    // 💳 ticket 10 + 🎫 (2026-11-04) surcharge: BR ที่ถูกจัดเลขห้องแล้ว
-                    //    - เปลี่ยนวันที่ (check_in/check_out) → ยัง 422 (ห้อง pinned ผูก overlap กับ window เดิม)
-                    //    - เปลี่ยนประเภทห้อง (room_type_id) → อนุญาตแบบ **upgrade-only** (type ใหม่แพงกว่า
-                    //      เท่านั้น) แล้วปลด room_id = null ให้ auto-assign จัด type ใหม่
-                    //      (ห้องเก่า pre-check-in ไม่ได้ occupied — ไม่แตะ room status / ไม่สร้าง task)
-                    if ($postPayment && $bookingRoom->room_id && $shapeChanged) {
-                        if (isset($dirtyFields['check_in']) || isset($dirtyFields['check_out'])) {
-                            throw new \Exception('ห้องนี้ถูกจัดเลขห้องจริงแล้ว ไม่สามารถเปลี่ยนวันที่เข้าพักได้ — ให้ปลดการจัดห้องก่อนค่ะ 🏨', 422);
-                        }
-
-                        // 🎫 upgrade-only — เทียบ effective daily rate ของเจ้าของบิล (บริบทเดียวกับ reprice)
-                        $oldTypeForRate = RoomType::findOrFail($bookingRoom->room_type_id);
-                        $newTypeForRate = RoomType::findOrFail($effectiveTypeId);
-                        $oldRateForUpgrade = GlobalRate::getEffectiveDailyRate($oldTypeForRate, $locked->user);
-                        $newRateForUpgrade = GlobalRate::getEffectiveDailyRate($newTypeForRate, $locked->user);
-                        if ($newRateForUpgrade < $oldRateForUpgrade) {
-                            throw new \Exception(
-                                'เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน '.
-                                "({$oldTypeForRate->name_en} {$oldRateForUpgrade} → {$newTypeForRate->name_en} {$newRateForUpgrade} บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫",
-                                422
-                            );
-                        }
-
-                        // 🚪 จับหมายเลขห้องเดิมไว้ทำ audit note ก่อนปลด
-                        $releaseRoom = true;
-                        $oldRoomNumber = Room::find($bookingRoom->room_id)?->room_number;
-                        $newRoomTypeName = $newTypeForRate->name_en;
-                    }
 
                     if ($shapeChanged) {
                         $checkIn = Carbon::parse($effectiveCheckIn);
@@ -849,11 +834,6 @@ class BookingController extends Controller
                     }
 
                     if (! empty($dirtyFields)) {
-                        // 🚪 (2026-11-04) upgrade type บนห้องที่ถูกจัดแล้ว → ปลด room_id ให้ auto-assign
-                        //    (PUT /bookings/{id}/assign-rooms หรือ app:daily-room-maintenance) จัด type ใหม่
-                        if ($releaseRoom) {
-                            $dirtyFields['room_id'] = null;
-                        }
                         $bookingRoom->update($dirtyFields);
                     }
                 }
@@ -868,12 +848,21 @@ class BookingController extends Controller
                 $effectiveRoomRequest = $validated;
                 $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
                 $effectiveRoomRequest['check_out'] = $effectiveCheckOut;
+                $targetMaxExtraBeds = RoomType::findOrFail($effectiveTypeId)->max_extra_beds;
                 $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
                     $effectiveRoomRequest,
                     $addonInput,
                     $existingAddon,
-                    RoomType::findOrFail($effectiveTypeId)->max_extra_beds
+                    $targetMaxExtraBeds
                 );
+                // 🛏️ tier-endpoints-v2: addon cap ในโหมด 2 ตรวจสอบ extra_beds_by_night รายคืน ≤ max_extra_beds tier ใหม่
+                if ($postPayment && ! $isCheckedIn && $targetMaxExtraBeds !== null) {
+                    foreach ($extraBedsByNight as $night => $qty) {
+                        if ($qty > $targetMaxExtraBeds) {
+                            throw new \Exception("จำนวนเตียงเสริมคืน {$night} เกินขีดสุดของประเภทห้อง (สูงสุด {$targetMaxExtraBeds} ต่อคืน) ค่ะ 🛏️", 422);
+                        }
+                    }
+                }
                 [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                 $addonData = [
@@ -909,43 +898,62 @@ class BookingController extends Controller
                 // 💳 ticket 10 — surcharge: reprice ตรง (applyToDraft guard draft-only ·
                 //    used redemption ยังถูกนับใน reprice — โค้ดส่วนลดคงเดิมไม่ถูกถอด)
                 if ($postPayment) {
-                    app(DiscountService::class)->reprice($locked);
+                    $roomAmountOverrides = [];
+                    if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+                        $nights = (int) Carbon::parse($effectiveCheckIn)->startOfDay()
+                            ->diffInDays(Carbon::parse($effectiveCheckOut)->startOfDay()) ?: 1;
+                        $roomAmountOverrides[$bookingRoom->id] = (int) $validated['price_per_night'] * $nights;
+                    }
+                    app(DiscountService::class)->reprice($locked, $roomAmountOverrides);
                 } else {
                     $this->reconcileDiscount($locked);
                 }
 
-                // 💳 ticket 10 — downgrade guard: ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
-                //    (ticket 08 — ไม่มีการคืนเงินในระบบ จึงบล็อกส่วนต่างลดจนเกินยอดที่จ่ายไปแล้ว)
-                //    💸 (15/10/26, ticket 13): ยอดรวม = total + charges — charges หนุนยอดได้
+                // 💳 ticket 10 — downgrade guard:
+                //    🏨 โหมด 3 (checked_in addon-only): ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
+                //    🚪 โหมด 2 (tier-change): มติ v2 ข้อ 1 ตัด ledger-guard 422 ออก, outstanding clamp 0, syncIsPaid()
                 $chargesTotal = (int) $locked->charges_total;
                 $newTotal = (int) $locked->fresh()->total_amount;
                 $paidAmount = $locked->paid_amount;
-                if ($newTotal + $chargesTotal < $paidAmount) {
-                    throw new \Exception(
-                        'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
-                        422
-                    );
+
+                if ($isCheckedIn) {
+                    if ($newTotal + $chargesTotal < $paidAmount) {
+                        throw new \Exception(
+                            'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                            422
+                        );
+                    }
+                    if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
+                        $locked->update(['is_paid' => false]);
+                    }
+                } elseif ($postPayment) {
+                    // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 1): recompute is_paid ตามนิยาม (paid ≥ total + charges)
+                    $locked->fresh()->syncIsPaid();
                 }
 
-                // 💳 ticket 10 — is_paid=true เดิม (จ่ายครบ) แต่ surcharge ทำให้ยอดค้างเกิด → reset false
-                //    (ตามนิยาม is_paid = SUM(payments) ≥ total + charges — recordPayment จะ set คืนเมื่อเก็บส่วนต่างครบ)
-                if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
-                    $locked->update(['is_paid' => false]);
-                }
+                // 📝 (tier-endpoints-v2) Audit — note row สำหรับโหมด 2 (post-payment change-tier)
+                //    (บันทึก direction + ราคาเดิม→ใหม่)
+                if ($postPayment && ! $isCheckedIn) {
+                    $oldType = RoomType::find($previousRoomTypeId);
+                    $newType = RoomType::find($effectiveTypeId);
+                    $newRoomAmount = (int) $bookingRoom->fresh()->room_amount;
+                    $typeChanged = (string) $previousRoomTypeId !== (string) $effectiveTypeId;
 
-                // 🎫 (2026-11-04) airtight — surcharge upgrade type แล้วยอดรวมต้องไม่ต่ำกว่าเดิม
-                //    (กัน group/month tier พายอดตก แม้เรทรายวันของ type ใหม่จะแพงขึ้น)
-                if ($releaseRoom && $newTotal < $previousTotal) {
-                    throw new \Exception(
-                        "อัปเกรดประเภทห้องแล้วยอดรวมต้องไม่ต่ำกว่าเดิมค่ะ ({$previousTotal} → {$newTotal} บาท) กรุณาตรวจสอบเรทของประเภทห้องนะคะ",
-                        422
-                    );
-                }
+                    $direction = match (true) {
+                        $newRoomAmount > $previousRoomAmount => 'upgrade',
+                        $newRoomAmount < $previousRoomAmount => 'downgrade',
+                        default => 'same-tier',
+                    };
 
-                // 📝 (2026-11-04) Audit — note row ของการปลดห้องเพื่อ upgrade type
-                //    (สถานะ BR ไม่เปลี่ยน จึงเขียนตรงไม่ผ่าน transitionStatus — from=to=สถานะเดิม
-                //    · convention extension เดียวกับ FrontDeskController::changeRoom)
-                if ($releaseRoom) {
+                    $noteParts = ["change-tier ({$direction})"];
+                    if ($typeChanged) {
+                        $noteParts[] = "tier {$oldType?->name_en} → {$newType?->name_en}";
+                    }
+                    if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+                        $noteParts[] = "manual rate {$validated['price_per_night']} บาท/คืน";
+                    }
+                    $noteParts[] = "price {$previousRoomAmount} → {$newRoomAmount} บาท";
+
                     StatusChangeLog::create([
                         'entity_type' => 'booking_room',
                         'entity_id' => $bookingRoom->id,
@@ -953,7 +961,7 @@ class BookingController extends Controller
                         'to_status' => $bookingRoom->status,
                         'role' => $user->role,
                         'causer_id' => $user->id,
-                        'note' => 'ปลดห้อง '.$oldRoomNumber.' · upgrade type → '.$newRoomTypeName.' รอจัดห้องใหม่',
+                        'note' => implode(' · ', $noteParts),
                     ]);
                 }
 

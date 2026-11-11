@@ -196,22 +196,27 @@ class BookingSurchargeAfterPaymentTest extends TestCase
     }
 
     // =========================================================
-    // ⬇️ downgrade — ลดได้เฉพาะยอดรวมใหม่ ≥ paid (ticket 08: ไม่มีคืนเงิน)
+    // ⬇️ downgrade — tier-endpoints-v2 (มติ v2 ข้อ 1): อนุญาต + ไม่คืนเงิน (clamp outstanding 0, syncIsPaid)
     // =========================================================
 
-    public function test_downgrade_below_paid_is_blocked(): void
+    public function test_downgrade_below_paid_is_allowed_with_no_refund_and_is_paid_true(): void
     {
         $typeCheap = $this->roomTypeSetup(500, 1, 'Budget');
         $booking = $this->paidBooking(1500, 'deposit'); // จ่ายมัดจำ 750
 
-        $this->putRoom($booking, ['room_type_id' => $typeCheap->id])
-            ->assertStatus(422);
+        $res = $this->putRoom($booking, ['room_type_id' => $typeCheap->id]);
+        $res->assertStatus(200)
+            ->assertJsonPath('total_amount', 500)
+            ->assertJsonPath('previous_total_amount', 1500)
+            ->assertJsonPath('surcharge_amount', -1000)
+            ->assertJsonPath('paid_amount', 750)
+            ->assertJsonPath('outstanding_amount', 0);
 
-        // rollback — ยอดเดิมคงอยู่ ไม่มีอะไรแตะ
         $fresh = $booking->fresh();
-        $this->assertEquals(1500, $fresh->total_amount);
-        $this->assertEquals(RoomType::where('name_en', 'Standard')->firstOrFail()->id, $fresh->bookingRooms()->first()->room_type_id);
-        $this->assertEquals(1500, $fresh->bookingRooms()->sum('amount'));
+        $this->assertEquals(500, $fresh->total_amount);
+        $this->assertEquals($typeCheap->id, $fresh->bookingRooms()->first()->room_type_id);
+        $this->assertEquals(500, $fresh->bookingRooms()->sum('amount'));
+        $this->assertTrue((bool) $fresh->is_paid);
     }
 
     public function test_downgrade_above_paid_shrinks_outstanding(): void
@@ -292,7 +297,7 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $this->assertEquals(1500, $booking->fresh()->total_amount);
     }
 
-    public function test_assigned_room_upgrade_type_releases_room(): void
+    public function test_assigned_room_upgrade_type_rejects_and_points_to_change_room(): void
     {
         $typeB = $this->roomTypeSetup(2500, 1, 'Deluxe');
         $booking = $this->paidBooking(1500, 'full'); // จ่ายเต็ม → confirmed
@@ -304,15 +309,15 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $br = $booking->bookingRooms()->first();
         $this->assertNotNull($br->fresh()->room_id);
 
-        // 🎫 (2026-11-04 เปลี่ยนสัญญา) type ใหม่แพงกว่า (upgrade-only) → 200
-        //    + ปลด room_id = null รอ auto-assign จัด type ใหม่ (เคสถูกกว่า = 422 ดู ChangeRoomTest)
-        $this->actingAs($this->admin(), 'sanctum')
-            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", ['room_type_id' => $typeB->id])
-            ->assertStatus(200);
+        // 🎫 (tier-endpoints-v2 มติ v2 ข้อ 3): BR ที่มีห้องแล้ว โหมด 2 ต้อง 422 ชี้ไป change-room
+        $response = $this->actingAs($this->admin(), 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", ['room_type_id' => $typeB->id]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('change-room', $response->json('message'));
 
         $br = $br->fresh();
-        $this->assertNull($br->room_id);
-        $this->assertEquals($typeB->id, $br->room_type_id);
+        $this->assertNotNull($br->room_id);
     }
 
     public function test_checked_in_room_is_blocked(): void

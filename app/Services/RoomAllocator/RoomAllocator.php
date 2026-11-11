@@ -44,9 +44,10 @@ final class RoomAllocator
      *
      * @param  Collection<int, BookingRoom>  $bookingRooms  BR ที่ยังไม่มี room_id
      * @param  bool  $includeReserved  admin flag `include_reserved` (request-scoped — ไม่ persist)
+     * @param  array  $excludeRoomIds  รายการห้องที่ต้องการยกเว้นออกจาก pool (เช่น ห้องเดิมของ BR-1 ใน split)
      * @return AllocationResult {assignments: [brId => roomId], ok, cost, winner}
      */
-    public function allocate(Collection $bookingRooms, bool $includeReserved = false): AllocationResult
+    public function allocate(Collection $bookingRooms, bool $includeReserved = false, array $excludeRoomIds = []): AllocationResult
     {
         if ($bookingRooms->isEmpty()) {
             return AllocationResult::failed(0);
@@ -59,7 +60,7 @@ final class RoomAllocator
         $brs = $bookingRooms->map(fn ($br) => BookingRequestDto::fromModel($br))->values()->all();
 
         // ---- 2. โหลด room pool + reservations ที่ overlap ----
-        $rooms = $this->loadRoomPool($brs, $includeReserved);
+        $rooms = $this->loadRoomPool($brs, $includeReserved, $excludeRoomIds);
 
         // ---- 3. X09 priority seed ----
         $x09Seeder = new X09Seeder($this->weights);
@@ -143,7 +144,7 @@ final class RoomAllocator
      * @param  bool  $includeReserved  true = ตัดเฉพาะ maintenance period (reserved เข้า pool ได้)
      * @return RoomDto[]
      */
-    private function loadRoomPool(array $brs, bool $includeReserved = false): array
+    private function loadRoomPool(array $brs, bool $includeReserved = false, array $excludeRoomIds = []): array
     {
         $neededTypes = array_values(array_unique(array_map(fn ($br) => $br->type, $brs)));
 
@@ -165,6 +166,10 @@ final class RoomAllocator
                 $maxCheckOut,
                 $includeReserved ? RoomStatePeriod::KIND_MAINTENANCE : null
             );
+
+        if (! empty($excludeRoomIds)) {
+            $query->whereNotIn('id', $excludeRoomIds);
+        }
 
         // lockForUpdate เพื่อกัน race (skip ใน SQLite ที่ไม่ support)
         if (config('database.default') !== 'sqlite' && DB::transactionLevel() > 0) {
