@@ -3,7 +3,7 @@ label: wayfinder:task
 type: AFK
 title: "HTTP feature suite — split-upgrade (ตาม seam ของ room-auto-assign-test)"
 status: open
-assignee:
+assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: ["01-implement-split-upgrade.md"]
 ---
 

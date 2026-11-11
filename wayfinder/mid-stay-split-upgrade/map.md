@@ -42,6 +42,7 @@ Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ขอ�
 - (2026-11-10) grilling session: ล็อกมติทั้ง 8 ข้อข้างบน + สำรวจโค้ดยืนยันว่าพิธี manual บนวันย้อนหลังทำงานได้ (ไม่มี date validation ใน checkIn/checkOut) — spec ฉบับเต็มอยู่ที่ tickets/01
 - (2026-11-10 รอบสอง) owner แก้ 2 มติ: (1) container gate = **`confirmed|draft`** — ตัด `paid`, เพิ่ม `draft` (2) **ห้าม split_date ย้อนหลัง** — ต้อง ≥ วันนี้ · tickets 01/02 sync ตามแล้ว
 - (2026-11-11 scrutinize session) ตรวจ end-to-end พบ 9 findings (3 ใหญ่) — positive: holdingSlot ครอบ checked_in, syncStatusFromRooms ปิดเมื่อครบจริง, addon re-slice ทำได้จริง, intdiv manual path airtight พิสูจน์ผ่าน · owner ตัดสิน 3 มติเพิ่ม (ข้อ 9-11): float+document / pin ทุก BR / reword message · objective amendments (ledger guard + is_paid, type-match pin, BR-2 ผ่าน transitionStatus, staff pre-flight, tz, Collection, ตัด exclusion) ยัด tickets 01/02/03 ครบแล้ว
+- [01: Implement split-upgrade endpoint](tickets/01-implement-split-upgrade.md) (2026-11-11): implement แล้วโดย antigravity บน `feature/split-upgrade` (`ee4fd5e`) — 3 ไฟล์ (splitUpgrade +430 / reprice override map / route) · Recipe 14 ข้อ + edge ครบ · suite 874 tests ผ่านหมด (review โดย orchestrator)
 
 ## Not yet specified
 
