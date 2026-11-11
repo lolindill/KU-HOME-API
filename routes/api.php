@@ -81,18 +81,6 @@ Route::prefix('v1')->group(function () {
 
     // 🌟 Refactor (18/06/26): ลบ public booking/lookup/request-payment — non-member ใช้งานไม่ได้แล้ว ทุกคนต้อง login
     //    createBooking ย้ายไป protected routes ด้านล่าง
-
-    // 🖼️ (19/08/26): ให้บริการไฟล์รูปผ่าน signed URL อายุ 15 นาที
-    //    🔐 (26/10/26): เพิ่ม auth:sanctum — ผู้ขอต้องเป็นเจ้าของรูป (ตาม imageable:
-    //    สลิป/evidence → เจ้าของ booking · รูป housekeeping → assigned_to) หรือ admin
-    //    ตรวจใน ImageController::show — signature + token คุมคู่กัน (2 ชั้น)
-    //    ⚠️ exempt RequireJsonAccept เฉพาะ route นี้ เพื่อให้ fetch รูปที่ส่ง Accept: image/* โหลดได้
-    //       (document ใน cline.md — frontend ใช้ fetch + Authorization header + blob แทน <img src>)
-    Route::get('/images/{image}/file', [ImageController::class, 'show'])
-        ->where('image', '[0-9a-f\-]{36}')
-        ->name('images.file')
-        ->middleware(['auth:sanctum', 'signed', 'throttle:10,1'])
-        ->withoutMiddleware([RequireJsonAccept::class]);
 });
 
 // ============================================
@@ -164,6 +152,18 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         ->where('bookingId', '[0-9a-f\-]{36}')->middleware('throttle:5,1');
     Route::delete('/bookings/{bookingId}/discount-code', [BookingController::class, 'destroyDiscountCode'])
         ->where('bookingId', '[0-9a-f\-]{36}')->middleware('throttle:5,1');
+
+    // 🖼️ (19/08/26): ให้บริการไฟล์รูปผ่าน signed URL อายุ 15 นาที
+    //    🔐 (26/10/26): เพิ่ม auth:sanctum — ผู้ขอต้องเป็นเจ้าของรูป (ตาม imageable:
+    //    สลิป/evidence → เจ้าของ booking · รูป housekeeping → assigned_to) หรือ admin
+    //    ตรวจใน ImageController::show — signature + token คุมคู่กัน (2 ชั้น)
+    //    ⚠️ exempt RequireJsonAccept เฉพาะ route นี้ เพื่อให้ fetch รูปที่ส่ง Accept: image/* โหลดได้
+    //       (document ใน cline.md — frontend ใช้ fetch + Authorization header + blob แทน <img src>)
+    Route::get('/images/{image}/file', [ImageController::class, 'show'])
+        ->where('image', '[0-9a-f\-]{36}')
+        ->name('images.file')
+        ->middleware(['signed', 'throttle:10,1'])
+        ->withoutMiddleware([RequireJsonAccept::class]);
 
     // ============================================
     // 🔐 Admin-only Routes
