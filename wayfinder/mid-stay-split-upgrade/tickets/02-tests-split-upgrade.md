@@ -25,6 +25,8 @@ blocked-by: ["01-implement-split-upgrade.md"]
 - [ ] split_date ออกนอก `(check_in, check_out)` ทั้งสองขอบ + เท่ากับ check_in/check_out เป๊ะ
 - [ ] room_type_id = เดิม (ไม่ใช่ upgrade) / tier ต่ำกว่า / ไม่มีจริง
 - [ ] `price_per_night` โดน staff ยิง → 422 · admin ยิงแต่ต่ำกว่า `ceil(room_amount₀/n₀)` → 422
+- [ ] **(scrutinize)** pin `room_id` ที่ `room_type_id` ไม่ตรงกับ `room_type_id` ที่ส่งมา → 422 (validate ก่อนเช็คอื่น)
+- [ ] **(scrutinize)** staff computed path ที่เรท tier ใหม่ × n₂ < ส่วนที่ขาดของสัญญา → 422 พร้อมข้อความแนะ admin ใส่ `price_per_night` (ไม่ใช่ข้อความ money guard ทั่วไป)
 - [ ] บิลมี discount_code/redemption → 422 ข้อความบอกข้อจำกัด v1
 - [ ] guests เกิน `max_guests` ของ tier ใหม่
 - [ ] extra_beds_by_night คีย์ครึ่งหลังเกิน `max_extra_beds` tier ใหม่
@@ -37,14 +39,18 @@ blocked-by: ["01-implement-split-upgrade.md"]
 - [ ] admin กรอก price_per_night: total = intdiv(room_amount₀×n₁,n₀) + price×n₂ + addon → surcharge envelope ตรงสูตร + outstanding/max(0,…) ถูก
 - [ ] staff ไม่กรอก price: BR-2 ใช้ computed `getEffectiveDailyRate` ของ tier ใหม่
 - [ ] addon re-slice: extra_beds_by_night แบ่งถูกครึ่ง + breakfast ยอด = sets × rate × คืนของแต่ละ BR (รวมเท่าเดิมเมื่อ rate ไม่เปลี่ยน) + early_hours คง BR-1 + late_hours ย้าย BR-2
-- [ ] audit: `status_change_logs` มี 2 แถว from=to ของ BR-1/BR-2 พร้อม note + causer
+- [ ] audit: ภายใต้บิล confirmed มี machine row `draft→confirmed` ของ BR-2 (จาก transitionStatus) + note rows ของ BR-1/BR-2 พร้อม note + causer (ภายใต้บิล draft = note rows อย่างเดียว)
 - [ ] invariant `Σ booking_rooms.amount == total_amount` + booking_type mirror ไม่พัง
 - [ ] บิล multi-room: BR อื่นในบิลไม่ถูกแตะ room_id · availability ของบิลนับถูกหลัง split (holdingSlot ทั้งคู่)
 - [ ] split ซ้ำบน BR-2 (ที่ checked_in แล้ว) สำเร็จ
 - [ ] deferred bill: split ผ่าน + outstanding เพิ่มตาม surcharge
 
-**Money guard**
-- [ ] simulate เคส total ลด (เช่น BR อื่นในบิลโดน group flip หลังจำนวน BR ข้าม 5) → 422 fail-safe + rollback
+**Money guard (มติ #10 scrutinize — pin ทุก BR)**
+- [ ] **pin-freeze invariant:** บิล multi-room ที่จำนวน BR ข้าม 5/10 หลังเพิ่ม BR-2 → `room_amount` ของ BR อื่น **คงเดิมทุกตัว** (group flip ไม่กระทบยอด — ตัด test "group flip → 422" เดิมทิ้ง)
+- [ ] pair guard: admin manual price ที่ถูกสูตร → ผ่าน · สร้างสถานการณ์ fail (manual < ceil(a₀/n₀) กัน validator ไม่จับ — เช่นยิง staff computed ที่เรทต่ำ) → 422 + rollback ครบ
+- [ ] **ledger guard + is_paid:** บิล paid ครบ (is_paid=true) → split บวกยอด → `is_paid` reset false + outstanding เพิ่มถูกตัว (pattern :920-934)
+- [ ] **บิล overpay** (paid > total+charges): split ผ่าน ไม่ 422 — ledger guard ไม่ false-fire + outstanding clamp 0 คงอยู่
+- [ ] **(มติ #9 scrutinize — float semantics)** split แล้วเปลี่ยน global_rates ของ tier เก่า/ใหม่ แล้วเรียก updateRoom โหมด 3 เพิ่ม addon บน BR-1 → `room_amount` ของ BR-1/BR-2 **ถูกคิดใหม่จากเรทใหม่** (ราคาตกลงตอน split ไม่รอด — ยืนยันพฤติกรรมตามที่จดในเอกสาร ไม่ใช่ bug)
 
 ## Definition of done
 

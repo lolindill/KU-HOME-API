@@ -23,7 +23,7 @@ Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ขอ�
 - **discount redemption ผูก per-BR** + `isEligible` เช็คหน้าต่างวัน BR ครบ (DiscountService.php:116-128) + ใส่โค้ดได้เฉพาะ draft (`applyToDraft` :24-28) → BR-2 ใหม่กลางทางได้โค้ดไม่ได้ตามสถาปัตยกรรม → v1 บล็อกบิลมีโค้ด (มติ #6)
 - `booking_type`/`stay_type`/`nights` เป็น derived per-BR — split แล้ว mirror ปรับเอง · 90-night cap นับต่อห้อง (ตัดแล้วเล็กลง ไม่มีปัญหา) · ไม่ต้อง migration ใหม่ (ไม่มี column เพิ่ม)
 
-## Locked decisions — grill-me session 2026-11-10 (8 มติ ห้าม re-litigate โดยไม่มีเหตุผลใหม่)
+## Locked decisions — grill-me session 2026-11-10 (8 มติ) + scrutinize session 2026-11-11 (ข้อ 9-11) — ห้าม re-litigate โดยไม่มีเหตุผลใหม่
 
 1. **Scope (แก้รอบสอง 2026-11-10):** **container `confirmed` หรือ `draft` เท่านั้น** (เดิม `paid|confirmed` — ตัด `paid` ออก เพิ่ม `draft`) · container `confirmed` → BR `checked_in|confirmed` · container `draft` → BR `draft` (BR-2 mirror สถานะบริบท)
 2. **split_date (แก้รอบสอง 2026-11-10):** ต้องอยู่ใน `(check_in, check_out)` เคร่งครัด — ครึ่งละ ≥ 1 คืน · **ต้อง ≥ วันนี้ ห้ามย้อนหลัง** (เพิกถอน backdated ของรอบแรก) · อนาคตได้ (BR-2 ยึด slot ผ่าน `holdingSlot()`)
@@ -33,15 +33,19 @@ Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ขอ�
 6. **ส่วนลด:** บิลที่มี `discount_code`/redemption (held หรือ used) → **422 ใน v1** (ข้อความชัด)
 7. **Addon: carry + re-slice ที่ split_date** — breakfast sets คัดลอก BR-2 (× คืนของแต่ละ BR อัตโนมัติ) · `extra_beds_by_night` แบ่ง map (คีย์ < split_date = BR-1, ≥ split_date = BR-2 + validate `max_extra_beds` tier ใหม่) · `early_hours` คง BR-1 · `late_hours` ย้าย BR-2
 8. **ห้อง BR-2: จัดทันทีตอน split** — ส่ง `room_id` = pin (validate ตาม change-room) · ไม่ส่ง = `RoomAllocator::allocate([$br2])` · fail → rollback 422 ทั้ง transaction · ยึด slot ทันทีผ่าน holdingSlot (BR-2 confirmed กันเช็คอินซ้อนโดย guard ที่ FrontDeskController.php:230-245)
+9. **(scrutinize 2026-11-11) ราคา split เป็น one-shot (float + document):** `reprice()` ครั้งถัดไปหลัง split (เช่นเพิ่ม addon ผ่าน updateRoom โหมด 3 BookingController.php:912, change-room :538) จะคิดใหม่ BR-1/BR-2 จาก global_rates วันนี้ — ราคาตกลงตอน split (manual price + intdiv สัญญา) ไม่รอด · ยอมรับโดยตั้งใจ **ไม่มี migration/persist override** — จด warning ใน cline.md + api_guide ให้ front desk ตรวจ surcharge envelope หลังแตะ addon บนบิล split ทุกครั้ง + test ยืนยันพฤติกรรม
+10. **(scrutinize 2026-11-11) Money guard ชุดสุดท้าย = pair guard + pin ทุก BR + ledger guard:** ตอน split ส่ง override map **ครบทุก BR ของบิล** (BR อื่น freeze ที่ `room_amount` ปัจจุบันของตัวเอง) → total delta = คู่ split เท่านั้น ไม่มี drift/group-flip · guard: (a) `br1' + br2 ≥ room_amount₀` exact (b) ledger `newTotal + charges < paid → 422` + reset `is_paid=false` เมื่อ surcharge ทำยอดค้าง (pattern BookingController.php:920-934) · **ไม่มี guard total** (ตาม step 11 เดิม) — edge #63/test group-flip-422 ของ ticket เดิมยกเลิก
+11. **(scrutinize 2026-11-11) guests-cap 422 reword:** ข้อความ "บอกให้ลดก่อน" เป็นทางตัน (แก้ guests บน BR `checked_in` ไม่ได้ทาง API — allow-list โหมด 3) → เปลี่ยนเป็นแจ้งตรงว่า "split ขึ้น tier นี้ไม่ได้เพราะแขกเกิน cap — เลือก tier ที่รองรับครบ" (แก้ข้อความเท่านั้น ไม่เพิ่ม guests override ใน payload)
 
 ## Decisions so far
 
 - (2026-11-10) grilling session: ล็อกมติทั้ง 8 ข้อข้างบน + สำรวจโค้ดยืนยันว่าพิธี manual บนวันย้อนหลังทำงานได้ (ไม่มี date validation ใน checkIn/checkOut) — spec ฉบับเต็มอยู่ที่ tickets/01
 - (2026-11-10 รอบสอง) owner แก้ 2 มติ: (1) container gate = **`confirmed|draft`** — ตัด `paid`, เพิ่ม `draft` (2) **ห้าม split_date ย้อนหลัง** — ต้อง ≥ วันนี้ · tickets 01/02 sync ตามแล้ว
+- (2026-11-11 scrutinize session) ตรวจ end-to-end พบ 9 findings (3 ใหญ่) — positive: holdingSlot ครอบ checked_in, syncStatusFromRooms ปิดเมื่อครบจริง, addon re-slice ทำได้จริง, intdiv manual path airtight พิสูจน์ผ่าน · owner ตัดสิน 3 มติเพิ่ม (ข้อ 9-11): float+document / pin ทุก BR / reword message · objective amendments (ledger guard + is_paid, type-match pin, BR-2 ผ่าน transitionStatus, staff pre-flight, tz, Collection, ตัด exclusion) ยัด tickets 01/02/03 ครบแล้ว
 
 ## Not yet specified
 
-- (ว่าง — ทุกโหนด grill แล้วตอบครบ ณ 2026-11-10 · ถ้า implement เจอเคสที่ spec มืด ให้ append ที่นี่แล้วเปิด ticket ใหม่)
+- (ว่าง — ทุกโหนด grill แล้วตอบครบ ณ 2026-11-10 · scrutinize session 2026-11-11 เพิ่ม 3 มติ (ล็อกแล้ว ดู Locked decisions ข้อ 9-11) + objective amendments ยัด tickets 01/02/03 เรียบร้อย · ถ้า implement เจอเคสที่ spec มืด ให้ append ที่นี่แล้วเปิด ticket ใหม่)
 
 ## Out of scope
 
