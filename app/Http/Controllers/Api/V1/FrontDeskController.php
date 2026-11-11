@@ -9,7 +9,6 @@ use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\DiscountRedemption;
-use App\Models\GlobalRate;
 use App\Models\HousekeepingTask;
 use App\Models\Payment;
 use App\Models\Room;
@@ -618,21 +617,26 @@ class FrontDeskController extends Controller
             ], 403);
         }
 
+        // 🌟 1. Load + scope: บิลจาก bookingId, BR จากบิลนั้นเท่านั้น (404 ข้ามบิล — pattern :175-176)
+        $booking = Booking::findOrFail($bookingId);
+        $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+
+        // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 5): ตรวจสอบพารามิเตอร์ที่ตัดออกก่อน validate อื่นทั้งหมด
+        if ($request->has('room_type_id') || $request->has('price_per_night')) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'การแบ่งช่วงพักเป็นแบบประเภทห้องเดิม (same-tier) เท่านั้น ไม่รองรับ room_type_id หรือ price_per_night แล้วค่ะนายท่าน — หากต้องการเปลี่ยนประเภทห้อง กรุณาใช้ PUT โหมด 2 หรือ change-room แทนนะคะ 🚪',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'split_date' => 'required|date',
-            'room_type_id' => 'required|uuid|exists:room_types,id',
-            'price_per_night' => 'nullable|integer',
             'room_id' => 'nullable|uuid|exists:rooms,id',
             'notes' => 'nullable|string|max:255',
         ]);
 
         try {
             DB::beginTransaction();
-
-            $booking = Booking::findOrFail($bookingId);
-
-            // 🌟 1. Load + scope: บิลจาก bookingId, BR จากบิลนั้นเท่านั้น (404 ข้ามบิล — pattern :175-176)
-            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
 
             // 🌟 Lock ทั้งบิล + ห้องเก่า (ถ้ามี) + ห้องใหม่ (ถ้ามี) แบบ changeRoom :389-399
             $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
@@ -696,79 +700,23 @@ class FrontDeskController extends Controller
             $n1 = (int) $checkIn->diffInDays($splitDate);
             $n2 = (int) $splitDate->diffInDays($checkOut);
 
-            // 🌟 4. Validate upgrade-only (มติ #5):
-            $newRoomType = RoomType::findOrFail($validated['room_type_id']);
-            $oldRoomType = RoomType::findOrFail($bookingRoom->room_type_id);
-
-            if ((string) $newRoomType->id === (string) $oldRoomType->id) {
-                throw new \Exception('ประเภทห้องใหม่ต้องแตกต่างจากประเภทห้องเดิมค่ะนายท่าน 🏨', 422);
-            }
-
-            $oldEffectiveRate = GlobalRate::getEffectiveDailyRate($oldRoomType, $locked->user);
-            $newEffectiveRate = GlobalRate::getEffectiveDailyRate($newRoomType, $locked->user);
-
-            if ($newEffectiveRate <= $oldEffectiveRate) {
-                throw new \Exception(
-                    'การแบ่งห้องพักรองรับเฉพาะการอัปเกรดเป็นประเภทห้องที่สูงกว่าเท่านั้นค่ะนายท่าน '.
-                    "({$oldRoomType->name_en} {$oldEffectiveRate} → {$newRoomType->name_en} {$newEffectiveRate} บาท/คืน) 🎫",
-                    422
-                );
-            }
-
+            // 🌟 4. Same-tier split (มติ v2 ข้อ 5):
+            $roomType = RoomType::findOrFail($bookingRoom->room_type_id);
             $roomAmount0 = (int) $bookingRoom->room_amount;
-            $avgRate0 = (int) ceil($roomAmount0 / $n0);
-            $roomAmount1 = intdiv($roomAmount0 * $n1, $n0);
             $previousTotal = (int) $locked->total_amount;
-
-            $hasManualPrice = array_key_exists('price_per_night', $validated) && $validated['price_per_night'] !== null;
-            if ($hasManualPrice) {
-                if ($user->role !== 'admin') {
-                    throw new \Exception('เฉพาะผู้ดูแลระบบ (admin) เท่านั้นที่สามารถระบุราคาห้องพักต่อคืนได้ค่ะนายท่าน', 422);
-                }
-                $pricePerNight = (int) $validated['price_per_night'];
-                if ($pricePerNight < $avgRate0) {
-                    throw new \Exception(
-                        "ราคาต่อคืนที่ระบุ ({$pricePerNight} บาท) ต้องไม่ต่ำกว่าเรทเฉลี่ยต่อคืนเดิมตามสัญญา ({$avgRate0} บาท/คืน) ค่ะ 💰",
-                        422
-                    );
-                }
-                $br2RoomAmount = $pricePerNight * $n2;
-            } else {
-                // Computed path (staff หรือ admin ไม่ได้กรอก price_per_night)
-                // Pre-flight check (scrutinize): computed_rate × n₂ < room_amount₀ − intdiv(room_amount₀ × n₁, n₀) → 422
-                $minBr2Needed = $roomAmount0 - $roomAmount1;
-                if ($newEffectiveRate * $n2 < $minBr2Needed) {
-                    throw new \Exception(
-                        "เรทมาตรฐานของประเภทห้องใหม่ ({$newEffectiveRate} บาท/คืน) รวม {$n2} คืน ไม่เพียงพอต่อส่วนต่างค่าห้องเดิม แนะนำให้ผู้ดูแลระบบ (admin) กำหนดราคาต่อคืน (price_per_night) เองค่ะนายท่าน 💰",
-                        422
-                    );
-                }
-                $pricePerNight = $newEffectiveRate;
-                $br2RoomAmount = $newEffectiveRate * $n2;
-            }
+            $br1RoomAmount = intdiv($roomAmount0 * $n1, $n0);
+            $br2RoomAmount = $roomAmount0 - $br1RoomAmount;
 
             // 🌟 5. Trim BR-1: check_out = split_date (ห้ามเปลี่ยน status ตามมติ #3)
             $bookingRoom->update([
                 'check_out' => $splitDate->toDateString(),
             ]);
 
-            // 🌟 6. ราคา BR-1 สัญญาสัดส่วน: $roomAmount1 (intdiv) เตรียมไว้สำหรับ override map
-
-            // 🌟 7. สร้าง BR-2:
-            // guests cap check (มติ #11 scrutinize):
+            // 🌟 6. สร้าง BR-2 (same-tier):
             $guests = $bookingRoom->guests;
-            $guestCount = is_array($guests) ? count($guests) : 0;
-            if ($newRoomType->max_guests !== null && $guestCount > $newRoomType->max_guests) {
-                throw new \Exception(
-                    "split ขึ้นประเภทห้อง {$newRoomType->name_en} ไม่ได้เพราะผู้เข้าพัก {$guestCount} คน เกินจำนวนสูงสุดที่รองรับได้ ({$newRoomType->max_guests} คน) — กรุณาเลือกประเภทห้องที่รองรับจำนวนผู้เข้าพักได้ครบนะคะ 👥",
-                    422
-                );
-            }
-
-            // bed_preference: ถ้า bed option ไม่มีใน tier ใหม่ → null
             $bedPreference = $bookingRoom->bed_preference;
             if ($bedPreference !== null) {
-                $hasBedOption = Room::where('room_type_id', $newRoomType->id)
+                $hasBedOption = Room::where('room_type_id', $roomType->id)
                     ->where('bed_type', $bedPreference)
                     ->exists();
                 if (! $hasBedOption) {
@@ -779,7 +727,7 @@ class FrontDeskController extends Controller
             // สร้าง status 'draft' เสมอ แล้วภายใต้บิล confirmed เรียก transitionStatus('confirmed', $userRole)
             $br2 = BookingRoom::create([
                 'booking_id' => $locked->id,
-                'room_type_id' => $newRoomType->id,
+                'room_type_id' => $roomType->id,
                 'room_id' => null,
                 'check_in' => $splitDate->toDateString(),
                 'check_out' => $checkOut->toDateString(),
@@ -797,7 +745,7 @@ class FrontDeskController extends Controller
                 $br2->transitionStatus('confirmed', $user->role);
             }
 
-            // 🌟 8. Addon carry + re-slice (มติ #7):
+            // 🌟 7. Addon carry + re-slice (มติ #7):
             $addon = $bookingRoom->addon;
             if ($addon) {
                 $byNight = is_array($addon->extra_beds_by_night) ? $addon->extra_beds_by_night : [];
@@ -813,9 +761,9 @@ class FrontDeskController extends Controller
                     if ($nightDate->lt($splitDate)) {
                         $br1Beds[$dateKey] = $qty;
                     } else {
-                        if ($newRoomType->max_extra_beds !== null && $qty > $newRoomType->max_extra_beds) {
+                        if ($roomType->max_extra_beds !== null && $qty > $roomType->max_extra_beds) {
                             throw new \Exception(
-                                "จำนวนเตียงเสริมคืน {$dateKey} ({$qty} เตียง) เกินขีดสุดของประเภทห้อง {$newRoomType->name_en} (สูงสุด {$newRoomType->max_extra_beds} ต่อคืน) ค่ะ 🛏️",
+                                "จำนวนเตียงเสริมคืน {$dateKey} ({$qty} เตียง) เกินขีดสุดของประเภทห้อง {$roomType->name_en} (สูงสุด {$roomType->max_extra_beds} ต่อคืน) ค่ะ 🛏️",
                                 422
                             );
                         }
@@ -841,72 +789,134 @@ class FrontDeskController extends Controller
                 ]);
             }
 
-            // 🌟 9. จัดห้อง BR-2 (มติ #8):
-            if (! empty($validated['room_id'])) {
-                $assignedRoom = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
+            // 🌟 8. จัดห้อง BR-2 (มติ v2 ข้อ 5):
+            $hasPin = ! empty($validated['room_id']);
 
-                // Pin check: validate room.room_type_id === room_type_id ที่ส่งมาก่อนเป็นอันดับแรก (422 ถ้าไม่ตรง)
-                if ((string) $assignedRoom->room_type_id !== (string) $newRoomType->id) {
-                    throw new \Exception(
-                        "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
-                        'ไม่ตรงกับประเภทห้องที่เลือกอัปเกรดค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ 🏨',
-                        422
-                    );
+            if ($bookingRoom->room_id !== null) {
+                // กรณี BR-1 มี room_id → BR-2 ต้องได้เลขห้องใหม่ต่างจาก BR-1 type เดียวกัน
+                if ($hasPin) {
+                    $assignedRoom = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
+
+                    // Pin check 1: ตรวจว่า ≠ ห้อง BR-1 (422 ถ้าซ้ำ — ตรวจก่อนเช็คอื่น)
+                    if ((string) $assignedRoom->id === (string) $bookingRoom->room_id) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} เป็นห้องเดิมของช่วงแรก กรุณาเลือกห้องอื่นที่ต่างจากเดิมค่ะนายท่าน 🚪",
+                            422
+                        );
+                    }
+
+                    // Pin check 2: ตรวจว่า type ตรงกับ tier เดิม (422 ถ้าผิด type)
+                    if ((string) $assignedRoom->room_type_id !== (string) $roomType->id) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
+                            "ไม่ตรงกับประเภทห้องเดิม ({$roomType->name_en}) ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ 🏨",
+                            422
+                        );
+                    }
+
+                    // ตรวจความพร้อมของห้อง
+                    if (! in_array($assignedRoom->status, ['available', 'prep_checkin', 'dirty'], true)) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$assignedRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน 🚪",
+                            422
+                        );
+                    }
+
+                    if (RoomStatePeriod::where('room_id', $assignedRoom->id)
+                        ->overlapping($br2->check_in, $br2->check_out, RoomStatePeriod::KIND_MAINTENANCE)
+                        ->exists()) {
+                        throw new \Exception(
+                            "ห้อง {$assignedRoom->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
+                            "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
+                            'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน 🛠️',
+                            422
+                        );
+                    }
+
+                    $overlap = $assignedRoom->bookingRooms()
+                        ->where('booking_rooms.id', '!=', $br2->id)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $br2->check_out)
+                        ->where('check_out', '>', $br2->check_in)
+                        ->exists();
+                    if ($overlap) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
+                            "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
+                            'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน กรุณาเลือกห้องอื่นนะคะ 🚪',
+                            422
+                        );
+                    }
+
+                    $br2->update(['room_id' => $assignedRoom->id]);
+                } else {
+                    // ไม่ pin → auto-allocate ห้องเดียว exclude ห้องของ BR-1
+                    $allocatorResult = app(RoomAllocator::class)->allocate(new Collection([$br2]), false, [$bookingRoom->room_id]);
+                    if (! $allocatorResult->ok || empty($allocatorResult->assignments[$br2->id])) {
+                        throw new \Exception(
+                            "ไม่สามารถจัดหาห้องว่างสำหรับประเภทห้อง {$roomType->name_en} ในช่วงเวลาดังกล่าวได้ค่ะนายท่าน 😭",
+                            422
+                        );
+                    }
+                    $br2->update(['room_id' => $allocatorResult->assignments[$br2->id]]);
                 }
-
-                if (! in_array($assignedRoom->status, ['available', 'prep_checkin', 'dirty'], true)) {
-                    throw new \Exception(
-                        "ห้องหมายเลข {$assignedRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$assignedRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน 🚪",
-                        422
-                    );
-                }
-
-                if (RoomStatePeriod::where('room_id', $assignedRoom->id)
-                    ->overlapping($br2->check_in, $br2->check_out, RoomStatePeriod::KIND_MAINTENANCE)
-                    ->exists()) {
-                    throw new \Exception(
-                        "ห้อง {$assignedRoom->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
-                        "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
-                        'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน 🛠️',
-                        422
-                    );
-                }
-
-                $overlap = $assignedRoom->bookingRooms()
-                    ->where('booking_rooms.id', '!=', $br2->id)
-                    ->holdingSlot()
-                    ->where('check_in', '<', $br2->check_out)
-                    ->where('check_out', '>', $br2->check_in)
-                    ->exists();
-                if ($overlap) {
-                    throw new \Exception(
-                        "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
-                        "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
-                        'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน กรุณาเลือกห้องอื่นนะคะ 🚪',
-                        422
-                    );
-                }
-
-                $br2->update(['room_id' => $assignedRoom->id]);
             } else {
-                // Auto-allocate — allocate() type-hint Eloquent Collection (RoomAllocator.php:49)
-                // ต้องครอบ instance จริงของ $br2 (loadMissing addon+roomType ทำงานกับตัว model ตัวเดิม)
-                // ห้าม collect() (Support\Collection → TypeError) หรือ hydrate() (สำเนา detached — attribute หลุด)
-                $allocatorResult = app(RoomAllocator::class)->allocate(new Collection([$br2]));
-                if (! $allocatorResult->ok || empty($allocatorResult->assignments[$br2->id])) {
-                    throw new \Exception(
-                        "ไม่สามารถจัดหาห้องว่างสำหรับประเภทห้อง {$newRoomType->name_en} ในช่วงเวลาดังกล่าวได้ค่ะนายท่าน 😭",
-                        422
-                    );
+                // กรณี BR-1 ไม่มี room_id:
+                if ($hasPin) {
+                    $assignedRoom = Room::with('roomType')->lockForUpdate()->findOrFail($validated['room_id']);
+
+                    if ((string) $assignedRoom->room_type_id !== (string) $roomType->id) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} (ประเภท: {$assignedRoom->roomType->name_en}) ".
+                            "ไม่ตรงกับประเภทห้องเดิม ({$roomType->name_en}) ค่ะนายท่าน กรุณาตรวจสอบอีกครั้งนะคะ 🏨",
+                            422
+                        );
+                    }
+
+                    if (! in_array($assignedRoom->status, ['available', 'prep_checkin', 'dirty'], true)) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$assignedRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน 🚪",
+                            422
+                        );
+                    }
+
+                    if (RoomStatePeriod::where('room_id', $assignedRoom->id)
+                        ->overlapping($br2->check_in, $br2->check_out, RoomStatePeriod::KIND_MAINTENANCE)
+                        ->exists()) {
+                        throw new \Exception(
+                            "ห้อง {$assignedRoom->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงเข้าพัก ".
+                            "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
+                            'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน 🛠️',
+                            422
+                        );
+                    }
+
+                    $overlap = $assignedRoom->bookingRooms()
+                        ->where('booking_rooms.id', '!=', $br2->id)
+                        ->holdingSlot()
+                        ->where('check_in', '<', $br2->check_out)
+                        ->where('check_out', '>', $br2->check_in)
+                        ->exists();
+                    if ($overlap) {
+                        throw new \Exception(
+                            "ห้องหมายเลข {$assignedRoom->room_number} มีการจองอื่นทับช่วงเข้าพัก ".
+                            "({$br2->check_in->toDateString()} – {$br2->check_out->toDateString()}) ".
+                            'ไม่สามารถจัดเข้าพักได้ค่ะนายท่าน กรุณาเลือกห้องอื่นนะคะ 🚪',
+                            422
+                        );
+                    }
+
+                    $br2->update(['room_id' => $assignedRoom->id]);
+                } else {
+                    // ไม่ pin → room_id = null ไม่ allocate
                 }
-                $br2->update(['room_id' => $allocatorResult->assignments[$br2->id]]);
             }
 
-            // 🌟 10. Reprice ผ่าน override — pin ทุก BR (มติ #10 scrutinize):
+            // 🌟 9. Reprice ผ่าน override — pin ทุก BR
             $overrideMap = [];
             foreach ($locked->fresh()->bookingRooms as $r) {
                 if ((string) $r->id === (string) $bookingRoom->id) {
-                    $overrideMap[$r->id] = $roomAmount1;
+                    $overrideMap[$r->id] = $br1RoomAmount;
                 } elseif ((string) $r->id === (string) $br2->id) {
                     $overrideMap[$r->id] = $br2RoomAmount;
                 } else {
@@ -916,39 +926,18 @@ class FrontDeskController extends Controller
 
             app(DiscountService::class)->reprice($locked, $overrideMap);
 
-            // 🌟 11. Money guard airtight (มติ #4 + #10 scrutinize):
-            // เทียบส่วนค่าห้องรวมก่อนปัด: br1.room_amount_new + br2.room_amount ≥ room_amount₀ (exact integer)
-            // ไม่เทียบ total หลัง RoundToTen เหมือน change-room เพื่อป้องกัน artifact จากการปัดเศษหลักสิบ
-            if (($roomAmount1 + $br2RoomAmount) < $roomAmount0) {
-                throw new \Exception(
-                    'ส่วนต่างค่าห้องรวมหลังแบ่งช่วงพักต้องไม่ต่ำกว่าค่าห้องเดิมตามสัญญาค่ะนายท่าน 💰',
-                    422
-                );
-            }
-
-            // Ledger guard copy precedent (BookingController.php:920-934 / FrontDeskController.php:553-563)
-            // 🌟 overpay-safe (scrutinize edge "บิล overpay"): บิลที่ paid > total+charges อยู่ก่อนแล้ว
-            //    ต้องผ่าน ไม่ false-fire — split ลดยอดไม่ได้ (money guard ครอบ pair + BR อื่น freeze)
-            //    จึงยิง 422 เฉพาะเมื่อสมดุลหลัง split (new+charges) แย่ลงกว่าก่อน split (previous+charges ≥ paid)
             $lockedFresh = $locked->fresh();
             $newTotal = (int) $lockedFresh->total_amount;
-            $chargesTotal = (int) $lockedFresh->charges_total;
-            $paidAmount = (int) $lockedFresh->paid_amount;
 
-            if ($newTotal + $chargesTotal < $paidAmount && $previousTotal + $chargesTotal >= $paidAmount) {
+            // 🌟 10. Guard invariant (มติ v2 ข้อ 5): total หลัง split == total ก่อนเป๊ะ (surcharge 0)
+            if ($newTotal !== $previousTotal) {
                 throw new \Exception(
-                    'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
-                    422
+                    "Invariant violation: total_amount หลังแบ่งช่วงพักต้องเท่ากับยอดเดิมเป๊ะ ({$previousTotal} !== {$newTotal}) 💥",
+                    500
                 );
             }
 
-            if ($lockedFresh->is_paid && ($newTotal + $chargesTotal > $paidAmount)) {
-                $lockedFresh->update(['is_paid' => false]);
-            }
-
-            // 🌟 12. Audit:
-            // ภายใต้บิล confirmed ได้แถว machine draft→confirmed ของ BR-2 อัตโนมัติจาก transitionStatus แล้ว
-            // เขียน note row from=to เพิ่ม 2 แถว:
+            // 🌟 11. Audit:
             StatusChangeLog::create([
                 'entity_type' => 'booking_room',
                 'entity_id' => $bookingRoom->id,
@@ -956,10 +945,14 @@ class FrontDeskController extends Controller
                 'to_status' => $bookingRoom->status,
                 'role' => $user->role,
                 'causer_id' => $user->id,
-                'note' => "split-upgrade: check_out trimmed to {$splitDate->toDateString()}, price {$roomAmount0}→{$roomAmount1}",
+                'note' => "split: check_out trimmed to {$splitDate->toDateString()}, price {$roomAmount0}→{$br1RoomAmount}",
             ]);
 
+            $oldRoomNumber = Room::find($bookingRoom->room_id)?->room_number;
+            $newRoomNumber = Room::find($br2->fresh()->room_id)?->room_number;
+            $roomChangeNote = ($oldRoomNumber && $newRoomNumber) ? " · room {$oldRoomNumber}→{$newRoomNumber}" : '';
             $noteSuffix = ! empty($validated['notes']) ? ' · '.$validated['notes'] : '';
+
             StatusChangeLog::create([
                 'entity_type' => 'booking_room',
                 'entity_id' => $br2->id,
@@ -967,16 +960,14 @@ class FrontDeskController extends Controller
                 'to_status' => $br2->status,
                 'role' => $user->role,
                 'causer_id' => $user->id,
-                'note' => "split-upgrade: spawned from {$bookingRoom->id}, tier {$oldRoomType->name_en}→{$newRoomType->name_en}, {$pricePerNight} × {$n2} nights".$noteSuffix,
+                'note' => "split: spawned from {$bookingRoom->id}, tier {$roomType->name_en}, {$n2} nights{$roomChangeNote}".$noteSuffix,
             ]);
 
             DB::commit();
 
-            $surchargeAmount = $newTotal - $previousTotal;
-
             return response()->json([
                 'status' => 'success',
-                'message' => "แบ่งช่วงพักและอัปเกรดประเภทห้องเป็น {$newRoomType->name_en} เรียบร้อยแล้วค่ะนายท่าน ✨ ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳",
+                'message' => 'แบ่งช่วงพักเรียบร้อยแล้วค่ะนายท่าน ✨ ยอดรวมคงเดิมไม่มีส่วนต่างราคาค่ะ 🏨',
                 'split_summary' => [
                     'br1_id' => $bookingRoom->id,
                     'br2_id' => $br2->id,
@@ -987,15 +978,13 @@ class FrontDeskController extends Controller
                     'br2' => [
                         'check_in' => $br2->fresh()->check_in->toDateString(),
                         'check_out' => $br2->fresh()->check_out->toDateString(),
-                        'room_type_id' => $br2->room_type_id,
                         'room_id' => $br2->fresh()->room_id,
-                        'price_per_night' => $pricePerNight,
                         'nights' => $n2,
                     ],
                 ],
                 'previous_total_amount' => $previousTotal,
                 'total_amount' => $newTotal,
-                'surcharge_amount' => $surchargeAmount,
+                'surcharge_amount' => 0,
                 'paid_amount' => (int) $lockedFresh->paid_amount,
                 'outstanding_amount' => (int) $lockedFresh->outstanding_amount,
                 'payment_type' => $lockedFresh->payment_type,
