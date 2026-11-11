@@ -44,13 +44,14 @@ ehthumbs.db
 Homestead.json
 Homestead.yaml
 
-# 📚 docs/ — เก็บเฉพาะ api_guide + ER diagram + API Bin export ไว้ใน repo (ไฟล์อื่นทั้งหมด รวมถึงที่จะเพิ่มในอนาคต ไม่ track)
+# 📚 docs/ — เก็บเฉพาะ api_guide + ER diagram + API Bin export + api_patches ไว้ใน repo (ไฟล์อื่นทั้งหมด รวมถึงที่จะเพิ่มในอนาคต ไม่ track)
 /docs/*
 !/docs/api_guide.md
 !/docs/report_guide.md
 !/docs/sso-frontend-guide.md
 !/docs/database-er.md
 !/docs/API Bin*.xlsx
+!/docs/api_patches/
 
 # 🚧 Project-specific scratch/output (KU HOME)
 api_bin_output.txt
