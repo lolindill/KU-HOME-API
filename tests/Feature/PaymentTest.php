@@ -2,58 +2,26 @@
 
 namespace Tests\Feature;
 
-use App\Models\Booking;
-use App\Models\Payment;
-use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class PaymentTest extends TestCase
 {
-    use RefreshDatabase;
-
-    /**
-     * 🌟 Refactor (25/06/26): bookings ไม่มี check_in/check_out แล้ว — ย้ายไป BR-level
-     */
-    private function createBooking(array $overrides = []): Booking
-    {
-        $user = User::factory()->create();
-
-        return Booking::create(array_merge([
-            'user_id' => $user->id,
-            'source' => 'online',
-            'status' => 'draft',
-            'total_amount' => 4500,
-        ], $overrides));
-    }
-
     // ============================================
-    // ❄️ FROZEN: Request payment deprecated (410 Gone)
+    // 🧹 (2026-11-11, api-route-hygiene): POST /payments ถูกลบพร้อม
+    //    PaymentController::requestPayment — เดิมเป็น 410 tombstone (FROZEN 2026-11-03)
+    //    ที่คอมเมนต์ route "สร้างรายการชำระ" หลอกผู้อ่าน
+    //    flow ชำระเงินจริง = POST /bookings/{id}/confirm + POST /front-desk/{bookingId}/payment
     // ============================================
 
-    public function test_request_payment_returns_410_gone(): void
+    public function test_payments_route_removed(): void
     {
         $this->actingAsAdmin();
-        $booking = $this->createBooking();
 
-        $response = $this->postJson('/api/v1/payments', [
-            'booking_id' => $booking->id,
-            'amount' => 4500,
-        ]);
-        $response->assertStatus(410);
-    }
-
-    public function test_non_admin_cannot_request_payment(): void
-    {
-        $this->actingAsUser();
-        $booking = $this->createBooking();
-
-        $response = $this->postJson('/api/v1/payments', [
-            'booking_id' => $booking->id,
-            'amount' => 4500,
-        ]);
-        $response->assertStatus(403);
+        // 🧾 pin สัญญาใหม่: route ไม่มีแล้ว → 404 (เดิม tombstone 410 ถูกถอดตามมติ scrutinize)
+        $this->postJson('/api/v1/payments', [
+            'booking_id' => '00000000-0000-0000-0000-000000000000',
+            'amount' => 100,
+        ])->assertStatus(404);
     }
 
     // ============================================
@@ -61,7 +29,8 @@ class PaymentTest extends TestCase
     // ============================================
     // webhook flow ทั้งหมด (draft→paid + receipt creation) ย้ายไป
     // POST /bookings/{id}/confirm + admin verify ผ่าน booking_confirmations table แล้ว
-    // — test ยืนยันว่า webhook returns 410 GONE อยู่ใน BookingConfirmationTest
+    // — test ยืนยันว่า webhook returns 410 GONE อยู่ใน BookingConfirmationTest (คง route 410
+    //   ไว้เป็น contract รอ gateway — มติ scrutinize 2026-11-11)
     // — tests เดิม (webhook_can_update / 422_unknown / receipt_idempotent / does_not_crash_when_paid)
     //   ถูกลบออกเพราะ flow deprecated แล้ว
 

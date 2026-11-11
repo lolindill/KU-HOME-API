@@ -136,9 +136,11 @@ class RouteProtectionTest extends TestCase
 
     public function test_payments_create_rejects_non_admin(): void
     {
+        // 🧹 (2026-11-11, api-route-hygiene): POST /payments ถูกลบแล้ว (410 tombstone ถอดตามมติ
+        //    scrutinize) — route ไม่มี → 404 ทุก role รวม admin · pin สัญญาใหม่ที่ PaymentTest
         $this->actingAsUser();
         $response = $this->postJson('/api/v1/payments', []);
-        $response->assertStatus(403);
+        $response->assertStatus(404);
     }
 
     public function test_dashboard_list_tasks_rejects_non_admin(): void

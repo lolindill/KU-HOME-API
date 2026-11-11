@@ -190,11 +190,15 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             ->where('id', '[0-9a-f\-]{36}');
 
         // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ)
+        //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 03): verb-in-path + ไม่มี
+        //    where-uuid/throttle — ต่าง convention จาก PUT /bookings/{id} ด้านล่าง · รอ unify
+        //    เป็น REST shape พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking กับ frontend)
         Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
 
         // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
         //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
-        //    ⚠️ วางก่อน route /bookings/update/{id} จับคู่ {id} ไม่ชน — where uuid เท่านั้น
+        //    (2026-11-11: แก้คอมเมนต์เดิมที่บอกว่าต้อง "วางก่อน /bookings/update/{id} ไม่ให้ชน" —
+        //    literal segment "update" กับ {id}+where-uuid ไม่มีทางจับคู่ชนกัน ลำดับไม่มีผล)
         Route::put('/bookings/{id}', [BookingController::class, 'updateBookingPayment'])
             ->where('id', '[0-9a-f\-]{36}')
             ->middleware('throttle:5,1');
@@ -211,21 +215,22 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/booking-confirmations/{id}/reject', [BookingConfirmationController::class, 'reject'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 🛏️ Rooms — เปลี่ยนสถานะห้อง (admin only)
+        // 🛏️ Rooms — เปลี่ยนสถานะห้องบน board (admin only) — 5 สถานะ lifecycle เท่านั้น
+        //    (maintenance/reserved_closed ถูกถอดออกจาก machine ตั้งแต่ 24/09/26)
+        //    ⚠️ สถานะนี้ไม่มีผลต่อการขายห้อง — availability/allocator มอง room_state_periods
+        //    อย่างเดียว ปิดขายช่วงเวลา = /rooms/{roomId}/periods (แยกอยู่กลุ่ม admin+staff)
         Route::put('/rooms/{id}/status', [RoomController::class, 'updateRoomStatus']);
 
         // 📝 Room status logs (audit, admin only) — ประวัติการเปลี่ยนสถานะห้อง (REQ-039)
         Route::get('/rooms/{id}/status-logs', [RoomController::class, 'statusLogs'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 🛎️ Front Desk Operations (admin only)
-        Route::prefix('front-desk')->group(function () {
-            Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);
-            Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow']);
-        });
-
-        // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
-        Route::post('/payments', [PaymentController::class, 'requestPayment']);
+        // 💳 (2026-11-11, api-route-hygiene): ลบ POST /payments — เดิมเป็น 410 tombstone
+        //    (requestPayment FROZEN 2026-11-03) ที่คอมเมนต์ "สร้างรายการชำระ" หลอกผู้อ่าน
+        //    · เส้น walk-in / mark-no-show (admin only) ย้ายไปรวมกลุ่ม front-desk (admin+staff)
+        //      ด้านล่าง โดยใส่ role:admin รายเส้นแทน
+        //    flow ชำระเงินจริง = POST /bookings/{id}/confirm + POST /front-desk/{bookingId}/payment
+        //    · POST /payment/webhook (public) คง 410 ไว้เป็น contract รอ gateway (blocker #4)
 
         // 🌟 Refactor (22/07/26): Global Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
         Route::put('/global-rates/{id}', [GlobalRateController::class, 'update']);
@@ -248,13 +253,24 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // ============================================
     // 🛎️ Front Desk & Operations (admin + staff — REQ-031 24hr front desk)
+    //    (2026-11-11, api-route-hygiene: ยุบ 3 กลุ่ม front-desk กระจัดกระจายเป็นกลุ่มเดียว
+    //    zero-URL-change · เส้น admin-only ใช้ role:admin รายเส้น — CheckRole ตรวจต่อ layer
+    //    จึงได้สิทธิ์เดิมเป๊ะ: staff โดน 403 ที่เส้น admin-only เหมือนเดิม)
     // ============================================
     Route::middleware('role:admin,staff')->group(function () {
         // 📅 Auto assign rooms for booking
         Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
 
-        // 🛎️ Front Desk Operations (check-in, check-out, counter payment)
+        // 🛎️ Front Desk Operations (check-in, check-out, counter payment, walk-in, no-show)
         Route::prefix('front-desk')->group(function () {
+            // 🚶 Walk-in booking (admin เท่านั้น — เดิมอยู่กลุ่ม role:admin แยก)
+            Route::post('/walk-in', [FrontDeskController::class, 'walkIn'])
+                ->middleware('role:admin');
+
+            // 🚫 Mark no-show (admin เท่านั้น — รองรับห้อง draft/confirmed promote)
+            Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow'])
+                ->middleware('role:admin');
+
             // 🛎️ Per-room check-in/check-out (2026-11-06 — แทนที่ booking-level เดิมทั้งหมด):
             //    เช็คอิน/เอาท์ "รายห้อง" (booking_room) — บิล multi-room แขกมาถึง/จ่ายไม่พร้อมกันได้
             //    · check-in ห้องแรก promote บิล paid → confirmed · บิล complete ปิดรับ check-in
@@ -277,6 +293,16 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [FrontDeskController::class, 'splitUpgrade'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
+
+            // 🚪 Check-in Evidence (REQ-033) — อัปโหลดบัตร ปชช./registration/PDPA
+            //    ผูกกับ BookingRoom (เก็บ 365 วัน)
+            //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 04): address ตรงด้วย
+            //    booking-rooms/{id} ต่างจากพี่น้อง nested {bookingId}/rooms/{bookingRoomId}
+            //    — รอ unify พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking)
+            Route::post('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'uploadEvidence'])
+                ->where('id', '[0-9a-f\-]{36}');
+            Route::get('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'getEvidences'])
+                ->where('id', '[0-9a-f\-]{36}');
         });
     });
 
@@ -308,15 +334,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::patch('/additional-charges/{id}', [AdditionalChargeController::class, 'update'])
             ->where('id', '[0-9a-f\-]{36}');
         Route::delete('/additional-charges/{id}', [AdditionalChargeController::class, 'destroy'])
-            ->where('id', '[0-9a-f\-]{36}');
-    });
-
-    // 🛎️ Check-in Evidence (REQ-033 — admin+staff)
-    //    อัปโหลดบัตร ปชช./registration/PDPA ผูกกับ BookingRoom (เก็บ 365 วัน)
-    Route::middleware('role:admin,staff')->prefix('front-desk')->group(function () {
-        Route::post('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'uploadEvidence'])
-            ->where('id', '[0-9a-f\-]{36}');
-        Route::get('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'getEvidences'])
             ->where('id', '[0-9a-f\-]{36}');
     });
 

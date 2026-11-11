@@ -2092,9 +2092,16 @@ class BookingController extends Controller
             $statusCode = $e->getCode() ?: 500;
             Log::error('Failed to update booking status: '.$e->getMessage());
 
+            // 🧾 (2026-11-11, api-route-hygiene): relay message เฉพาะ 4xx domain error
+            //    (transitionStatus โยน 422) — 5xx ไม่ leak $e->getMessage() ออก client
+            //    (คอนเวนชัน AGENTS.md: generic message + Log::error)
+            $message = $statusCode >= 400 && $statusCode < 500
+                ? $e->getMessage()
+                : 'เกิดข้อผิดพลาดภายในระบบ โปรดลองอีกครั้งในภายหลังค่ะ';
+
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage(),
+                'message' => $message,
             ], $statusCode);
         }
     }
