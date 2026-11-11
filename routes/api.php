@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\V1\AdditionalChargeController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingAssignmentController;
 use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\BookingManagementController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DiscountController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
@@ -193,18 +195,18 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 03): verb-in-path + ไม่มี
         //    where-uuid/throttle — ต่าง convention จาก PUT /bookings/{id} ด้านล่าง · รอ unify
         //    เป็น REST shape พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking กับ frontend)
-        Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
+        Route::put('/bookings/update/{id}', [BookingManagementController::class, 'updateStatus']);
 
         // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
         //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
         //    (2026-11-11: แก้คอมเมนต์เดิมที่บอกว่าต้อง "วางก่อน /bookings/update/{id} ไม่ให้ชน" —
         //    literal segment "update" กับ {id}+where-uuid ไม่มีทางจับคู่ชนกัน ลำดับไม่มีผล)
-        Route::put('/bookings/{id}', [BookingController::class, 'updateBookingPayment'])
+        Route::put('/bookings/{id}', [BookingManagementController::class, 'updateBookingPayment'])
             ->where('id', '[0-9a-f\-]{36}')
             ->middleware('throttle:5,1');
 
         // 📝 Status change logs (audit) — ประวัติการเปลี่ยนสถานะของ booking + booking_rooms
-        Route::get('/bookings/{id}/status-logs', [BookingController::class, 'statusLogs'])
+        Route::get('/bookings/{id}/status-logs', [BookingManagementController::class, 'statusLogs'])
             ->where('id', '[0-9a-f\-]{36}');
 
         // 🌟 Refactor (24/07/26): admin verify/reject booking confirmation (by confirmation_id)
@@ -259,7 +261,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // ============================================
     Route::middleware('role:admin,staff')->group(function () {
         // 📅 Auto assign rooms for booking
-        Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
+        Route::put('/bookings/{bookingId}/assign-rooms', [BookingAssignmentController::class, 'autoAssignRooms']);
 
         // 🛎️ Front Desk Operations (check-in, check-out, counter payment, walk-in, no-show)
         Route::prefix('front-desk')->group(function () {
