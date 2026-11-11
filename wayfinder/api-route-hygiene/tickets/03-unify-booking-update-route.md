@@ -4,7 +4,7 @@ type: HITL
 title: "Unify PUT /bookings/update/{id} → REST shape (breaking — ต้อง api_patches)"
 summary: รวมเส้น verb-in-path PUT /bookings/update/{id} เป็น PUT /bookings/{id}/status — breaking 1 call site + patch note
 status: open
-assignee:
+assignee: kevii (orchestrator session 2026-11-11 — dispatch antigravity/gemini-3.8-flash @ .worktree/unify-booking-update-route)
 blocked-by: []
 ---
 

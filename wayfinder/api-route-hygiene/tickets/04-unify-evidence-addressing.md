@@ -4,7 +4,7 @@ type: HITL
 title: "Unify evidence addressing — /front-desk/booking-rooms/{id}/evidence → nested (breaking)"
 summary: ย้าย evidence endpoint เป็น nested {bookingId}/rooms/{bookingRoomId} ตรงพี่น้อง — grep frontend ยืนยัน caller ก่อน
 status: open
-assignee:
+assignee: kevii (orchestrator session 2026-11-11 — dispatch antigravity/gemini-3.8-flash @ .worktree/unify-evidence-addressing · frontend grep ไม่ได้ repo ไม่อยู่บนเครื่อง — ยืนยันจาก reverse index snapshot 2026-11-06 + จด limitation ใน patch note)
 blocked-by: []
 ---
 
