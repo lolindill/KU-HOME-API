@@ -257,6 +257,18 @@ final class BookingAutoAssignRoomsTest extends TestCase
     }
 
     /**
+     * ✅ 4.1. 404 router-level เมื่อส่ง bookingId ที่ไม่ใช่ UUID (rider where-uuid)
+     */
+    public function test_non_uuid_booking_id_returns_router_404(): void
+    {
+        $this->actingAsAdmin();
+
+        $response = $this->putJson('/api/v1/bookings/non-uuid-string/assign-rooms');
+
+        $response->assertStatus(404);
+    }
+
+    /**
      * ✅ 5. 422 เมื่อบุ๊กกิ้งอยู่ในสถานะ 'draft'
      */
     public function test_booking_in_draft_status_returns_422(): void

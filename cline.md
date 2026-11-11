@@ -333,7 +333,7 @@ Role restrictions:
 **❌ ไม่มี `cancelled` แล้ว** — draft ที่หมดอายุจะถูก **hard delete** โดย `CleanupExpiredDrafts` command
 **🧹 `pending` และ `verify_error` ที่หมด deadline ไม่ถูก cleanup ลบ** (ห้องยังถูก hold ไว้ตาม availability และรอ user ส่งสลิปใหม่)
 **⚠️ `checked_in` / `checked_out` / `no_show` อยู่ที่ `BookingRoom` (BR-level state machine) ไม่ใช่ booking container**
-**⚠️ `PUT /bookings/update/{id}` (admin) validation ยังเป็น `in:draft,paid,confirmed,complete`** — ไม่มี `pending` หรือ `verify_error` โดยตั้งใจ (เกิดจาก slip submission/rejection เท่านั้น)
+**⚠️ `PUT /bookings/{id}/status` (admin — เดิม `PUT /bookings/update/{id}`) validation ยังเป็น `in:draft,paid,confirmed,complete`** — ไม่มี `pending` หรือ `verify_error` โดยตั้งใจ (เกิดจาก slip submission/rejection เท่านั้น)
 
 ### BookingRoom Status Flow (BR-level — 🌟 Refactor 25/06/26)
 ```
@@ -1452,7 +1452,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 **จุดที่ไม่เปลี่ยน (ตรวจสอบแล้ว):**
 - Availability queries ทั้งหมด (`draft,confirmed,checked_in`) เช็คที่ **BR-level** status — BR state machine ไม่กระทบ
 - `CleanupExpiredDrafts` ยังลบเฉพาะ `draft` — **pending ที่หมด deadline ไม่ถูกลบ** (เงินอาจโอนแล้ว รอ admin ตรวจ; reject แล้วกลับ draft จะถูกเก็บเอง)
-- `PUT /bookings/update/{id}` validation `in:draft,paid,confirmed,complete` — ไม่เพิ่ม `pending` (pending เกิดจาก slip submission เท่านั้น)
+- `PUT /bookings/{id}/status` (เดิม `PUT /bookings/update/{id}`) validation `in:draft,paid,confirmed,complete` — ไม่เพิ่ม `pending` (pending เกิดจาก slip submission เท่านั้น)
 - แก้/ลบ booking rooms ยังจำกัดเฉพาะ `draft` — booking ระหว่าง `pending` แก้ไม่ได้ (สลิกกำลังรอตรวจ)
 - FrontDesk `recordPayment` `draft → paid` (role admin) ยังใช้ได้ตามเดิม
 
@@ -2177,7 +2177,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   - **admin ส่ง = instant-verify:** confirmation สร้างตรง `verified` (reviewed_by = admin ผู้ส่ง) + เขียน ledger จุดที่ ④ เมื่อแจ้ง amount (deferred ไม่แจ้ง amount ≠ จ่ายครบ — **ไม่มี** fallback ยอดคงค้างแบบ full ใน verify) + บิลเดิน state machine: `draft→confirmed` (walk-in เดิม) · `verify_error→pending→paid→confirmed` · `paid→confirmed` · `confirmed` คงสถานะ
   - **เจ้าของส่ง (โหมด A มี user_id) = flow เดิม:** confirmation `pending` + draft/verify_error→pending รอ admin verify ตามสายเดิม · โหมด B (user_id null) เหลือ admin เท่านั้น (ownership check เดิม)
   - **deadline guard ข้าม deferred** — บิล deferred ไม่มีวันหมดอายุ (CleanupExpiredDrafts ยกเว้นอยู่แล้ว) ไม่งั้นเกิน 15 นาทีส่งสลิปไม่ได้ · existing-pending guard (สลิปค้างสูงสุด 1) ใช้กับ deferred เหมือนเดิม
-  - บิล **full/deposit คงเดิมทุกอย่าง** — รับเฉพาะ draft/verify_error, paid/confirmed ยัง 422 (เก็บท้ายบิลผ่าน recordPayment เท่านั้น) · approve แบบไม่แนบสลิปผ่าน `PUT /bookings/update/{id}` ยังทำงานเหมือนเดิม · **ยกเว้น CleanupExpiredDrafts + ยึด slot ต่อ** แม้เลย 15 นาที (เงื่อนไขเพิ่มใน `BookingRoom::scopeHoldingSlot()` — draft deferred ยังกิน slot) · complete ได้ทั้งที่ยอดค้าง · Tests: BookingPaymentTypeTest 8 เคสใหม่ (instant-verify ±amount / owner pending→verify / installment บิล confirmed / เลย deadline / regression full 422 / โหมด B 403 / pending ซ้อน 422) — suite 25 เขียว
+  - บิล **full/deposit คงเดิมทุกอย่าง** — รับเฉพาะ draft/verify_error, paid/confirmed ยัง 422 (เก็บท้ายบิลผ่าน recordPayment เท่านั้น) · approve แบบไม่แนบสลิปผ่าน `PUT /bookings/{id}/status` (เดิม `/bookings/update/{id}`) ยังทำงานเหมือนเดิม · **ยกเว้น CleanupExpiredDrafts + ยึด slot ต่อ** แม้เลย 15 นาที (เงื่อนไขเพิ่มใน `BookingRoom::scopeHoldingSlot()` — draft deferred ยังกิน slot) · complete ได้ทั้งที่ยอดค้าง · Tests: BookingPaymentTypeTest 8 เคสใหม่ (instant-verify ±amount / owner pending→verify / installment บิล confirmed / เลย deadline / regression full 422 / โหมด B 403 / pending ซ้อน 422) — suite 25 เขียว
   - **💳 Check-out bypass (2026-11-06):** `FrontDeskController::checkOut` ข้าม guard ชำระครบเมื่อ `payment_type='deferred'` — checkout ได้แม้ยอดค้าง (ทั้งค่าห้อง + additional charges) · ห้อง → `checkout_makeup` + บิล → `complete` ตามปกติ · `is_paid` คง `false` จนกว่าจะชำระครบจริง เก็บต่อผ่าน `recordPayment` (บิล `complete` จ่ายครบ → set `is_paid=true` ไม่มี transition — flow เดิม) · บิล `full`/`deposit` คงโดน guard เดิมทุกอย่าง (400 ค้างชำระ) · Tests: FrontDeskTest +2 (unpaid balance มี charge ค้าง / partially paid)
 - **Response envelope 4 field ทุก response ของ booking ทุก role** — implement เป็น accessors/appends บน `Booking`: `paid_amount`/`outstanding_amount` (appends), `deposit_amount` (**accessor ทับ column — effective: type≠deposit → null, null column → ceil(total×50%)**), `expected_amount` (สูตรรวม: `paid===0 && deposit ? deposit_amount : outstanding`) · `BookingConfirmation` มี appends `expected_amount` (dashboard เทียบ claimed=amount vs expected ทันที)
 - **⚠️ Breaking change:** `POST /bookings/{id}/confirm` **บังคับ `amount` (integer ≥ 1)** ตั้งแต่ deploy นี้ — frontend ku-home ต้องอัปเดต · สลิปเก่า (row amount=null) verify แล้วคง flow เดิม (is_paid=true, ไม่เขียน ledger — 0 บาทไม่ใช่เหตุการณ์เงิน)
@@ -2581,4 +2581,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **routes/api.php:** เปลี่ยนแค่ `use` (2 บรรทัด/branch) + FQCN swap 4 เส้น/branch — รวม 8 action swap จาก `BookingController`/`FrontDeskController` เดิม
 - **การพิสูจน์ของ orchestrator review (ไม่เชื่อ report agent — วัดเองทุกชั้น):** baseline ก่อน dispatch = **916 tests / 3,860 assertions** เขียวทั้ง 2 worktree (⚠️ suite จริงคือ **916** ไม่ใช่ 917 เพราะ PaymentTest รวม 2 test 410-tombstone เป็น 1 pin ใหม่ตอน zero-risk commit `d51e9be`) · หลังงาน agent: suite 916/3,860 เท่าเดิมทั้ง 2 branch + `pint --dirty` PASS · **route-parity:** `route:list --json` เทียบ baseline = 113→113 เส้น, URL+verb **IDENTICAL**, action swap เป๊ะ 4/branch · **line-multiset fidelity** (เทียบทุกบรรทัด old vs union ใหม่): ตั๋ว 01 ต่างแค่ boilerplate (php/namespace/use สำเนา×3/class braces) — ตรวจเจอ tombstone comment 2 บรรทัด (`lookupBooking ถูกลบแล้ว` + `showById`) หลุดตอนย้าย autoAssignRooms → orchestrator restore + commit `1ec1cf9` · ตั๋ว 02 ต่างแค่ handleCatch duplicate (byte-identical ทุกบรรทัด) + boilerplate — สะอาด 100% · acceptance gate บน dev หลัง merge: pint PASS + suite 916/3,860 + route-parity 113 identical / swaps 8
 - **Commits:** agent ตั๋ว 01 = `346433e` (+ review fix `1ec1cf9`) บน `feature/split-booking-controller` · agent ตั๋ว 02 = `310646e` บน `feature/split-front-desk-controller` · merge dev = `d45bc65` + `ec04fb4` (conflict เดียว: import block เก็บทั้ง 2 use เรียงตัวอักษร) · **0 test edits** ตาม acceptance · ไม่ต้องมี api_patches — move-only ไม่แตะ URL (patch note เกิดตอน tickets 03/04 เท่านั้น)
+
+## 📅 Unify booking update route — ticket 03 (2026-11-11 — api-route-hygiene, breaking URL-level)
+
+- **Context & Motivation:** แก้หนี้ verb-in-path `PUT /bookings/update/{id}` (routes/api.php:200 → `BookingManagementController::updateStatus`) — รวมเส้นเข้า REST subresource convention เดียวกับ `GET /bookings/{id}/status-logs` เป็น `PUT /bookings/{id}/status`
+- **มติ LOCK แล้ว (owner-approved):**
+  1. ทางเลือก (a): ย้ายเป็น `PUT /bookings/{id}/status` + ถอดเส้นเก่าทิ้งทันที (ไม่ทิ้ง tombstone — ยิงเส้นเก่าได้ 404)
+  2. ใส่ `where('id', '[0-9a-f\-]{36}')` ให้ `{id}` ของเส้นใหม่ วางคู่กับ `status-logs`
+  3. ไม่เพิ่ม throttle (คงพฤติกรรมเดิม)
+  4. `updateStatus` รับ `Request` มือเปล่าคงเดิม (move-pure ไม่ formalize เป็น FormRequest)
+  5. 🪶 Rider: เพิ่ม where-uuid `[0-9a-f\-]{36}` ให้ `PUT /bookings/{bookingId}/assign-rooms` ด้วย (non-uuid → router 404, uuid behavior คงเดิม)
+- **Patch note:** ออก `docs/api_patches/2026-11-11-unify-booking-update-route.md` ครอบคลุม error matrix + migration guide สำหรับ frontend หน้า `admin-confirm-bookings` (caller จุดเดียวตาม snapshot 2026-11-06)
+- **Tests & Verification:**
+  - อัปเดต tests 4 ไฟล์ (`BookingTest`, `BookingPaymentTypeTest`, `AssignRoomsIncludeReservedTest`, `RouteProtectionTest`)
+  - เพิ่ม probe test เช็ค router 404 สำหรับ non-uuid และตรวจสอบ error matrix (`BookingTest`, `RouteProtectionTest`, `BookingAutoAssignRoomsTest`)
+  - Suite tests ผ่านฉลุย 100% + `vendor/bin/pint --dirty` PASS
 

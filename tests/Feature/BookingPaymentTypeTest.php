@@ -25,7 +25,7 @@ use Tests\TestCase;
  *   - deposit (effective 50% / ยอดกำหนดเอง · verify → is_paid false · เก็บส่วนเหลือผ่าน recordPayment)
  *   - deferred (💳 06/11/26 ย้อนมติ 25/09/26: รับสลิปผ่าน confirm แล้วทุกสถานะหลัก —
  *     admin ส่ง = instant-verify + ledger จุดที่ 4 · เจ้าของส่ง = pending รอ verify ·
- *     approve แบบไม่แนบสลิปผ่าน PUT /bookings/update/{id} คงเดิม)
+ *     approve แบบไม่แนบสลิปผ่าน PUT /bookings/{id}/status คงเดิม)
  *   - สิทธิ์ payment fields (admin/system เท่านั้น — non-admin 403)
  *   - PUT /bookings/{id} (endpoint ใหม่ — draft only)
  *   - reject → ส่งสลิปใหม่ (row ใหม่ · ledger ไม่เปลี่ยน)
@@ -491,9 +491,9 @@ class BookingPaymentTypeTest extends TestCase
             ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deferred']));
         $booking = Booking::findOrFail($created->json('booking_id'));
 
-        // อนุมัติก่อนแบบไม่แนบสลิป (flow เดิม — PUT /bookings/update/{id})
+        // อนุมัติก่อนแบบไม่แนบสลิป (flow เดิม — PUT /bookings/{id}/status)
         $this->actingAs($admin, 'sanctum')
-            ->putJson("/api/v1/bookings/update/{$booking->id}", ['status' => 'confirmed'])
+            ->putJson("/api/v1/bookings/{$booking->id}/status", ['status' => 'confirmed'])
             ->assertStatus(200)
             ->assertJsonPath('booking_status', 'confirmed')
             ->assertJsonPath('outstanding_amount', 1500);

@@ -344,7 +344,7 @@ class BookingTest extends TestCase
     }
 
     // ============================================
-    // ✅ Admin: Update booking status
+    // ✅ Admin: Update booking status (PUT /bookings/{id}/status)
     // ============================================
 
     public function test_admin_can_update_booking_status(): void
@@ -352,7 +352,7 @@ class BookingTest extends TestCase
         $this->actingAsAdmin();
         $booking = $this->createBooking(['status' => 'draft']);
 
-        $response = $this->putJson("/api/v1/bookings/update/{$booking->id}", [
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/status", [
             'status' => 'paid',
         ]);
         $response->assertStatus(200);
@@ -367,10 +367,44 @@ class BookingTest extends TestCase
         // 🌟 Refactor (25/06/26): draft → confirmed is now VALID (admin walk-in skip paid)
         // ต้องใช้ transition ที่ invalid จริงๆ ตาม container state machine
         // draft → complete ข้ามขั้น paid/confirmed ไม่ได้ค่ะ
-        $response = $this->putJson("/api/v1/bookings/update/{$booking->id}", [
+        $response = $this->putJson("/api/v1/bookings/{$booking->id}/status", [
             'status' => 'complete',
         ]);
         $response->assertStatus(422);
+    }
+
+    public function test_booking_status_update_with_non_uuid_returns_router_404(): void
+    {
+        $this->actingAsAdmin();
+        $response = $this->putJson('/api/v1/bookings/non-uuid-string/status', [
+            'status' => 'paid',
+        ]);
+        $response->assertStatus(404);
+    }
+
+    public function test_booking_status_update_with_unknown_uuid_returns_404(): void
+    {
+        $this->actingAsAdmin();
+        $unknownId = (string) Str::uuid();
+        $response = $this->putJson("/api/v1/bookings/{$unknownId}/status", [
+            'status' => 'paid',
+        ]);
+        $response->assertStatus(404)
+            ->assertJson([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูล Booking ที่ระบุในระบบค่ะนายท่าน โปรดตรวจสอบ ID อีกครั้งนะคะ',
+            ]);
+    }
+
+    public function test_old_booking_update_endpoint_is_removed(): void
+    {
+        $this->actingAsAdmin();
+        $booking = $this->createBooking(['status' => 'draft']);
+
+        $response = $this->putJson("/api/v1/bookings/update/{$booking->id}", [
+            'status' => 'paid',
+        ]);
+        $response->assertStatus(404);
     }
 
     // ============================================
