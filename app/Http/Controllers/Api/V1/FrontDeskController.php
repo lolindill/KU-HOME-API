@@ -362,11 +362,10 @@ class FrontDeskController extends Controller
             // 🔒 BR ต้องอยู่ใต้ booking นี้จริง (ของ booking อื่น = 404)
             $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
 
-            // 🛡️ Guard: BR ต้อง checked_in หรือ confirmed — ย้ายได้ทั้งกลางทางและก่อนเช็คอิน
-            //    (2026-11-09): รับ BR confirmed ที่มีเลขห้องผูกไว้แล้ว — สลับห้องล่วงหน้าได้
-            if (! in_array($bookingRoom->status, ['confirmed', 'checked_in'])) {
+            // 🛡️ Guard: BR ต้อง checked_in หรือ confirmed หรือ draft (ที่มีเลขห้องผูกไว้แล้ว — tier-endpoints-v2 มติ v2 ข้อ 7)
+            if (! in_array($bookingRoom->status, ['draft', 'confirmed', 'checked_in'], true)) {
                 throw new \Exception(
-                    "ย้ายห้องได้เฉพาะห้องที่เช็คอินแล้ว (checked_in) หรือยืนยันแล้ว (confirmed) เท่านั้นค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}'",
+                    "ย้ายห้องได้เฉพาะห้องที่มีเลขห้องแล้ว (สถานะ draft หรือ confirmed ก่อนเช็คอิน หรือ checked_in ที่เข้าพักแล้ว) เท่านั้นค่ะนายท่าน ห้องนี้สถานะ '{$bookingRoom->status}' 🚪",
                     422
                 );
             }
