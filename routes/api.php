@@ -2,8 +2,11 @@
 
 use App\Http\Controllers\Api\V1\AdditionalChargeController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BookingAssignmentController;
 use App\Http\Controllers\Api\V1\BookingConfirmationController;
 use App\Http\Controllers\Api\V1\BookingController;
+use App\Http\Controllers\Api\V1\BookingManagementController;
+use App\Http\Controllers\Api\V1\CheckinEvidenceController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DiscountController;
 use App\Http\Controllers\Api\V1\FrontDeskController;
@@ -14,6 +17,7 @@ use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PaymentController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\RoomController;
+use App\Http\Controllers\Api\V1\RoomMoveController;
 use App\Http\Controllers\Api\V1\RoomStatePeriodController;
 use App\Http\Controllers\Api\V1\SsoController;
 use App\Http\Controllers\Api\V1\StockController;
@@ -81,18 +85,6 @@ Route::prefix('v1')->group(function () {
 
     // 🌟 Refactor (18/06/26): ลบ public booking/lookup/request-payment — non-member ใช้งานไม่ได้แล้ว ทุกคนต้อง login
     //    createBooking ย้ายไป protected routes ด้านล่าง
-
-    // 🖼️ (19/08/26): ให้บริการไฟล์รูปผ่าน signed URL อายุ 15 นาที
-    //    🔐 (26/10/26): เพิ่ม auth:sanctum — ผู้ขอต้องเป็นเจ้าของรูป (ตาม imageable:
-    //    สลิป/evidence → เจ้าของ booking · รูป housekeeping → assigned_to) หรือ admin
-    //    ตรวจใน ImageController::show — signature + token คุมคู่กัน (2 ชั้น)
-    //    ⚠️ exempt RequireJsonAccept เฉพาะ route นี้ เพื่อให้ fetch รูปที่ส่ง Accept: image/* โหลดได้
-    //       (document ใน cline.md — frontend ใช้ fetch + Authorization header + blob แทน <img src>)
-    Route::get('/images/{image}/file', [ImageController::class, 'show'])
-        ->where('image', '[0-9a-f\-]{36}')
-        ->name('images.file')
-        ->middleware(['auth:sanctum', 'signed', 'throttle:10,1'])
-        ->withoutMiddleware([RequireJsonAccept::class]);
 });
 
 // ============================================
@@ -165,6 +157,18 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::delete('/bookings/{bookingId}/discount-code', [BookingController::class, 'destroyDiscountCode'])
         ->where('bookingId', '[0-9a-f\-]{36}')->middleware('throttle:5,1');
 
+    // 🖼️ (19/08/26): ให้บริการไฟล์รูปผ่าน signed URL อายุ 15 นาที
+    //    🔐 (26/10/26): เพิ่ม auth:sanctum — ผู้ขอต้องเป็นเจ้าของรูป (ตาม imageable:
+    //    สลิป/evidence → เจ้าของ booking · รูป housekeeping → assigned_to) หรือ admin
+    //    ตรวจใน ImageController::show — signature + token คุมคู่กัน (2 ชั้น)
+    //    ⚠️ exempt RequireJsonAccept เฉพาะ route นี้ เพื่อให้ fetch รูปที่ส่ง Accept: image/* โหลดได้
+    //       (document ใน cline.md — frontend ใช้ fetch + Authorization header + blob แทน <img src>)
+    Route::get('/images/{image}/file', [ImageController::class, 'show'])
+        ->where('image', '[0-9a-f\-]{36}')
+        ->name('images.file')
+        ->middleware(['signed', 'throttle:10,1'])
+        ->withoutMiddleware([RequireJsonAccept::class]);
+
     // ============================================
     // 🔐 Admin-only Routes
     // ============================================
@@ -189,18 +193,18 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::patch('/organizations/{id}/toggle', [OrganizationController::class, 'toggle'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ)
-        Route::put('/bookings/update/{id}', [BookingController::class, 'updateStatus']);
-
         // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
         //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
-        //    ⚠️ วางก่อน route /bookings/update/{id} จับคู่ {id} ไม่ชน — where uuid เท่านั้น
-        Route::put('/bookings/{id}', [BookingController::class, 'updateBookingPayment'])
+        Route::put('/bookings/{id}', [BookingManagementController::class, 'updateBookingPayment'])
             ->where('id', '[0-9a-f\-]{36}')
             ->middleware('throttle:5,1');
 
+        // 📅 Booking status transition (admin only — เปลี่ยนสถานะด้วยมือ, ticket 03 unify จาก PUT /bookings/update/{id})
+        Route::put('/bookings/{id}/status', [BookingManagementController::class, 'updateStatus'])
+            ->where('id', '[0-9a-f\-]{36}');
+
         // 📝 Status change logs (audit) — ประวัติการเปลี่ยนสถานะของ booking + booking_rooms
-        Route::get('/bookings/{id}/status-logs', [BookingController::class, 'statusLogs'])
+        Route::get('/bookings/{id}/status-logs', [BookingManagementController::class, 'statusLogs'])
             ->where('id', '[0-9a-f\-]{36}');
 
         // 🌟 Refactor (24/07/26): admin verify/reject booking confirmation (by confirmation_id)
@@ -211,21 +215,22 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::put('/booking-confirmations/{id}/reject', [BookingConfirmationController::class, 'reject'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 🛏️ Rooms — เปลี่ยนสถานะห้อง (admin only)
+        // 🛏️ Rooms — เปลี่ยนสถานะห้องบน board (admin only) — 5 สถานะ lifecycle เท่านั้น
+        //    (maintenance/reserved_closed ถูกถอดออกจาก machine ตั้งแต่ 24/09/26)
+        //    ⚠️ สถานะนี้ไม่มีผลต่อการขายห้อง — availability/allocator มอง room_state_periods
+        //    อย่างเดียว ปิดขายช่วงเวลา = /rooms/{roomId}/periods (แยกอยู่กลุ่ม admin+staff)
         Route::put('/rooms/{id}/status', [RoomController::class, 'updateRoomStatus']);
 
         // 📝 Room status logs (audit, admin only) — ประวัติการเปลี่ยนสถานะห้อง (REQ-039)
         Route::get('/rooms/{id}/status-logs', [RoomController::class, 'statusLogs'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 🛎️ Front Desk Operations (admin only)
-        Route::prefix('front-desk')->group(function () {
-            Route::post('/walk-in', [FrontDeskController::class, 'walkIn']);
-            Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow']);
-        });
-
-        // 💳 Payments — สร้างรายการชำระสำหรับผู้ใช้ที่ล็อกอิน
-        Route::post('/payments', [PaymentController::class, 'requestPayment']);
+        // 💳 (2026-11-11, api-route-hygiene): ลบ POST /payments — เดิมเป็น 410 tombstone
+        //    (requestPayment FROZEN 2026-11-03) ที่คอมเมนต์ "สร้างรายการชำระ" หลอกผู้อ่าน
+        //    · เส้น walk-in / mark-no-show (admin only) ย้ายไปรวมกลุ่ม front-desk (admin+staff)
+        //      ด้านล่าง โดยใส่ role:admin รายเส้นแทน
+        //    flow ชำระเงินจริง = POST /bookings/{id}/confirm + POST /front-desk/{bookingId}/payment
+        //    · POST /payment/webhook (public) คง 410 ไว้เป็น contract รอ gateway (blocker #4)
 
         // 🌟 Refactor (22/07/26): Global Rates Management (admin only — แก้ราคา/เปิด-ปิดการใช้งาน)
         Route::put('/global-rates/{id}', [GlobalRateController::class, 'update']);
@@ -248,13 +253,25 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // ============================================
     // 🛎️ Front Desk & Operations (admin + staff — REQ-031 24hr front desk)
+    //    (2026-11-11, api-route-hygiene: ยุบ 3 กลุ่ม front-desk กระจัดกระจายเป็นกลุ่มเดียว
+    //    zero-URL-change · เส้น admin-only ใช้ role:admin รายเส้น — CheckRole ตรวจต่อ layer
+    //    จึงได้สิทธิ์เดิมเป๊ะ: staff โดน 403 ที่เส้น admin-only เหมือนเดิม)
     // ============================================
     Route::middleware('role:admin,staff')->group(function () {
-        // 📅 Auto assign rooms for booking
-        Route::put('/bookings/{bookingId}/assign-rooms', [BookingController::class, 'autoAssignRooms']);
+        // 📅 Auto assign rooms for booking (rider: ใส่ where-uuid ป้องกัน non-uuid ล้นเข้า controller)
+        Route::put('/bookings/{bookingId}/assign-rooms', [BookingAssignmentController::class, 'autoAssignRooms'])
+            ->where('bookingId', '[0-9a-f\-]{36}');
 
-        // 🛎️ Front Desk Operations (check-in, check-out, counter payment)
+        // 🛎️ Front Desk Operations (check-in, check-out, counter payment, walk-in, no-show)
         Route::prefix('front-desk')->group(function () {
+            // 🚶 Walk-in booking (admin เท่านั้น — เดิมอยู่กลุ่ม role:admin แยก)
+            Route::post('/walk-in', [FrontDeskController::class, 'walkIn'])
+                ->middleware('role:admin');
+
+            // 🚫 Mark no-show (admin เท่านั้น — รองรับห้อง draft/confirmed promote)
+            Route::post('/{bookingId}/mark-no-show', [FrontDeskController::class, 'markNoShow'])
+                ->middleware('role:admin');
+
             // 🛎️ Per-room check-in/check-out (2026-11-06 — แทนที่ booking-level เดิมทั้งหมด):
             //    เช็คอิน/เอาท์ "รายห้อง" (booking_room) — บิล multi-room แขกมาถึง/จ่ายไม่พร้อมกันได้
             //    · check-in ห้องแรก promote บิล paid → confirmed · บิล complete ปิดรับ check-in
@@ -269,14 +286,21 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/payment', [FrontDeskController::class, 'recordPayment']);
 
             // 🚪 In-stay room move (2026-11-04) — ย้ายห้องจริงหลัง check-in + เปลี่ยนประเภทห้องแบบ upgrade-only
-            Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [FrontDeskController::class, 'changeRoom'])
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [RoomMoveController::class, 'changeRoom'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
 
             // 🔀 Mid-stay split-upgrade (2026-11-11) — แบ่งช่วงพักครึ่งหนึ่งย้ายขึ้น tier สูงกว่า
-            Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [FrontDeskController::class, 'splitUpgrade'])
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [RoomMoveController::class, 'splitUpgrade'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
+
+            // 🚪 Check-in Evidence (REQ-033) — อัปโหลดบัตร ปชช./registration/PDPA
+            //    ผูกกับ BookingRoom (เก็บ 365 วัน)
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/evidence', [CheckinEvidenceController::class, 'uploadEvidence'])
+                ->whereUuid(['bookingId', 'bookingRoomId']);
+            Route::get('/{bookingId}/rooms/{bookingRoomId}/evidence', [CheckinEvidenceController::class, 'getEvidences'])
+                ->whereUuid(['bookingId', 'bookingRoomId']);
         });
     });
 
@@ -308,15 +332,6 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::patch('/additional-charges/{id}', [AdditionalChargeController::class, 'update'])
             ->where('id', '[0-9a-f\-]{36}');
         Route::delete('/additional-charges/{id}', [AdditionalChargeController::class, 'destroy'])
-            ->where('id', '[0-9a-f\-]{36}');
-    });
-
-    // 🛎️ Check-in Evidence (REQ-033 — admin+staff)
-    //    อัปโหลดบัตร ปชช./registration/PDPA ผูกกับ BookingRoom (เก็บ 365 วัน)
-    Route::middleware('role:admin,staff')->prefix('front-desk')->group(function () {
-        Route::post('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'uploadEvidence'])
-            ->where('id', '[0-9a-f\-]{36}');
-        Route::get('/booking-rooms/{id}/evidence', [FrontDeskController::class, 'getEvidences'])
             ->where('id', '[0-9a-f\-]{36}');
     });
 
