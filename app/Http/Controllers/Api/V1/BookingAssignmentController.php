@@ -14,6 +14,9 @@ use Illuminate\Support\Facades\Log;
 
 class BookingAssignmentController extends Controller
 {
+    // 🌟 Refactor (18/06/26): lookupBooking ถูกลบแล้ว — Guest/Non-member ไม่สามารถใช้งานระบบได้
+    // นายท่านต้องล็อกอินก่อน แล้วใช้ showById เพื่อดูข้อมูลการจองของตัวเองได้เลยค่ะ
+
     public function autoAssignRooms(Request $request, $bookingId)
     {
         try {
