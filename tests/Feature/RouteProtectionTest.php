@@ -116,8 +116,16 @@ class RouteProtectionTest extends TestCase
     public function test_booking_update_status_rejects_non_admin(): void
     {
         $this->actingAsUser();
-        $response = $this->putJson('/api/v1/bookings/update/nonexistent', ['status' => 'paid']);
+        $dummyId = (string) Str::uuid();
+        $response = $this->putJson("/api/v1/bookings/{$dummyId}/status", ['status' => 'paid']);
         $response->assertStatus(403);
+    }
+
+    public function test_booking_update_status_non_uuid_returns_router_404(): void
+    {
+        $this->actingAsUser();
+        $response = $this->putJson('/api/v1/bookings/nonexistent/status', ['status' => 'paid']);
+        $response->assertStatus(404);
     }
 
     public function test_room_status_update_rejects_non_admin(): void

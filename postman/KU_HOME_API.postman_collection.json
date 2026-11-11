@@ -2352,7 +2352,7 @@
       "description": "Admin manual status transitions, automatic room cluster allocation, and state transition audit trail.",
       "item": [
         {
-          "name": "PUT Manual Booking Status Transition (/bookings/update/{id})",
+          "name": "PUT Manual Booking Status Transition (/bookings/{id}/status)",
           "event": [
             {
               "listen": "test",
@@ -2406,14 +2406,14 @@
               }
             },
             "url": {
-              "raw": "{{base_url}}/bookings/update/{{booking_id}}",
+              "raw": "{{base_url}}/bookings/{{booking_id}}/status",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "bookings",
-                "update",
-                "{{booking_id}}"
+                "{{booking_id}}",
+                "status"
               ]
             }
           }
@@ -4057,14 +4057,14 @@
               }
             },
             "url": {
-              "raw": "{{base_url}}/bookings/update/{{booking_id}}",
+              "raw": "{{base_url}}/bookings/{{booking_id}}/status",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "bookings",
-                "update",
-                "{{booking_id}}"
+                "{{booking_id}}",
+                "status"
               ]
             }
           }

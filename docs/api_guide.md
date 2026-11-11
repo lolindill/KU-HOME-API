@@ -2084,9 +2084,9 @@ curl -H "Authorization: Bearer <TOKEN>" \
 
 ---
 
-### PUT `/bookings/update/{id}` — Update booking status (Admin)
+### PUT `/bookings/{id}/status` — Update booking status (Admin)
 
-🔒 **Admin only**
+🔒 **Admin only** · `{id}` บังคับรูปแบบ UUID `[0-9a-f\-]{36}` (2026-11-11, ticket 03: unify จาก `PUT /bookings/update/{id}` เดิมที่ถอดออกแล้ว)
 
 Uses **state machine** — see [Booking State Machine](#booking-state-machine).
 
@@ -2998,7 +2998,7 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 |---|---|---|
 | เต็มจำนวน | `full` (**default**) | flow เดิมทุกอย่าง — สลิปเต็ม → verify → `is_paid=true` |
 | มัดจำ | `deposit` | จ่ายงวดแรก = ยอดมัดจำ (`deposit_amount` ตายตัว, null = **50%** ของ `total_amount` — config `booking.deposit_percent`) → verify → confirmed + `is_paid=false` → เก็บส่วนเหลือที่เคาน์เตอร์ (`recordPayment`) จน `is_paid=true` |
-| ค้างชำระ | `deferred` | ไม่รับสลิป — admin อนุมัติ `draft → confirmed` (ผ่าน `PUT /bookings/update/{id}`) → เก็บเงินปลายทางผ่าน `recordPayment` จนครบ |
+| ค้างชำระ | `deferred` | ไม่รับสลิป — admin อนุมัติ `draft → confirmed` (ผ่าน `PUT /bookings/{id}/status`) → เก็บเงินปลายทางผ่าน `recordPayment` จนครบ |
 
 **กติกาสิทธิ์:** ตั้ง/แก้ `payment_type` / `deposit_amount` ได้ **admin/system เท่านั้น** — ช่องทาง 2 ทาง: `POST /bookings` (ครั้งเดียวตอนสร้าง) และ `PUT /bookings/{id}` (draft only) · non-admin ส่ง field เงินมา = **403**
 

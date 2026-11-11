@@ -193,19 +193,15 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::patch('/organizations/{id}/toggle', [OrganizationController::class, 'toggle'])
             ->where('id', '[0-9a-f\-]{36}');
 
-        // 📅 Booking Management (admin only — เปลี่ยนสถานะด้วยมือ)
-        //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 03): verb-in-path + ไม่มี
-        //    where-uuid/throttle — ต่าง convention จาก PUT /bookings/{id} ด้านล่าง · รอ unify
-        //    เป็น REST shape พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking กับ frontend)
-        Route::put('/bookings/update/{id}', [BookingManagementController::class, 'updateStatus']);
-
         // 💳 (25/09/26, booking-payment-types ticket 01/05): admin แก้ payment fields
         //    (payment_type / deposit_amount / discount_code / payment_deadline) ของ draft booking
-        //    (2026-11-11: แก้คอมเมนต์เดิมที่บอกว่าต้อง "วางก่อน /bookings/update/{id} ไม่ให้ชน" —
-        //    literal segment "update" กับ {id}+where-uuid ไม่มีทางจับคู่ชนกัน ลำดับไม่มีผล)
         Route::put('/bookings/{id}', [BookingManagementController::class, 'updateBookingPayment'])
             ->where('id', '[0-9a-f\-]{36}')
             ->middleware('throttle:5,1');
+
+        // 📅 Booking status transition (admin only — เปลี่ยนสถานะด้วยมือ, ticket 03 unify จาก PUT /bookings/update/{id})
+        Route::put('/bookings/{id}/status', [BookingManagementController::class, 'updateStatus'])
+            ->where('id', '[0-9a-f\-]{36}');
 
         // 📝 Status change logs (audit) — ประวัติการเปลี่ยนสถานะของ booking + booking_rooms
         Route::get('/bookings/{id}/status-logs', [BookingManagementController::class, 'statusLogs'])
@@ -262,8 +258,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     //    จึงได้สิทธิ์เดิมเป๊ะ: staff โดน 403 ที่เส้น admin-only เหมือนเดิม)
     // ============================================
     Route::middleware('role:admin,staff')->group(function () {
-        // 📅 Auto assign rooms for booking
-        Route::put('/bookings/{bookingId}/assign-rooms', [BookingAssignmentController::class, 'autoAssignRooms']);
+        // 📅 Auto assign rooms for booking (rider: ใส่ where-uuid ป้องกัน non-uuid ล้นเข้า controller)
+        Route::put('/bookings/{bookingId}/assign-rooms', [BookingAssignmentController::class, 'autoAssignRooms'])
+            ->where('bookingId', '[0-9a-f\-]{36}');
 
         // 🛎️ Front Desk Operations (check-in, check-out, counter payment, walk-in, no-show)
         Route::prefix('front-desk')->group(function () {

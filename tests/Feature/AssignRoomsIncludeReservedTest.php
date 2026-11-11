@@ -162,7 +162,7 @@ class AssignRoomsIncludeReservedTest extends TestCase
         $bookingId = $create->json('booking_id');
 
         // 2) admin เปลี่ยนสถานะ draft → paid (เงินสดหน้าเคาน์เตอร์) ให้ assign-rooms ผ่าน gate
-        $this->putJson("/api/v1/bookings/update/{$bookingId}", ['status' => 'paid'])
+        $this->putJson("/api/v1/bookings/{$bookingId}/status", ['status' => 'paid'])
             ->assertStatus(200)
             ->assertJsonPath('booking_status', 'paid');
 
@@ -338,7 +338,7 @@ class AssignRoomsIncludeReservedTest extends TestCase
         $create->assertStatus(201);
         $bookingId = $create->json('booking_id');
 
-        $this->putJson("/api/v1/bookings/update/{$bookingId}", ['status' => 'paid'])
+        $this->putJson("/api/v1/bookings/{$bookingId}/status", ['status' => 'paid'])
             ->assertStatus(200);
 
         return $bookingId;
