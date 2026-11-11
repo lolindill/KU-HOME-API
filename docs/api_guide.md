@@ -298,13 +298,20 @@ Revokes the current access token.
     "id": "uuid-string",
     "name": "Somchai Jaidee",
     "email": "somchai@example.com",
+    "auth_provider": "password",
     "role": "user",
+    "title": "นิสิต",
+    "phone": "0812345678",
+    "nationality": "Thai",
     "ver": false,
+    "avatar": null,
     "created_at": "2026-06-19T10:00:00.000000Z",
     "updated_at": "2026-06-19T10:00:00.000000Z"
   }
 }
 ```
+
+> `auth_provider` = `password` | `ku_sso` | `google` (split-user model — email ซ้ำข้าม provider ได้) · `avatar` = Image object พร้อม signed `url` (อายุ 15 นาที) หรือ `null` ถ้ายังไม่ได้ตั้ง · `password`/`remember_token` ไม่ถูก expose เสมอ
 
 ---
 
@@ -312,24 +319,84 @@ Revokes the current access token.
 
 🔒 **Auth required**
 
-> 🛡️ Users **cannot** change their own `role` or `ver` (verification). These must go through admin endpoints.
+> 🛡️ Users **cannot** change their own `role` or `ver` (verification) — ต้องผ่าน admin endpoints (`PUT /users/{id}`, `PUT /users/{id}/verify`)
+>
+> 🔒 **SSO email lock (2026-11-11):** account `auth_provider = ku_sso` | `google` ส่ง field `email` → **422** — email เป็น identity anchor ที่ผูกกับผู้ให้บริการต้นทาง (ระบบใช้ email ค้นหา account ตอน SSO login ถ้าแก้แล้วจะกลายเป็น account ใหม่ซ้ำ) · password account (`auth_provider = password`) เปลี่ยนเองได้ตามปกติ · admin ยังแก้ email ของ SSO user ได้ผ่าน `PUT /users/{id}`
 
-**Request Body (all fields optional):**
+**Request Body (all fields optional, JSON):**
 ```json
 {
   "name": "Somchai Newname",
-  "password": "NewPassword123!"
+  "email": "somchai.new@example.com",
+  "password": "NewPassword123!",
+  "title": "ดร.",
+  "phone": "0812345678",
+  "nationality": "Thai"
 }
 ```
+
+**Validation:**
+- `name` — ถ้าส่งมาต้องไม่ว่าง (max 255)
+- `email` — ถ้าส่งมาต้องเป็น format email (unique ต่อ `auth_provider`) · **ห้ามสำหรับ SSO account (422)**
+- `password` — ถ้าส่งมา min 8 ตัวอักษร
+- `title` / `phone` / `nationality` — string สูงสุด 255 (nullable)
 
 **Response `200`:**
 ```json
 {
   "status": "success",
   "message": "Profile updated successfully",
-  "user": { ...updated user object... }
+  "user": { ...updated user object (รวม avatar)... }
 }
 ```
+
+---
+
+### POST `/profile/avatar` — Upload / replace own avatar 🖼️
+
+🔒 **Auth required** (ทุก role) · Throttle: `10,1` · **(2026-11-11)**
+
+Multipart form — field `file`: รูปภาพ `jpeg` / `png` / `jpg` / `webp` ขนาดไม่เกิน **2MB**
+
+อัปโหลดซ้ำ = **แทนที่** — avatar เก่าถูกลบ (row + ไฟล์) อัตโนมัติ · 1 user มี avatar เดียวเสมอ
+
+**Response `201`:**
+```json
+{
+  "status": "success",
+  "message": "อัปเดตรูปโปรไฟล์เรียบร้อยแล้วค่ะนายท่าน ✨",
+  "data": {
+    "id": "image-uuid",
+    "file_name": "avatar.png",
+    "mime_type": "image/png",
+    "size": 12345,
+    "url": "http://localhost/api/v1/images/<image-uuid>/file?expires=...&signature=...",
+    "created_at": "2026-11-11T00:00:00.000000Z"
+  }
+}
+```
+
+> ดูไฟล์จริงผ่าน `GET /images/{id}/file` (signed URL อายุ 15 นาที + Bearer token) — **เจ้าของโปรไฟล์ + admin เท่านั้น** คนอื่น 403 · URL หมดอายุแล้วดึงใหม่ผ่าน `GET /me` จะได้ `user.avatar.url` สดทุกครั้ง
+
+**Errors:** `401` ไม่ login · `422` ไม่ใช่รูป / ไม่รองรับ mimes / เกิน 2MB · `500` อัปโหลดล้มเหลว (ไฟล์ถูก rollback)
+
+---
+
+### DELETE `/profile/avatar` — Remove own avatar 🖼️
+
+🔒 **Auth required**
+
+ลบ avatar (row + ไฟล์บน private disk)
+
+**Response `200`:**
+```json
+{
+  "status": "success",
+  "message": "ลบรูปโปรไฟล์เรียบร้อยแล้วค่ะ"
+}
+```
+
+**Errors:** `404` ยังไม่มี avatar ให้ลบ
 
 ---
 
@@ -1989,16 +2056,16 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 
 ### GET `/images/{id}/file` — Serve image via signed URL
 
-🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป / check-in evidence / รูป housekeeping) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
+🖼️ **(19/08/26)** — ให้บริการไฟล์รูป (สลิป / check-in evidence / รูป housekeeping / 🖼️ avatar รูปโปรไฟล์) จาก private disk ผ่าน **signed URL อายุ 15 นาที**
 
 🔐 **(26/10/26) ต้องส่ง `Authorization: Bearer <token>`** — token + signature คุมคู่กัน (2 ชั้น) · ผู้ขอต้องเป็น:
 - **admin** — เห็นได้ทุกรูป
-- **เจ้าของรูปตาม imageable** — สลิป (`BookingConfirmation`) / check-in evidence (`BookingRoom`) → เจ้าของ booking (org booking `user_id = null` → admin เท่านั้น) · รูป housekeeping (`HousekeepingTask`) → แม่บ้านที่ถูก `assigned_to`
+- **เจ้าของรูปตาม imageable** — สลิป (`BookingConfirmation`) / check-in evidence (`BookingRoom`) → เจ้าของ booking (org booking `user_id = null` → admin เท่านั้น) · รูป housekeeping (`HousekeepingTask`) → แม่บ้านที่ถูก `assigned_to` · 🖼️ **(11/11/26)** avatar (`User`) → เจ้าของโปรไฟล์เอง
 - type แปลกปลอม → admin เท่านั้น (fail-closed)
 
 **Throttle**: `10,1`
 
-- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending
+- URL ถูกออกให้เฉพาะใน response ของผู้มีสิทธิ์ เท่านั้น เช่น `slip_image_url` จาก `POST /bookings/{id}/confirm` หรือ `confirmation.slip_image.url` จาก verify/reject/pending หรือ 🖼️ `user.avatar.url` จาก `GET /me` / `data.url` จาก `POST /profile/avatar`
 - ⚠️ Route นี้ **exempt `RequireJsonAccept`** เฉพาะจุดเดียวในระบบ — เพื่อให้ fetch รูปที่ส่ง `Accept: image/*` โหลดได้ (มิฉะนั้นโดน 406) — เหตุผลถูกบันทึกใน `cline.md`
 - ไฟล์จริงอยู่ที่ `storage/app/private/slips/...` — ไม่มี symlink สาธารณะ
 

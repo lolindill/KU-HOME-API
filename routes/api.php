@@ -99,6 +99,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // 👤 User Profile (เจ้าของเท่านั้น)
     Route::get('/me', [UserController::class, 'me']);
     Route::put('/profile', [UserController::class, 'updateProfile']);
+    // 🖼️ Avatar (รูปโปรไฟล์) — multipart แยกจาก PUT /profile ที่เป็น JSON (แพทเทิร์นเดียวกับ evidence)
+    //    ดูไฟล์ผ่าน signed URL ของ images.file — เจ้าของ + admin เท่านั้น (ตรวจใน ImageController::show)
+    Route::post('/profile/avatar', [UserController::class, 'uploadAvatar'])->middleware('throttle:10,1');
+    Route::delete('/profile/avatar', [UserController::class, 'deleteAvatar']);
 
     // 📅 Bookings (เจ้าของบุ๊กกิ้งดูของตัวเองได้)
     Route::get('/bookings', [BookingController::class, 'getBookings']);

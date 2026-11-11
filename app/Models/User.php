@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -40,6 +41,21 @@ class User extends Authenticatable
     public function bookings(): HasMany
     {
         return $this->hasMany(Booking::class);
+    }
+
+    // 🖼️ รูปโปรไฟล์ (avatar) — 1 user มี avatar เดียว (controller ลบ row เก่าก่อนสร้างใหม่)
+    public function avatar(): MorphOne
+    {
+        return $this->morphOne(Image::class, 'imageable');
+    }
+
+    // 🖼️ ลบ user → ลบ avatar row ติดไปด้วย (hook deleting ของ Image จะลบไฟล์บน disk ให้)
+    //    ใช้ relation query ตรง ไม่พึ่ง cache บน instance — กัน stale cache ของ relation เดิม
+    protected static function booted(): void
+    {
+        static::deleting(function (User $user) {
+            $user->avatar()->first()?->delete();
+        });
     }
 
     public $incrementing = false;
