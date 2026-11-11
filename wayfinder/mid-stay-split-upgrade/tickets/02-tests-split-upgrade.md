@@ -2,7 +2,7 @@
 label: wayfinder:task
 type: AFK
 title: "HTTP feature suite — split-upgrade (ตาม seam ของ room-auto-assign-test)"
-status: open
+status: closed *(2026-11-11 — suite 30 tests/127 assertions ผ่านครบ + fix implementation bug 3 จุด, full suite 904 ไม่มี regression)*
 assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: ["01-implement-split-upgrade.md"]
 ---
@@ -55,3 +55,18 @@ blocked-by: ["01-implement-split-upgrade.md"]
 ## Definition of done
 
 suite ใหม่ผ่านครบ + `composer run test` (full suite) ไม่มี regression · รายงานจำนวนเคส/assertions ไว้ใน resolution ตามธรรมเนียม map
+
+## Resolution (2026-11-11)
+
+Suite สร้างโดย antigravity (`tests/Feature/FrontDeskSplitUpgradeTest.php` — 30 tests / 127 assertions ผ่านครบ) · session ของมันหยุดกลางทาง (รายงาน "fallback problem") เพราะเจอ implementation bug — หยุดถูกต้องตามกติกา "อย่าแก้ app/ เอง" · orchestrator (ZCode) รับช่วงตรวจ + fix + verify:
+
+**Bugs ฝั่ง implementation ที่พิสูจน์ด้วย test แล้วแก้ (commit `ff4be74`):**
+1. **`allocate(collect([$br2]))` TypeError** — RoomAllocator type-hint `Eloquent\Collection` แต่ `collect()` ให้ `Support\Collection` · TypeError ไม่ใช่ \Exception → หลุด catch → transaction ค้างเปิด → test ถัด ๆ ไป cascade fail "already an active transaction" · แก้เป็น `new \Illuminate\Database\Eloquent\Collection([$br2])` (ครอบ instance จริง — hydrate ไม่เวิร์ก ทำสำเนา detached attribute หลุด) + เปลี่ยน catch เป็น `\Throwable` (rollback กันทุกกรณี)
+2. **late_hours ได้ 0 เสมอ** — โค้ด `$addon->update(['late_hours' => 0])` ก่อนแล้วอ่าน `$addon->late_hours` ไปใส่ BR-2 (instance โดน mutate แล้ว) · แก้: capture ค่าก่อน update
+3. **ledger guard false-fire บิล overpay** — precedent literal `new+charges < paid → 422` โดนบิลที่ overpay อยู่ก่อนแล้ว · แก้ overpay-safe: ยิงเฉพาะเมื่อสมดุลหลัง split แย่ลงกว่าก่อน split (`new+charges < paid && previous+charges >= paid`) — ตรง edge "บิล overpay ผ่าน ไม่ 422" ของ spec
+
+**Bugs ฝั่ง test ที่แก้:** assertSame บน UUID ไม่ cast `(string)` (gotcha AGENTS.md) ที่ happy path
+
+**ผล:** suite ใหม่ 30 tests / 127 assertions ผ่านครบ · full suite **904 tests / 3,797 assertions** (874 → 904) ไม่มี regression · pint สะอาด
+
+**ครอบคลุม checklist:** auth/scope (401/403/404), validation 422 ทุกข้อ (container/split_date อดีต+ขอบ/room_type/price staff+admin/pin type ก่อนเช็คอื่น/computed pre-flight/discount/guests cap/extra beds cap/allocate fail + rollback ตรวจ BR-1 คงเดิม), happy path (admin checked_in/draft+discount/future holdingSlot/manual price envelope/staff computed/addon reslice/audit 2 แถว+machine row/invariant Σamount/multi-room freeze/repeat split/deferred), money guard (pin-freeze ข้าม 5-10/pair guard fail rollback/ledger guard+is_paid reset/overpay clamp 0/float semantics มติ #9)
