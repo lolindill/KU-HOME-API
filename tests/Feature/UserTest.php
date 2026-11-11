@@ -123,32 +123,103 @@ class UserTest extends TestCase
         ]);
     }
 
-    public function test_sso_user_profile_update_accepts_own_email_even_with_password_twin(): void
+    public function test_sso_user_cannot_change_email_via_profile(): void
     {
-        // 🎫 split user: SSO user อัปเดตโปรไฟล์ด้วย email ตัวเองได้ แม้จะมี password twin email เดียวกัน
-        User::factory()->create([
-            'email' => 'twin@ku.th',
+        // 🔒 (11/11/26) SSO user ห้ามแก้ email ผ่าน PUT /profile — email เป็น identity anchor
+        //    ที่ SSO service ใช้ค้นหา account ตอน login (แก้แล้ว login ถัดไปจะสร้าง user ใหม่ซ้ำ)
+        //    ทดสอบทั้ง ku_sso และ google รวมถึงเคสส่ง email เดิมของตัวเอง (ก็ยังล็อก)
+        $twin = User::factory()->create([
+            'email' => 'sso@ku.th', // password twin email เดียวกับ SSO user (ต่าง provider จึง unique ผ่าน)
             'auth_provider' => 'password',
         ]);
 
+        foreach (['ku_sso', 'google'] as $provider) {
+            $ssoUser = User::factory()->create([
+                'email' => 'sso@ku.th',
+                'auth_provider' => $provider,
+            ]);
+
+            $response = $this->actingAs($ssoUser, 'sanctum')
+                ->putJson('/api/v1/profile', [
+                    'name' => 'SSO Updated',
+                    'email' => 'sso@ku.th', // email เดิมของตัวเองก็ยังห้าม
+                ]);
+
+            $response->assertStatus(422);
+            $this->assertDatabaseHas('users', [
+                'id' => $ssoUser->id,
+                'email' => 'sso@ku.th',
+                'auth_provider' => $provider,
+            ]);
+            // ทั้ง request fail → name ต้องไม่เปลี่ยนตาม
+            $this->assertNotEquals('SSO Updated', $ssoUser->fresh()->name);
+        }
+    }
+
+    public function test_sso_user_can_update_other_profile_fields(): void
+    {
+        // 🔒 SSO user แก้อย่างอื่นได้ปกติ (name/title/phone/nationality) — ล็อกเฉพาะ email
         $ssoUser = User::factory()->create([
-            'email' => 'twin@ku.th',
             'auth_provider' => 'ku_sso',
+            'name' => 'KU User',
         ]);
 
-        $this->actingAs($ssoUser, 'sanctum');
+        $response = $this->actingAs($ssoUser, 'sanctum')
+            ->putJson('/api/v1/profile', [
+                'name' => 'Renamed KU User',
+                'title' => 'นิสิต',
+                'phone' => '0812345678',
+                'nationality' => 'Thai',
+            ]);
 
-        $response = $this->putJson('/api/v1/profile', [
-            'name' => 'SSO Updated',
-            'email' => 'twin@ku.th',
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', [
+            'id' => $ssoUser->id,
+            'name' => 'Renamed KU User',
+            'title' => 'นิสิต',
+            'phone' => '0812345678',
+            'email' => $ssoUser->email,
+        ]);
+    }
+
+    public function test_password_user_can_change_email_via_profile(): void
+    {
+        // 🔓 password user เปลี่ยน email เองได้ (unique scope ต่อ provider ตาม ticket 09)
+        $user = User::factory()->create([
+            'auth_provider' => 'password',
+            'email' => 'old@example.com',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->putJson('/api/v1/profile', [
+                'email' => 'new@example.com',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'email' => 'new@example.com',
+        ]);
+    }
+
+    public function test_admin_can_change_sso_user_email_via_users_endpoint(): void
+    {
+        // 🔓 admin PUT /users/{id} ไม่โดน SSO email lock (ล็อกเฉพาะ /profile)
+        $this->actingAsAdmin();
+
+        $ssoUser = User::factory()->create([
+            'auth_provider' => 'ku_sso',
+            'email' => 'sso@ku.th',
+        ]);
+
+        $response = $this->putJson("/api/v1/users/{$ssoUser->id}", [
+            'email' => 'fixed@ku.th',
         ]);
 
         $response->assertStatus(200);
         $this->assertDatabaseHas('users', [
             'id' => $ssoUser->id,
-            'name' => 'SSO Updated',
-            'email' => 'twin@ku.th',
-            'auth_provider' => 'ku_sso',
+            'email' => 'fixed@ku.th',
         ]);
     }
 

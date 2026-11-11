@@ -328,7 +328,9 @@ class ImageTest extends TestCase
             'size' => 16,
             'original_name' => 'test.jpg',
             'category' => 'other',
-            'imageable_type' => User::class,
+            // 🖼️ (11/11/26) Room::class ไม่มี case ใน ImageController::show → fail-closed (admin เท่านั้น)
+            //    (เดิมใช้ User::class เป็น unknown type — ตอนนี้ User เป็น type ที่รู้จักแล้วเพราะ avatar)
+            'imageable_type' => Room::class,
             'imageable_id' => $user->id,
             'uploaded_by' => $user->id,
         ]);

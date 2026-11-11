@@ -5,8 +5,12 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
+use App\Http\Requests\UploadAvatarRequest;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class UserController extends Controller
 {
@@ -81,7 +85,7 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'User profile fetched successfully',
-            'user' => $request->user(),
+            'user' => $request->user()->load('avatar'),
         ]);
     }
 
@@ -94,6 +98,13 @@ class UserController extends Controller
         // Role changes must go through admin update (PUT /users/{id})
         unset($validated['role'], $validated['ver']);
 
+        // 🔒 SSO user (ku_sso/google) ห้ามแก้ email — ตัดออกเป็น defense-in-depth
+        //    (ชั้นแรกคือ rule 'prohibited' ใน UpdateUserRequest → 422)
+        //    email เป็น identity anchor ที่ SSO service ใช้ค้นหา account ตอน login
+        if ($user->auth_provider !== 'password') {
+            unset($validated['email']);
+        }
+
         if (isset($validated['password'])) {
             $validated['password'] = bcrypt($validated['password']);
         }
@@ -103,7 +114,91 @@ class UserController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Profile updated successfully',
-            'user' => $user,
+            'user' => $user->fresh(['avatar']),
+        ]);
+    }
+
+    /**
+     * 🖼️ POST /profile/avatar — อัปโหลด/แทนที่รูปโปรไฟล์ (multipart `file`)
+     *    1 user มี avatar เดียว — อัปโหลดใหม่ = ลบ row/ไฟล์เก่า (hook ของ Image จัดการ disk)
+     *    ดูไฟล์ผ่าน signed URL ของ images.file (เจ้าของ + admin เท่านั้น — ตรวจใน ImageController::show)
+     */
+    public function uploadAvatar(UploadAvatarRequest $request)
+    {
+        $user = $request->user();
+        $file = $request->file('file');
+
+        $storedPath = null;
+        try {
+            DB::beginTransaction();
+
+            // 🖼️ เก็บไฟล์บน private disk local (storage/app/private/avatars)
+            $storedPath = $file->store('avatars', 'local');
+
+            // 🖼️ ใช้ relation query ตรง (avatar()->first()) ไม่พึ่ง cache บน instance
+            //    — กัน stale cache จาก instance ที่ถูกใช้ซ้ำ (เช่น test/long-lived request)
+            $oldAvatar = $user->avatar()->first();
+
+            $image = $user->avatar()->create([
+                'path' => $storedPath,
+                'disk' => 'local',
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+                'original_name' => $file->getClientOriginalName(),
+                'uploaded_by' => $user->id,
+                'category' => 'avatar',
+            ]);
+
+            // 🖼️ แทนที่ — ลบ row เก่าหลังสร้างใหม่สำเร็จ (hook deleting ลบไฟล์เก่าให้)
+            $oldAvatar?->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'อัปเดตรูปโปรไฟล์เรียบร้อยแล้วค่ะนายท่าน ✨',
+                'data' => [
+                    'id' => $image->id,
+                    'file_name' => $image->original_name,
+                    'mime_type' => $image->mime_type,
+                    'size' => $image->size,
+                    'url' => $image->url,
+                    'created_at' => $image->created_at?->toISOString(),
+                ],
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            if ($storedPath !== null) {
+                Storage::disk('local')->delete($storedPath);
+            }
+            Log::error('Upload avatar failed: '.$e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'เกิดข้อผิดพลาดในการอัปโหลดรูปโปรไฟล์ กรุณาลองใหม่อีกครั้งนะคะ 🥺',
+            ], 500);
+        }
+    }
+
+    /**
+     * 🖼️ DELETE /profile/avatar — ลบรูปโปรไฟล์ (row + ไฟล์ ผ่าน hook deleting ของ Image)
+     */
+    public function deleteAvatar(Request $request)
+    {
+        $avatar = $request->user()->avatar()->first();
+
+        if (! $avatar) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบรูปโปรไฟล์ให้ลบค่ะนายท่าน',
+            ], 404);
+        }
+
+        $avatar->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'ลบรูปโปรไฟล์เรียบร้อยแล้วค่ะ',
         ]);
     }
 

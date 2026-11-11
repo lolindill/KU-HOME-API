@@ -7,6 +7,7 @@ use App\Models\BookingConfirmation;
 use App\Models\BookingRoom;
 use App\Models\HousekeepingTask;
 use App\Models\Image;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -14,13 +15,15 @@ use Illuminate\Support\Facades\Storage;
  * 🖼️ Image Controller (19/08/26) — ให้บริการไฟล์รูปผ่าน signed URL
  *
  * draft upload() ถูกถอดออกแล้ว — รูปถูกสร้างผ่าน flow ของเจ้าของเสมอ
- * (ปัจจุบัน: POST /bookings/{id}/confirm สร้าง slip Image ผูกกับ confirmation)
+ * (ปัจจุบัน: POST /bookings/{id}/confirm สร้าง slip Image ผูกกับ confirmation
+ *  และ POST /profile/avatar สร้าง avatar Image ผูกกับ user)
  *
  * 🔐 (26/10/26) กติกาสิทธิ์ — token + signature คุมคู่กัน (2 ชั้น):
  *   admin ผ่านทุกประเภท · เจ้าของตาม imageable:
  *   - BookingConfirmation (สลิป) / BookingRoom (check-in evidence) → เจ้าของ booking
  *     (org booking user_id = null → admin เท่านั้น เหมือน semantics ของ BookingController::showById)
  *   - HousekeepingTask (รูปก่อน/หลังเก็บ) → assigned_to
+ *   - 🖼️ (11/11/26) User (รูปโปรไฟล์ avatar) → เจ้าของโปรไฟล์เอง
  *   - type อื่น/ไม่รู้จัก → admin เท่านั้น (fail-closed)
  */
 class ImageController extends Controller
@@ -50,6 +53,8 @@ class ImageController extends Controller
             $imageable instanceof BookingConfirmation => $imageable->booking?->user_id,
             $imageable instanceof BookingRoom => $imageable->booking?->user_id,
             $imageable instanceof HousekeepingTask => $imageable->assigned_to,
+            // 🖼️ รูปโปรไฟล์ (avatar) → เจ้าของโปรไฟล์เอง
+            $imageable instanceof User => $imageable->id,
             default => null,
         };
 
