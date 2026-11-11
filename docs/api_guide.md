@@ -2798,6 +2798,99 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 
 ---
 
+### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade` — Mid-stay split-upgrade (แบ่งครึ่งช่วงพักขึ้น tier สูงกว่า)
+
+✂️ **(2026-11-11)** — แบ่ง `booking_room` หนึ่งห้องออกเป็น **สองช่วง**: **BR-1** ถูกตัด `check_out` สั้นลงถึง `split_date` (คง tier/สัญญาเดิม ราคาสัดส่วนตามคืนที่เหลือ) + **BR-2** ใหม่ช่วงครึ่งหลังบน `room_type` ที่ **tier สูงกว่า** (ราคา manual หรือ computed) — ใช้เมื่อแขกอยากอัปเกรดเฉพาะครึ่งหลังของช่วงพัก เช่น พัก 4 คืน Standard แต่ 2 คืนหลังขึ้น Deluxe
+
+🔒 **Admin + Staff only** (`role:admin,staff` + re-check ใน controller) · ไม่มี throttle
+
+**เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
+- Booking container ต้องเป็น `confirmed` **หรือ `draft`** · BR ภายใต้บิล `confirmed` = `checked_in|confirmed` · ภายใต้บิล `draft` = `draft` (`paid`/`pending`/`verify_error`/`complete` → 422)
+- บิลมีส่วนลด (`discount_code` หรือ redemption held/used) → **422** (v1 ยังไม่รองรับ — ชะตา redemption ยังไม่ออกแบบ)
+- `split_date`: ต้องอยู่ใน `(check_in, check_out)` เคร่งครัด (ครึ่งละ ≥ 1 คืน) **และห้ามย้อนหลัง** (ต้อง ≥ วันนี้ตาม tz Asia/Bangkok)
+- 🎫 **กติกา upgrade-only:** `room_type_id` ใหม่ ≠ เดิม + เรทรายวัน effective ของ **เจ้าของบิล** (`GlobalRate::getEffectiveDailyRate` — ku_member ใช้ `daily_ku`) ต้อง **แพงกว่า** เดิมอย่างเคร่งครัด
+- จำนวนแขกเดิม ≤ `max_guests` ของ tier ใหม่ (เกิน → 422 แนะเลือก tier ที่รองรับครบ — แก้ guests บน BR `checked_in` ไม่ได้ทาง API)
+- `extra_beds_by_night` ครึ่งหลัง (คีย์ ≥ `split_date`) รายคืนต้อง ≤ `max_extra_beds` ของ tier ใหม่
+
+**เรื่องราคา:**
+- **BR-1 (สัญญาสัดส่วน):** `room_amount ใหม่ = intdiv(room_amount₀ × n₁, n₀)` — คงเรทสัญญาเดิม ไม่คำนวณจาก global_rates
+- **BR-2 แบบ manual:** ส่ง `price_per_night` — **admin เท่านั้น** (staff ส่ง → 422) และต้อง ≥ `ceil(room_amount₀ / n₀)` (อัปเกรดจริงเทียบสัญญา)
+- **BR-2 แบบ computed:** ไม่ส่ง `price_per_night` = ใช้ `getEffectiveDailyRate` ของ tier ใหม่ × n₂ · ถ้า `computed × n₂ < ส่วนที่ขาดของสัญญา` → 422 พร้อมข้อความแนะให้ admin ใส่ `price_per_night` เอง (เรท computed อาจต่ำกว่าสัญญาเฉลี่ย เช่น บิลที่เคยใช้ `set_room_price`)
+- ทั้งหมดไหลผ่าน `DiscountService::reprice()` ด้วย **override map ครบทุก BR ของบิล** — BR อื่น freeze ที่ `room_amount` ปัจจุบันของตัวเอง → ยอด delta เกิดจากคู่ split เท่านั้น (BR จำนวนข้าม 5/10 ไม่กระทบยอดตอน split)
+- 💰 **Money guard:** ส่วนค่าห้องรวมก่อนปัด `br1' + br2 ≥ room_amount₀` (exact) + ledger guard ไม่ลดยอดต่ำกว่าเงินที่ชำระ (บิล overpay ผ่าน — ไม่ false-fire) + `is_paid` reset false เมื่อ surcharge ทำยอดค้าง
+
+> ⚠️ **คำเตือนราคา one-shot (สำคัญสำหรับ front desk):** ราคาที่ตกลงตอน split (manual price / สัญญาสัดส่วน) **ไม่ persist** — `reprice()` ครั้งถัดไปที่แตะบิลนี้ (เช่น เพิ่ม/แก้ addon ผ่าน `PUT /bookings/{id}/rooms/{brId}` โหมด checked_in, `change-room`) จะคิด `room_amount` ของ BR-1/BR-2 **ใหม่จาก global_rates วันนี้** · **ตรวจ surcharge envelope หลังแตะ addon/change-room บนบิลที่เคย split ทุกครั้ง** (ตั้งใจออกแบบแบบนี้ — ไม่ใช่ bug)
+
+**ผลลัพธ์ (ใน transaction เดียว):** BR-1 ถูกตัด `check_out` = `split_date` (สถานะคงเดิม — ไม่ auto เช็คเอาท์) · BR-2 สร้างใหม่ (guests/bed_preference คัดลอก — bed option ไม่มีใน tier ใหม่ → null; สถานะ `draft` แล้ว promote `confirmed` ผ่าน `transitionStatus` ภายใต้บิล confirmed / คง `draft` ภายใต้บิล draft) · จัดห้อง BR-2 ทันที (pin `room_id` ที่ต้องเป็น type ที่ประกาศ หรือ auto-allocate ผ่าน `RoomAllocator`) · addon ถูกแยก 2 row (early คง BR-1, late ย้าย BR-2, breakfast คัดลอก, extra_beds แบ่งคืน) · **สถานะห้องกายภาพทั้งสองไม่ถูกแตะ** — front desk เช็คเอาท์ BR-1 / เช็คอิน BR-2 เองวันจริงด้วย flow ปกติ (ห้อง BR-2 ถูกยึด slot ผ่าน `holdingSlot()` ทันที — check-in ซ้ำทับช่วงโดน overlap guard) · audit: machine row `draft→confirmed` ของ BR-2 + note rows ของ BR-1/BR-2 (causer = auth user)
+
+**Request Body:**
+```json
+{
+  "split_date": "2026-11-15",
+  "room_type_id": "deluxe-room-type-uuid",
+  "price_per_night": 1500,
+  "room_id": "room-uuid (optional — ไม่ส่ง = auto-allocate)",
+  "notes": "Guest upgraded for the last 2 nights (optional)"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `split_date` | required, date — ใน `(check_in, check_out)` + ≥ วันนี้ |
+| `room_type_id` | required, uuid, exists — ต้องเป็น tier แพงกว่าเดิม |
+| `price_per_night` | nullable, integer — **admin only**, ≥ `ceil(room_amount₀/n₀)` |
+| `room_id` | nullable, uuid, exists — pin ห้อง BR-2 (type ต้องตรง `room_type_id`) |
+| `notes` | nullable, string, max:255 — ต่อท้าย audit note ของ BR-2 |
+
+**Response `200` (ตัวอย่าง: Standard 4 คืน 1,000/คืน = 4,000 · split วันที่ 3 · Deluxe 1,500/คืน):**
+```json
+{
+  "status": "success",
+  "message": "แบ่งช่วงพักและอัปเกรดประเภทห้องเป็น Deluxe เรียบร้อยแล้วค่ะนายท่าน ✨ ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳",
+  "split_summary": {
+    "br1_id": "br-uuid-1",
+    "br2_id": "br-uuid-2",
+    "br1_new": {
+      "check_out": "2026-11-15",
+      "room_amount": 2000
+    },
+    "br2": {
+      "check_in": "2026-11-15",
+      "check_out": "2026-11-17",
+      "room_type_id": "deluxe-room-type-uuid",
+      "room_id": "room-uuid",
+      "price_per_night": 1500,
+      "nights": 2
+    }
+  },
+  "previous_total_amount": 4000,
+  "total_amount": 5000,
+  "surcharge_amount": 1000,
+  "paid_amount": 4000,
+  "outstanding_amount": 1000,
+  "payment_type": "full",
+  "deposit_amount": 0
+}
+```
+
+**Response `422` (ตัวอย่าง guests เกิน cap):**
+```json
+{
+  "status": "error",
+  "message": "split ขึ้นประเภทห้อง Deluxe ไม่ได้เพราะผู้เข้าพัก 3 คน เกินจำนวนสูงสุดที่รองรับได้ (2 คน) — กรุณาเลือกประเภทห้องที่รองรับจำนวนผู้เข้าพักได้ครบนะคะ 👥"
+}
+```
+
+| Code | เมื่อ |
+|---|---|
+| `403` | ไม่ใช่ admin/staff |
+| `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบ room_type / room |
+| `422` | ผิดเงื่อนไขใด ๆ ด้านบน (container/BR สถานะผิด, บิลมีส่วนลด, split_date อดีต/นอกช่วง, tier ไม่แพงกว่า, staff ใส่ราคา / ราคาต่ำกว่าสัญญา, computed ไม่พอส่วนต่าง, guests/extra_beds เกิน cap, pin ผิด type, ห้องไม่พร้อม/maintenance/overlap, allocate fail, money/ledger guard) |
+
+> 💳 **บิล deferred:** split ผ่านปกติ — surcharge เข้า `outstanding_amount` เก็บทีหลัง (ประตูเงินตอนเช็คเอาท์ยกเว้น deferred อยู่แล้ว) · **บิล draft:** BR-2 ได้สถานะ `draft` และ BR-1 ยังแก้ผ่าน `PUT /bookings/{id}/rooms/{brId}` ได้หลัง split (แต่บิล draft ที่มีโค้ดส่วนลดรออยู่จะโดนบล็อก 422 ตาม v1)
+
+---
+
 ### POST `/front-desk/{bookingId}/mark-no-show` — Mark guest as no-show
 
 🔒 **Admin only**

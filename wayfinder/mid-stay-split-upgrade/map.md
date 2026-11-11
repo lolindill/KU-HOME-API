@@ -1,12 +1,12 @@
 ---
 label: wayfinder:map
 title: "split-upgrade — แบ่งช่วงพักครึ่งหนึ่งย้ายขึ้น tier สูงกว่า (mid-stay)"
-status: open
+status: closed
 ---
 
 # Wayfinder Map — Mid-stay split-upgrade (แบ่งครึ่งช่วงพักอัปเกรด tier)
 
-## Destination
+## Destination ✅ COMPLETED (2026-11-11)
 
 Endpoint ฝั่ง front-desk ใหม่แบ่ง `booking_room` ของบิลที่ยังไม่ปิด (container `confirmed`/`draft` — BR `checked_in`/`confirmed`/`draft`) ออกเป็นสองช่วง:
 **BR-1** ถูกตัด `check_out` สั้นลงถึง `split_date` (คง tier/สัญญาเดิม ราคาสัดส่วนตามคืนที่เหลือ) + **BR-2** ใหม่ช่วงครึ่งหลังบน `room_type` ที่ tier สูงกว่า (ราคา manual หรือ computed) — ผ่าน `reprice()` override จบด้วย surcharge envelope

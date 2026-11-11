@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "docs — cline.md + api_guide + AGENTS.md สำหรับ split-upgrade"
-status: open
-assignee:
+status: closed *(2026-11-11 — เอกสาร 3 จุดอัปเดตจากโค้ดจริงบน dev ครบ)*
+assignee: ZCode (orchestrator session 2026-11-11)
 blocked-by: ["01-implement-split-upgrade.md"]
 ---
 
@@ -22,3 +22,11 @@ blocked-by: ["01-implement-split-upgrade.md"]
 ## Definition of done
 
 เอกสาร 3 ไฟล์อัปเดต · ตัวเลข/ชื่อ field/สถานะทุกจุดตรงกับโค้ดจริงบน `dev` · commit ไปกับ branch ที่ทำงานอยู่
+
+## Resolution (2026-11-11)
+
+ทำโดย ZCode orchestrator (ตาม flow ที่ owner สั่ง — ticket 03 เป็นงานของ session นี้) หลัง tickets 01+02 ปิด อ้างจากโค้ดจริงบน branch (implement `ee4fd5e` + tests/fixes `ff4be74`):
+
+- **cline.md** — หัวข้อใหม่ "✂️ Split-upgrade (แบ่งครึ่งช่วงพักอัปเกรด tier)": context + มติล็อก 11 ข้อ (ห้าม re-litigate) + deviation 4 จุด (money guard ก่อนปัด / pin ทุก BR / one-shot float / ledger guard overpay-safe + is_paid reset) + pre-merge bug fixes 3 จุด (Eloquent Collection / late_hours capture / overpay-safe — test-driven ก่อน merge จึงไม่เข้า bug index) + test record
+- **docs/api_guide.md** — endpoint section แทรกหลัง change-room: เงื่อนไขครบ, กติกาเรื่องราคา (manual/computed/pre-flight), ⚠️ คำเตือนราคา one-shot ให้ front desk อ่านชัด, ผลลัพธ์ใน transaction, request/response + field table, error matrix 403/404/422, หมายเหตุ deferred + draft
+- **AGENTS.md** — bullet ✂️ (11/11/26) ต่อท้าย BookingRoom bullet ใน State Machines ชี้ cline.md (สรุป endpoint + ไม่ transition สถานะ + ราคา one-shot + มติ 11 ข้อ)
