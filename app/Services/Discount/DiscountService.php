@@ -175,8 +175,10 @@ class DiscountService
      *      ตามเอกสารหลักเกณฑ์ของโรงแรม (เช่น Deluxe month 18,000 → 45 คืน = 18,000 + 15×600
      *      = 27,000) · สูตรนี้ monotonic ทุกคืน — ไม่มี cliff (supersede กฎ b=floor(y/20)
      *      ของ amendment 2026-10-20)
+     *
+     * @param  array<string, int>  $roomAmountOverrides  map [brId => room_amount_Baht] สำหรับ freeze/override ค่าห้อง (split-upgrade มติ #5, #10)
      */
-    public function reprice(Booking $booking): Booking
+    public function reprice(Booking $booking, array $roomAmountOverrides = []): Booking
     {
         $discount = $booking->discount_code ? Discount::where('code', $booking->discount_code)->first() : null;
         $holds = DiscountRedemption::whereIn('booking_room_id', $booking->bookingRooms()->pluck('id'))->get();
@@ -201,34 +203,41 @@ class DiscountService
             $nights = (int) Carbon::parse($br->check_in)->startOfDay()
                 ->diffInDays(Carbon::parse($br->check_out)->startOfDay()) ?: 1;
 
-            // 🌙 เขตรายเดือน (admin + x ≥ gate + มีเรท month) — ไม่เข้าเงื่อนไข = เรทรายวัน
-            //    (ไม่มีเรท month → fallback daily เส้นตรงตามมติ owner 2026-10-22)
-            $monthRate = GlobalRate::getRoomRate($br->roomType, 'month');
-            $isMonthly = $isAdminPath && $nights >= $monthlyGate && $monthRate > 0;
-
-            if ($isMonthly) {
-                // เดือนเต็ม + เศษคิดรายวันแบบเดือน (month÷30) — intdiv(x × month, 30) คิดตรง
-                // กันพอดี (a×month + intdiv(c×month, 30)) โดยไม่เกิดเศษเพนนี
-                $roomAmount = intdiv($nights * $monthRate, 30);
-                $rate = intdiv($roomAmount, $nights); // เรทเฉลี่ย/คืน — อ้างอิงฐานส่วนลด
+            if (array_key_exists($br->id, $roomAmountOverrides)) {
+                // 🔀 (2026-11-11) split-upgrade override map (มติ #5, #10):
+                //    ใช้ room_amount ที่ส่งมาโดยตรง (BR-1 สัญญาสัดส่วน / BR-2 manual หรือ computed / BR อื่น freeze)
+                $roomAmount = (int) $roomAmountOverrides[$br->id];
+                $rate = intdiv($roomAmount, $nights);
             } else {
-                $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
+                // 🌙 เขตรายเดือน (admin + x ≥ gate + มีเรท month) — ไม่เข้าเงื่อนไข = เรทรายวัน
+                //    (ไม่มีเรท month → fallback daily เส้นตรงตามมติ owner 2026-10-22)
+                $monthRate = GlobalRate::getRoomRate($br->roomType, 'month');
+                $isMonthly = $isAdminPath && $nights >= $monthlyGate && $monthRate > 0;
 
-                // ชั้นจำนวนห้อง (admin เท่านั้น) — group ทับ daily/daily_ku ทั้งบิลสั้นและ
-                // เคส fallback รายเดือนที่ไม่มีเรท month · org booking (userless) → daily
-                if ($isAdminPath) {
-                    $groupCode = $billRoomCount >= (int) config('booking.group_large_min_rooms', 10)
-                        ? 'min_10_rooms'
-                        : ($billRoomCount >= (int) config('booking.group_min_rooms', 5) ? 'min_5_rooms' : null);
-                    if ($groupCode !== null) {
-                        $groupRate = GlobalRate::getRoomRate($br->roomType, 'group', $groupCode);
-                        if ($groupRate > 0) {
-                            $rate = $groupRate;
+                if ($isMonthly) {
+                    // เดือนเต็ม + เศษคิดรายวันแบบเดือน (month÷30) — intdiv(x × month, 30) คิดตรง
+                    // กันพอดี (a×month + intdiv(c×month, 30)) โดยไม่เกิดเศษเพนนี
+                    $roomAmount = intdiv($nights * $monthRate, 30);
+                    $rate = intdiv($roomAmount, $nights); // เรทเฉลี่ย/คืน — อ้างอิงฐานส่วนลด
+                } else {
+                    $rate = GlobalRate::getEffectiveDailyRate($br->roomType, $user);
+
+                    // ชั้นจำนวนห้อง (admin เท่านั้น) — group ทับ daily/daily_ku ทั้งบิลสั้นและ
+                    // เคส fallback รายเดือนที่ไม่มีเรท month · org booking (userless) → daily
+                    if ($isAdminPath) {
+                        $groupCode = $billRoomCount >= (int) config('booking.group_large_min_rooms', 10)
+                            ? 'min_10_rooms'
+                            : ($billRoomCount >= (int) config('booking.group_min_rooms', 5) ? 'min_5_rooms' : null);
+                        if ($groupCode !== null) {
+                            $groupRate = GlobalRate::getRoomRate($br->roomType, 'group', $groupCode);
+                            if ($groupRate > 0) {
+                                $rate = $groupRate;
+                            }
                         }
                     }
-                }
 
-                $roomAmount = $rate * $nights;
+                    $roomAmount = $rate * $nights;
+                }
             }
 
             $isHeld = $holds->contains('booking_room_id', $br->id);

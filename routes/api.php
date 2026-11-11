@@ -272,6 +272,11 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
             Route::post('/{bookingId}/rooms/{bookingRoomId}/change-room', [FrontDeskController::class, 'changeRoom'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
+
+            // 🔀 Mid-stay split-upgrade (2026-11-11) — แบ่งช่วงพักครึ่งหนึ่งย้ายขึ้น tier สูงกว่า
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [FrontDeskController::class, 'splitUpgrade'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
         });
     });
 

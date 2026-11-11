@@ -2,8 +2,8 @@
 label: wayfinder:task
 type: AFK
 title: "implement POST /front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade"
-status: open
-assignee:
+status: closed *(2026-11-11 — implement ครบ Recipe 14 ข้อ + edge cases, review ผ่าน, suite 874 tests ผ่านหมด)*
+assignee: antigravity (agent-hub, dispatch โดย session 2026-11-11)
 blocked-by: []
 ---
 
@@ -69,3 +69,13 @@ Error: envelope {"status":"error","message":...} + 422/403/404 ตามเค�
 ## Definition of done
 
 Endpoint ตาม contract ครบทุก validate · guard ผ่านทุก edge ข้างบน · audit ครบ (machine transition row + note rows ตามข้อ 12) · ไม่มี migration ใหม่ · pint สะอาด · full suite ไม่มี regression (suite ของ tickets/02 มาปิดทีหลัง — ticket นี้อย่างน้อยรัน suite เดิมผ่าน)
+
+## Resolution (2026-11-11)
+
+Implement เสร็จโดย antigravity (gemini-3.8-flash, session hub_sess_9fea20202887) บน `feature/split-upgrade` commit `ee4fd5e` · review โดย ZCode session (orchestrator):
+
+- **ไฟล์แก้ 3 ไฟล์:** `FrontDeskController.php` (+430 — method `splitUpgrade` :627-1044), `DiscountService.php` (reprice รับ optional `$roomAmountOverrides` map — backward compatible), `routes/api.php` (+5 — route ใหม่ใต้กลุ่ม front-desk มี where uuid ครบ)
+- **ครบ Recipe 14 ข้อ** — จุดยืนยันสำคัญ: BR-2 ผ่าน `transitionStatus('confirmed', $userRole)` จริง (ได้ machine audit row) · pin check `room_type_id` ก่อน validate อื่น · staff computed pre-flight ตัดก่อนถึง money guard · override map ครบทุก BR (BR อื่น freeze) · money guard เทียบ `roomAmount1 + br2RoomAmount < roomAmount0` ก่อนปัด · ledger guard + reset `is_paid` · note rows 2 แถว from=to + causer · ไม่แตะสถานะห้องกายภาพ
+- **edge cases ครบตาม checklist:** split_date อดีต (tz Bangkok) / นอกช่วง / เท่าขอบ / tier เท่าหรือต่ำกว่า / staff ใส่ราคา / guests cap reword ตามมติ #11 / addon re-slice + max_extra_beds / pin ผิด type / allocate fail rollback ครบ / บิล draft BR-2 mirror draft / deferred ผ่านปกติ
+- **DoD:** pint สะอาด · full suite **874 tests / 3,670 assertions ผ่านหมด ไม่มี regression** · ไม่มี migration · ไม่แตะ tests/
+- จุดตัดสินเอง 1 จุด (ยอมรับได้): pre-flight computed path ใช้กับทั้ง staff **และ** admin ที่ไม่กรอกราคา — superset ของ spec (ข้อความแนะ admin ใส่ราคา ยังถูกต้องทั้งสองกรณี)
