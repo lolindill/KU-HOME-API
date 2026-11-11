@@ -4286,17 +4286,18 @@ Accept: application/json
 
 ### 1. Upload Check-in Evidence
 
-อัปโหลดไฟล์หลักฐานการเข้าพักสำหรับห้องพักที่ระบุ (`booking_rooms.id`)
+อัปโหลดไฟล์หลักฐานการเข้าพักสำหรับห้องพักที่ระบุ (`booking_rooms.id`) ภายใต้บิลการจอง (`bookings.id`)
 
 - **Method:** `POST`
-- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **URL:** `/api/v1/front-desk/{bookingId}/rooms/{bookingRoomId}/evidence`
 - **Headers:**
   - `Authorization: Bearer <TOKEN>`
   - `Content-Type: multipart/form-data`
   - `Accept: application/json`
 - **Roles:** `admin`, `staff`
 - **Path Parameters:**
-  - `id` *(string, required)*: UUID ของ `booking_rooms`
+  - `bookingId` *(string, required)*: UUID ของ `bookings`
+  - `bookingRoomId` *(string, required)*: UUID ของ `booking_rooms`
 - **Body (Multipart Form-Data):**
   - `file` *(file, required)*: ไฟล์ภาพหรือเอกสาร (mimes: `jpeg, png, jpg, webp, pdf`, ขนาดสูงสุด 10MB = 10,240 KB)
   - `type` *(string, required)*: ประเภทของหลักฐาน ค่าที่รองรับได้แก่:
@@ -4334,7 +4335,7 @@ Accept: application/json
 
 - **401 Unauthorized:** ไม่ได้ส่ง Token หรือ Token หมดอายุ
 - **403 Forbidden:** ผู้ใช้ไม่ใช่ role `admin` หรือ `staff`
-- **404 Not Found:** ไม่พบ `booking_room` ตาม UUID ที่ส่งมา
+- **404 Not Found:** ไม่พบ `booking_room` ตาม UUID ที่ส่งมา หรือ `booking_room` ไม่อยู่ภายใต้ `bookingId` ที่ระบุ (หรือ UUID format ไม่ถูกต้อง)
 - **422 Unprocessable Entity:** 
   - ส่งประเภทหลักฐานผิด / ไม่ได้แนบไฟล์ / ไฟล์เกิน 10MB / นามสกุลไฟล์ไม่รองรับ
   - สถานะห้องไม่อยู่ในกลุ่มที่อนุญาต (เช่น ยังเป็น `draft` หรือถูกมาร์ก `no_show`)
@@ -4346,13 +4347,14 @@ Accept: application/json
 ดึงรายการหลักฐานทั้งหมดของห้องพักที่ระบุ พร้อม Signed URL สดใหม่ (อายุ 15 นาที) สำหรับเปิดดูไฟล์
 
 - **Method:** `GET`
-- **URL:** `/api/v1/front-desk/booking-rooms/{id}/evidence`
+- **URL:** `/api/v1/front-desk/{bookingId}/rooms/{bookingRoomId}/evidence`
 - **Headers:**
   - `Authorization: Bearer <TOKEN>`
   - `Accept: application/json`
 - **Roles:** `admin`, `staff`
 - **Path Parameters:**
-  - `id` *(string, required)*: UUID ของ `booking_rooms`
+  - `bookingId` *(string, required)*: UUID ของ `bookings`
+  - `bookingRoomId` *(string, required)*: UUID ของ `booking_rooms`
 
 #### Success Response (200 OK)
 

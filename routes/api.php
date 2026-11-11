@@ -297,13 +297,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
             // 🚪 Check-in Evidence (REQ-033) — อัปโหลดบัตร ปชช./registration/PDPA
             //    ผูกกับ BookingRoom (เก็บ 365 วัน)
-            //    🧾 debt (2026-11-11, wayfinder/api-route-hygiene ticket 04): address ตรงด้วย
-            //    booking-rooms/{id} ต่างจากพี่น้อง nested {bookingId}/rooms/{bookingRoomId}
-            //    — รอ unify พร้อม api_patches (มติ scrutinize: เลื่อน เพราะ breaking)
-            Route::post('/booking-rooms/{id}/evidence', [CheckinEvidenceController::class, 'uploadEvidence'])
-                ->where('id', '[0-9a-f\-]{36}');
-            Route::get('/booking-rooms/{id}/evidence', [CheckinEvidenceController::class, 'getEvidences'])
-                ->where('id', '[0-9a-f\-]{36}');
+            Route::post('/{bookingId}/rooms/{bookingRoomId}/evidence', [CheckinEvidenceController::class, 'uploadEvidence'])
+                ->whereUuid(['bookingId', 'bookingRoomId']);
+            Route::get('/{bookingId}/rooms/{bookingRoomId}/evidence', [CheckinEvidenceController::class, 'getEvidences'])
+                ->whereUuid(['bookingId', 'bookingRoomId']);
         });
     });
 
