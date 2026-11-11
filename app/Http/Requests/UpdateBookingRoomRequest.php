@@ -57,6 +57,9 @@ class UpdateBookingRoomRequest extends FormRequest
             'billing_address' => 'nullable|string|max:255',
             'billing_comment' => 'nullable|string|max:255',
 
+            // 💰 manual price_per_night (admin+staff — tier-endpoints-v2)
+            'price_per_night' => 'nullable|integer|min:0',
+
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'addons' => 'nullable|array',
             // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
@@ -140,6 +143,8 @@ class UpdateBookingRoomRequest extends FormRequest
             'check_out.required' => 'กรุณาระบุวันที่เช็คเอาท์',
             'check_out.after' => 'วันที่เช็คเอาท์ต้องอยู่หลังวันที่เช็คอิน',
             'bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',
+            'price_per_night.integer' => 'ราคาต่อคืนต้องเป็นตัวเลขจำนวนเต็มค่ะ',
+            'price_per_night.min' => 'ราคาต่อคืนต้องไม่ติดลบค่ะ',
             'addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
             'addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
             'addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',

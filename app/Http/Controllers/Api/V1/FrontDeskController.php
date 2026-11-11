@@ -352,6 +352,7 @@ class FrontDeskController extends Controller
         $validated = $request->validate([
             'room_id' => 'required|uuid|exists:rooms,id',
             'notes' => 'nullable|string|max:255',
+            'price_per_night' => 'nullable|integer|min:0',
         ]);
 
         try {
@@ -457,20 +458,6 @@ class FrontDeskController extends Controller
                 );
             }
 
-            // 🎫 กติกา upgrade-only — type ใหม่ต้องแพงกว่าหรือเท่ากัน
-            //    เทียบ effective daily rate ของเจ้าของบิล (บริบทเดียวกับ reprice — ku_member ใช้ daily_ku)
-            if ($typeChanged) {
-                $oldRate = GlobalRate::getEffectiveDailyRate($oldRoomType, $locked->user);
-                $newRate = GlobalRate::getEffectiveDailyRate($newRoomType, $locked->user);
-                if ($newRate < $oldRate) {
-                    throw new \Exception(
-                        'เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน '.
-                        "({$oldRoomType->name_en} {$oldRate} → {$newRoomType->name_en} {$newRate} บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫",
-                        422
-                    );
-                }
-            }
-
             // 🚪 Commit การย้าย — BR คงสถานะเดิม (สถานะไม่เปลี่ยน จึงไม่ผ่าน transitionStatus)
             $bookingRoom->update([
                 'room_id' => $newRoom->id,
@@ -481,7 +468,7 @@ class FrontDeskController extends Controller
             //    duplicate-guard: ถ้ามี active task อยู่แล้วไม่สร้างซ้ำ (Fix S-B2 pattern)
             //    (2026-11-09): เดิม checkout_makeup → เปลี่ยนเป็น dirty (owner มติ) · เฉพาะ
             //    in-stay เท่านั้น — BR confirmed แขกยังไม่เคยเข้าพัก = ไม่มี checkout
-            //    → ปล่อยห้องเก่าคงสถานะเดิม ไม่เปิดงานแม่บ้าน
+            //    → ปล่อยห้องเก่าคงสถานะเดิม ไม่เปิดงานแม่บ้าน (tier-endpoints-v2 มติ v2 ข้อ 4)
             $housekeepingTaskId = null;
             $newRoomHousekeepingTaskId = null;
             if ($isInStay) {
@@ -521,57 +508,43 @@ class FrontDeskController extends Controller
 
                 // 🌟 ห้องใหม่ → occupied (dirty ผ่าน — machine รับ dirty→occupied แล้ว 2026-11-09)
                 $newRoom->transitionStatusTo('occupied', $user->id);
-            } elseif ($newRoom->status === 'dirty') {
-                // 🧹 BR confirmed — ห้องปลายทาง dirty ที่แขกจะเข้า: เปิด task 'daily' ทันที
-                //    (ห้องคง dirty รอแม่บ้านเก็บก่อนเช็คอินจริงตาม flow ปกติ)
-                $newRoomTaskExists = HousekeepingTask::where('room_id', $newRoom->id)
-                    ->whereIn('status', ['unassigned', 'accepted', 'in_progress'])
-                    ->exists();
-                if (! $newRoomTaskExists) {
-                    $newRoomTask = HousekeepingTask::create([
-                        'id' => Str::uuid(),
-                        'room_id' => $newRoom->id,
-                        'task_type' => 'daily',
-                        'status' => 'unassigned',
-                        'notes' => 'Auto: dirty room pre-assigned via room change ('.$oldRoom->room_number.' → '.$newRoom->room_number.') — cleaning required',
-                    ]);
-                    $newRoomHousekeepingTaskId = $newRoomTask->id;
-                }
             }
 
-            // 💰 Reprice ทั้งบิล (full-stay) — chokepoint เดียวกับ surcharge (ticket 10)
-            //    type ใหม่แพงขึ้น = ส่วนต่างเข้า outstanding เก็บต่อผ่าน front-desk / check-out
-            app(DiscountService::class)->reprice($locked);
+            // 💰 Reprice ทั้งบิล (full-stay) — รองรับ manual price_per_night (admin+staff — tier-endpoints-v2)
+            $nights = (int) Carbon::parse($bookingRoom->check_in)->startOfDay()
+                ->diffInDays(Carbon::parse($bookingRoom->check_out)->startOfDay()) ?: 1;
+            $roomAmountOverrides = [];
+            if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+                $manualRate = (int) $validated['price_per_night'];
+                $roomAmountOverrides[$bookingRoom->id] = $manualRate * $nights;
+            }
+            app(DiscountService::class)->reprice($locked, $roomAmountOverrides);
 
-            // 🎫 airtight — type เปลี่ยนแล้วยอดรวมต้องไม่ต่ำกว่าเดิม (กัน group/month tier พายอดตก
-            //    แม้เรทรายวันแพงขึ้น)
             $newTotal = (int) $locked->fresh()->total_amount;
-            if ($typeChanged && $newTotal < $previousTotal) {
-                throw new \Exception(
-                    "อัปเกรดประเภทห้องแล้วยอดรวมต้องไม่ต่ำกว่าเดิมค่ะ ({$previousTotal} → {$newTotal} บาท) กรุณาตรวจสอบเรทของประเภทห้องนะคะ",
-                    422
-                );
-            }
-
-            // 💳 money guards — pattern เดียวกับ updateRoom (ticket 10 + ticket 13):
-            //    ยอดรวมใหม่ (รวม charges) ต้องไม่ต่ำกว่าเงินที่เข้า ledger · is_paid=true เดิม
-            //    แต่เกิดยอดค้าง → reset false (recordPayment/check-out เก็บส่วนต่างต่อ)
-            $chargesTotal = (int) $locked->charges_total;
             $paidAmount = $locked->paid_amount;
-            if ($newTotal + $chargesTotal < $paidAmount) {
-                throw new \Exception(
-                    'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
-                    422
-                );
-            }
-            if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
-                $locked->update(['is_paid' => false]);
-            }
+
+            // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 1): ตัด ledger-guard 422 ออก, recompute is_paid ตามนิยาม
+            $locked->fresh()->syncIsPaid();
 
             // 📝 Audit — note row ของ BR (from=to=สถานะ BR เดิม · note เล่าการย้าย)
-            //    (2026-11-04) convention extension: row นี้เขียนตรงใน controller ไม่ผ่าน
-            //    transitionStatus เพราะสถานะ BR ไม่เปลี่ยน — note column ถูกใช้เป็นครั้งแรก
-            //    · room transitions ถูก log เองผ่าน Room::transitionStatusTo (entity_type=room)
+            //    (tier-endpoints-v2: บันทึก pre-checkin move สำหรับ BR confirmed, บันทึก direction + ราคาเดิม→ใหม่)
+            $direction = match (true) {
+                $newTotal > $previousTotal => 'upgrade',
+                $newTotal < $previousTotal => 'downgrade',
+                default => 'same-tier',
+            };
+            $movePrefix = $isInStay ? 'ย้ายห้อง' : 'ย้ายห้องก่อนเช็คอิน (pre-checkin move)';
+            $noteParts = ["{$movePrefix} {$oldRoom->room_number} → {$newRoom->room_number}"];
+            if ($typeChanged) {
+                $noteParts[] = "{$direction} type {$oldRoomType->name_en} → {$newRoomType->name_en}";
+            }
+            if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+                $noteParts[] = "manual rate {$validated['price_per_night']} บาท/คืน";
+            }
+            if ($newTotal !== $previousTotal) {
+                $noteParts[] = "price {$previousTotal} → {$newTotal} บาท";
+            }
+
             StatusChangeLog::create([
                 'entity_type' => 'booking_room',
                 'entity_id' => $bookingRoom->id,
@@ -579,16 +552,25 @@ class FrontDeskController extends Controller
                 'to_status' => $bookingRoom->status,
                 'role' => $user->role,
                 'causer_id' => $user->id,
-                'note' => 'ย้ายห้อง '.$oldRoom->room_number.' → '.$newRoom->room_number
-                    .($typeChanged ? ' · type '.$oldRoomType->name_en.' → '.$newRoomType->name_en : ''),
+                'note' => implode(' · ', $noteParts),
             ]);
 
             DB::commit();
 
+            $typeChangeMessage = '';
+            if ($typeChanged) {
+                if ($newTotal > $previousTotal) {
+                    $typeChangeMessage = ' อัปเกรดประเภทห้องเป็น '.$newRoomType->name_en.' — ส่วนต่างเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳';
+                } elseif ($newTotal < $previousTotal) {
+                    $typeChangeMessage = ' ปรับลดประเภทห้องเป็น '.$newRoomType->name_en.' — ยอดรวมปรับลดตามส่วนต่างค่ะ 💳';
+                } else {
+                    $typeChangeMessage = ' เปลี่ยนประเภทห้องเป็น '.$newRoomType->name_en.' เรียบร้อยแล้วค่ะ 💳';
+                }
+            }
+
             return response()->json([
                 'status' => 'success',
-                'message' => 'ย้ายห้องเรียบร้อยแล้วค่ะนายท่าน 🚪✨ ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'
-                    .($typeChanged ? ' อัปเกรดประเภทห้องเป็น '.$newRoomType->name_en.' — ส่วนต่างเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳' : ''),
+                'message' => 'ย้ายห้องเรียบร้อยแล้วค่ะนายท่าน 🚪✨ ('.$oldRoom->room_number.' → '.$newRoom->room_number.')'.$typeChangeMessage,
                 'booking_id' => $booking->id,
                 'booking_room_id' => $bookingRoom->id,
                 'old_room_number' => $oldRoom->room_number,
