@@ -1,7 +1,7 @@
 ---
 label: wayfinder:map
 title: "tier-endpoints-v2 — split pure same-tier + ต่อยอด PUT โหมด 2/change-room (downgrade-no-refund + staff manual price)"
-status: open
+status: closed *(2026-11-11 — tickets 4 ใบปิดครบ · suite 917/0 · merge dev)*
 ---
 
 # Wayfinder Map — Tier endpoints v2
@@ -31,6 +31,7 @@ status: open
 - (2026-11-11) owner sketch "split same tier + change tier อีกทาง" + grill 5 คำถาม (downgrade-no-refund / staff manual price / change-tier scope / refactor route เดิม / ต่อยอด PUT โหมด 2 ไม่เพิ่ม endpoint) + เพิ่มมติ 6 coverage matrix — มติ v2 supersede มติ #5/#11 ของ map เดิมบางส่วน (ล็อกในข้อ 2-5)
 - (2026-11-11 หลัง review 01) orchestrator พบ dead-end (BR ก่อนเช็คอิน = draft เสมอ ไม่มี path ไป confirmed ก่อน check-in) → owner มติ ข้อ 7: เพิ่ม draft(+room_id) เข้า change-room gate แก้เลยใน branch นี้ — งานแนบท้าย ticket 01 (Amendment)
 - (2026-11-11) tickets 01-03 ปิดครบ: implement `bd898af` + split `1cae64a` + amendment `b8bf90d` + tests `de2e878` — full suite **917 passed / 0 failed** · superseded 24 ตัว re-target ครบ · เหลือ ticket 04 (docs โดย orchestrator)
+- (2026-11-11) **MAP CLOSED** — ticket 04 (docs โดย ZCode orchestrator) ปิด: cline.md (✂️ pure + 🔀 family v2 + supersede note 🚪 2026-11-04) + api_guide (PUT BR/change-room/split/summary 4 จุด) + AGENTS.md bullet · ตามธรรมเนียมปิด map: untrack จาก git (ไฟล์คงอยู่บนเครื่อง dev)
 
 ## Not yet specified
 

@@ -1562,14 +1562,14 @@ curl -s -H "Accept: application/json" \
 🌟 **(17/08/26, 10/11/26)**: แก้ไข booking room **รายห้อง** — สามโหมดตาม parent booking & booking room:
 
 1. **แก้ไขปกติ (draft)** — ใช้ได้เมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` (เจ้าของหรือ admin)
-2. 💳 **Surcharge หลังจ่ายก่อนเข้าพัก (25/09/26, ticket 10)** — parent booking เป็น `paid|confirmed` และ BR เป็น `draft|confirmed` → **admin เท่านั้น** (user เจ้าของ = `403`) · แก้ห้องแล้วราคาเปลี่ยน ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่)
+2. 💳 **Change-tier หลังจ่ายก่อนเข้าพัก (25/09/26 ticket 10 · 🔄 **tier-endpoints-v2 2026-11-11**)** — parent booking เป็น `paid|confirmed` และ BR เป็น `confirmed` → **admin หรือ staff** (user เจ้าของ = `403`) · **เปลี่ยนประเภทห้องขึ้น/ลงได้ + ราคา manual** (ดู Constraints) · ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่)
 3. 🏨 **Addon แก้กลางพัก (checked_in addon-only, 10/11/26)** — parent booking เป็น `confirmed` และ BR เป็น `checked_in` → **admin หรือ staff เท่านั้น** (owner/non-admin/non-staff = `403`) · **Field allow-list**: รับเฉพาะ `addons` และ `extra_beds` (หากส่ง `room_type_id`, `check_in`, `check_out`, `guests`, `bed_preference`, `billing_address`, `billing_comment` จะได้ `422` "ห้องเข้าพักแล้วรับเฉพาะการเพิ่ม/แก้ addon เท่านั้นค่ะ 🏨") · ข้ามการตรวจ guests cap, availability, room release · ราคา reprice recalculate และส่วนต่างเข้า `outstanding_amount` (keep surcharge envelope) · เก็บต่อผ่าน `POST /front-desk/{id}/payment` ก่อน check-out (หากมียอดค้างชำระ check-out จะถูก reject `400`)
 
-🔒 **Auth required** · Ownership/Role: **booking owner** or **admin** (โหมด surcharge: **admin only**, โหมด checked_in: **admin หรือ staff เท่านั้น**) · ⏱ Rate-limited: 5 requests/minute
+🔒 **Auth required** · Ownership/Role: **booking owner** or **admin** (โหมด change-tier: **admin หรือ staff**, โหมด checked_in: **admin หรือ staff เท่านั้น**) · ⏱ Rate-limited: 5 requests/minute
 
 **Constraints:**
 - โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
-- โหมด surcharge 💳: Booking `paid|confirmed` + BR `draft|confirmed` (BR `checked_out/no_show` = `422`) · 🎫 **(2026-11-04 อัปเดตกติกา)** BR ที่มี `room_id` ถูกจัดแล้ว: **เปลี่ยนวันที่ → ยัง `422`** (ปลดการจัดห้องก่อน) แต่ **เปลี่ยน `room_type_id` ได้เมื่อ type ใหม่แพงกว่าเท่านั้น (upgrade-only)** → ระบบจะ **ปลด `room_id = null` ให้ auto-assign จัด type ใหม่** (เรียก `PUT /bookings/{id}/assign-rooms` ต่อ) · ประเภทถูกกว่า = `422` · reprice ผ่าน `reprice()` เดิม (กติกาปัดสิบไหลตาม) · **ยอดรวมใหม่ต้อง ≥ เงินที่เข้า ledger แล้ว** — ต่ำกว่า = `422` (ticket 08: ไม่มีการคืนเงินในระบบ) · 🎫 upgrade แล้วยอดรวมต้องไม่ต่ำกว่ายอดเดิมด้วย (กัน group/month tier พายอดตก) · `deposit_amount` คงเดิมไม่ย้อน · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset เป็น `false` (เก็บครบแล้ว set คืนโดย recordPayment) · การปลดห้องเพื่อ upgrade เขียน audit `status_change_logs` note row ("ปลดห้อง X · upgrade type → Y รอจัดห้องใหม่")
+- โหมด change-tier 💳 (🔄 **tier-endpoints-v2 2026-11-11 — supersede กติกา upgrade-only/releaseRoom เดิม**): Booking `paid|confirmed` + BR `confirmed` (`checked_out/no_show` = `422`) · **scope: BR `room_id = null` เท่านั้น** — BR ที่มีเลขห้องแล้ว → `422` ชี้ไปใช้ `change-room` (**breaking** กับกติกาเดิม 2026-11-04) · ส่ง param `room_id` → `422` (การจัดเลขห้องผ่าน assign-rooms/RoomAllocator เท่านั้น) · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · ราคา = manual `price_per_night` (int baht, admin+staff — ใหม่) หรือ computed `GlobalRate::getEffectiveDailyRate` ของเจ้าของบิล × nights · guests cap เทียบ `max_guests` tier ใหม่ (`422` พร้อมแนะแก้ guests ในคำขอเดียวกัน) · `extra_beds_by_night` รายคืน ≤ `max_extra_beds` tier ใหม่ (`422`) · dates แก้ได้ตามเดิม (availability re-check) · **เงิน:** reprice ทั้งบิลจาก `global_rates` วันนี้ (manual price pin เฉพาะ BR ที่แก้) · **downgrade อนุญาต — ไม่คืนเงิน:** `outstanding = max(0, total + charges − paid)`, `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · `surcharge_amount` ติดลบได้ · audit `status_change_logs` note row บอก direction (upgrade/downgrade/same-tier) + tier + ราคาเดิม→ใหม่
 - โหมด checked_in 🏨: Booking `confirmed` + BR `checked_in` · รับเฉพาะ `addons` / `extra_beds` · `checked_out/no_show` = `422` เหมือนเดิม ("ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ") · downgrade ต่ำกว่าเงินที่เข้า ledger = `422` · ส่วนต่าง surcharge เข้า `outstanding_amount` · ต้องชำระเงินครบก่อน check-out เสมอ (front desk reject `400` เมื่อมียอดค้าง)
 - แก้ได้ทุก field ของห้องในโหมด draft/surcharge (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus) · สำหรับโหมด checked_in แก้ได้เฉพาะ `addons` และ `extra_beds`
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
@@ -1583,6 +1583,8 @@ curl -s -H "Accept: application/json" \
 {
   "check_in": "2026-08-22",
   "check_out": "2026-08-25",
+  "room_type_id": "uuid (โหมด change-tier — ขึ้น/ลงได้)",
+  "price_per_night": 1200,
   "guests": [
     { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
   ],
@@ -1592,6 +1594,7 @@ curl -s -H "Accept: application/json" \
   "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
 }
 ```
+> `price_per_night` (nullable int baht) มีผลเฉพาะโหมด change-tier (admin+staff) — ไม่กรอก = คิดจาก `GlobalRate::getEffectiveDailyRate` ของเจ้าของบิล · โหมด draft จะไม่รับค่านี้ (reprice จากเรทปกติ)
 
 **Validation Rules:**
 
@@ -1669,7 +1672,7 @@ curl -s -H "Accept: application/json" \
 | Code | Cause |
 |------|-------|
 | 401  | ไม่ได้ล็อกอิน |
-| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin · 💳 โหมด surcharge (booking `paid|confirmed`) โดยไม่ใช่ admin |
+| 403  | ไม่ใช่เจ้าของ booking และไม่ใช่ admin · 💳 โหมด change-tier (booking `paid|confirmed`) โดยไม่ใช่ admin/staff |
 | 404  | ไม่พบ booking / ไม่พบ BR / BR ไม่ได้อยู่ใต้ booking นี้ |
 | 422  | Booking หรือ BR ไม่ใช่ draft / ห้องเต็มในช่วงวันใหม่ / 💳 BR checked_in ไปแล้ว / 💳 เปลี่ยน shape ทั้งที่มี room_id / 💳 ยอดรวมใหม่ต่ำกว่าเงินที่ชำระแล้ว / validation |
 | 500  | Unexpected (ซ่อน message จริง + `Log::error`) |
@@ -2740,26 +2743,32 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 
 ### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` — In-stay room move (ย้ายห้องหลัง check-in)
 
-🚪 **(2026-11-04)** — ย้ายแขกไปห้องจริง (room_id) ใหม่ **กลางทาง** หลังเช็คอินแล้ว พร้อมเปลี่ยนประเภทห้องได้ในคราวเดียว
+🚪 **(2026-11-04 · 🔄 **ขยาย gate + downgrade + manual price ตาม tier-endpoints-v2 2026-11-11**)** — ย้ายแขกไปห้องจริง (room_id) ใหม่ พร้อมเปลี่ยนประเภทห้องได้ในคราวเดียว — ได้ทั้ง **กลางทางหลังเช็คอิน** และ **ก่อนเช็คอิน** (BR มีเลขห้องแล้วหลัง T-2 auto-assign)
 
 🔒 **Admin + Staff only** (`role:admin,staff` + re-check ใน controller)
 
 **เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
-- Booking container ต้องเป็น `confirmed` · BR ต้องเป็น `checked_in` **และมี `room_id` แล้ว** (ย้ายได้เฉพาะหลังเช็คอิน — เคส pre-check-in ใช้ `PUT /bookings/{id}/rooms/{brId}` แทน)
-- ห้องใหม่ ≠ ห้องปัจจุบัน · ห้องใหม่สถานะ `available|prep_checkin`
+- BR ต้องเป็น `checked_in` หรือ `confirmed` หรือ `draft` **ที่มี `room_id` แล้ว** (🔄 v2 ข้อ 7: รับ BR `draft` หลัง T-2 จัดห้อง — โครงสร้างจริง: BR ก่อนเช็คอิน = `draft` เสมอ)
+- Booking container: BR `checked_in` → ต้อง `confirmed` · BR `confirmed`/`draft` → `paid|confirmed`
+- ห้องใหม่ ≠ ห้องปัจจุบัน · ห้องใหม่สถานะ `available|prep_checkin|dirty`
 - ห้องใหม่ไม่ติด **maintenance period** ทับช่วงพัก (reserved ผ่าน — ธรรมเนียมเดียวกับ check-in) · ไม่มี BR อื่น `holdingSlot()` ทับช่วงเข้าพักของ BR นี้
 - จำนวนแขกเดิม ≤ `max_guests` ของ type ใหม่
-- 🎫 **กติกา upgrade-only:** ถ้า type ใหม่ ≠ เดิม → เรทรายวัน effective ของ **เจ้าของบิล** (ku_member ใช้ `daily_ku`) ต้อง **แพงกว่าหรือเท่ากัน** — ถูกกว่า = `422` · หลัง reprice ยอดรวมต้องไม่ต่ำกว่ายอดเดิมด้วย (กัน group/month tier พายอดตก)
+- 🔄 **เลิก upgrade-only (v2):** type ใหม่แพง/ถูกกว่าได้ — ราคา = manual `price_per_night` (int baht, admin+staff — ใหม่) หรือ computed effective rate ของเจ้าของบิล
 
-**ผลลัพธ์ (ใน transaction เดียว):** BR คงสถานะ `checked_in` แต่ชี้ `room_id`/`room_type_id` ใหม่ · ห้องเก่า → `checkout_makeup` + สร้างงานแม่บ้าน `checkout` (duplicate-guard) · ห้องใหม่ → `occupied` · 💰 **reprice ทั้งบิล (full-stay)** ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน front-desk / ดักที่ check-out · money guards เดียวกับ surcharge (ยอดใหม่+charges ≥ paid, `is_paid` reset เมื่อเกิดค้าง) · audit: room transitions ×2 ผ่าน `Room::transitionStatusTo` + **note row ของ BR** (`entity_type='booking_room'`, from=to=`checked_in`, note "ย้ายห้อง X → Y")
+**ผลลัพธ์ (ใน transaction เดียว):** BR คงสถานะเดิม (สถานะไม่เปลี่ยน) แต่ชี้ `room_id`/`room_type_id` ใหม่
+- **BR `checked_in`** 🏨 — housekeeping ceremony ครบ: ห้องเก่า → `dirty` + สร้างงานแม่บ้าน `checkout` (duplicate-guard) · ห้องใหม่ → `occupied` (dirty ผ่าน)
+- **BR `confirmed`/`draft`** — **re-point ล้วน**: ไม่แตะสถานะห้องกายภาพเก่า/ใหม่ ไม่สร้าง task ใด ๆ (slot คุมด้วย `holdingSlot()` อยู่แล้ว)
+- 💰 **reprice ทั้งบิล (full-stay)** จากเรทวันนี้ — **downgrade อนุญาต ไม่คืนเงิน (🔄 v2):** `outstanding = max(0, total + charges − paid)` + `is_paid` recompute ผ่าน `syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · upgrade → ส่วนต่างเข้า `outstanding_amount` เก็บต่อผ่าน front-desk / ดักที่ check-out · audit: room transitions เฉพาะ checked_in + **note row ของ BR** (from=to, note "ย้ายห้อง X → Y" — ก่อนเช็คอิน prefix "ย้ายห้องก่อนเช็คอิน (pre-checkin move)" + direction + ราคา)
 
 **Request Body:**
 ```json
 {
   "room_id": "new-room-uuid",
+  "price_per_night": 1500,
   "notes": "Guest asked for higher floor (optional)"
 }
 ```
+> `price_per_night` (nullable int baht, admin+staff) — ไม่กรอก = คิดจาก effective rate ของ type ใหม่ตามเจ้าของบิล
 
 **Response `200` (upgrade example):**
 ```json
@@ -2782,71 +2791,54 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 }
 ```
 
-**Response `422` (downgrade / ห้องไม่พร้อม):**
-```json
-{
-  "status": "error",
-  "message": "เปลี่ยนประเภทห้องได้เฉพาะประเภทที่แพงกว่าเท่านั้นค่ะนายท่าน (Standard 1500 → Deluxe 1200 บาท/คืน) — ระบบไม่อนุญาต downgrade ค่ะ 🎫"
-}
-```
-
 | Code | เมื่อ |
 |---|---|
 | `403` | ไม่ใช่ admin/staff |
 | `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบห้อง |
-| `422` | ผิดเงื่อนไขใด ๆ ด้านบน (BR ไม่ `checked_in`, ห้องไม่พร้อม, overlap, maintenance, guests เกิน, downgrade, ยอดต่ำกว่า paid) |
+| `422` | ผิดเงื่อนไขใด ๆ ด้านบน (BR ไม่มีห้อง/สถานะไม่ผ่าน gate, ห้องไม่พร้อม, overlap, maintenance, guests เกิน) |
 
 ---
 
-### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade` — Mid-stay split-upgrade (แบ่งครึ่งช่วงพักขึ้น tier สูงกว่า)
+### POST `/front-desk/{bookingId}/rooms/{bookingRoomId}/split-upgrade` — Mid-stay split (แบ่งครึ่งช่วงพัก — **pure same-tier**)
 
-✂️ **(2026-11-11)** — แบ่ง `booking_room` หนึ่งห้องออกเป็น **สองช่วง**: **BR-1** ถูกตัด `check_out` สั้นลงถึง `split_date` (คง tier/สัญญาเดิม ราคาสัดส่วนตามคืนที่เหลือ) + **BR-2** ใหม่ช่วงครึ่งหลังบน `room_type` ที่ **tier สูงกว่า** (ราคา manual หรือ computed) — ใช้เมื่อแขกอยากอัปเกรดเฉพาะครึ่งหลังของช่วงพัก เช่น พัก 4 คืน Standard แต่ 2 คืนหลังขึ้น Deluxe
+✂️ **(2026-11-11 · 🔄 **v2 refactor ตาม tier-endpoints-v2 — วันเดียวกับ ship**)** — แบ่ง `booking_room` หนึ่งห้องออกเป็น **สองช่วง**: **BR-1** ถูกตัด `check_out` สั้นลงถึง `split_date` + **BR-2** ใหม่ช่วงครึ่งหลัง — **tier เดิมเท่านั้น (same-tier)** และ **total ทั้งบิลคงเดิมเป๊ะ (surcharge = 0)** · การเปลี่ยน tier ย้ายไปที่ `PUT /bookings/{id}/rooms/{brId}` โหมด change-tier (BR ไม่มีเลขห้อง) หรือ `change-room` (BR มีเลขห้อง) แล้ว
 
 🔒 **Admin + Staff only** (`role:admin,staff` + re-check ใน controller) · ไม่มี throttle
 
 **เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
 - Booking container ต้องเป็น `confirmed` **หรือ `draft`** · BR ภายใต้บิล `confirmed` = `checked_in|confirmed` · ภายใต้บิล `draft` = `draft` (`paid`/`pending`/`verify_error`/`complete` → 422)
-- บิลมีส่วนลด (`discount_code` หรือ redemption held/used) → **422** (v1 ยังไม่รองรับ — ชะตา redemption ยังไม่ออกแบบ)
+- **ส่ง `room_type_id` หรือ `price_per_night` → `422` ทันที** (ตรวจก่อน validate อื่น — field เดิมถูกตัดจาก contract v2) — ข้อความชี้ไปใช้ PUT โหมด 2 / change-room
+- บิลมีส่วนลด (`discount_code` หรือ redemption held/used) → **422** (v1 ยังไม่รองรับ)
 - `split_date`: ต้องอยู่ใน `(check_in, check_out)` เคร่งครัด (ครึ่งละ ≥ 1 คืน) **และห้ามย้อนหลัง** (ต้อง ≥ วันนี้ตาม tz Asia/Bangkok)
-- 🎫 **กติกา upgrade-only:** `room_type_id` ใหม่ ≠ เดิม + เรทรายวัน effective ของ **เจ้าของบิล** (`GlobalRate::getEffectiveDailyRate` — ku_member ใช้ `daily_ku`) ต้อง **แพงกว่า** เดิมอย่างเคร่งครัด
-- จำนวนแขกเดิม ≤ `max_guests` ของ tier ใหม่ (เกิน → 422 แนะเลือก tier ที่รองรับครบ — แก้ guests บน BR `checked_in` ไม่ได้ทาง API)
-- `extra_beds_by_night` ครึ่งหลัง (คีย์ ≥ `split_date`) รายคืนต้อง ≤ `max_extra_beds` ของ tier ใหม่
 
-**เรื่องราคา:**
-- **BR-1 (สัญญาสัดส่วน):** `room_amount ใหม่ = intdiv(room_amount₀ × n₁, n₀)` — คงเรทสัญญาเดิม ไม่คำนวณจาก global_rates
-- **BR-2 แบบ manual:** ส่ง `price_per_night` — **admin เท่านั้น** (staff ส่ง → 422) และต้อง ≥ `ceil(room_amount₀ / n₀)` (อัปเกรดจริงเทียบสัญญา)
-- **BR-2 แบบ computed:** ไม่ส่ง `price_per_night` = ใช้ `getEffectiveDailyRate` ของ tier ใหม่ × n₂ · ถ้า `computed × n₂ < ส่วนที่ขาดของสัญญา` → 422 พร้อมข้อความแนะให้ admin ใส่ `price_per_night` เอง (เรท computed อาจต่ำกว่าสัญญาเฉลี่ย เช่น บิลที่เคยใช้ `set_room_price`)
-- ทั้งหมดไหลผ่าน `DiscountService::reprice()` ด้วย **override map ครบทุก BR ของบิล** — BR อื่น freeze ที่ `room_amount` ปัจจุบันของตัวเอง → ยอด delta เกิดจากคู่ split เท่านั้น (BR จำนวนข้าม 5/10 ไม่กระทบยอดตอน split)
-- 💰 **Money guard:** ส่วนค่าห้องรวมก่อนปัด `br1' + br2 ≥ room_amount₀` (exact) + ledger guard ไม่ลดยอดต่ำกว่าเงินที่ชำระ (บิล overpay ผ่าน — ไม่ false-fire) + `is_paid` reset false เมื่อ surcharge ทำยอดค้าง
+**เรื่องราคา (v2 — สัญญาสัดส่วนล้วน ไม่มี manual/computed):**
+- **BR-1:** `room_amount ใหม่ = intdiv(room_amount₀ × n₁, n₀)` — คงเรทสัญญาเดิม
+- **BR-2:** `room_amount = room_amount₀ − intdiv(room_amount₀ × n₁, n₀)` (remainder ไป BR-2)
+- ไหลผ่าน `DiscountService::reprice()` ด้วย **override map ครบทุก BR ของบิล** — BR อื่น freeze → **total คงเดิมเป๊ะ** · **guard invariant:** ถ้า total หลัง split เพี้ยนจากเดิม (bug ข้างใน) → rollback ทั้ง transaction · `surcharge_amount` = 0 เสมอ
 
-> ⚠️ **คำเตือนราคา one-shot (สำคัญสำหรับ front desk):** ราคาที่ตกลงตอน split (manual price / สัญญาสัดส่วน) **ไม่ persist** — `reprice()` ครั้งถัดไปที่แตะบิลนี้ (เช่น เพิ่ม/แก้ addon ผ่าน `PUT /bookings/{id}/rooms/{brId}` โหมด checked_in, `change-room`) จะคิด `room_amount` ของ BR-1/BR-2 **ใหม่จาก global_rates วันนี้** · **ตรวจ surcharge envelope หลังแตะ addon/change-room บนบิลที่เคย split ทุกครั้ง** (ตั้งใจออกแบบแบบนี้ — ไม่ใช่ bug)
-
-**ผลลัพธ์ (ใน transaction เดียว):** BR-1 ถูกตัด `check_out` = `split_date` (สถานะคงเดิม — ไม่ auto เช็คเอาท์) · BR-2 สร้างใหม่ (guests/bed_preference คัดลอก — bed option ไม่มีใน tier ใหม่ → null; สถานะ `draft` แล้ว promote `confirmed` ผ่าน `transitionStatus` ภายใต้บิล confirmed / คง `draft` ภายใต้บิล draft) · จัดห้อง BR-2 ทันที (pin `room_id` ที่ต้องเป็น type ที่ประกาศ หรือ auto-allocate ผ่าน `RoomAllocator`) · addon ถูกแยก 2 row (early คง BR-1, late ย้าย BR-2, breakfast คัดลอก, extra_beds แบ่งคืน) · **สถานะห้องกายภาพทั้งสองไม่ถูกแตะ** — front desk เช็คเอาท์ BR-1 / เช็คอิน BR-2 เองวันจริงด้วย flow ปกติ (ห้อง BR-2 ถูกยึด slot ผ่าน `holdingSlot()` ทันที — check-in ซ้ำทับช่วงโดน overlap guard) · audit: machine row `draft→confirmed` ของ BR-2 + note rows ของ BR-1/BR-2 (causer = auth user)
+**ผลลัพธ์ (ใน transaction เดียว):** BR-1 ถูกตัด `check_out` = `split_date` (สถานะคงเดิม — ไม่ auto เช็คเอาท์) · BR-2 สร้างใหม่ (guests/bed_preference คัดลอก; สถานะ `draft` แล้ว promote `confirmed` ผ่าน `transitionStatus` ภายใต้บิล confirmed / คง `draft` ภายใต้บิล draft) · **จัดห้อง BR-2:** BR-1 มีห้อง → BR-2 ต้องได้**เลขใหม่ต่างเดิม** type เดียวกัน — pin `room_id` (ตรวจ ≠ ห้อง BR-1 **ก่อน** แล้ว type ตรง แล้ว status/maintenance/overlap) หรือ auto-allocate ผ่าน `RoomAllocator` (**exclude ห้องของ BR-1**) · BR-1 ไม่มีห้อง → pin ปกติ / ไม่ pin → `room_id = null` · addon ถูกแยก 2 row (early คง BR-1, late ย้าย BR-2, breakfast คัดลอก, extra_beds แบ่งคืน — validate `max_extra_beds` tier เดิม) · **สถานะห้องกายภาพไม่ถูกแตะ** — front desk เช็คเอาท์ BR-1 / เช็คอิน BR-2 เองวันจริง (ห้อง BR-2 ถูกยึด slot ผ่าน `holdingSlot()` ทันที) · audit: machine row `draft→confirmed` ของ BR-2 + note rows ของ BR-1/BR-2 (เล่าการแบ่งช่วง + เลขห้องเก่า→ใหม่ถ้ามี)
 
 **Request Body:**
 ```json
 {
   "split_date": "2026-11-15",
-  "room_type_id": "deluxe-room-type-uuid",
-  "price_per_night": 1500,
-  "room_id": "room-uuid (optional — ไม่ส่ง = auto-allocate)",
-  "notes": "Guest upgraded for the last 2 nights (optional)"
+  "room_id": "room-uuid (optional — pin BR-2; ต้อง type เดียวกับ BR-1 + ≠ ห้อง BR-1 ถ้า BR-1 มีห้อง)",
+  "notes": "Guest wants to split the stay (optional)"
 }
 ```
 
 | Field | Rule |
 |---|---|
 | `split_date` | required, date — ใน `(check_in, check_out)` + ≥ วันนี้ |
-| `room_type_id` | required, uuid, exists — ต้องเป็น tier แพงกว่าเดิม |
-| `price_per_night` | nullable, integer — **admin only**, ≥ `ceil(room_amount₀/n₀)` |
-| `room_id` | nullable, uuid, exists — pin ห้อง BR-2 (type ต้องตรง `room_type_id`) |
+| `room_id` | nullable, uuid, exists — pin ห้อง BR-2 (type ต้องตรง tier เดิม; ซ้ำห้อง BR-1 = 422) |
 | `notes` | nullable, string, max:255 — ต่อท้าย audit note ของ BR-2 |
+| ~~`room_type_id` / `price_per_night`~~ | ❌ **ถูกตัด** — ส่งมา → `422` |
 
-**Response `200` (ตัวอย่าง: Standard 4 คืน 1,000/คืน = 4,000 · split วันที่ 3 · Deluxe 1,500/คืน):**
+**Response `200` (ตัวอย่าง: Standard 4 คืน 4,000 · split วันที่ 3):**
 ```json
 {
   "status": "success",
-  "message": "แบ่งช่วงพักและอัปเกรดประเภทห้องเป็น Deluxe เรียบร้อยแล้วค่ะนายท่าน ✨ ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳",
+  "message": "แบ่งช่วงพักเรียบร้อยแล้วค่ะนายท่าน ✨ ยอดรวมคงเดิมไม่มีส่วนต่างราคาค่ะ 🏨",
   "split_summary": {
     "br1_id": "br-uuid-1",
     "br2_id": "br-uuid-2",
@@ -2857,37 +2849,35 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
     "br2": {
       "check_in": "2026-11-15",
       "check_out": "2026-11-17",
-      "room_type_id": "deluxe-room-type-uuid",
       "room_id": "room-uuid",
-      "price_per_night": 1500,
       "nights": 2
     }
   },
   "previous_total_amount": 4000,
-  "total_amount": 5000,
-  "surcharge_amount": 1000,
+  "total_amount": 4000,
+  "surcharge_amount": 0,
   "paid_amount": 4000,
-  "outstanding_amount": 1000,
+  "outstanding_amount": 0,
   "payment_type": "full",
   "deposit_amount": 0
 }
 ```
 
-**Response `422` (ตัวอย่าง guests เกิน cap):**
+**Response `422` (ตัวอย่าง: ส่ง field ที่ตัดแล้ว):**
 ```json
 {
   "status": "error",
-  "message": "split ขึ้นประเภทห้อง Deluxe ไม่ได้เพราะผู้เข้าพัก 3 คน เกินจำนวนสูงสุดที่รองรับได้ (2 คน) — กรุณาเลือกประเภทห้องที่รองรับจำนวนผู้เข้าพักได้ครบนะคะ 👥"
+  "message": "การแบ่งช่วงพักเป็นแบบประเภทห้องเดิม (same-tier) เท่านั้น ไม่รองรับ room_type_id หรือ price_per_night แล้วค่ะนายท่าน — หากต้องการเปลี่ยนประเภทห้อง กรุณาใช้ PUT โหมด 2 หรือ change-room แทนนะคะ 🚪"
 }
 ```
 
 | Code | เมื่อ |
 |---|---|
 | `403` | ไม่ใช่ admin/staff |
-| `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบ room_type / room |
-| `422` | ผิดเงื่อนไขใด ๆ ด้านบน (container/BR สถานะผิด, บิลมีส่วนลด, split_date อดีต/นอกช่วง, tier ไม่แพงกว่า, staff ใส่ราคา / ราคาต่ำกว่าสัญญา, computed ไม่พอส่วนต่าง, guests/extra_beds เกิน cap, pin ผิด type, ห้องไม่พร้อม/maintenance/overlap, allocate fail, money/ledger guard) |
+| `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบ room |
+| `422` | ส่ง `room_type_id`/`price_per_night` · container/BR สถานะผิด · บิลมีส่วนลด · split_date อดีต/นอกช่วง · pin ซ้ำห้อง BR-1/ผิด type · ห้องไม่พร้อม/maintenance/overlap · allocate fail |
 
-> 💳 **บิล deferred:** split ผ่านปกติ — surcharge เข้า `outstanding_amount` เก็บทีหลัง (ประตูเงินตอนเช็คเอาท์ยกเว้น deferred อยู่แล้ว) · **บิล draft:** BR-2 ได้สถานะ `draft` และ BR-1 ยังแก้ผ่าน `PUT /bookings/{id}/rooms/{brId}` ได้หลัง split (แต่บิล draft ที่มีโค้ดส่วนลดรออยู่จะโดนบล็อก 422 ตาม v1)
+> 💳 **บิล deferred:** split ผ่านปกติ (ยอดไม่เปลี่ยน) · **บิล draft:** BR-2 ได้สถานะ `draft` และ BR-1 ยังแก้ผ่าน `PUT /bookings/{id}/rooms/{brId}` ได้หลัง split · **⚠️ หมายเหตุ reprice:** reprice ครั้งถัดไปที่แตะบิล (addon/change-room/tier-change) คิด BR-1/BR-2 ใหม่จาก global_rates วันนี้ — ราคาสัญญาสัดส่วนตอน split ไม่รอด (รายละเอียดหัวข้อ tier-change family ใน `cline.md`)
 
 ---
 
@@ -3041,14 +3031,14 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 - **จองครึ่งคืนไม่มีในโดเมน** — ทุกจุดคำนวณคืน (`reprice()` + `BookingController` 4 จุด: create/confirm rooms/update rooms/record-walk-in) `startOfDay()` ทั้ง check_in/check_out ก่อน `diffInDays()` เสมอ (กัน Carbon 3 คืน float เมื่อ input เป็น datetime เช่น `2026-10-01 14:00`)
 - **Regression:** เรทหลักร้อยตัวงั้น (เช่น 1,500) ยอดเดิมไม่เปลี่ยน — ปัดสิบโดนเฉพาะเมื่อเกิดเศษ
 
-### 💳 Surcharge — แก้ห้องหลังชำระเงิน (ticket 10) — 25/09/26
+### 💳 Change-tier / Surcharge — แก้ห้องหลังชำระเงิน (ticket 10 — 🔄 tier-endpoints-v2 2026-11-11) — 25/09/26
 
 > กรณี booking `paid|confirmed` (มัดจำ/ค้างชำระ verify ผ่าน หรือจ่ายเต็มแล้ว) ต้องการ**เปลี่ยน room type หรือแก้รายละเอียดห้อง** ให้แขก — ราคารวมเปลี่ยน → ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `recordPayment` (กลไกเดิม — **ไม่มี endpoint เงินใหม่**)
 
-- **ช่องทาง:** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` เดิม (3 โหมด — draft = แก้ปกติ, `paid|confirmed` = surcharge ก่อนเข้าพัก, `checked_in` = addon-only กลางพัก) — โหมด surcharge: **admin เท่านั้น** · โหมด checked_in: **admin หรือ staff เท่านั้น** (user เจ้าของ = `403`)
-- **Guard:** BR `draft|confirmed` (ก่อนเข้าพัก) หรือ `checked_in` 🏨 (10/11/26: addon-only mode — admin/staff แก้ไขเฉพาะ addons/extra_beds ได้กลางพัก, ฟิลด์อื่น = `422`) · `checked_out/no_show` = `422` เสมอ · BR ที่มี `room_id` ถูกจัดแล้ว (ก่อนเข้าพัก) เปลี่ยนวันที่ไม่ได้ (`422`) แต่ upgrade `room_type_id` ได้ · availability re-check + `holdingSlot()` เหมือนโหมด draft (โหมด checked_in ข้าม availability)
-- **Downgrade:** ยอดรวมใหม่ **ต่ำกว่าเงินที่เข้า ledger = `422`** (ticket 08 — ไม่มีการคืนเงินในระบบ) · ลดได้เฉพาะยอดรวมใหม่ยัง ≥ `paid_amount` → `outstanding_amount` ลดตาม
-- **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว) · `is_paid=true` เดิมที่ surcharge ทำให้เกิดยอดค้าง → reset `false` (ตามนิยาม `SUM(payments) ≥ total + charges_total`)
+- **ช่องทาง:** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` เดิม (3 โหมด — draft = แก้ปกติ, `paid|confirmed` + BR `confirmed` = **change-tier**, `checked_in` = addon-only กลางพัก) — โหมด change-tier: **admin หรือ staff** (🔄 v2 — เดิม admin-only) · โหมด checked_in: **admin หรือ staff เท่านั้น** (user เจ้าของ = `403`)
+- **Guard (🔄 v2):** BR `confirmed` ที่ **`room_id = null` เท่านั้น** — BR ที่มีเลขห้อง → `422` ชี้ไป `change-room` (**breaking**: capability "ปลดห้องเพื่อ upgrade" เดิมถูกย้ายไป change-room) · ส่ง param `room_id` → `422` · `checked_out/no_show` = `422` เสมอ · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · guests/extra_beds cap ตาม tier ใหม่ · availability re-check + `holdingSlot()` เหมือนโหมด draft (โหมด checked_in ข้าม availability)
+- **เงิน (🔄 v2 มติ downgrade-no-refund):** **downgrade อนุญาต — ไม่คืนเงิน** — `outstanding = max(0, total + charges − paid)` · `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (paid ครอบยอดใหม่ → true คืนได้) · `surcharge_amount` ติดลบได้ · ราคา manual `price_per_night` (admin+staff) หรือ computed — **⚠️ reprice จากเรทวันนี้ทั้งบิล** (float: ราคาเดิมของ BR อื่นบนบิลอาจเปลี่ยน)
+- **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว)
 - **Response เพิ่ม 6 field เสมอ:** `previous_total_amount` · `surcharge_amount` (ติดลบได้) · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
 
 ### PUT `/bookings/{id}` — Update booking payment + customer identity fields (Admin) 🆕
@@ -3733,11 +3723,14 @@ Returns tasks with status `pending` or `in_progress`.
 > แก้ไขห้องได้ทุก field ผ่าน `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` (เช็ค availability + คิดราคาใหม่ที่ server)
 > และลบห้องออกได้ผ่าน `DELETE /bookings/{bookingId}/rooms/{bookingRoomId}` (ห้องสุดท้ายลบไม่ได้ — ให้ลบทั้ง booking)
 >
-> 🚪 **(2026-11-04) In-stay move window:** BR `checked_in` ย้ายห้องจริง (`room_id`) ได้ผ่าน
-> `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` (admin+staff) — พร้อมเปลี่ยน
-> `room_type_id` ได้เมื่อ type ใหม่ **แพงกว่าเท่านั้น** (upgrade-only) · BR **คงสถานะ `checked_in`**
-> (การย้ายไม่ใช่ transition — จด audit ผ่าน note row ใน `status_change_logs`) · ห้องเก่า
-> `occupied → checkout_makeup` + งานแม่บ้าน · ห้องใหม่ `→ occupied` · รายละเอียด endpoint ดูหัว Front Desk Operations
+> 🚪 **(2026-11-04 · 🔄 tier-endpoints-v2 2026-11-11) Move window:** BR ที่มี `room_id` ย้ายห้องจริงผ่าน
+> `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` (admin+staff) — ได้ทั้ง
+> `checked_in` (กลางทาง) และ `confirmed`/`draft` (ก่อนเช็คอิน — re-point ล้วนไม่แตะห้องกายภาพ) ·
+> เปลี่ยน `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) + manual `price_per_night` ·
+> **downgrade อนุญาตไม่คืนเงิน** + `syncIsPaid()` · การย้ายไม่ใช่ transition — จด audit ผ่าน
+> note row · ห้องเก่า/ใหม่ ceremony เฉพาะ checked_in (ห้องเก่า dirty + task, ห้องใหม่ occupied) ·
+> สำหรับ BR ไม่มีเลขห้อง ใช้ `PUT /bookings/{id}/rooms/{brId}` โหมด change-tier แทน ·
+> รายละเอียด endpoint ดูหัว Front Desk Operations
 >
 > 🛎️ **(2026-11-06) Per-room check-in/check-out:** `confirmed → checked_in` (`check-in`) และ
 > `checked_in → checked_out` (`check-out`) ทำผ่าน `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/check-in|check-out`
