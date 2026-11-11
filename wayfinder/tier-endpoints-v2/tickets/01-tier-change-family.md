@@ -43,3 +43,12 @@ blocked-by: []
 ## Definition of done
 
 ทั้งสอง endpoint ครบตาม spec + edge ครบ · pint สะอาด · full suite เดิม (904) ผ่าน — ถ้า suite เดิม assert พฤติกรรมเก่าที่ถูก supersede (เช่น upgrade-only ของ change-room/admin-only mode 2) ให้ **หยุดรายงาน** อย่าแก้ tests เอง (ticket 03 ของ map นี้ re-target)
+
+## 🩹 Amendment (2026-11-11 — มติ v2 ข้อ 7, งานต่อเนื่องของ ticket นี้)
+
+Review 01 (`bd898af`) ผ่าน แต่ orchestrator พบ dead-end: BR ก่อนเช็คอิน = `draft` เสมอ (ไม่มี path ไป confirmed ก่อน check-in) → BR draft ที่ T-2 จัดห้องแล้ว ตี 422 ทั้ง mode 2 และ change-room → owner มติ: **เพิ่ม `draft` เข้า gate ของ change-room** (เฉพาะ BR ที่มี `room_id` — guard room_id มีอยู่แล้ว)
+
+- Gate เป็น `draft|confirmed|checked_in` + มี room_id · บิล: draft/confirmed BR → `paid|confirmed` (isInStay=false path เดิมครอบ) · checked_in → `confirmed` (เดิม)
+- พฤติกรรม draft เหมือน confirmed ทุกอย่าง: re-point ล้วน ไม่แตะห้องกายภาพ ไม่สร้าง task · price_per_night ใช้ได้ · audit "pre-checkin move"
+- ปรับข้อความ error ของ gate ให้ระบุ draft (ที่มีห้อง) — ไทย+emoji
+- ticket 03 ต้องมี tests ครอบกรณี draft+room ด้วย
