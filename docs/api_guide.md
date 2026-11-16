@@ -2948,6 +2948,82 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 
 ---
 
+### PUT `/front-desk/{bookingId}/rooms/{bookingRoomId}/dates` — Shift dates (ย้ายชุดวันเข้าพัก — **shift-only**)
+
+📅 **(2026-11-16)** — ย้าย `check_in` + `check_out` ของ `booking_room` ไปชุดวันใหม่ **โดยจำนวนคืนต้องเท่าเดิมเป๊ะ** (มติ owner) — ปิดช่องว่างเดิม: บิล `paid|confirmed` ที่ผ่าน draft ไปแล้วไม่มีทางขยับวันเข้าพัก (`PUT /bookings/{id}/rooms/{brId}` โหมด post-payment ปิด BR ที่มีเลขห้อง, `change-room` เปลี่ยนเลขห้องไม่ขยับวันที่, `split-upgrade` แบ่งช่วง) · เหมาะกับกรณีแขกเลื่อนวันมาถึง/ขยับกลุ่มวันพักทั้งชุด
+
+🔒 **Admin + Staff only** (`role:admin,staff` + re-check ใน controller) · ไม่มี throttle
+
+**เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
+- Booking container ต้องเป็น `paid` **หรือ `confirmed`** · BR ต้องเป็น `confirmed` (pre-checkin) — **`room_id` มีหรือไม่มีก็ได้** (BR `draft` → ใช้ `PUT /bookings/{id}/rooms/{brId}` เดิม · BR `checked_in` → ยังไม่รองรับ)
+- **Shift-only:** จำนวนคืนชุดใหม่ (`check_out − check_in`) **ต้องเท่าชุดเดิม** — ไม่เท่า = `422` ชี้ไปใช้ `PUT /bookings/{id}/rooms/{brId}` (BR ไม่มีเลขห้องเท่านั้น)
+- ส่ง `room_id` / `room_type_id` / `price_per_night` → **`422` ทันที** (single-intent — เปลี่ยนห้องใช้ `change-room`, เปลี่ยน tier/ราคาใช้ PUT โหมด 2)
+- `check_in` ใหม่ต้อง **ไม่ย้อนหลัง** (≥ วันนี้ tz Asia/Bangkok) · ชุดใหม่ซ้ำชุดเดิม = `422` (ไม่มีอะไรให้ย้าย)
+- เพดานคืนคงเขตเดิม: **staff** ≥ 20 คืน → `422` (เขตรายเดือนเป็นของ admin) · **ทุก role รวม admin** > 90 คืน → `422`
+
+**เรื่องห้อง (เฉพาะ BR ที่มีเลขห้อง — strict same-room, ไม่ auto-allocate ตามมติ owner):**
+- ห้องเดิมต้อง**ว่างช่วงวันใหม่** — overlap ผ่าน `holdingSlot()` ตัดตัวเองออก (half-open: วันเช็คเอาท์ไม่นับครอบห้อง) · ไม่ว่าง = `422` ชี้ให้ใช้ `change-room` คู่กัน
+- ห้องอยู่ในช่วง **maintenance period** ทับวันใหม่ → `422` · **reserved period ไม่บล็อก** (ตามธรรมเนียม change-room/split-upgrade ฝั่ง admin+staff)
+- BR **ไม่มีห้อง → ข้ามตรวจห้องทั้งหมด** (ไปจัดตอน `PUT /bookings/{id}/assign-rooms` ตามปกติ)
+
+**ผลลัพธ์ (ใน transaction เดียว):** BR อัปเดต `check_in`/`check_out` ใหม่ (สถานะคงเดิม — **ไม่ transition สถานะใด**) · addon `extra_beds_by_night` **เลื่อน key ตาม delta วัน คง qty เดิม** (breakfast × จำนวนคืนเดิม กับ early/late hours คงมูลค่า) · reprice ทั้งบิลจากเรทวันนี้ผ่าน `DiscountService::reprice()` (⚠️ caveat ตระกูล — ราคาบิลอื่นบนใบเดียวกันอาจไหลตามเรทปัจจุบัน) + `syncIsPaid()` (ส่วนต่างไหลเข้า `outstanding_amount` — เก็บต่อผ่าน front-desk payment) · audit: `StatusChangeLog` note row ของ BR (from=to=สถานะเดิม, เล่าวันเดิม→ใหม่ + delta + ราคาเดิม→ใหม่)
+
+**Request Body:**
+```json
+{
+  "check_in": "2026-11-20",
+  "check_out": "2026-11-24",
+  "notes": "Guest postponed arrival (optional)"
+}
+```
+
+| Field | Rule |
+|---|---|
+| `check_in` | required, date — ≥ วันนี้ (Asia/Bangkok) |
+| `check_out` | required, date — หลัง `check_in` และคืนรวมต้องเท่าชุดเดิม |
+| `notes` | nullable, string, max:255 — ต่อท้าย audit note |
+| ~~`room_id` / `room_type_id` / `price_per_night`~~ | ❌ **ถูกตัด** — ส่งมา → `422` |
+
+**Response `200` (ตัวอย่าง: Standard 4 คืน 4,000 ย้ายจาก 16–20 → 20–24 พ.ย.):**
+```json
+{
+  "status": "success",
+  "message": "ย้ายชุดวันเข้าพักเรียบร้อยแล้วค่ะนายท่าน 📅✨ (2026-11-16–2026-11-20 → 2026-11-20–2026-11-24) คงห้อง 401 เดิม",
+  "booking_id": "booking-uuid",
+  "booking_room_id": "br-uuid",
+  "room_number": "401",
+  "old_check_in": "2026-11-16",
+  "old_check_out": "2026-11-20",
+  "check_in": "2026-11-20",
+  "check_out": "2026-11-24",
+  "nights": 4,
+  "previous_total_amount": 4000,
+  "total_amount": 4000,
+  "surcharge_amount": 0,
+  "paid_amount": 4000,
+  "outstanding_amount": 0
+}
+```
+> `room_number` เป็น `null` เมื่อ BR ยังไม่มีเลขห้อง (ข้ามตรวจห้อง — ไปจัดตอน assign-rooms)
+
+**Response `422` (ตัวอย่าง: จำนวนคืนไม่เท่าเดิม):**
+```json
+{
+  "status": "error",
+  "message": "ย้ายชุดวันเข้าพักต้องคงจำนวนคืนเดิมไว้ค่ะนายท่าน (เดิม 4 คืน · ชุดใหม่ 5 คืน) — หากต้องการเปลี่ยนจำนวนคืน กรุณาใช้ PUT /bookings/{id}/rooms/{brId} แทนนะคะ 📅"
+}
+```
+
+| Code | เมื่อ |
+|---|---|
+| `403` | ไม่ใช่ admin/staff |
+| `404` | ไม่พบ booking / BR ไม่ได้อยู่ใต้ booking นี้ / ไม่พบ room |
+| `422` | ส่ง field ที่ตัดแล้ว · container/BR สถานะผิด · จำนวนคืนไม่เท่าเดิม · ชุดใหม่ซ้ำเดิม · check_in ย้อนหลัง / check_out ≤ check_in · เพดานคืน (staff ≥20 · ทุก role >90) · ห้องเดิม overlap/maintenance ช่วงใหม่ |
+
+> 💳 **บิล paid/confirmed ผ่านหมด** — ส่วนต่างราคาหลัง reprice ไหลเข้า `outstanding_amount` (ไม่มีการคืนเงินในระบบ) · **⚠️ หมายเหตุ reprice:** คิดทั้งบิลจาก global_rates วันนี้เช่นเดียวกับ change-room/PUT โหมด 2 — ตรวจ envelope `surcharge_amount` ทุกครั้ง (รายละเอียดหัวข้อ tier-change family ใน `cline.md`)
+
+---
+
 ### POST `/front-desk/{bookingId}/mark-no-show` — Mark guest as no-show
 
 🔒 **Admin only**

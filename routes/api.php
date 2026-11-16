@@ -299,6 +299,13 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
 
+            // 📅 Shift dates (2026-11-16) — ย้ายชุดวันเข้าพัก (shift-only: จำนวนคืนต้องเท่าเดิม)
+            //    BR confirmed มี/ไม่มีเลขห้องก็ได้ — มีห้อง → ตรวจห้องเดิมว่างช่วงใหม่ (strict,
+            //    ไม่ auto-allocate) · ไม่มีห้อง → ข้ามตรวจ (ไปจัดตอน assign-rooms)
+            Route::put('/{bookingId}/rooms/{bookingRoomId}/dates', [RoomMoveController::class, 'changeDates'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
+
             // 🚪 Check-in Evidence (REQ-033) — อัปโหลดบัตร ปชช./registration/PDPA
             //    ผูกกับ BookingRoom (เก็บ 365 วัน)
             Route::post('/{bookingId}/rooms/{bookingRoomId}/evidence', [CheckinEvidenceController::class, 'uploadEvidence'])

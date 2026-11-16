@@ -722,6 +722,253 @@ class RoomMoveController extends Controller
         }
     }
 
+    /**
+     * 📅 Shift dates — ย้ายชุดวันเข้าพัก (shift-only) — 2026-11-16
+     *
+     * บิล paid|confirmed + BR confirmed (room_id nullable — มี/ไม่มีเลขห้องก็ได้) ย้าย
+     * check_in+check_out ไปชุดวันใหม่ได้ โดย **จำนวนคืนต้องเท่าเดิมเป๊ะ** (มติ owner —
+     * เปลี่ยนจำนวนคืนใช้ PUT /bookings/{id}/rooms/{brId} โหมด 2 เฉพาะ BR ที่ยังไม่มีห้อง)
+     *
+     * - มีห้อง → strict same-room: ห้องเดิมต้องว่างช่วงวันใหม่ (overlap ผ่าน holdingSlot
+     *   ตัดตัวเองออก + maintenance period บล็อก — reserved ไม่บล็อก ตามธรรมเนียม
+     *   change-room/split-upgrade ฝั่ง admin+staff) · ไม่ว่าง = 422 ชี้ change-room
+     *   (ไม่ auto-allocate — มติ owner)
+     * - ไม่มีห้อง → ข้ามตรวจห้อง (ไปจัดตอน assign-rooms ตามปกติ)
+     * - ไม่ transition สถานะใด (มติตระกูล — audit ผ่าน StatusChangeLog note row)
+     * - addon extra_beds_by_night เลื่อน key ตาม delta วัน คง qty เดิม (คืนคงเดิมทั้งหมด)
+     * - reprice ทั้งบิลจากเรทวันนี้ (caveat ตระกูล — float) + syncIsPaid (มติ v2 ข้อ 1)
+     * - เพดานคืนตามเขตเดิม: non-admin ≥ block_min_nights (20) 422 · ทุก role > monthly_max_nights (90) 422
+     */
+    public function changeDates(Request $request, $bookingId, $bookingRoomId)
+    {
+        // 🌟 Defense-in-depth: ตรวจ role ใน controller ด้วย ไม่พึ่ง middleware อย่างเดียว
+        $user = $request->user();
+        if (! $user || ! in_array($user->role, ['admin', 'staff'], true)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ต้องเป็นแอดมินหรือเจ้าหน้าที่เท่านั้นถึงจะย้ายวันเข้าพักได้ค่ะนายท่าน',
+            ], 403);
+        }
+
+        // 🚪 Single-intent: พารามิเตอร์อื่นถูกตัดออก (มติ owner — เปลี่ยนห้อง/type/ราคา ใช้ endpoint ข้างเคียง)
+        if ($request->has('room_id') || $request->has('room_type_id') || $request->has('price_per_night')) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ย้ายวันเข้าพักไม่รองรับ room_id, room_type_id หรือ price_per_night ค่ะนายท่าน — เปลี่ยนห้องใช้ change-room · เปลี่ยนประเภทห้อง/ราคาใช้ PUT โหมด 2 แทนนะคะ 📅',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'check_in' => 'required|date',
+            'check_out' => 'required|date',
+            'notes' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            // 🌟 1. Load + scope: บิลจาก bookingId, BR จากบิลนั้นเท่านั้น (404 ข้ามบิล — pattern :58-61)
+            $booking = Booking::findOrFail($bookingId);
+            $bookingRoom = $booking->bookingRooms()->where('id', $bookingRoomId)->firstOrFail();
+
+            // 🛡️ BR gate — เฉพาะ confirmed (pre-checkin): draft ยังแก้วันที่ผ่าน PUT BR ได้ ·
+            //    checked_in ยังไม่รองรับ (กลางพัก — out of scope มติ owner)
+            if ($bookingRoom->status !== 'confirmed') {
+                throw new \Exception(
+                    "ย้ายชุดวันเข้าพักได้เฉพาะห้องสถานะ confirmed เท่านั้นค่ะนายท่าน (สถานะปัจจุบันคือ '{$bookingRoom->status}' — draft แก้วันที่ผ่าน PUT /bookings/{id}/rooms/{brId} ได้อยู่ · checked_in เข้าพักแล้วยังไม่รองรับ) 📅",
+                    422
+                );
+            }
+
+            // 🛡️ Container gate — บิลต้อง paid|confirmed (pattern changeRoom :74)
+            if (! in_array($booking->status, ['paid', 'confirmed'], true)) {
+                throw new \Exception(
+                    "ย้ายวันเข้าพักได้เฉพาะรายการจองสถานะ 'paid' หรือ 'confirmed' เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$booking->status}'",
+                    422
+                );
+            }
+
+            // 🗓️ 2. Date guards — target ชุดใหม่
+            $today = Carbon::today(BookingRule::TIMEZONE)->startOfDay();
+            $oldIn = Carbon::parse($bookingRoom->check_in)->startOfDay();
+            $oldOut = Carbon::parse($bookingRoom->check_out)->startOfDay();
+            $newIn = Carbon::parse($validated['check_in'])->startOfDay();
+            $newOut = Carbon::parse($validated['check_out'])->startOfDay();
+
+            if ($newOut->lte($newIn)) {
+                throw new \Exception(
+                    'วันที่เช็คเอาท์ใหม่ต้องอยู่หลังวันที่เช็คอินใหม่ค่ะนายท่าน 🗓️',
+                    422
+                );
+            }
+
+            if ($newIn->lt($today)) {
+                throw new \Exception('วันที่เช็คอินใหม่ต้องไม่เป็นวันที่ในอดีตค่ะ 🗓️', 422);
+            }
+
+            // ⏱️ Shift-only (มติ owner): จำนวนคืนต้องเท่าเดิมเป๊ะ
+            $oldNights = (int) $oldIn->diffInDays($oldOut);
+            $newNights = (int) $newIn->diffInDays($newOut);
+            if ($newNights !== $oldNights) {
+                throw new \Exception(
+                    "ย้ายชุดวันเข้าพักต้องคงจำนวนคืนเดิมไว้ค่ะนายท่าน (เดิม {$oldNights} คืน · ชุดใหม่ {$newNights} คืน) — หากต้องการเปลี่ยนจำนวนคืน กรุณาใช้ PUT /bookings/{id}/rooms/{brId} แทนนะคะ 📅",
+                    422
+                );
+            }
+
+            if ($newIn->toDateString() === $oldIn->toDateString()
+                && $newOut->toDateString() === $oldOut->toDateString()) {
+                throw new \Exception('ชุดวันที่ส่งมาเหมือนวันเดิมทุกอย่าง ไม่มีอะไรให้ย้ายค่ะนายท่าน 📅', 422);
+            }
+
+            // 🌙 เพดานคืนตามเขตเดิม (คงเขตแม้คืนไม่เปลี่ยน — คู่ guardMonthlyNights)
+            $cap = BookingRule::monthlyNightsCap($user);
+            $max = BookingRule::monthlyMaxNights();
+            if ($newNights >= $cap) {
+                throw new \Exception(
+                    "การจองตั้งแต่ {$cap} คืนขึ้นไป (จองรายเดือน/จองเหมา — ห้องนี้ {$newNights} คืน) เป็นเขตบริการของผู้ดูแลระบบ กรุณาติดต่อผู้ดูแลค่ะ 🌙",
+                    422
+                );
+            }
+            if ($newNights > $max) {
+                throw new \Exception(
+                    "การจองรายเดือน/จองเหมา สามารถจองได้สูงสุด {$max} คืน (ห้องนี้ {$newNights} คืน) หากต้องการพักนานกว่านี้ กรุณาแบ่งการจองหรือติดต่อผู้ดูแลค่ะ 🗓️",
+                    422
+                );
+            }
+
+            // 🌟 3. Lock บิล + re-check container กัน race กับ check-in/verify พร้อมกัน (pattern :92-99)
+            $locked = Booking::where('id', $booking->id)->lockForUpdate()->firstOrFail();
+            if (! in_array($locked->status, ['paid', 'confirmed'], true)) {
+                throw new \Exception(
+                    "ย้ายวันเข้าพักได้เฉพาะรายการจองสถานะ 'paid' หรือ 'confirmed' เท่านั้นค่ะนายท่าน สถานะปัจจุบันคือ '{$locked->status}'",
+                    422
+                );
+            }
+
+            // 🏨 4. Room checks — เฉพาะ BR ที่มีเลขห้อง (ไม่มีห้อง = ข้าม ไปจัดตอน assign-rooms)
+            $roomNumber = null;
+            if ($bookingRoom->room_id !== null) {
+                $room = Room::lockForUpdate()->findOrFail($bookingRoom->room_id);
+                $roomNumber = $room->room_number;
+
+                // 🗓️ maintenance period ทับช่วงวันใหม่ → reject (reserved ไม่บล็อก — ธรรมเนียม admin/staff)
+                if (RoomStatePeriod::where('room_id', $room->id)
+                    ->overlapping($newIn->toDateString(), $newOut->toDateString(), RoomStatePeriod::KIND_MAINTENANCE)
+                    ->exists()) {
+                    throw new \Exception(
+                        "ห้อง {$room->room_number} อยู่ในช่วงซ่อมแซม (maintenance period) ทับช่วงวันใหม่ ".
+                        "({$newIn->toDateString()} – {$newOut->toDateString()}) ไม่สามารถย้ายวันเข้าได้ค่ะนายท่าน",
+                        422
+                    );
+                }
+
+                // ⏱️ overlap guard — ห้องเดิมต้องว่างช่วงวันใหม่ (holdingSlot ตัดตัวเองออก — pattern changeRoom :128-133)
+                $overlap = $room->bookingRooms()
+                    ->where('booking_rooms.id', '!=', $bookingRoom->id)
+                    ->holdingSlot()
+                    ->where('check_in', '<', $newOut->toDateString())
+                    ->where('check_out', '>', $newIn->toDateString())
+                    ->exists();
+                if ($overlap) {
+                    throw new \Exception(
+                        "ห้องหมายเลข {$room->room_number} มีการจองอื่นทับช่วงวันใหม่ ".
+                        "({$newIn->toDateString()} – {$newOut->toDateString()}) ไม่สามารถย้ายวันเข้าได้ค่ะนายท่าน ".
+                        'หากต้องการชุดวันนี้ กรุณาใช้ change-room ย้ายไปห้องอื่นนะคะ',
+                        422
+                    );
+                }
+            }
+
+            $previousTotal = (int) $locked->total_amount;
+
+            // 📅 5. Commit การย้าย — BR คงสถานะเดิม (สถานะไม่เปลี่ยน จึงไม่ผ่าน transitionStatus)
+            $bookingRoom->update([
+                'check_in' => $newIn->toDateString(),
+                'check_out' => $newOut->toDateString(),
+            ]);
+
+            // 🛏️ 6. Addon extra_beds_by_night เลื่อน key ตาม delta วัน คง qty เดิม
+            //    (คืนคงเดิมทั้งหมด จึงไม่มี key หลุดช่วง — ต่างจากการสไลซ์ของ split)
+            $deltaDays = (int) (($newIn->timestamp - $oldIn->timestamp) / 86400);
+            $addon = $bookingRoom->addon;
+            if ($addon && is_array($addon->extra_beds_by_night) && $deltaDays !== 0) {
+                $shifted = [];
+                foreach ($addon->extra_beds_by_night as $dateKey => $qty) {
+                    $qty = (int) $qty;
+                    if ($qty <= 0) {
+                        continue;
+                    }
+                    $shifted[Carbon::parse($dateKey)->startOfDay()->addDays($deltaDays)->toDateString()] = $qty;
+                }
+                $addon->update([
+                    'extra_beds_by_night' => ! empty($shifted) ? $shifted : null,
+                ]);
+            }
+
+            // 💰 7. Reprice ทั้งบิล (เรทวันนี้ — caveat ตระกูล) + syncIsPaid (มติ v2 ข้อ 1 — ไม่มี ledger-guard 422)
+            app(DiscountService::class)->reprice($locked);
+
+            $newTotal = (int) $locked->fresh()->total_amount;
+            $paidAmount = $locked->paid_amount;
+            $locked->fresh()->syncIsPaid();
+
+            // 📝 8. Audit — note row ของ BR (from=to=สถานะ BR เดิม · note เล่าการย้ายวัน)
+            $deltaLabel = ($deltaDays > 0 ? '+' : '').$deltaDays;
+            $noteParts = [
+                "ย้ายชุดวันเข้าพัก {$oldIn->toDateString()}–{$oldOut->toDateString()} → ".
+                "{$newIn->toDateString()}–{$newOut->toDateString()} (delta {$deltaLabel} วัน)",
+            ];
+            if ($newTotal !== $previousTotal) {
+                $noteParts[] = "price {$previousTotal} → {$newTotal} บาท";
+            }
+            $noteSuffix = ! empty($validated['notes']) ? ' · '.$validated['notes'] : '';
+
+            StatusChangeLog::create([
+                'entity_type' => 'booking_room',
+                'entity_id' => $bookingRoom->id,
+                'from_status' => $bookingRoom->status,
+                'to_status' => $bookingRoom->status,
+                'role' => $user->role,
+                'causer_id' => $user->id,
+                'note' => implode(' · ', $noteParts).$noteSuffix,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'ย้ายชุดวันเข้าพักเรียบร้อยแล้วค่ะนายท่าน 📅✨ '.
+                    "({$oldIn->toDateString()}–{$oldOut->toDateString()} → {$newIn->toDateString()}–{$newOut->toDateString()})".
+                    ($roomNumber ? " คงห้อง {$roomNumber} เดิม" : ''),
+                'booking_id' => $booking->id,
+                'booking_room_id' => $bookingRoom->id,
+                'room_number' => $roomNumber,
+                'old_check_in' => $oldIn->toDateString(),
+                'old_check_out' => $oldOut->toDateString(),
+                'check_in' => $newIn->toDateString(),
+                'check_out' => $newOut->toDateString(),
+                'nights' => $newNights,
+                'previous_total_amount' => $previousTotal,
+                'total_amount' => $newTotal,
+                'surcharge_amount' => $newTotal - $previousTotal,
+                'paid_amount' => (int) $paidAmount,
+                'outstanding_amount' => (int) $locked->fresh()->outstanding_amount,
+            ], 200);
+
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ไม่พบข้อมูลการจองหรือห้องพักที่ระบุค่ะนายท่าน 🥺',
+            ], 404);
+
+        } catch (\Exception $e) {
+            return $this->handleCatch('Change-dates', $e);
+        }
+    }
+
     private function handleCatch(string $action, \Exception $e): JsonResponse
     {
         DB::rollBack();
