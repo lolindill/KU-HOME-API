@@ -10,6 +10,7 @@ use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
+use App\Services\ReportExcel\Data\DailyFinancialReportData;
 use App\Support\LegacyPaymentBackfill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -50,6 +51,11 @@ class BookingPaymentTypeTest extends TestCase
     private function admin(): User
     {
         return User::factory()->create(['role' => 'admin']);
+    }
+
+    private function staff(): User
+    {
+        return User::factory()->create(['role' => 'staff']);
     }
 
     private function roomTypeSetup(int $price = 1500, int $rooms = 1): RoomType
@@ -548,8 +554,328 @@ class BookingPaymentTypeTest extends TestCase
             ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
             ->assertStatus(200);
 
-        // 💳 regression — บิล full/deposit ที่ confirmed แล้วยังไม่รับสลิป (เก็บต่อผ่าน recordPayment เท่านั้น)
+        // 💳 regression (16/11/26 P0-2 Collect): เจ้าของบิลทั่วไป (non-admin) ที่บิล full/deposit
+        //    confirmed แล้วยังถูกบล็อก 422 เหมือนเดิม (admin ส่ง Collect ได้ที่ชุดเทสด้านล่าง)
         $this->submitSlip($booking, $user, 100)
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+    }
+
+    // =========================================================
+    // 💳 P0-2 Collect — admin ส่งสลิปบน full/deposit สถานะ paid/confirmed (16/11/26)
+    //    (instant-verify เหมือน deferred · เจ้าของบิลทั่วไปยัง 422 · complete ยัง 422)
+    // =========================================================
+
+    public function test_deposit_confirmed_bill_admin_slip_collects_remaining_and_marks_paid(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, [
+                'payment_type' => 'deposit',
+                'user' => $owner->id,
+            ]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // งวดมัดจำ 750 → verify → confirmed (is_paid = false, outstanding = 750)
+        $this->submitSlip($booking, $owner, 750)->assertStatus(201);
+        $firstConfirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$firstConfirmation->id}/verify")
+            ->assertStatus(200)
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', false)
+            ->assertJsonPath('outstanding_amount', 750);
+
+        // 💳 P0-2 Collect: admin แนบสลิปเก็บส่วนที่เหลือ 750 ผ่าน /confirm → instant-verify + is_paid true
+        $collect = $this->submitSlip($booking, $admin, 750);
+        $collect->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('payment_recorded.amount', 750);
+
+        $collectConfirmationId = $collect->json('confirmation_id');
+        $this->assertDatabaseHas('payments', [
+            'booking_id' => $booking->id,
+            'amount' => 750,
+            'status' => 'completed',
+            'reference_number' => $collectConfirmationId,
+        ]);
+        $this->assertTrue($booking->fresh()->is_paid);
+
+        // รายงานการเงินต้องจำแนกเป็น "สลิป (โอน/QR)" เพราะผูก confirmation UUID
+        $rows = iterator_to_array(app(DailyFinancialReportData::class)->rows(['date' => now()->toDateString()]));
+        $this->assertCount(2, $rows);
+        $this->assertSame(DailyFinancialReportData::CHANNEL_SLIP, $rows[1]['payment_channel']);
+        $this->assertSame('แนบสลิป', $rows[1]['slip_photo']);
+    }
+
+    public function test_full_confirmed_bill_admin_slip_collects_charge_and_allows_checkout(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+        $room = Room::where('room_type_id', $roomType->id)->firstOrFail();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['user' => $owner->id]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        $this->submitSlip($booking, $owner, 1500)->assertStatus(201);
+        $first = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/booking-confirmations/{$first->id}/verify")
+            ->assertStatus(200);
+
+        // เช็คอินห้อง → เกิดค่าใช้จ่ายเพิ่ม 300 (is_paid กลับ false)
+        $br = $booking->bookingRooms()->firstOrFail();
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/check-in", ['room_id' => $room->id])
+            ->assertStatus(200);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/additional-charges', [
+                'booking_id' => $booking->id,
+                'booking_room_id' => $br->id,
+                'transaction_date' => now()->toDateString(),
+                'item_name' => 'ค่าเสียหาย/ส่วนต่าง',
+                'price' => 300,
+                'charge_type' => 'damage',
+            ])->assertStatus(201);
+
+        // ยังค้าง 300 → check-out โดนบล็อก 400
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/check-out", [
+                'verified_by' => $admin->id,
+            ])->assertStatus(400);
+
+        // admin Collect พร้อมสลิป 300 ผ่าน /confirm → instant-verify + is_paid true → check-out ผ่าน!
+        $this->submitSlip($booking, $admin, 300)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1800)
+            ->assertJsonPath('outstanding_amount', 0);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/check-out", [
+                'verified_by' => $admin->id,
+            ])->assertStatus(200);
+
+        $this->assertSame('complete', $booking->fresh()->status);
+    }
+
+    public function test_full_paid_bill_admin_slip_instant_verifies_and_promotes_to_confirmed(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'paid']);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 1000, 'status' => 'completed']);
+
+        // บิล full สถานะ paid มียอดค้าง 500 → admin Collect 500 → confirmed + is_paid true
+        $this->submitSlip($booking, $admin, 500)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0);
+
+        $this->assertSame('confirmed', $booking->bookingRooms()->firstOrFail()->status);
+    }
+
+    public function test_full_confirmed_bill_admin_slip_without_amount_fills_outstanding(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'confirmed', 'is_paid' => false]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 1100, 'status' => 'completed']);
+
+        // full ไม่แจ้ง amount → fallback เติม outstanding (400) ให้ครบเหมือน verify()
+        ($this->actingAs($admin, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('amount', null)
+            ->assertJsonPath('payment_recorded.amount', 400)
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0);
+    }
+
+    public function test_deposit_confirmed_bill_admin_slip_without_amount_skips_ledger(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deposit']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'confirmed', 'is_paid' => false]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 750, 'status' => 'completed']);
+
+        // deposit ไม่แจ้ง amount → ไม่เดายอดงวด (คง soft เหมือน verify())
+        ($this->actingAs($admin, 'sanctum'))
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", [
+                'slip_image' => $this->slipFile(),
+            ])
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('payment_recorded', null)
+            ->assertJsonPath('booking_is_paid', false)
+            ->assertJsonPath('paid_amount', 750)
+            ->assertJsonPath('outstanding_amount', 750);
+    }
+
+    public function test_deposit_confirmed_bill_blocks_non_admin_owner_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, [
+                'payment_type' => 'deposit',
+                'user' => $owner->id,
+            ]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'confirmed']);
+
+        $this->submitSlip($booking, $owner, 750)
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+    }
+
+    public function test_deposit_draft_bill_admin_slip_still_goes_pending(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['payment_type' => 'deposit']));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // draft ของ deposit/full แม้ admin ส่งก็ยังคงรอ verify (pending) ไม่ข้ามขั้น
+        $this->submitSlip($booking, $admin, 750)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'pending')
+            ->assertJsonPath('booking_status', 'pending')
+            ->assertJsonPath('payment_recorded', null);
+    }
+
+    public function test_full_complete_bill_blocks_admin_slip_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'complete']);
+
+        $this->submitSlip($booking, $admin, 100)
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+    }
+
+    public function test_staff_can_collect_deposit_confirmed_bill_with_instant_verify(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $staff = $this->staff();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, [
+                'payment_type' => 'deposit',
+                'user' => $owner->id,
+            ]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'confirmed', 'is_paid' => false]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 750, 'status' => 'completed']);
+
+        // staff (ไม่ใช่เจ้าของบิล) เก็บงวดที่เหลือหน้าเคาน์เตอร์พร้อมสลิป → instant-verify
+        $res = $this->submitSlip($booking, $staff, 750);
+        $res->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('payment_recorded.received_by', $staff->id);
+
+        $confirmation = BookingConfirmation::findOrFail($res->json('confirmation_id'));
+        $this->assertSame($staff->id, $confirmation->reviewed_by);
+    }
+
+    public function test_staff_can_collect_full_paid_bill_and_promote_to_confirmed(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $staff = $this->staff();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id, ['user' => $owner->id]));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'paid']);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 1000, 'status' => 'completed']);
+
+        $this->submitSlip($booking, $staff, 500)
+            ->assertStatus(201)
+            ->assertJsonPath('confirmation_status', 'verified')
+            ->assertJsonPath('booking_status', 'confirmed')
+            ->assertJsonPath('booking_is_paid', true)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0);
+
+        $this->assertSame('confirmed', $booking->bookingRooms()->firstOrFail()->status);
+    }
+
+    public function test_staff_cannot_submit_slip_for_other_users_draft_booking_403(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $staff = $this->staff();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $created = $this->actingAs($owner, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+
+        // staff ห้ามส่งสลิป pre-payment แทนคนอื่นในสถานะ draft (ไม่ใช่ Collect)
+        $this->submitSlip($booking, $staff, 1500)
+            ->assertStatus(403)
+            ->assertJsonPath('status', 'error');
+    }
+
+    public function test_staff_complete_bill_blocks_422(): void
+    {
+        $roomType = $this->roomTypeSetup();
+        $admin = $this->admin();
+        $staff = $this->staff();
+
+        $created = $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/v1/bookings', $this->bookingPayload($roomType->id));
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $booking->update(['status' => 'complete']);
+
+        $this->submitSlip($booking, $staff, 100)
             ->assertStatus(422)
             ->assertJsonPath('status', 'error');
     }

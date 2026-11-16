@@ -34,7 +34,11 @@ use Illuminate\Support\Facades\Storage;
  * 💳 (06/11/26, owner — ย้อนมติ 25/09/26): บิล **deferred** รับสลิปผ่าน confirm ได้แล้วทุกสถานะหลัก
  *    (draft/verify_error/paid/confirmed — เก็บยอดค้างเป็นงวดด้วยสลิปได้) · ผู้ส่งเป็น **admin**
  *    → instant-verify (confirmation verified + ledger จุดที่ 4 + บิล confirmed ทันที) ·
- *    เจ้าของส่ง → flow เดิม (pending รอ verify) · บิล full/deposit คงเดิมทุกอย่าง
+ *    เจ้าของส่ง → flow เดิม (pending รอ verify)
+ * 💳 (16/11/26, P0-2 Collect): ขยายรับบิลสถานะ **paid/confirmed** (full/deposit/deferred) สำหรับ
+ *    **admin + staff** (หน้าเคาน์เตอร์ 24 ชม.) → instant-verify (เก็บมัดจำงวดที่เหลือ /
+ *    change-room / tier-change / addon กลางพัก / additional_charges พร้อมสลิป) ·
+ *    draft/verify_error ของ full/deposit และสิทธิ์เจ้าของบิลคง flow เดิมทุกประการ
  */
 class BookingConfirmationController extends Controller
 {
@@ -51,24 +55,40 @@ class BookingConfirmationController extends Controller
         $booking = Booking::findOrFail($bookingId);
 
         // 💳 (06/11/26, owner — ย้อนมติ 25/09/26 "deferred บล็อกสลิป"): บิล deferred รับสลิปผ่าน endpoint นี้ได้แล้ว
-        //    (FE AdminConfirm แนบสลิปทุกครั้งที่ add/update บิล) — state guard ขยายตาม payment_type
+        //    (FE AdminConfirm แนบสลิปทุกครั้งที่ add/update บิล)
         $isDeferred = $booking->payment_type === 'deferred';
+        $isAdmin = $user->role === 'admin';
+        $isStaff = $user->role === 'staff';
+        $isOwner = $booking->user_id === $user->id;
 
-        // ownership check (เจ้าของหรือ admin เท่านั้น) — deferred โหมด B (user_id null) เหลือ admin เท่านั้น
-        if ($user->role !== 'admin' && $booking->user_id !== $user->id) {
+        // ownership check:
+        // - admin: ทุกบิลทุกสถานะที่อนุญาต
+        // - staff: หน้าเคาน์เตอร์ 24 ชม. เปิดเฉพาะ Collect (paid/confirmed) หรือบิลที่ตัวเองเป็นเจ้าของ (draft/verify_error)
+        //          — ห้ามส่งสลิป pre-payment แทนคนอื่นในสถานะ draft/verify_error
+        // - role อื่น: เฉพาะบิลที่ตัวเองเป็นเจ้าของเท่านั้น
+        if ((! $isAdmin && ! $isStaff && ! $isOwner)
+            || ($isStaff && ! $isOwner && in_array($booking->status, ['draft', 'verify_error'], true))) {
             return $this->error('ไม่มีสิทธิ์ส่งหลักฐานการชำระสำหรับ booking นี้ค่ะ', 403);
         }
 
-        // state guard — บิลปกติรับเฉพาะ draft/verify_error (หลัง reject booking จะเป็น verify_error เพื่อส่งใหม่)
-        // 💳 deferred รับเพิ่ม paid/confirmed (เก็บยอดค้างเป็นงวดด้วยสลิปได้) — 'pending' ยังกันด้วย
-        //    existing-pending guard (สลิปค้างสูงสุด 1) · บิล full/deposit ที่จ่ายแล้วเก็บต่อผ่าน recordPayment เท่านั้น
-        $allowedStates = $isDeferred
-            ? ['draft', 'verify_error', 'paid', 'confirmed']
-            : ['draft', 'verify_error'];
+        // state guard — non-admin/non-staff รับเฉพาะ draft/verify_error
+        // 💳 (06/11/26 + 16/11/26 P0-2 Collect):
+        //    - admin: รับ draft, verify_error, paid, confirmed ทุก payment_type
+        //    - staff: รับ paid, confirmed ทุก payment_type (Collect) + draft, verify_error เฉพาะบิลที่ตัวเองเป็นเจ้าของ
+        //    · 'pending' และ 'complete' ยังกันทุกกรณีด้วย allowedStates + existing-pending guard
+        $allowedStates = match (true) {
+            $isAdmin => ['draft', 'verify_error', 'paid', 'confirmed'],
+            $isStaff => $isOwner
+                ? ['draft', 'verify_error', 'paid', 'confirmed']
+                : ['paid', 'confirmed'],
+            default => ['draft', 'verify_error'],
+        };
         if (! in_array($booking->status, $allowedStates, true)) {
-            $hint = $isDeferred
-                ? 'รับเฉพาะ draft, verify_error, paid หรือ confirmed (pending = มีสลิปรอตรวจอยู่)'
-                : 'รับเฉพาะ draft หรือ verify_error เท่านั้น';
+            $hint = match (true) {
+                $isAdmin || ($isStaff && $isOwner) => 'รับเฉพาะ draft, verify_error, paid หรือ confirmed (pending = มีสลิปรอตรวจอยู่)',
+                $isStaff => 'staff เก็บยอดหน้าเคาน์เตอร์รับเฉพาะ paid หรือ confirmed เท่านั้น',
+                default => 'รับเฉพาะ draft หรือ verify_error เท่านั้น',
+            };
 
             return $this->error(
                 "ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}' ({$hint})",
@@ -111,6 +131,11 @@ class BookingConfirmationController extends Controller
 
             $booking = Booking::with('bookingRooms')->where('id', $bookingId)->lockForUpdate()->firstOrFail();
 
+            $lockedIsOwner = $booking->user_id === $user->id;
+            if ($isStaff && ! $lockedIsOwner && in_array($booking->status, ['draft', 'verify_error'], true)) {
+                throw new Exception('ไม่มีสิทธิ์ส่งหลักฐานการชำระสำหรับ booking นี้ค่ะ', 403);
+            }
+
             if (! in_array($booking->status, $allowedStates, true)) {
                 throw new Exception("ไม่สามารถส่งหลักฐานได้เพราะ booking อยู่ในสถานะ '{$booking->status}'", 422);
             }
@@ -130,8 +155,12 @@ class BookingConfirmationController extends Controller
 
             // 💳 (06/11/26, owner): admin ส่งสลิปบิล deferred = **ยืนยันทันที** (instant-verify) —
             //    confirmation verified + เขียน ledger จุดที่ 4 + บิล confirmed ตาม state machine
-            //    · เจ้าของส่ง หรือ บิล full/deposit → flow เดิม (pending รอ admin verify)
-            $isInstantVerify = $isDeferred && $user->role === 'admin';
+            // 💳 (16/11/26, P0-2 Collect): admin + staff ส่งสลิปบนสถานะ paid/confirmed = instant-verify เหมือนกัน
+            //    · draft/verify_error ของ full/deposit และกรณีเจ้าของบิลส่ง → flow เดิม (pending รอ admin verify)
+            $lockedIsDeferred = $booking->payment_type === 'deferred';
+            $lockedIsCollectState = in_array($booking->status, ['paid', 'confirmed'], true);
+            $isInstantVerify = ($isAdmin && ($lockedIsDeferred || $lockedIsCollectState))
+                || ($isStaff && $lockedIsCollectState);
 
             $payment = null;
             if ($isInstantVerify) {
@@ -155,10 +184,15 @@ class BookingConfirmationController extends Controller
                     'uploaded_by' => $user->id,
                 ]);
 
-                // 💳 ledger จุดที่ 4 (จดใน cline.md — มติ 06/11/26): เขียนเมื่อแจ้ง amount เท่านั้น —
-                //    deferred ไม่แจ้ง amount ≠ จ่ายครบ (ต่างจาก fallback ของ full ใน verify())
-                //    · is_paid = SUM(payments) ≥ total + charges (pattern เดียวกับ verify)
+                // 💳 ledger จุดที่ 4 (มติ 06/11/26 + 16/11/26 P0-2 Collect):
+                //    - แจ้ง amount → เขียนตามยอดที่แจ้ง
+                //    - ไม่แจ้ง amount: deferred/deposit ไม่เดายอด (ไม่เขียน) · full เติม outstanding_amount (เหมือน verify())
+                //    · is_paid = SUM(payments) ≥ total + charges (syncIsPaid)
                 $ledgerAmount = $validated['amount'] ?? null;
+                if ($ledgerAmount === null && $booking->payment_type === 'full' && $booking->outstanding_amount > 0) {
+                    $ledgerAmount = $booking->outstanding_amount;
+                }
+
                 if ($ledgerAmount !== null) {
                     $payment = Payment::create([
                         'booking_id' => $booking->id,
@@ -168,7 +202,7 @@ class BookingConfirmationController extends Controller
                         'received_by' => $user->id,
                     ]);
 
-                    $booking->update(['is_paid' => $booking->paid_amount >= $booking->total_amount + $booking->charges_total]);
+                    $booking->syncIsPaid();
                 }
 
                 // transitions — เส้นทางที่ matrix อนุญาต (admin): draft→confirmed (walk-in เดิม)
@@ -213,9 +247,9 @@ class BookingConfirmationController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                // 💳 (06/11/26): admin ส่งสลิป deferred = ยืนยันทันที ไม่ได้ "รอตรวจ"
+                // 💳 (06/11/26 + 16/11/26): admin/staff instant-verify (deferred ทุกสถานะโดย admin / paid,confirmed โดย admin+staff)
                 'message' => $isInstantVerify
-                    ? 'ยืนยันการชำระเงินทันที (admin) — บิลอัปเดตสถานะตาม state machine แล้วค่ะนายท่าน'
+                    ? "ยืนยันการชำระเงินทันที ({$user->role}) — บิลอัปเดตสถานะตาม state machine แล้วค่ะนายท่าน"
                     : 'ส่งหลักฐานการชำระเรียบร้อย — รอแอดมินตรวจสอบค่ะนายท่าน',
                 'confirmation_id' => $confirmation->id,
                 'confirmation_status' => $confirmation->status,
@@ -223,8 +257,8 @@ class BookingConfirmationController extends Controller
                 'amount' => $confirmation->amount,
                 'expected_amount' => $freshBooking->expected_amount,
                 'booking_status' => $freshBooking->status,
-                // 💳 (06/11/26): ledger row ที่เขียนทันทีเมื่อ admin ส่งสลิป deferred พร้อมแจ้งยอด
-                //    (null เมื่อไม่แจ้ง amount หรือไม่ใช่ instant-verify path)
+                'booking_is_paid' => $freshBooking->is_paid,
+                // 💳 (06/11/26 + 16/11/26): ledger row ที่เขียนทันทีเมื่อ instant-verify (null เมื่อไม่มีเหตุการณ์เงินหรือไม่ใช่ instant-verify)
                 'payment_recorded' => $payment?->fresh(),
                 // 💳 envelope 4 field ของ booking
                 'payment_type' => $freshBooking->payment_type,

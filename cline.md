@@ -2657,3 +2657,14 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Docs:** `docs/api_guide.md` + patch note `docs/api_patches/2026-11-16-tier-change-default-keep-price.md`
 - **Tests:** `TierChangeFamilyTest`, `ChangeRoomTest`, `BookingSurchargeAfterPaymentTest`, `FrontDeskSplitUpgradeTest` (ปรับ test ที่คาดหวัง auto-reprice ให้ส่ง `apply_new_rate: true` + fix fixture `room_amount` ใน `ChangeRoomTest`/`TierChangeFamilyTest` + เพิ่ม 13 เคสใหม่ครอบคลุม default keep-price ทั้ง upgrade/downgrade, multi-room preserve, addon-on-upgrade, changing nights, BR draft under paid, draft mode unchanged, checked_in 422, invalid boolean 422, manual price priority)
 
+## 💳 P0-2 Collect — ขยาย `POST /bookings/{id}/confirm` รับ `full`/`deposit` สถานะ `paid`/`confirmed` (2026-11-16)
+
+- **Context & Motivation:** มติ "ชำระเงินทุกครั้งต้องมีสลิป ยกเว้นเลือกค้างชำระ" แต่เดิม `POST /bookings/{id}/confirm` รับเฉพาะ `draft`/`verify_error` สำหรับ `full`/`deposit` (รับ `paid`/`confirmed` เฉพาะ `deferred`) ทำให้บิล `deposit` งวดที่เหลือ หรือ `full` ที่มียอดส่วนต่างทีหลัง (change-room / tier-change / addon กลางพัก / additional_charges) เก็บเงินพร้อมแนบสลิปไม่ได้และโดน `checkOutRoom` บล็อก 400
+- **Implementation (`BookingConfirmationController::confirm` — ทาง A):**
+  - `admin` + `staff` (หน้าเคาน์เตอร์ 24 ชม.) ส่งสลิปบนสถานะ `paid`/`confirmed` (ทุก `payment_type`: `full`/`deposit`/`deferred`) → **instant-verify** (`confirmation_status = 'verified'`, สร้าง `Image`, เขียน `Payment` ledger ด้วย `reference_number = confirmation->id` → `DailyFinancialReportData` จำแนกเป็น `"สลิป (โอน/QR)"` อัตโนมัติ, `$booking->syncIsPaid()`, และ `paid → confirmed` / `confirmed` คงสถานะ)
+  - กรณีไม่แจ้ง `amount` ใน instant-verify: `deferred`/`deposit` ไม่เดายอดงวด (ไม่เขียน ledger), ส่วน `full` เติม `outstanding_amount` อัตโนมัติเหมือน `verify()`
+  - `draft`/`verify_error` ของ `full`/`deposit` (แม้ `admin` หรือ `staff` เจ้าของบิลส่ง) ยังคง flow `pending` รอ verify เดิม · `staff` ที่ไม่ใช่เจ้าของบิลส่งใน `draft`/`verify_error` ได้ **403** · เจ้าของบิลทั่วไปส่งบน `paid`/`confirmed` ยังคง **422** · `pending` และ `complete` ยังคง **422** ทุกกรณี
+  - Response ของ `confirm` เพิ่ม `booking_is_paid` คู่กับ `booking_status`
+- **Docs & Tests:** อัปเดต `routes/api.php` + `docs/api_guide.md` · เพิ่ม 12 เคสใน `BookingPaymentTypeTest` (deposit collect + report channel / full charge collect → checkout pass / paid→confirmed / full without amount / deposit without amount / non-admin 422 / deposit draft admin still pending / complete 422 / staff collect deposit / staff collect paid→confirmed / staff non-owner draft 403 / staff complete 422) · full suite **989 passed (4,248 assertions)** + `pint --dirty` PASS
+
+

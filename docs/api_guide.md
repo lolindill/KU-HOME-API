@@ -1963,9 +1963,9 @@ curl -s -H "Accept: application/json" \
 🌟 **Refactor (25/08/26)**: booking `draft → pending` แทน (mirror กับ confirmation) — `paid` + `is_paid=true` จะเกิดตอน admin **verify** เท่านั้น
 🌟 **Refactor (19/08/26)**: ลบ `payment_method` ออก — flow เหลือ "ส่งสลิป → รอแอดมินตรวจ" อย่างเดียว (`slip_image` บังคับเสมอ, `transfer_time` optional)
 🌟 **Refactor (19/08/26 #2)**: สลิปย้ายไปเก็บบน **private disk** (`storage/app/private/slips/` — เว็บเปิดตรงๆ ไม่ได้) + metadata ลง `images` table (polymorphic) · ดูรูปผ่าน **signed URL อายุ 15 นาที** เท่านั้น (ดู [`GET /images/{id}/file`](#get-imagesidfile--serve-image-via-signed-url))
-💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · 💳 **(06/11/26, ย้อนมติ 25/09/26)** booking `deferred` **รับสลิปผ่าน endpoint นี้แล้วทุกสถานะหลัก** (draft/verify_error/paid/confirmed — เก็บยอดค้างเป็นงวดได้) — **admin ส่ง = ยืนยันทันที** (instant-verify: confirmation `verified` + เขียน ledger เมื่อแจ้ง amount + บิล confirmed), **เจ้าของส่ง = flow เดิม** (`pending` รอ verify) · บิล `full`/`deposit` คงเดิมทุกอย่าง (paid/confirmed ยัง 422 — เก็บท้ายบิลผ่าน `POST /front-desk/{bookingId}/payment`)
+💳 **Payment types (25/09/26)**: เพิ่ม **`amount` (บาท, ≥ 1)** — ยอดที่ user แจ้งตามสลิป · 💳 **(08/10/26)** `amount` **กลับเป็น optional (nullable)** — user ไม่แจ้งยอดก็ส่งสลิปได้ (ยัง 422 ถ้าส่งมาเป็น 0 หรือไม่ใช่จำนวนเต็ม) · 💳 **(06/11/26, ย้อนมติ 25/09/26)** booking `deferred` **รับสลิปผ่าน endpoint นี้แล้วทุกสถานะหลัก** (draft/verify_error/paid/confirmed — เก็บยอดค้างเป็นงวดได้) — **admin ส่ง = ยืนยันทันที** (instant-verify: confirmation `verified` + เขียน ledger เมื่อแจ้ง amount + บิล confirmed), **เจ้าของส่ง = flow เดิม** (`pending` รอ verify) · 💳 **(16/11/26, P0-2 Collect)** ขยายให้ **`admin` + `staff`** ส่งสลิป Collect บนบิล `full`/`deposit`/`deferred` สถานะ **`paid` / `confirmed`** ได้แบบ **instant-verify** เช่นเดียวกัน (เก็บมัดจำงวดที่เหลือ / `change-room` / tier-change / add-on กลางพัก / `additional_charges`) · บิล `full`/`deposit` ในสถานะ `draft`/`verify_error` และสิทธิ์เจ้าของบิลทั่วไปยังคง flow เดิม (`staff` ที่ไม่ใช่เจ้าของบิลส่งใน `draft`/`verify_error` ได้ **403**, เจ้าของบิลทั่วไปใน `paid`/`confirmed` ได้ **422**) · การเก็บเงินสดหน้าเคาน์เตอร์ยังคงใช้ `POST /front-desk/{bookingId}/payment` ได้ตามเดิม
 
-🔒 **Auth required** · Ownership: User (owner) or admin · **Throttle**: `5,1`
+🔒 **Auth required** · Ownership: User (owner), admin, or staff (Collect `paid`/`confirmed` only) · **Throttle**: `5,1`
 
 **Content-Type**: `multipart/form-data` (เพราะมีไฟล์ slip)
 
@@ -1996,6 +1996,8 @@ curl -X POST /api/v1/bookings/{id}/confirm \
   "amount": 750,
   "expected_amount": 750,
   "booking_status": "pending",
+  "booking_is_paid": false,
+  "payment_recorded": null,
   "payment_type": "deposit",
   "deposit_amount": 750,
   "paid_amount": 0,
@@ -2008,14 +2010,14 @@ curl -X POST /api/v1/bookings/{id}/confirm \
 > 💳 `expected_amount` = ยอดที่ระบบคาดว่าต้องชำระ ณ ตอนนี้ (deposit งวดแรก = ยอดมัดจำ, กรณีอื่น = `outstanding_amount`) · 4 field `payment_type/deposit_amount/paid_amount/outstanding_amount` ส่งทุก response ของ booking ทุก role
 
 **Guards** (422 on failure):
-- ❌ Booking ไม่อยู่ในสถานะที่รับ — บิล `full`/`deposit`: รับเฉพาะ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่) · บิล `deferred` (💳 06/11/26): รับเพิ่ม `paid` และ `confirmed` (เก็บยอดค้างเป็นงวด) — `pending` ยังไม่รับทุก type
+- ❌ Booking ไม่อยู่ในสถานะที่รับ — เจ้าของบิลทั่วไป (non-admin/non-staff): รับเฉพาะ `draft` หรือ `verify_error` (หลัง reject booking จะเป็น `verify_error` เพื่อส่งใหม่) · `admin`: รับ `draft`, `verify_error`, `paid`, `confirmed` ทุก `payment_type` · `staff`: รับ `paid`, `confirmed` ทุก `payment_type` (Collect) + `draft`/`verify_error` เฉพาะบิลที่ตัวเองเป็นเจ้าของ (`pending` และ `complete` ยังไม่รับทุกกรณี)
 - ❌ หมดเวลา (`payment_deadline` ผ่านแล้ว — ตรวจเฉพาะ `draft` ของบิล full/deposit, `verify_error` ส่งใหม่ได้แม้หมด deadline · 💳 **deferred ไม่มีวันหมดอายุ** — ข้าม guard นี้)
 - ❌ มี confirmation `pending` อยู่แล้ว (1 pending max — กัน spam, ใช้กับ deferred ด้วย)
 - ❌ ไม่ส่ง `slip_image` (บังคับเสมอ)
-- ❌ ไม่ส่ง `amount` / amount < 1 (💳 ใหม่ 25/09/26)
-- ❌ Ownership — บิล deferred โหมด B (`user_id = null`) ผู้ที่ไม่ใช่ admin ส่งไม่ได้ → **403**
+- ❌ ส่ง `amount` < 1 หรือไม่ใช่จำนวนเต็ม (ไม่ส่ง = `null`)
+- ❌ Ownership — ผู้ที่ไม่ใช่ `admin`/`staff` ส่งแทนคนอื่นไม่ได้ → **403** · `staff` ที่ไม่ใช่เจ้าของบิลส่งในสถานะ `draft`/`verify_error` ไม่ได้ → **403**
 
-💳 **Instant-verify (admin ส่งสลิปบิล deferred — 06/11/26)**: response เป็น `confirmation_status: "verified"` + `booking_status: "confirmed"` ทันที (ไม่รอ verify) + field `payment_recorded` = payments row ที่เขียน (null เมื่อไม่แจ้ง amount) · เส้นทางสถานะ: `draft→confirmed` · `verify_error→pending→paid→confirmed` · `paid→confirmed` · `confirmed` คงสถานะ
+💳 **Instant-verify (`admin` ส่งสลิปบน `deferred` ทุกสถานะหลัก หรือ `admin`+`staff` ส่งสลิป Collect บนสถานะ `paid`/`confirmed` ทุก `payment_type` — 06/11/26 + 16/11/26)**: response เป็น `confirmation_status: "verified"` + `booking_status: "confirmed"` ทันที (ไม่รอ verify) + field `payment_recorded` = payments row ที่เขียน (`booking_is_paid` อัปเดตตาม `paid ≥ total + charges`) · กรณีไม่ส่ง `amount`: `deferred`/`deposit` ไม่เขียน ledger (`payment_recorded = null`), ส่วน `full` เติมยอดคงค้าง `outstanding_amount` ให้อัตโนมัติเหมือน `verify()` · เส้นทางสถานะ: `draft→confirmed` · `verify_error→pending→paid→confirmed` · `paid→confirmed` · `confirmed` คงสถานะ (`draft`/`verify_error` ของ `full`/`deposit` แม้ `admin` ส่งยังคงเป็น `pending` รอ verify ตามเดิม)
 
 ---
 

@@ -144,7 +144,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
     // 💳 (06/11/26): บิล deferred รับสลิปที่นี่แล้วทุกสถานะหลัก — admin ส่ง = instant-verify (confirmed + ledger),
-    //    เจ้าของส่ง = pending รอ verify · บิล full/deposit คงเดิม (draft/verify_error เท่านั้น)
+    //    เจ้าของส่ง = pending รอ verify
+    // 💳 (16/11/26, P0-2 Collect): บิล full/deposit/deferred สถานะ paid/confirmed เปิดให้ admin + staff
+    //    ส่งสลิป Collect ที่นี่แบบ instant-verify (draft/verify_error และสิทธิ์เจ้าของบิลคงเดิม)
     Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])
         ->where('bookingId', '[0-9a-f\-]{36}')
         ->middleware('throttle:5,1');
