@@ -208,6 +208,7 @@ class FrontDeskController extends Controller
                 );
             } elseif ($booking->status === 'paid') {
                 $booking->transitionStatus('confirmed', $userRole);
+                $bookingRoom->refresh();
             }
 
             // 🌟 จับคู่ห้องพัก: ส่ง room_id มา = มอบหมายห้องตอนเช็คอิน (เปลี่ยนจากที่ผูกไว้ได้)
@@ -498,6 +499,7 @@ class FrontDeskController extends Controller
             // รองรับสถานการณ์จริง: ลูกค้าจ่ายเงินแล้วแต่ไม่มา ระบบยังปิดการจองได้
             if ($booking->status === 'paid') {
                 $booking->transitionStatus('confirmed', 'admin');
+                $targetRooms->each->refresh();
             }
 
             // Mark no-show ทีละห้อง (ใช้ BR state machine)

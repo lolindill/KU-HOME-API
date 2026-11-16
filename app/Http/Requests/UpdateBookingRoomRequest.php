@@ -13,7 +13,8 @@ use Illuminate\Foundation\Http\FormRequest;
  * — สองโหมด (guard ใน controller):
  *   1) parent booking status='draft' + BR status='draft' — แก้ไขปกติ (เจ้าของหรือ admin)
  *   2) 💳 (25/09/26, ticket 10) parent booking status='paid|confirmed' + BR draft|confirmed —
- *      surcharge หลังจ่าย (admin เท่านั้น) — reprice ใหม่ ส่วนต่างเก็บต่อผ่าน recordPayment
+ *      surcharge / change-tier หลังจ่าย (admin+staff) — default คงราคาห้องเดิมทั้งขาขึ้น/ลง
+ *      (ต้องส่ง apply_new_rate=true เพื่อคิดเรทห้องใหม่ หรือส่ง price_per_night เอง)
  *
  * โครงสร้าง flat (ไม่ซ้อน booking_rooms.*) ต่างจาก StoreBookingRequest/AddBookingRoomsRequest
  * เพราะแก้ทีละห้องด้วย bookingRoomId ที่ระบุใน path
@@ -57,8 +58,10 @@ class UpdateBookingRoomRequest extends FormRequest
             'billing_address' => 'nullable|string|max:255',
             'billing_comment' => 'nullable|string|max:255',
 
-            // 💰 manual price_per_night (admin+staff — tier-endpoints-v2)
+            // 💰 manual price_per_night & toggle apply_new_rate (admin+staff — post-payment change-tier)
+            //    default apply_new_rate = false (คงราคาห้องเดิมทั้งขาขึ้นและขาลง)
             'price_per_night' => 'nullable|integer|min:0',
+            'apply_new_rate' => 'nullable|boolean',
 
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'addons' => 'nullable|array',
@@ -145,6 +148,7 @@ class UpdateBookingRoomRequest extends FormRequest
             'bed_preference.in' => 'bed_preference ต้องเป็น king_size เท่านั้นค่ะ',
             'price_per_night.integer' => 'ราคาต่อคืนต้องเป็นตัวเลขจำนวนเต็มค่ะ',
             'price_per_night.min' => 'ราคาต่อคืนต้องไม่ติดลบค่ะ',
+            'apply_new_rate.boolean' => 'สถานะการคิดเรทห้องใหม่ (apply_new_rate) ต้องเป็น true หรือ false ค่ะ 💳',
             'addons.early_checkin.integer' => 'จำนวนชั่วโมง early check-in ต้องเป็นตัวเลขจำนวนเต็ม (0-7) ค่ะ',
             'addons.early_checkin.min' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',
             'addons.early_checkin.max' => 'ชั่วโมง early check-in ต้องอยู่ระหว่าง 0-7 ชั่วโมงค่ะ',

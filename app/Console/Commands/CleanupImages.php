@@ -6,6 +6,7 @@ use App\Models\BookingConfirmation;
 use App\Models\BookingRoom;
 use App\Models\HousekeepingTask;
 use App\Models\Image;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -14,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 #[Signature('app:cleanup-images')]
-#[Description('Sweep orphaned slip/evidence/housekeeping files/rows + apply retention policy on rejected slips (30d), checkin evidences (365d) and housekeeping photos (90d)')]
+#[Description('Sweep orphaned slip/evidence/housekeeping/avatar files/rows + apply retention policy on rejected slips (30d), checkin evidences (365d) and housekeeping photos (90d)')]
 class CleanupImages extends Command
 {
     public function handle()
@@ -33,7 +34,7 @@ class CleanupImages extends Command
         //    (เช่น เหลือจาก failed transaction ก่อน best-effort delete ใน controller จะทำงาน)
         $disk = Storage::disk('local');
         $knownPaths = Image::where('disk', 'local')->pluck('path')->flip();
-        foreach (['slips', 'checkin_evidences', 'housekeeping'] as $folder) {
+        foreach (['slips', 'checkin_evidences', 'housekeeping', 'avatars'] as $folder) {
             foreach ($disk->files($folder) as $file) {
                 if (! $knownPaths->has($file)) {
                     $disk->delete($file);
@@ -76,6 +77,18 @@ class CleanupImages extends Command
             $image->delete(); // hook deleting จะลบไฟล์บน disk ให้
             $results['orphan_rows_deleted']++;
             $this->line("  ✓ Orphan task photo row deleted: {$image->id}");
+        }
+
+        //    2e. image morph ไป user (รูปโปรไฟล์ avatar) ที่ถูกลบไปแล้ว (defense-in-depth
+        //        นอกเหนือจาก User::deleting hook ที่ลบให้แล้ว)
+        $userOrphans = Image::query()
+            ->where('imageable_type', User::class)
+            ->whereNotIn('imageable_id', User::pluck('id'))
+            ->get();
+        foreach ($userOrphans as $image) {
+            $image->delete(); // hook deleting จะลบไฟล์บน disk ให้
+            $results['orphan_rows_deleted']++;
+            $this->line("  ✓ Orphan avatar row deleted: {$image->id}");
         }
 
         //    2d. image ไม่มี imageable เลยและแก่กว่า 24 ชม. (สร้างไม่สำเร็จ/ค้างจากอะไรก็ตาม)

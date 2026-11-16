@@ -99,6 +99,10 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     // 👤 User Profile (เจ้าของเท่านั้น)
     Route::get('/me', [UserController::class, 'me']);
     Route::put('/profile', [UserController::class, 'updateProfile']);
+    // 🖼️ Avatar (รูปโปรไฟล์) — multipart แยกจาก PUT /profile ที่เป็น JSON (แพทเทิร์นเดียวกับ evidence)
+    //    ดูไฟล์ผ่าน signed URL ของ images.file — เจ้าของ + admin เท่านั้น (ตรวจใน ImageController::show)
+    Route::post('/profile/avatar', [UserController::class, 'uploadAvatar'])->middleware('throttle:10,1');
+    Route::delete('/profile/avatar', [UserController::class, 'deleteAvatar']);
 
     // 📅 Bookings (เจ้าของบุ๊กกิ้งดูของตัวเองได้)
     Route::get('/bookings', [BookingController::class, 'getBookings']);
@@ -140,7 +144,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
     // 🌟 Refactor (24/07/26): user ส่ง slip ยืนยันการชำระ → สร้าง booking_confirmation (1:N history)
     // 💳 (06/11/26): บิล deferred รับสลิปที่นี่แล้วทุกสถานะหลัก — admin ส่ง = instant-verify (confirmed + ledger),
-    //    เจ้าของส่ง = pending รอ verify · บิล full/deposit คงเดิม (draft/verify_error เท่านั้น)
+    //    เจ้าของส่ง = pending รอ verify
+    // 💳 (16/11/26, P0-2 Collect): บิล full/deposit/deferred สถานะ paid/confirmed เปิดให้ admin + staff
+    //    ส่งสลิป Collect ที่นี่แบบ instant-verify (draft/verify_error และสิทธิ์เจ้าของบิลคงเดิม)
     Route::post('/bookings/{bookingId}/confirm', [BookingConfirmationController::class, 'confirm'])
         ->where('bookingId', '[0-9a-f\-]{36}')
         ->middleware('throttle:5,1');
@@ -292,6 +298,13 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
 
             // 🔀 Mid-stay split-upgrade (2026-11-11) — แบ่งช่วงพักครึ่งหนึ่งย้ายขึ้น tier สูงกว่า
             Route::post('/{bookingId}/rooms/{bookingRoomId}/split-upgrade', [RoomMoveController::class, 'splitUpgrade'])
+                ->where('bookingId', '[0-9a-f\-]{36}')
+                ->where('bookingRoomId', '[0-9a-f\-]{36}');
+
+            // 📅 Shift dates (2026-11-16) — ย้ายชุดวันเข้าพัก (shift-only: จำนวนคืนต้องเท่าเดิม)
+            //    BR confirmed มี/ไม่มีเลขห้องก็ได้ — มีห้อง → ตรวจห้องเดิมว่างช่วงใหม่ (strict,
+            //    ไม่ auto-allocate) · ไม่มีห้อง → ข้ามตรวจ (ไปจัดตอน assign-rooms)
+            Route::put('/{bookingId}/rooms/{bookingRoomId}/dates', [RoomMoveController::class, 'changeDates'])
                 ->where('bookingId', '[0-9a-f\-]{36}')
                 ->where('bookingRoomId', '[0-9a-f\-]{36}');
 

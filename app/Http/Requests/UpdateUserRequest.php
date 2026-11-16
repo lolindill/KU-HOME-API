@@ -30,20 +30,36 @@ class UpdateUserRequest extends FormRequest
         // กรณี /profile route ไม่มี param → fallback ใช้ user ที่ login อยู่
         $provider = $userId ? User::find($userId)?->auth_provider : 'password';
 
+        // 🔒 (2026-11-11) profile route: SSO user (ku_sso / google) ห้ามแก้ email เอง —
+        //    email เป็น identity anchor ที่ KuSsoService/GoogleSsoService ใช้ค้นหา account ตอน login
+        //    (ถ้าแก้ ครั้งหน้า login จะหาไม่เจอ → สร้าง user ใหม่ซ้ำเป็นบัญชีแฝด)
+        //    admin PUT /users/{id} (มี route param id) คงแก้ได้เหมือนเดิม
+        $isProfileRoute = $this->route('user') === null && $this->route('id') === null;
+        $ssoLockedEmail = $isProfileRoute && ($provider ?? 'password') !== 'password';
+
         return [
             'name' => 'sometimes|required|string|max:255',
-            'email' => [
-                'sometimes', 'required', 'string', 'email', 'max:255',
-                Rule::unique('users', 'email')
-                    ->where(fn ($query) => $query->where('auth_provider', $provider ?? 'password'))
-                    ->ignore($userId),
-            ],
+            'email' => $ssoLockedEmail
+                ? ['prohibited']
+                : [
+                    'sometimes', 'required', 'string', 'email', 'max:255',
+                    Rule::unique('users', 'email')
+                        ->where(fn ($query) => $query->where('auth_provider', $provider ?? 'password'))
+                        ->ignore($userId),
+                ],
             'password' => 'sometimes|required|string|min:8',
             'title' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:255',
             'nationality' => 'nullable|string|max:255',
             'role' => 'nullable|string|in:user,admin,staff,housekeeping,ku_member',
             'ver' => 'nullable|boolean',
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'email.prohibited' => 'บัญชีที่ล็อกอินผ่าน SSO (KU SSO / Google) เปลี่ยนอีเมลไม่ได้ค่ะ — อีเมลผูกกับผู้ให้บริการต้นทาง 🔒',
         ];
     }
 }
