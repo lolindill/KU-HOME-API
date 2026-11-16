@@ -2641,3 +2641,19 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Tests:** เพิ่ม `tests/Feature/RoomDatesChangeTest.php` 19 เคส (401 · 403 loop 5 roles · 404 ข้ามบิล · container draft/pending/verify_error · BR draft/checked_in · param-cut 3 แบบ · check_out ≤ check_in · คืนไม่เท่า · check_in อดีต · ชุดซ้ำเดิม · staff 20 คืน 422 🌙 · admin 91 คืน 422 🗓️ · overlap 422 + BR ไม่ถูกแตะ · maintenance 422 · happy admin มีห้องคงห้อง+audit+is_paid · happy ไม่มีห้อง · happy ย้ายย้อนเมื่อว่าง · happy admin 20 คืนเขต monthly intdiv(20×9000,30)=6000 · addon keys เลื่อน +7 คง qty + total 5900)
 - **Suite:** baseline 939 → **958 passed (4,030 assertions)** + `vendor/bin/pint --dirty` PASS · docs: `api_guide.md` section ใหม่ใต้ Front Desk Operations + patch note `docs/api_patches/2026-11-16-room-dates-endpoint.md` (additive ไม่ breaking)
 
+## 🎚️ Tier-change & Change-room default keep-price + `apply_new_rate` toggle (2026-11-16)
+
+- **Context & Motivation:** เดิมหลังเปลี่ยน tier (`PUT /bookings/{id}/rooms/{brId}` โหมด 2) หรือย้ายห้อง (`POST /front-desk/{id}/rooms/{brId}/change-room`) ระบบจะ reprice ตามเรทห้องใหม่จาก `global_rates` ทันทีโดยอัตโนมัติ ทำให้อัปเกรดห้องให้แขกฟรีหน้าเคาน์เตอร์ต้องคอยกรอก `price_per_night` เดิมทุกครั้ง
+- **มติ owner LOCK (2026-11-16):**
+  1. **Scope:** มีผลเฉพาะโหมดหลังจ่ายเงิน (`booking.status` ไม่ใช่ `draft` — คือ `paid|confirmed`) ของ `admin + staff` เท่านั้น:
+     - `PUT /api/v1/bookings/{bookingId}/rooms/{bookingRoomId}` โหมด 2 (รวม BR `draft|confirmed` ที่ `room_id = null`)
+     - `POST /api/v1/front-desk/{bookingId}/rooms/{bookingRoomId}/change-room`
+     - บิล **`draft`** (โหมด 1) ยังคง reprice ตามเรทห้องใหม่ปกติ (ไม่รับ toggle นี้) · โหมด **`checked_in`** (โหมด 3 addon-only) คง allow-list เฉพาะ `addons`/`extra_beds` (ส่ง `apply_new_rate` → `422`)
+  2. **Toggle `apply_new_rate` (`nullable|boolean`, default `false`):**
+     - `false` หรือไม่ส่ง (**default**): คง `room_amount` เดิมของห้อง **ทั้งขาขึ้น (upgrade) และขาลง (downgrade)** (และ freeze `room_amount` ของ BR อื่นในบิลด้วยเพื่อกันราคาขยับจากเรทวันนี้) · ยกเว้นใน `PUT` โหมด 2 หากเปลี่ยนจำนวนคืน (`$newNights !== $oldNights`) หรือแก้ `addons` ระบบยังคำนวณส่วนต่างส่วนนั้นตามปกติ
+     - `true`: คำนวณตามเรทห้องใหม่จาก `global_rates` (ทั้ง upgrade และ downgrade)
+     - `price_per_night` (manual int baht): ชนะเสมอทั้งเมื่อ `apply_new_rate` เป็น `false` และ `true`
+  3. **Audit & Message:** `StatusChangeLog` note row เพิ่ม direction `'keep-price'` และ tag `'คงราคาเดิม (apply_new_rate=false)'` เมื่อเปลี่ยน tier โดยคงราคาเดิม · success message แยกกรณี `surcharge_amount === 0` ในโหมด 2 และ `change-room` ชัดเจน
+- **Docs:** `docs/api_guide.md` + patch note `docs/api_patches/2026-11-16-tier-change-default-keep-price.md`
+- **Tests:** `TierChangeFamilyTest`, `ChangeRoomTest`, `BookingSurchargeAfterPaymentTest`, `FrontDeskSplitUpgradeTest` (ปรับ test ที่คาดหวัง auto-reprice ให้ส่ง `apply_new_rate: true` + fix fixture `room_amount` ใน `ChangeRoomTest`/`TierChangeFamilyTest` + เพิ่ม 13 เคสใหม่ครอบคลุม default keep-price ทั้ง upgrade/downgrade, multi-room preserve, addon-on-upgrade, changing nights, BR draft under paid, draft mode unchanged, checked_in 422, invalid boolean 422, manual price priority)
+

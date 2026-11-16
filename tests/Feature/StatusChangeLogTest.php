@@ -169,6 +169,36 @@ class StatusChangeLogTest extends TestCase
         ]);
     }
 
+    public function test_booking_transition_to_paid_promotes_draft_rooms_and_writes_logs(): void
+    {
+        $roomType = $this->createRoomType();
+        $booking = $this->createBooking(['status' => 'draft']);
+        $br = $this->createBookingRoom($booking, $roomType, 'draft');
+
+        $admin = $this->createAdmin();
+        Auth::login($admin);
+
+        $booking->transitionStatus('paid', 'admin');
+
+        $this->assertSame('paid', $booking->fresh()->status);
+        $this->assertSame('confirmed', $br->fresh()->status);
+
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking',
+            'entity_id' => $booking->id,
+            'from_status' => 'draft',
+            'to_status' => 'paid',
+            'role' => 'admin',
+        ]);
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking_room',
+            'entity_id' => $br->id,
+            'from_status' => 'draft',
+            'to_status' => 'confirmed',
+            'role' => 'admin',
+        ]);
+    }
+
     // ============================================
     // 🔗 syncStatusFromRooms → system audit log
     // ============================================

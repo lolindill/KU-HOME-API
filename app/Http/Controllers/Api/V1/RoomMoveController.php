@@ -50,6 +50,9 @@ class RoomMoveController extends Controller
             'room_id' => 'required|uuid|exists:rooms,id',
             'notes' => 'nullable|string|max:255',
             'price_per_night' => 'nullable|integer|min:0',
+            'apply_new_rate' => 'nullable|boolean',
+        ], [
+            'apply_new_rate.boolean' => 'สถานะการคิดเรทห้องใหม่ (apply_new_rate) ต้องเป็น true หรือ false ค่ะ 💳',
         ]);
 
         try {
@@ -144,6 +147,7 @@ class RoomMoveController extends Controller
             $oldRoomType = RoomType::findOrFail($bookingRoom->room_type_id);
             $typeChanged = (string) $newRoom->room_type_id !== (string) $bookingRoom->room_type_id;
             $previousTotal = (int) $locked->total_amount;
+            $previousRoomAmount = (int) $bookingRoom->room_amount;
 
             // 👥 guests cap — จำนวนแขกเดิมต้องไม่เกิน max_guests ของ type ใหม่
             $guests = $bookingRoom->guests;
@@ -206,13 +210,23 @@ class RoomMoveController extends Controller
                 $newRoom->transitionStatusTo('occupied', $user->id);
             }
 
-            // 💰 Reprice ทั้งบิล (full-stay) — รองรับ manual price_per_night (admin+staff — tier-endpoints-v2)
+            // 💰 Reprice ทั้งบิล (full-stay) — (2026-11-16): default คงราคาห้องเดิมทั้งขาขึ้น/ลง
+            //    ต้องส่ง apply_new_rate=true เพื่อคิดเรทห้องใหม่ หรือส่ง manual price_per_night เอง
+            $hasManualPrice = isset($validated['price_per_night']) && $validated['price_per_night'] !== null;
+            $applyNewRate = filter_var($validated['apply_new_rate'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
             $nights = (int) Carbon::parse($bookingRoom->check_in)->startOfDay()
                 ->diffInDays(Carbon::parse($bookingRoom->check_out)->startOfDay()) ?: 1;
             $roomAmountOverrides = [];
-            if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+            if ($hasManualPrice) {
                 $manualRate = (int) $validated['price_per_night'];
                 $roomAmountOverrides[$bookingRoom->id] = $manualRate * $nights;
+            } elseif (! $applyNewRate) {
+                foreach ($locked->fresh()->bookingRooms as $r) {
+                    $roomAmountOverrides[$r->id] = (string) $r->id === (string) $bookingRoom->id
+                        ? $previousRoomAmount
+                        : (int) $r->room_amount;
+                }
             }
             app(DiscountService::class)->reprice($locked, $roomAmountOverrides);
 
@@ -224,9 +238,11 @@ class RoomMoveController extends Controller
 
             // 📝 Audit — note row ของ BR (from=to=สถานะ BR เดิม · note เล่าการย้าย)
             //    (tier-endpoints-v2: บันทึก pre-checkin move สำหรับ BR confirmed, บันทึก direction + ราคาเดิม→ใหม่)
+            $keptOriginalRate = $typeChanged && ! $hasManualPrice && ! $applyNewRate;
             $direction = match (true) {
                 $newTotal > $previousTotal => 'upgrade',
                 $newTotal < $previousTotal => 'downgrade',
+                $keptOriginalRate => 'keep-price',
                 default => 'same-tier',
             };
             $movePrefix = $isInStay ? 'ย้ายห้อง' : 'ย้ายห้องก่อนเช็คอิน (pre-checkin move)';
@@ -234,8 +250,10 @@ class RoomMoveController extends Controller
             if ($typeChanged) {
                 $noteParts[] = "{$direction} type {$oldRoomType->name_en} → {$newRoomType->name_en}";
             }
-            if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
+            if ($hasManualPrice) {
                 $noteParts[] = "manual rate {$validated['price_per_night']} บาท/คืน";
+            } elseif ($keptOriginalRate) {
+                $noteParts[] = 'คงราคาเดิม (apply_new_rate=false)';
             }
             if ($newTotal !== $previousTotal) {
                 $noteParts[] = "price {$previousTotal} → {$newTotal} บาท";
@@ -260,7 +278,7 @@ class RoomMoveController extends Controller
                 } elseif ($newTotal < $previousTotal) {
                     $typeChangeMessage = ' ปรับลดประเภทห้องเป็น '.$newRoomType->name_en.' — ยอดรวมปรับลดตามส่วนต่างค่ะ 💳';
                 } else {
-                    $typeChangeMessage = ' เปลี่ยนประเภทห้องเป็น '.$newRoomType->name_en.' เรียบร้อยแล้วค่ะ 💳';
+                    $typeChangeMessage = ' เปลี่ยนประเภทห้องเป็น '.$newRoomType->name_en.' เรียบร้อยแล้วค่ะ (คงราคาเดิม) 💳';
                 }
             }
 

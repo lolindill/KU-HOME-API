@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Booking;
 use App\Models\BookingConfirmation;
+use App\Models\BookingRoom;
 use App\Models\GlobalRate;
 use App\Models\RoomType;
 use App\Models\User;
@@ -503,5 +504,35 @@ class BookingConfirmationTest extends TestCase
 
         $response->assertStatus(410)
             ->assertJsonPath('status', 'error');
+    }
+
+    public function test_verify_confirmation_promotes_draft_booking_rooms_to_confirmed(): void
+    {
+        $user = User::factory()->create(['role' => 'user']);
+        $booking = $this->createDraftBooking($user->id);
+        $roomType = RoomType::firstOrFail();
+
+        $br = BookingRoom::create([
+            'booking_id' => $booking->id,
+            'room_type_id' => $roomType->id,
+            'check_in' => now()->addDays(2)->toDateString(),
+            'check_out' => now()->addDays(5)->toDateString(),
+            'status' => 'draft',
+            'guests' => [['title' => 'mr', 'name' => 'Test Guest', 'nationality' => 'TH']],
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/bookings/{$booking->id}/confirm", $this->confirmPayload())
+            ->assertStatus(201);
+
+        $this->assertSame('draft', $br->fresh()->status);
+
+        $confirmation = BookingConfirmation::where('booking_id', $booking->id)->firstOrFail();
+
+        $this->actingAsAdmin()
+            ->putJson("/api/v1/booking-confirmations/{$confirmation->id}/verify")
+            ->assertStatus(200);
+
+        $this->assertSame('confirmed', $br->fresh()->status);
     }
 }

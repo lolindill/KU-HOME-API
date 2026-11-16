@@ -150,8 +150,8 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $this->assertEquals(750, $booking->paid_amount);
         $this->assertEquals(750, $booking->outstanding_amount);
 
-        // เปลี่ยน room type เป็น Deluxe (2500) หลังจ่ายมัดจำแล้ว — admin
-        $res = $this->putRoom($booking, ['room_type_id' => $typeB->id]);
+        // เปลี่ยน room type เป็น Deluxe (2500) หลังจ่ายมัดจำแล้ว (เปิด apply_new_rate=true เพื่อคิดเรทใหม่) — admin
+        $res = $this->putRoom($booking, ['room_type_id' => $typeB->id, 'apply_new_rate' => true]);
         $res->assertStatus(200)
             ->assertJsonPath('total_amount', 2500)
             ->assertJsonPath('previous_total_amount', 1500)
@@ -179,7 +179,7 @@ class BookingSurchargeAfterPaymentTest extends TestCase
 
         $this->assertTrue($booking->fresh()->is_paid);
 
-        $this->putRoom($booking, ['room_type_id' => $typeB->id])
+        $this->putRoom($booking, ['room_type_id' => $typeB->id, 'apply_new_rate' => true])
             ->assertStatus(200)
             ->assertJsonPath('total_amount', 3000)
             ->assertJsonPath('surcharge_amount', 1500)
@@ -204,7 +204,7 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         $typeCheap = $this->roomTypeSetup(500, 1, 'Budget');
         $booking = $this->paidBooking(1500, 'deposit'); // จ่ายมัดจำ 750
 
-        $res = $this->putRoom($booking, ['room_type_id' => $typeCheap->id]);
+        $res = $this->putRoom($booking, ['room_type_id' => $typeCheap->id, 'apply_new_rate' => true]);
         $res->assertStatus(200)
             ->assertJsonPath('total_amount', 500)
             ->assertJsonPath('previous_total_amount', 1500)
@@ -229,9 +229,9 @@ class BookingSurchargeAfterPaymentTest extends TestCase
         app(DiscountService::class)->reprice($booking->fresh());
         $this->assertEquals(3000, $booking->fresh()->total_amount);
 
-        // จ่ายแล้ว 1500 — เปลี่ยนเป็น 2 คืน × 1000 = 2000 ≥ paid → อนุญาต
+        // จ่ายแล้ว 1500 — เปลี่ยนเป็น 2 คืน × 1000 = 2000 ≥ paid (เปิด apply_new_rate=true) → อนุญาต
         $typeCheap = $this->roomTypeSetup(1000, 1, 'Cheap');
-        $res = $this->putRoom($booking, ['room_type_id' => $typeCheap->id]);
+        $res = $this->putRoom($booking, ['room_type_id' => $typeCheap->id, 'apply_new_rate' => true]);
         $res->assertStatus(200)
             ->assertJsonPath('total_amount', 2000)
             ->assertJsonPath('previous_total_amount', 3000)
@@ -367,5 +367,65 @@ class BookingSurchargeAfterPaymentTest extends TestCase
             ->assertJsonPath('outstanding_amount', 2500);
 
         $this->assertEquals('draft', $booking->fresh()->status);
+    }
+
+    public function test_editing_only_billing_comment_or_billing_address_does_not_reprice_when_rate_changed(): void
+    {
+        $booking = $this->paidBooking(1140, 'full'); // จ่ายเต็ม 1140 → is_paid = true
+        $br = $booking->bookingRooms()->first();
+
+        // จำลองว่าเรทปัจจุบันของประเภทห้องนี้เปลี่ยนเป็น 2900 บาท/คืน (ต่างจากตอนจองที่ 1140)
+        GlobalRate::where('room_type_id', $br->room_type_id)
+            ->where('rate_type', 'daily')
+            ->update(['default_price' => 2900]);
+
+        $logsBefore = DB::table('status_change_logs')->count();
+
+        // 1) แก้เฉพาะ billing_comment → ต้องไม่คำนวณราคาใหม่
+        $this->putRoom($booking, ['billing_comment' => 'หมายเหตุทดสอบ'])
+            ->assertStatus(200)
+            ->assertJsonPath('total_amount', 1140)
+            ->assertJsonPath('previous_total_amount', 1140)
+            ->assertJsonPath('surcharge_amount', 0)
+            ->assertJsonPath('paid_amount', 1140)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('booking_room.billing_comment', 'หมายเหตุทดสอบ');
+
+        // 2) แก้เฉพาะ billing_address → ต้องไม่คำนวณราคาใหม่เช่นกัน
+        $this->putRoom($booking, ['billing_address' => '50 ถนนงามวงศ์วาน จตุจักร กรุงเทพฯ'])
+            ->assertStatus(200)
+            ->assertJsonPath('total_amount', 1140)
+            ->assertJsonPath('previous_total_amount', 1140)
+            ->assertJsonPath('surcharge_amount', 0)
+            ->assertJsonPath('paid_amount', 1140)
+            ->assertJsonPath('outstanding_amount', 0)
+            ->assertJsonPath('booking_room.billing_address', '50 ถนนงามวงศ์วาน จตุจักร กรุงเทพฯ');
+
+        $fresh = $booking->fresh();
+        $this->assertSame(1140, (int) $fresh->total_amount);
+        $this->assertSame(0, (int) $fresh->outstanding_amount);
+        $this->assertTrue((bool) $fresh->is_paid);
+        $this->assertSame(1140, (int) $br->fresh()->room_amount);
+        $this->assertSame(1140, (int) $br->fresh()->amount);
+        // ต้องไม่สร้าง audit log change-tier เท็จเมื่อไม่ได้แก้ tier/ราคา
+        $this->assertSame($logsBefore, DB::table('status_change_logs')->count());
+    }
+
+    public function test_tier_change_without_apply_new_rate_defaults_to_keeping_original_price(): void
+    {
+        $typeDeluxe = $this->roomTypeSetup(2500, 1, 'Deluxe');
+        $booking = $this->paidBooking(1500, 'full'); // จ่ายเต็ม 1500 → is_paid true
+
+        $res = $this->putRoom($booking, ['room_type_id' => $typeDeluxe->id]);
+        $res->assertStatus(200)
+            ->assertJsonPath('total_amount', 1500)
+            ->assertJsonPath('previous_total_amount', 1500)
+            ->assertJsonPath('surcharge_amount', 0)
+            ->assertJsonPath('paid_amount', 1500)
+            ->assertJsonPath('outstanding_amount', 0);
+
+        $fresh = $booking->fresh();
+        $this->assertSame((string) $typeDeluxe->id, (string) $fresh->bookingRooms()->first()->room_type_id);
+        $this->assertTrue((bool) $fresh->is_paid);
     }
 }

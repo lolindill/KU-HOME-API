@@ -187,6 +187,7 @@ class BookingRoom extends Model
     public function scopeHoldingSlot($query)
     {
         return $query->whereIn('status', ['draft', 'confirmed', 'checked_in'])
+            ->whereHas('booking', fn ($b) => $b->where('status', '!=', 'complete'))
             ->where(function ($q) {
                 $q->whereIn('status', ['confirmed', 'checked_in'])
                     ->orWhere(function ($draft) {

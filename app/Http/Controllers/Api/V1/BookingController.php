@@ -758,6 +758,8 @@ class BookingController extends Controller
                 $previousTotal = (int) $locked->total_amount;
                 $previousRoomAmount = (int) $bookingRoom->room_amount;
                 $previousRoomTypeId = $bookingRoom->room_type_id;
+                $oldNights = (int) Carbon::parse($bookingRoom->check_in)->startOfDay()
+                    ->diffInDays(Carbon::parse($bookingRoom->check_out)->startOfDay()) ?: 1;
 
                 // ค่า effective = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (ใช้ทั้ง availability + pricing + guests cap)
                 $effectiveTypeId = $validated['room_type_id'] ?? $bookingRoom->room_type_id;
@@ -767,6 +769,11 @@ class BookingController extends Controller
                 $effectiveCheckOut = isset($validated['check_out'])
                     ? Carbon::parse($validated['check_out'])->toDateString()
                     : $bookingRoom->check_out->toDateString();
+                $newNights = (int) Carbon::parse($effectiveCheckIn)->startOfDay()
+                    ->diffInDays(Carbon::parse($effectiveCheckOut)->startOfDay()) ?: 1;
+                $nightsChanged = $newNights !== $oldNights;
+
+                $shapeChanged = false;
 
                 // 🏨 (10/11/26) ห้องเข้าพักแล้ว (checked_in): ข้ามการตรวจ guests cap, availability
                 if (! $isCheckedIn) {
@@ -838,129 +845,155 @@ class BookingController extends Controller
 
                 // 🌟 Reprice server-side — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
                 //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
+                //    🧾 (16/11/26): ถ้าแก้แค่ billing_comment / billing_address (หรือฟิลด์ที่ไม่กระทบราคา)
+                //    จะไม่เรียก reprice() เพื่อป้องกันยอดเงินเปลี่ยนเมื่อเรทปัจจุบันต่างจากตอนจอง
                 $existingAddon = $bookingRoom->addon;
                 $addonInput = $validated['addons'] ?? null;
+                $touchesAddons = array_key_exists('addons', $validated) || array_key_exists('extra_beds', $validated);
+                $hasManualPrice = isset($validated['price_per_night']) && $validated['price_per_night'] !== null;
+                $applyNewRate = $postPayment && ! $isCheckedIn && filter_var($validated['apply_new_rate'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                $addonChanged = false;
 
-                $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
-                // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
-                $effectiveRoomRequest = $validated;
-                $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
-                $effectiveRoomRequest['check_out'] = $effectiveCheckOut;
-                $targetMaxExtraBeds = RoomType::findOrFail($effectiveTypeId)->max_extra_beds;
-                $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
-                    $effectiveRoomRequest,
-                    $addonInput,
-                    $existingAddon,
-                    $targetMaxExtraBeds
-                );
-                // 🛏️ tier-endpoints-v2: addon cap ในโหมด 2 ตรวจสอบ extra_beds_by_night รายคืน ≤ max_extra_beds tier ใหม่
-                if ($postPayment && ! $isCheckedIn && $targetMaxExtraBeds !== null) {
-                    foreach ($extraBedsByNight as $night => $qty) {
-                        if ($qty > $targetMaxExtraBeds) {
-                            throw new \Exception("จำนวนเตียงเสริมคืน {$night} เกินขีดสุดของประเภทห้อง (สูงสุด {$targetMaxExtraBeds} ต่อคืน) ค่ะ 🛏️", 422);
+                if ($touchesAddons || $shapeChanged) {
+                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
+                    $effectiveRoomRequest = $validated;
+                    $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
+                    $effectiveRoomRequest['check_out'] = $effectiveCheckOut;
+                    $targetMaxExtraBeds = RoomType::findOrFail($effectiveTypeId)->max_extra_beds;
+                    $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
+                        $effectiveRoomRequest,
+                        $addonInput,
+                        $existingAddon,
+                        $targetMaxExtraBeds
+                    );
+                    // 🛏️ tier-endpoints-v2: addon cap ในโหมด 2 ตรวจสอบ extra_beds_by_night รายคืน ≤ max_extra_beds tier ใหม่
+                    if ($postPayment && ! $isCheckedIn && $targetMaxExtraBeds !== null) {
+                        foreach ($extraBedsByNight as $night => $qty) {
+                            if ($qty > $targetMaxExtraBeds) {
+                                throw new \Exception("จำนวนเตียงเสริมคืน {$night} เกินขีดสุดของประเภทห้อง (สูงสุด {$targetMaxExtraBeds} ต่อคืน) ค่ะ 🛏️", 422);
+                            }
                         }
                     }
-                }
-                [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
+                    [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
-                $addonData = [
-                    'breakfast_set_100' => $sets['set_100'],
-                    'breakfast_set_200' => $sets['set_200'],
-                    'extra_beds_by_night' => $extraBedsByNight ?: null,
-                    'early_hours' => $earlyHours,
-                    'late_hours' => $lateHours,
-                ];
-                if ($existingAddon) {
-                    $dirtyAddonFields = [];
-                    foreach ($addonData as $k => $v) {
-                        if ($k === 'extra_beds_by_night') {
-                            // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
-                            if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                    $addonData = [
+                        'breakfast_set_100' => $sets['set_100'],
+                        'breakfast_set_200' => $sets['set_200'],
+                        'extra_beds_by_night' => $extraBedsByNight ?: null,
+                        'early_hours' => $earlyHours,
+                        'late_hours' => $lateHours,
+                    ];
+                    if ($existingAddon) {
+                        $dirtyAddonFields = [];
+                        foreach ($addonData as $k => $v) {
+                            if ($k === 'extra_beds_by_night') {
+                                // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
+                                if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ((int) $existingAddon->$k !== (int) $v) {
                                 $dirtyAddonFields[$k] = $v;
                             }
-
-                            continue;
                         }
-                        if ((int) $existingAddon->$k !== (int) $v) {
-                            $dirtyAddonFields[$k] = $v;
+                        if (! empty($dirtyAddonFields)) {
+                            $existingAddon->update($dirtyAddonFields);
+                            $addonChanged = true;
                         }
+                    } else {
+                        Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                        $addonChanged = true;
                     }
-                    if (! empty($dirtyAddonFields)) {
-                        $existingAddon->update($dirtyAddonFields);
-                    }
-                } else {
-                    Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
                 }
 
-                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-                // 💳 ticket 10 — surcharge: reprice ตรง (applyToDraft guard draft-only ·
-                //    used redemption ยังถูกนับใน reprice — โค้ดส่วนลดคงเดิมไม่ถูกถอด)
-                if ($postPayment) {
-                    $roomAmountOverrides = [];
-                    if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
-                        $nights = (int) Carbon::parse($effectiveCheckIn)->startOfDay()
-                            ->diffInDays(Carbon::parse($effectiveCheckOut)->startOfDay()) ?: 1;
-                        $roomAmountOverrides[$bookingRoom->id] = (int) $validated['price_per_night'] * $nights;
+                $shouldReprice = $isCheckedIn || $shapeChanged || $hasManualPrice || $addonChanged || $applyNewRate;
+                $newTotal = $previousTotal;
+
+                if ($shouldReprice) {
+                    // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
+                    // 💳 ticket 10 — surcharge: reprice ตรง (applyToDraft guard draft-only ·
+                    //    used redemption ยังถูกนับใน reprice — โค้ดส่วนลดคงเดิมไม่ถูกถอด)
+                    if ($postPayment) {
+                        $roomAmountOverrides = [];
+                        if ($hasManualPrice) {
+                            $roomAmountOverrides[$bookingRoom->id] = (int) $validated['price_per_night'] * $newNights;
+                        } elseif (! $isCheckedIn && ! $applyNewRate && ! $nightsChanged) {
+                            // 🚪 (2026-11-16): โหมด change-tier หลังจ่ายเงิน (admin+staff) default คงราคาเดิม
+                            //    ทั้งขาขึ้นและขาลง — ต้องส่ง apply_new_rate=true เพื่อคิดเรทห้องใหม่ หรือระบุ
+                            //    price_per_night เอง (ถ้าเปลี่ยนจำนวนคืนหรือแก้ addon ยังคำนวณส่วนต่างปกติ)
+                            foreach ($locked->fresh()->bookingRooms as $r) {
+                                $roomAmountOverrides[$r->id] = (string) $r->id === (string) $bookingRoom->id
+                                    ? $previousRoomAmount
+                                    : (int) $r->room_amount;
+                            }
+                        }
+                        app(DiscountService::class)->reprice($locked, $roomAmountOverrides);
+                    } else {
+                        $this->reconcileDiscount($locked);
                     }
-                    app(DiscountService::class)->reprice($locked, $roomAmountOverrides);
-                } else {
-                    $this->reconcileDiscount($locked);
-                }
 
-                // 💳 ticket 10 — downgrade guard:
-                //    🏨 โหมด 3 (checked_in addon-only): ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
-                //    🚪 โหมด 2 (tier-change): มติ v2 ข้อ 1 ตัด ledger-guard 422 ออก, outstanding clamp 0, syncIsPaid()
-                $chargesTotal = (int) $locked->charges_total;
-                $newTotal = (int) $locked->fresh()->total_amount;
-                $paidAmount = $locked->paid_amount;
+                    // 💳 ticket 10 — downgrade guard:
+                    //    🏨 โหมด 3 (checked_in addon-only): ยอดรวมใหม่ต้องไม่ต่ำกว่าเงินที่เข้า ledger
+                    //    🚪 โหมด 2 (tier-change): มติ v2 ข้อ 1 ตัด ledger-guard 422 ออก, outstanding clamp 0, syncIsPaid()
+                    $chargesTotal = (int) $locked->charges_total;
+                    $newTotal = (int) $locked->fresh()->total_amount;
+                    $paidAmount = $locked->paid_amount;
 
-                if ($isCheckedIn) {
-                    if ($newTotal + $chargesTotal < $paidAmount) {
-                        throw new \Exception(
-                            'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
-                            422
-                        );
+                    if ($isCheckedIn) {
+                        if ($newTotal + $chargesTotal < $paidAmount) {
+                            throw new \Exception(
+                                'ไม่สามารถลดยอดรวมต่ำกว่าเงินที่ชำระเข้ามาแล้วได้ (ชำระแล้ว '.$paidAmount.' บาท ยอดใหม่ '.($newTotal + $chargesTotal).' บาท) — ระบบไม่มีการคืนเงินค่ะ 💳',
+                                422
+                            );
+                        }
+                        if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
+                            $locked->update(['is_paid' => false]);
+                        }
+                    } elseif ($postPayment) {
+                        // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 1): recompute is_paid ตามนิยาม (paid ≥ total + charges)
+                        $locked->fresh()->syncIsPaid();
                     }
-                    if ($locked->is_paid && $newTotal + $chargesTotal > $paidAmount) {
-                        $locked->update(['is_paid' => false]);
+
+                    // 📝 (tier-endpoints-v2) Audit — note row สำหรับโหมด 2 (post-payment change-tier)
+                    //    (บันทึก direction + ราคาเดิม→ใหม่)
+                    if ($postPayment && ! $isCheckedIn) {
+                        $oldType = RoomType::find($previousRoomTypeId);
+                        $newType = RoomType::find($effectiveTypeId);
+                        $newRoomAmount = (int) $bookingRoom->fresh()->room_amount;
+                        $typeChanged = (string) $previousRoomTypeId !== (string) $effectiveTypeId;
+                        $keptOriginalRate = $typeChanged && ! $hasManualPrice && ! $applyNewRate && ! $nightsChanged;
+
+                        $direction = match (true) {
+                            $newRoomAmount > $previousRoomAmount => 'upgrade',
+                            $newRoomAmount < $previousRoomAmount => 'downgrade',
+                            $keptOriginalRate => 'keep-price',
+                            default => 'same-tier',
+                        };
+
+                        $noteParts = ["change-tier ({$direction})"];
+                        if ($typeChanged) {
+                            $noteParts[] = "tier {$oldType?->name_en} → {$newType?->name_en}";
+                        }
+                        if ($hasManualPrice) {
+                            $noteParts[] = "manual rate {$validated['price_per_night']} บาท/คืน";
+                        } elseif ($keptOriginalRate) {
+                            $noteParts[] = 'คงราคาเดิม (apply_new_rate=false)';
+                        }
+                        $noteParts[] = "price {$previousRoomAmount} → {$newRoomAmount} บาท";
+
+                        StatusChangeLog::create([
+                            'entity_type' => 'booking_room',
+                            'entity_id' => $bookingRoom->id,
+                            'from_status' => $bookingRoom->status,
+                            'to_status' => $bookingRoom->status,
+                            'role' => $user->role,
+                            'causer_id' => $user->id,
+                            'note' => implode(' · ', $noteParts),
+                        ]);
                     }
-                } elseif ($postPayment) {
-                    // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 1): recompute is_paid ตามนิยาม (paid ≥ total + charges)
-                    $locked->fresh()->syncIsPaid();
-                }
-
-                // 📝 (tier-endpoints-v2) Audit — note row สำหรับโหมด 2 (post-payment change-tier)
-                //    (บันทึก direction + ราคาเดิม→ใหม่)
-                if ($postPayment && ! $isCheckedIn) {
-                    $oldType = RoomType::find($previousRoomTypeId);
-                    $newType = RoomType::find($effectiveTypeId);
-                    $newRoomAmount = (int) $bookingRoom->fresh()->room_amount;
-                    $typeChanged = (string) $previousRoomTypeId !== (string) $effectiveTypeId;
-
-                    $direction = match (true) {
-                        $newRoomAmount > $previousRoomAmount => 'upgrade',
-                        $newRoomAmount < $previousRoomAmount => 'downgrade',
-                        default => 'same-tier',
-                    };
-
-                    $noteParts = ["change-tier ({$direction})"];
-                    if ($typeChanged) {
-                        $noteParts[] = "tier {$oldType?->name_en} → {$newType?->name_en}";
-                    }
-                    if (isset($validated['price_per_night']) && $validated['price_per_night'] !== null) {
-                        $noteParts[] = "manual rate {$validated['price_per_night']} บาท/คืน";
-                    }
-                    $noteParts[] = "price {$previousRoomAmount} → {$newRoomAmount} บาท";
-
-                    StatusChangeLog::create([
-                        'entity_type' => 'booking_room',
-                        'entity_id' => $bookingRoom->id,
-                        'from_status' => $bookingRoom->status,
-                        'to_status' => $bookingRoom->status,
-                        'role' => $user->role,
-                        'causer_id' => $user->id,
-                        'note' => implode(' · ', $noteParts),
-                    ]);
                 }
 
                 DB::commit();
@@ -973,6 +1006,7 @@ class BookingController extends Controller
 
             $successMessage = match (true) {
                 $isCheckedIn => 'เพิ่มหรือแก้ไข addon สำหรับห้องพักที่เข้าพักแล้วเรียบร้อยแล้วค่ะนายท่าน — ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 🍳',
+                $postPayment && $surchargeAmount === 0 => 'แก้ไขห้องหลังชำระเงินเรียบร้อยแล้ว — คงราคาเดิมไม่มีส่วนต่างค่ะ 💳',
                 $postPayment => 'แก้ไขห้องหลังชำระเงินเรียบร้อยแล้ว — ส่วนต่างราคาเข้ายอดค้างชำระ เก็บต่อผ่าน front-desk ได้ค่ะ 💳',
                 default => 'แก้ไขห้องเรียบร้อยแล้วค่ะ',
             };
@@ -1201,12 +1235,25 @@ class BookingController extends Controller
 
                 // 🌟 Apply + reprice รายห้อง — addons normalize ผ่าน AddonPricing จุดเดียว (05/10/26):
                 //    ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นคงค่าเดิมจากแถว Addon · ราคาคิดใน reprice()
+                //    🧾 (16/11/26): ถ้าทั้ง batch แก้แค่ billing_comment / billing_address (หรือฟิลด์ที่ไม่กระทบราคา)
+                //    จะไม่เรียก reprice() เพื่อป้องกันยอดเงินเปลี่ยนเมื่อเรทปัจจุบันต่างจากตอนจอง
+                $anyPricingChanged = false;
+
                 foreach ($updates as $u) {
                     $bookingRoom = $u['model'];
                     $roomRequest = $u['request'];
 
                     if (! empty($u['dirty_fields'])) {
                         $bookingRoom->update($u['dirty_fields']);
+                    }
+
+                    if ($u['shape_changed']) {
+                        $anyPricingChanged = true;
+                    }
+
+                    $touchesAddons = array_key_exists('addons', $roomRequest) || array_key_exists('extra_beds', $roomRequest);
+                    if (! $touchesAddons && ! $u['shape_changed']) {
+                        continue;
                     }
 
                     $existingAddon = $bookingRoom->addon;
@@ -1249,14 +1296,18 @@ class BookingController extends Controller
                         }
                         if (! empty($dirtyAddonFields)) {
                             $existingAddon->update($dirtyAddonFields);
+                            $anyPricingChanged = true;
                         }
                     } else {
                         Addon::create(array_merge(['booking_room_id' => $bookingRoom->id], $addonData));
+                        $anyPricingChanged = true;
                     }
                 }
 
-                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26)
-                $this->reconcileDiscount($locked);
+                // 🌟 Reconcile ส่วนลด & total_amount (27/08/26) — เฉพาะเมื่อมีการเปลี่ยนแปลงที่กระทบราคาจริง
+                if ($anyPricingChanged) {
+                    $this->reconcileDiscount($locked);
+                }
 
                 DB::commit();
             } catch (\Exception $e) {

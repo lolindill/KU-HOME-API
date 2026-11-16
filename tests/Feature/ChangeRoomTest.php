@@ -77,14 +77,14 @@ class ChangeRoomTest extends TestCase
         ], $overrides));
     }
 
-    private function createBookingRoom(Booking $booking, RoomType $roomType, ?Room $room = null, string $brStatus = 'confirmed', int $guestCount = 1): BookingRoom
+    private function createBookingRoom(Booking $booking, RoomType $roomType, ?Room $room = null, string $brStatus = 'confirmed', int $guestCount = 1, array $overrides = []): BookingRoom
     {
         $guests = [];
         for ($i = 0; $i < $guestCount; $i++) {
             $guests[] = ['title' => 'mr', 'name' => 'Guest '.$i, 'nationality' => 'TH'];
         }
 
-        return BookingRoom::create([
+        return BookingRoom::create(array_merge([
             'id' => Str::uuid(),
             'booking_id' => $booking->id,
             'room_type_id' => $roomType->id,
@@ -93,7 +93,10 @@ class ChangeRoomTest extends TestCase
             'check_out' => now()->addDays(2)->toDateString(),
             'guests' => $guests,
             'status' => $brStatus,
-        ]);
+            'room_amount' => 3000,
+            'discount_amount' => 0,
+            'amount' => 3000,
+        ], $overrides));
     }
 
     private function createStaff(): User
@@ -186,7 +189,10 @@ class ChangeRoomTest extends TestCase
         Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+            ->postJson($this->endpoint($booking, $br), [
+                'room_id' => $newRoom->id,
+                'apply_new_rate' => true,
+            ]);
 
         $response->assertStatus(200)->assertJsonPath('status', 'success');
         $this->assertTrue($response->json('room_type_changed'));
@@ -214,6 +220,30 @@ class ChangeRoomTest extends TestCase
         $this->assertNull($response->json('new_room_housekeeping_task_id'));
     }
 
+    public function test_staff_upgrade_room_type_defaults_to_keeping_original_price(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2500);
+        $booking = $this->createBooking(['total_amount' => 3000, 'is_paid' => true]);
+        $oldRoom = $this->createRoom($standard, 'occupied');
+        $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'checked_in');
+        $newRoom = $this->createRoom($deluxe, 'available');
+        Payment::create(['booking_id' => $booking->id, 'amount' => 3000, 'status' => 'completed']);
+
+        // default (ไม่ส่ง apply_new_rate) -> ย้ายขึ้น Deluxe โดยคงราคาเดิม (surcharge 0)
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+        $this->assertTrue($response->json('room_type_changed'));
+        $this->assertSame(3000, $response->json('total_amount'));
+        $this->assertSame(3000, $response->json('previous_total_amount'));
+        $this->assertSame(0, $response->json('surcharge_amount'));
+        $this->assertSame(0, $response->json('outstanding_amount'));
+        $this->assertTrue((bool) $booking->fresh()->is_paid);
+        $this->assertAmountInvariant($booking->fresh());
+    }
+
     // ============================================
     // 🚫 3. Guards ของ change-room
     // ============================================
@@ -225,11 +255,17 @@ class ChangeRoomTest extends TestCase
         $booking = $this->createBooking(['total_amount' => 5000, 'is_paid' => true]);
         Payment::create(['booking_id' => $booking->id, 'amount' => 5000, 'status' => 'completed']);
         $oldRoom = $this->createRoom($deluxe, 'occupied');
-        $br = $this->createBookingRoom($booking, $deluxe, $oldRoom, 'checked_in');
+        $br = $this->createBookingRoom($booking, $deluxe, $oldRoom, 'checked_in', 1, [
+            'room_amount' => 5000,
+            'amount' => 5000,
+        ]);
         $newRoom = $this->createRoom($standard, 'available');
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+            ->postJson($this->endpoint($booking, $br), [
+                'room_id' => $newRoom->id,
+                'apply_new_rate' => true,
+            ]);
 
         $response->assertStatus(200)->assertJsonPath('status', 'success');
         $this->assertTrue($response->json('room_type_changed'));
@@ -287,7 +323,10 @@ class ChangeRoomTest extends TestCase
         $this->createBookingRoom($otherBooking, $standard, $newRoom, 'confirmed');
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+            ->postJson($this->endpoint($booking, $br), [
+                'room_id' => $newRoom->id,
+                'apply_new_rate' => true,
+            ]);
 
         $response->assertStatus(422);
         $this->assertStringContainsString('ทับช่วงเข้าพัก', $response->json('message'));
@@ -309,7 +348,10 @@ class ChangeRoomTest extends TestCase
         ]);
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+            ->postJson($this->endpoint($booking, $br), [
+                'room_id' => $newRoom->id,
+                'apply_new_rate' => true,
+            ]);
 
         $response->assertStatus(422);
         $this->assertStringContainsString('ซ่อมแซม', $response->json('message'));
@@ -325,7 +367,10 @@ class ChangeRoomTest extends TestCase
         $newRoom = $this->createRoom($deluxe, 'available');
 
         $response = $this->actingAs($this->createStaff(), 'sanctum')
-            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+            ->postJson($this->endpoint($booking, $br), [
+                'room_id' => $newRoom->id,
+                'apply_new_rate' => true,
+            ]);
 
         $response->assertStatus(422);
         $this->assertStringContainsString('เกินจำนวนสูงสุด', $response->json('message'));
@@ -554,13 +599,17 @@ class ChangeRoomTest extends TestCase
         $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 2500);
         $booking = $this->createBooking(['total_amount' => 5000, 'is_paid' => true]);
         $standardRoom = $this->createRoom($standard, 'available');
-        $br = $this->createBookingRoom($booking, $deluxe, null, 'confirmed'); // ไม่มีเลขห้อง
+        $br = $this->createBookingRoom($booking, $deluxe, null, 'confirmed', 1, [
+            'room_amount' => 5000,
+            'amount' => 5000,
+        ]); // ไม่มีเลขห้อง
         Payment::create(['booking_id' => $booking->id, 'amount' => 5000, 'status' => 'completed']);
 
-        // 🎫 (tier-endpoints-v2 มติ v2 ข้อ 1 & 3): BR ไม่มีห้อง ยิง downgrade ในโหมด 2 ผ่าน + syncIsPaid
+        // 🎫 (tier-endpoints-v2 มติ v2 ข้อ 1 & 3): BR ไม่มีห้อง ยิง downgrade ในโหมด 2 ผ่าน + syncIsPaid (เมื่อเปิด apply_new_rate=true)
         $response = $this->actingAs($this->createAdmin(), 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'room_type_id' => $standard->id,
+                'apply_new_rate' => true,
             ]);
 
         $response->assertStatus(200)->assertJsonPath('status', 'success');

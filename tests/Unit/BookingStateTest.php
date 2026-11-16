@@ -100,6 +100,7 @@ class BookingStateTest extends TestCase
         $booking = $this->createBooking('pending');
         $booking->transitionStatus('paid', 'admin');
         $this->assertEquals('paid', $booking->fresh()->status);
+        $this->assertEquals('confirmed', $booking->bookingRooms()->first()->status);
     }
 
     public function test_pending_to_verify_error_by_admin_reject(): void
@@ -150,6 +151,7 @@ class BookingStateTest extends TestCase
         $booking = $this->createBooking('draft');
         $booking->transitionStatus('paid', 'admin');
         $this->assertEquals('paid', $booking->fresh()->status);
+        $this->assertEquals('confirmed', $booking->bookingRooms()->first()->status);
     }
 
     public function test_draft_to_paid_by_system(): void
@@ -157,6 +159,7 @@ class BookingStateTest extends TestCase
         $booking = $this->createBooking('draft');
         $booking->transitionStatus('paid', 'system');
         $this->assertEquals('paid', $booking->fresh()->status);
+        $this->assertEquals('confirmed', $booking->bookingRooms()->first()->status);
     }
 
     public function test_paid_to_confirmed_by_admin(): void
@@ -164,6 +167,26 @@ class BookingStateTest extends TestCase
         $booking = $this->createBooking('paid');
         $booking->transitionStatus('confirmed', 'admin');
         $this->assertEquals('confirmed', $booking->fresh()->status);
+        $this->assertEquals('confirmed', $booking->bookingRooms()->first()->status);
+    }
+
+    public function test_booking_to_paid_does_not_overwrite_already_checked_in_room(): void
+    {
+        $booking = $this->createBooking('draft', 'checked_in');
+        $draftRoom = BookingRoom::create([
+            'booking_id' => $booking->id,
+            'room_type_id' => $booking->bookingRooms->first()->room_type_id,
+            'room_id' => null,
+            'check_in' => now()->addDay()->toDateString(),
+            'check_out' => now()->addDays(3)->toDateString(),
+            'status' => 'draft',
+            'guests' => [['title' => 'Mr', 'name' => 'Second Guest', 'nationality' => 'Thai']],
+        ]);
+
+        $booking->transitionStatus('paid', 'admin');
+
+        $this->assertEquals('checked_in', $booking->bookingRooms()->where('id', '!=', $draftRoom->id)->first()->status);
+        $this->assertEquals('confirmed', $draftRoom->fresh()->status);
     }
 
     public function test_confirmed_to_complete_by_admin(): void

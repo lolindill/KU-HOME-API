@@ -2520,6 +2520,70 @@ class BookingTest extends TestCase
         $this->assertEquals('123 Test St', $br->fresh()->billing_address);
     }
 
+    public function test_update_billing_comment_or_address_only_does_not_reprice_when_rate_changed(): void
+    {
+        $roomType = $this->createRoomType(); // daily rate = 1500
+        $this->createRoom($roomType);
+        $owner = User::factory()->create();
+
+        // สร้างการจอง 2 คืน ด้วยเรท 1500 → total = 3000
+        $created = $this->actingAs($owner, 'sanctum')
+            ->postJson('/api/v1/bookings', [
+                'source' => 'online',
+                'booking_rooms' => [
+                    [
+                        'room_type_id' => $roomType->id,
+                        'check_in' => now()->addDays(2)->toDateString(),
+                        'check_out' => now()->addDays(4)->toDateString(),
+                        'guests' => [['title' => 'mr', 'name' => 'Somchai', 'nationality' => 'TH']],
+                    ],
+                ],
+            ])->assertStatus(201);
+
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $br = $booking->bookingRooms->first();
+        $this->assertSame(3000, (int) $booking->total_amount);
+
+        // เปลี่ยนเรทปัจจุบันของห้องเป็น 2900 บาท/คืน (ถ้า reprice จะกลายเป็น 5800)
+        GlobalRate::where('room_type_id', $roomType->id)
+            ->where('rate_type', 'daily')
+            ->update(['default_price' => 2900]);
+
+        // 1) Single-room PUT แก้แค่ billing_comment และ billing_address
+        $this->actingAs($owner, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'billing_comment' => 'ขอใบกำกับภาษี',
+                'billing_address' => '99 ถนนพหลโยธิน',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('total_amount', 3000)
+            ->assertJsonPath('surcharge_amount', 0);
+
+        $this->assertSame(3000, (int) $booking->fresh()->total_amount);
+        $this->assertSame(3000, (int) $br->fresh()->amount);
+        $this->assertSame('ขอใบกำกับภาษี', $br->fresh()->billing_comment);
+        $this->assertSame('99 ถนนพหลโยธิน', $br->fresh()->billing_address);
+
+        // 2) Batch PUT แก้แค่ billing_comment และ billing_address
+        $this->actingAs($owner, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
+                'booking_rooms' => [
+                    [
+                        'booking_room_id' => $br->id,
+                        'billing_comment' => 'อัปเดตหมายเหตุแบบ batch',
+                        'billing_address' => '100 ถนนพหลโยธิน',
+                    ],
+                ],
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('total_amount', 3000);
+
+        $this->assertSame(3000, (int) $booking->fresh()->total_amount);
+        $this->assertSame(3000, (int) $br->fresh()->amount);
+        $this->assertSame('อัปเดตหมายเหตุแบบ batch', $br->fresh()->billing_comment);
+        $this->assertSame('100 ถนนพหลโยธิน', $br->fresh()->billing_address);
+    }
+
     // ============================================
     // ✅ Delete booking room (draft only) — DELETE /bookings/{bookingId}/rooms/{bookingRoomId}
     // ============================================

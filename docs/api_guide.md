@@ -1636,11 +1636,11 @@ curl -s -H "Accept: application/json" \
 
 **Constraints:**
 - โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
-- โหมด change-tier 💳 (🔄 **tier-endpoints-v2 2026-11-11 — supersede กติกา upgrade-only/releaseRoom เดิม**): Booking `paid|confirmed` + BR `confirmed` (`checked_out/no_show` = `422`) · **scope: BR `room_id = null` เท่านั้น** — BR ที่มีเลขห้องแล้ว → `422` ชี้ไปใช้ `change-room` (**breaking** กับกติกาเดิม 2026-11-04) · ส่ง param `room_id` → `422` (การจัดเลขห้องผ่าน assign-rooms/RoomAllocator เท่านั้น) · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · ราคา = manual `price_per_night` (int baht, admin+staff — ใหม่) หรือ computed `GlobalRate::getEffectiveDailyRate` ของเจ้าของบิล × nights · guests cap เทียบ `max_guests` tier ใหม่ (`422` พร้อมแนะแก้ guests ในคำขอเดียวกัน) · `extra_beds_by_night` รายคืน ≤ `max_extra_beds` tier ใหม่ (`422`) · dates แก้ได้ตามเดิม (availability re-check) · **เงิน:** reprice ทั้งบิลจาก `global_rates` วันนี้ (manual price pin เฉพาะ BR ที่แก้) · **downgrade อนุญาต — ไม่คืนเงิน:** `outstanding = max(0, total + charges − paid)`, `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · `surcharge_amount` ติดลบได้ · audit `status_change_logs` note row บอก direction (upgrade/downgrade/same-tier) + tier + ราคาเดิม→ใหม่
+- โหมด change-tier 💳 (🔄 **tier-endpoints-v2 2026-11-11** · 🎚️ **default keep-price 2026-11-16**): Booking `paid|confirmed` + BR `draft|confirmed` (`checked_out/no_show` = `422`) · **scope: BR `room_id = null` เท่านั้น** — BR ที่มีเลขห้องแล้ว → `422` ชี้ไปใช้ `change-room` (**breaking** กับกติกาเดิม 2026-11-04) · ส่ง param `room_id` → `422` (การจัดเลขห้องผ่าน assign-rooms/RoomAllocator เท่านั้น) · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · **ราคา (🎚️ 16/11/26):** **default คงราคาห้องเดิม (`apply_new_rate=false`) ทั้งขาขึ้นและขาลง** (`surcharge_amount = 0`, รวมห้องอื่นในบิลก็คงราคาเดิม) — ต้องส่ง `apply_new_rate: true` เพื่อคำนวณตามเรทใหม่จาก `global_rates` หรือระบุ `price_per_night` (int baht, ชนะเสมอ) · ยกเว้นเมื่อเปลี่ยนจำนวนคืน (`check_in`/`check_out` จำนวนคืนเปลี่ยน) หรือแก้ `addons`/`extra_beds` ระบบยังคำนวณส่วนต่างส่วนนั้นตามปกติ · guests cap เทียบ `max_guests` tier ใหม่ (`422` พร้อมแนะแก้ guests ในคำขอเดียวกัน) · `extra_beds_by_night` รายคืน ≤ `max_extra_beds` tier ใหม่ (`422`) · dates แก้ได้ตามเดิม (availability re-check) · **downgrade อนุญาต (เมื่อเปิด `apply_new_rate=true` หรือระบุ `price_per_night`) — ไม่คืนเงิน:** `outstanding = max(0, total + charges − paid)`, `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · `surcharge_amount` ติดลบได้ · audit `status_change_logs` note row บอก direction (`upgrade`/`downgrade`/`keep-price`/`same-tier`) + tier + ราคาเดิม→ใหม่
 - โหมด checked_in 🏨: Booking `confirmed` + BR `checked_in` · รับเฉพาะ `addons` / `extra_beds` · `checked_out/no_show` = `422` เหมือนเดิม ("ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ") · downgrade ต่ำกว่าเงินที่เข้า ledger = `422` · ส่วนต่าง surcharge เข้า `outstanding_amount` · ต้องชำระเงินครบก่อน check-out เสมอ (front desk reject `400` เมื่อมียอดค้าง)
 - แก้ได้ทุก field ของห้องในโหมด draft/surcharge (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus) · สำหรับโหมด checked_in แก้ได้เฉพาะ `addons` และ `extra_beds`
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
-- **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ
+- **ราคาคิดใหม่ทั้งหมดที่ server** จาก `global_rates` (room rate × nights + extra_bed + addons) แล้ว update กลับลง `addons` row + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ · 🧾 **(16/11/26)** หากเป็นการแก้ไขเฉพาะ `billing_comment` หรือ `billing_address` (หรือฟิลด์ที่ไม่กระทบราคา โดยไม่มีการเปลี่ยน `room_type_id`/`check_in`/`check_out`/`price_per_night`/`addons`/`extra_beds`) ระบบจะ **ไม่คำนวณราคาใหม่** (`total_amount`, `room_amount`, `amount`, `outstanding_amount`, `is_paid` คงเดิม และไม่เขียน log `change-tier`)
 - ⚡ **Smart Diffing**: ตรวจสอบ field ที่เปลี่ยนจริง (รวมถึง date casts/boolean casts) — ถ้าวันที่และประเภทห้องเหมือนเดิมในฐานข้อมูล จะข้ามการเช็ค availability อันหนักหน่วง และจะสั่ง Execute SQL เฉพาะเมื่อมีข้อมูลเปลี่ยนแปลงจริง (ลดภาระ DB)
 - `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
 - BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่น = `404`
@@ -1651,6 +1651,7 @@ curl -s -H "Accept: application/json" \
   "check_in": "2026-08-22",
   "check_out": "2026-08-25",
   "room_type_id": "uuid (โหมด change-tier — ขึ้น/ลงได้)",
+  "apply_new_rate": false,
   "price_per_night": 1200,
   "guests": [
     { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
@@ -1661,13 +1662,15 @@ curl -s -H "Accept: application/json" \
   "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
 }
 ```
-> `price_per_night` (nullable int baht) มีผลเฉพาะโหมด change-tier (admin+staff) — ไม่กรอก = คิดจาก `GlobalRate::getEffectiveDailyRate` ของเจ้าของบิล · โหมด draft จะไม่รับค่านี้ (reprice จากเรทปกติ)
+> 🎚️ `apply_new_rate` (nullable boolean, **default `false`**) และ `price_per_night` (nullable int baht) มีผลเฉพาะโหมด change-tier (บิล `paid|confirmed`, `admin+staff`): ไม่ส่งหรือ `false` = คงราคาห้องเดิมทั้งขาขึ้น/ลง · ส่ง `true` = คำนวณตามเรทใหม่จาก `global_rates` · ส่ง `price_per_night` = ใช้ราคาที่กรอกเสมอ (ชนะ `apply_new_rate`) · โหมด `draft` ไม่ใช้ toggle นี้ (reprice ตามเรทปกติเสมอ) · โหมด `checked_in` ห้ามส่งทั้งคู่ (`422`)
 
 **Validation Rules:**
 
 | Field | Rule |
 |-------|------|
 | `room_type_id` | `sometimes` uuid exists:room_types,id |
+| `apply_new_rate` | nullable boolean (`true`/`false`) — ใช้เฉพาะโหมด change-tier (default `false`) |
+| `price_per_night` | nullable integer ≥ 0 — ใช้เฉพาะโหมด change-tier (ชนะ `apply_new_rate`) |
 | `check_in` | `sometimes` date, ≥ today + 2 วัน (Bangkok time) สำหรับทั่วไป (admin exempt: ≥ today) |
 | `check_out` | `sometimes` date `after:check_in` |
 | `addons.extra_bed` | nullable integer ≥ 0 (canonical 🛏️) |
@@ -1760,7 +1763,7 @@ curl -s -H "Accept: application/json" \
 - `booking_room_id` ซ้ำใน batch เดียวกันไม่ได้ (validation `distinct`) → `422`
 - ถ้าห้องใดแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่จาก final state ของทั้ง batch**: existing count ตัดทุกห้องใน batch ออก + นับ batch overlaps รวมห้องที่ไม่ได้เปลี่ยน shape → เต็ม = `422` ทั้งชุด · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (top-level body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
 - วันที่ตรวจจาก **effective values** (ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม) — ส่งแต่ `check_in` ทับ `check_out` เดิม (หรือกลับกัน) ก็ถูกจับ → `422`
-- **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว)
+- **ราคาคิดใหม่ทั้งหมดที่ server** รายห้อง + คำนวณ `total_amount` ของ booking ใหม่ทั้งใบ (ครั้งเดียว) · 🧾 **(16/11/26)** หากทั้งชุดแก้ไขเฉพาะ `billing_comment` หรือ `billing_address` (หรือฟิลด์ที่ไม่กระทบราคา) ระบบจะ **ไม่คำนวณราคาใหม่**
 - ⚡ **Smart Diffing**: เทียบข้อมูลใหม่กับ DB จริง (รวม cast วันที่/boolean) — ห้องที่ข้อมูลไม่ต่างจากเดิมจะไม่เรียก SQL Update เลย, และถ้าไม่มีการเปลี่ยน shape (วันที่/ห้อง) ในทั้งชุด ก็จะข้ามการเช็ค availability
 - `payment_deadline` **ไม่เปลี่ยน** (เหมือน addRooms)
 - ทุก BR ต้องอยู่ใต้ booking ที่ระบุจริง — ใส่ BR id ของ booking อื่นสักอันเดียว = `404` ทั้ง batch (ไม่มีอะไรถูกแก้)
@@ -2820,22 +2823,23 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 - ห้องใหม่ ≠ ห้องปัจจุบัน · ห้องใหม่สถานะ `available|prep_checkin|dirty`
 - ห้องใหม่ไม่ติด **maintenance period** ทับช่วงพัก (reserved ผ่าน — ธรรมเนียมเดียวกับ check-in) · ไม่มี BR อื่น `holdingSlot()` ทับช่วงเข้าพักของ BR นี้
 - จำนวนแขกเดิม ≤ `max_guests` ของ type ใหม่
-- 🔄 **เลิก upgrade-only (v2):** type ใหม่แพง/ถูกกว่าได้ — ราคา = manual `price_per_night` (int baht, admin+staff — ใหม่) หรือ computed effective rate ของเจ้าของบิล
+- 🔄 **เลิก upgrade-only (v2)** · 🎚️ **default คงราคาเดิม (2026-11-16):** type ใหม่แพง/ถูกกว่าได้ — **ไม่ส่ง `apply_new_rate` หรือส่ง `false` = คงราคาห้องเดิมทั้งขาขึ้น/ลง** (`surcharge_amount = 0`, รวมห้องอื่นในบิลด้วย) · ส่ง `apply_new_rate: true` = คำนวณตาม effective rate ของ type ใหม่ · ส่ง `price_per_night` = ใช้ราคาที่กรอกเสมอ
 
 **ผลลัพธ์ (ใน transaction เดียว):** BR คงสถานะเดิม (สถานะไม่เปลี่ยน) แต่ชี้ `room_id`/`room_type_id` ใหม่
 - **BR `checked_in`** 🏨 — housekeeping ceremony ครบ: ห้องเก่า → `dirty` + สร้างงานแม่บ้าน `checkout` (duplicate-guard) · ห้องใหม่ → `occupied` (dirty ผ่าน)
 - **BR `confirmed`/`draft`** — **re-point ล้วน**: ไม่แตะสถานะห้องกายภาพเก่า/ใหม่ ไม่สร้าง task ใด ๆ (slot คุมด้วย `holdingSlot()` อยู่แล้ว)
-- 💰 **reprice ทั้งบิล (full-stay)** จากเรทวันนี้ — **downgrade อนุญาต ไม่คืนเงิน (🔄 v2):** `outstanding = max(0, total + charges − paid)` + `is_paid` recompute ผ่าน `syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · upgrade → ส่วนต่างเข้า `outstanding_amount` เก็บต่อผ่าน front-desk / ดักที่ check-out · audit: room transitions เฉพาะ checked_in + **note row ของ BR** (from=to, note "ย้ายห้อง X → Y" — ก่อนเช็คอิน prefix "ย้ายห้องก่อนเช็คอิน (pre-checkin move)" + direction + ราคา)
+- 💰 **ราคา & เงิน:** default คง `room_amount` เดิมทุกห้อง (`surcharge_amount = 0`) · เมื่อเปิด `apply_new_rate: true` (reprice จากเรทวันนี้) หรือส่ง `price_per_night` → **downgrade อนุญาต ไม่คืนเงิน (🔄 v2):** `outstanding = max(0, total + charges − paid)` + `is_paid` recompute ผ่าน `syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · upgrade → ส่วนต่างเข้า `outstanding_amount` เก็บต่อผ่าน front-desk / ดักที่ check-out · audit: room transitions เฉพาะ checked_in + **note row ของ BR** (from=to, note "ย้ายห้อง X → Y" — ก่อนเช็คอิน prefix "ย้ายห้องก่อนเช็คอิน (pre-checkin move)" + direction (`upgrade`/`downgrade`/`keep-price`) + ราคา)
 
 **Request Body:**
 ```json
 {
   "room_id": "new-room-uuid",
+  "apply_new_rate": false,
   "price_per_night": 1500,
   "notes": "Guest asked for higher floor (optional)"
 }
 ```
-> `price_per_night` (nullable int baht, admin+staff) — ไม่กรอก = คิดจาก effective rate ของ type ใหม่ตามเจ้าของบิล
+> `apply_new_rate` (nullable boolean, **default `false`**): ไม่ส่งหรือ `false` = คงราคาห้องเดิมทั้งขาขึ้นและขาลง (`surcharge_amount = 0`) · ส่ง `true` = คำนวณตาม effective rate ของ type ใหม่ · `price_per_night` (nullable int baht, admin+staff) — ถ้าระบุจะใช้ราคาที่กรอกเป็นหลักเสมอ (ชนะ `apply_new_rate`)
 
 **Response `200` (upgrade example):**
 ```json
@@ -3180,7 +3184,7 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 
 - **ช่องทาง:** `PUT /bookings/{bookingId}/rooms/{bookingRoomId}` เดิม (3 โหมด — draft = แก้ปกติ, `paid|confirmed` + BR `confirmed` = **change-tier**, `checked_in` = addon-only กลางพัก) — โหมด change-tier: **admin หรือ staff** (🔄 v2 — เดิม admin-only) · โหมด checked_in: **admin หรือ staff เท่านั้น** (user เจ้าของ = `403`)
 - **Guard (🔄 v2):** BR `confirmed` ที่ **`room_id = null` เท่านั้น** — BR ที่มีเลขห้อง → `422` ชี้ไป `change-room` (**breaking**: capability "ปลดห้องเพื่อ upgrade" เดิมถูกย้ายไป change-room) · ส่ง param `room_id` → `422` · `checked_out/no_show` = `422` เสมอ · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · guests/extra_beds cap ตาม tier ใหม่ · availability re-check + `holdingSlot()` เหมือนโหมด draft (โหมด checked_in ข้าม availability)
-- **เงิน (🔄 v2 มติ downgrade-no-refund):** **downgrade อนุญาต — ไม่คืนเงิน** — `outstanding = max(0, total + charges − paid)` · `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (paid ครอบยอดใหม่ → true คืนได้) · `surcharge_amount` ติดลบได้ · ราคา manual `price_per_night` (admin+staff) หรือ computed — **⚠️ reprice จากเรทวันนี้ทั้งบิล** (float: ราคาเดิมของ BR อื่นบนบิลอาจเปลี่ยน)
+- **เงิน (🔄 v2 มติ downgrade-no-refund · 🎚️ 2026-11-16 default keep-price):** **default คงราคาเดิม (`apply_new_rate=false`) ทั้งขาขึ้นและขาลง** · เมื่อเปิด `apply_new_rate=true` หรือระบุ `price_per_night` (admin+staff): **downgrade อนุญาต — ไม่คืนเงิน** — `outstanding = max(0, total + charges − paid)` · `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (paid ครอบยอดใหม่ → true คืนได้) · `surcharge_amount` ติดลบได้ · ⚠️ เมื่อเปิด `apply_new_rate=true` จะ reprice จากเรทวันนี้ทั้งบิล (ยกเว้น BR ที่ระบุ `price_per_night`) · การเปลี่ยนจำนวนคืนหรือแก้ addon ยังคิดส่วนต่างปกติ
 - **deposit_amount ไม่ย้อน** — คงยอดเดิม (เป็นข้อมูลงวดที่ตั้งไปแล้ว)
 - **Response เพิ่ม 6 field เสมอ:** `previous_total_amount` · `surcharge_amount` (ติดลบได้) · envelope `payment_type/deposit_amount/paid_amount/outstanding_amount`
 
@@ -3869,7 +3873,7 @@ Returns tasks with status `pending` or `in_progress`.
 > 🚪 **(2026-11-04 · 🔄 tier-endpoints-v2 2026-11-11) Move window:** BR ที่มี `room_id` ย้ายห้องจริงผ่าน
 > `POST /front-desk/{bookingId}/rooms/{bookingRoomId}/change-room` (admin+staff) — ได้ทั้ง
 > `checked_in` (กลางทาง) และ `confirmed`/`draft` (ก่อนเช็คอิน — re-point ล้วนไม่แตะห้องกายภาพ) ·
-> เปลี่ยน `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) + manual `price_per_night` ·
+> เปลี่ยน `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) + toggle `apply_new_rate` (default `false` = คงราคาเดิมทั้งขาขึ้น/ลง · `true` = คิดเรทใหม่) + manual `price_per_night` (ชนะเสมอ) ·
 > **downgrade อนุญาตไม่คืนเงิน** + `syncIsPaid()` · การย้ายไม่ใช่ transition — จด audit ผ่าน
 > note row · ห้องเก่า/ใหม่ ceremony เฉพาะ checked_in (ห้องเก่า dirty + task, ห้องใหม่ occupied) ·
 > สำหรับ BR ไม่มีเลขห้อง ใช้ `PUT /bookings/{id}/rooms/{brId}` โหมด change-tier แทน ·

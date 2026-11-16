@@ -1176,10 +1176,11 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         $this->assertSame(2000, (int) $br->fresh()->room_amount);
 
-        // 2. Composition: นำ BR-1 ที่ checked_in อยู่ ไปเปลี่ยนเป็น Deluxe ผ่าน change-room
+        // 2. Composition: นำ BR-1 ที่ checked_in อยู่ ไปเปลี่ยนเป็น Deluxe ผ่าน change-room (เปิด apply_new_rate=true เพื่อคิดเรทใหม่)
         $changeRes = $this->actingAs($this->createAdmin(), 'sanctum')
             ->postJson("/api/v1/front-desk/{$booking->id}/rooms/{$br->id}/change-room", [
                 'room_id' => $roomDeluxe->id,
+                'apply_new_rate' => true,
             ]);
 
         $changeRes->assertStatus(200);

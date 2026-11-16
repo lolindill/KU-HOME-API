@@ -335,6 +335,16 @@ class Booking extends Model
                 ->whereIn('booking_room_id', $this->bookingRooms()->pluck('id'))
                 ->where('status', 'held')
                 ->update(['status' => 'used']);
+
+            // 🛏️ (16/11/26): เมื่อ booking เข้า paid หรือ confirmed → promote ห้องที่ยังเป็น draft → confirmed
+            //    ผ่าน BookingRoom::transitionStatus() เพื่อ enforce state machine + เขียน audit log ครบ
+            $draftRooms = $this->bookingRooms()->where('status', 'draft')->get();
+            if ($draftRooms->isNotEmpty()) {
+                $draftRooms->each(fn (BookingRoom $br) => $br->transitionStatus('confirmed', $userRole));
+                if ($this->relationLoaded('bookingRooms')) {
+                    $this->unsetRelation('bookingRooms');
+                }
+            }
         }
     }
 
