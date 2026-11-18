@@ -195,7 +195,8 @@ class BookingManagementController extends Controller
 
                 DB::commit();
 
-                $fresh = $locked->fresh(['bookingRooms.addon', 'confirmations.slipImage']);
+                // 🏛️ (18/11/26, owner-envelope) — eager user/organization เพื่อ accessor `owner`
+                $fresh = $locked->fresh(['user', 'organization', 'bookingRooms.addon', 'confirmations.slipImage']);
 
                 return response()->json([
                     'status' => 'success',
@@ -209,12 +210,9 @@ class BookingManagementController extends Controller
                     'paid_amount' => $fresh->paid_amount,
                     'outstanding_amount' => $fresh->outstanding_amount,
                     'payment_deadline' => $fresh->payment_deadline?->toDateTimeString(),
-                    // 🏛️ ticket 07 — identity หลัง attach/switch/detach
-                    'user_id' => $fresh->user_id,
-                    'organization_id' => $fresh->organization_id,
-                    'customer_name' => $fresh->customer_name,
-                    'customer_phone' => $fresh->customer_phone,
-                    'customer_email' => $fresh->customer_email,
+                    // 🏛️ owner-envelope — identity หลัง attach/switch/detach อ่านผ่าน owner object
+                    //    (flat user_id/organization_id/customer_* ถูกตัดออกจาก envelope แล้ว — breaking)
+                    'owner' => $fresh->owner,
                 ], 200);
 
             } catch (\Exception $e) {

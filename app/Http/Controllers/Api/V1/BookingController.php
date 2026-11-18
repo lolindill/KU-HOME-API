@@ -97,10 +97,12 @@ class BookingController extends Controller
 
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
             // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
-            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage'])
+            // 🏛️ (18/11/26, owner-envelope): with('user') ทุก role — accessor `owner` อ่าน user.name
+            //    (org booking มองไม่เห็นใน non-admin อยู่แล้ว จึงไม่มี organization query ไฟร้)
+            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage', 'user'])
                 ->when($user && $user->role === 'admin', function ($q) {
-                    // 🏛️ ticket 08 — admin เห็น object organization คู่กับ user (org booking ไม่มีเจ้าของ user)
-                    $q->with('user')->with('organization');
+                    // 🏛️ ticket 08 — admin เห็น object organization (org booking ไม่มีเจ้าของ user)
+                    $q->with('organization');
                 });
 
             if ($user && $user->role === 'admin') {
@@ -1739,13 +1741,9 @@ class BookingController extends Controller
                 'paid_amount' => $booking->fresh()->paid_amount,
                 'outstanding_amount' => $booking->fresh()->outstanding_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
-                // 🏛️ (25/09/26, organization-bookings ticket 02): user_id = target (โหมด A) / null (โหมด B)
-                'user_id' => $bookingUserId,
-                // 🏛️ (25/09/26, organization-bookings ticket 03): org fields (null เมื่อไม่ใช่ org/โหมด B)
-                'organization_id' => $booking->organization_id,
-                'customer_name' => $booking->customer_name,
-                'customer_phone' => $booking->customer_phone,
-                'customer_email' => $booking->customer_email,
+                // 🏛️ (18/11/26, owner-envelope) — identity อ่านผ่าน owner object ทุกโหมด
+                //    (flat user_id/organization_id/customer_* ถูกตัดออกจาก envelope แล้ว — breaking)
+                'owner' => $booking->fresh(['user', 'organization'])->owner,
                 'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 

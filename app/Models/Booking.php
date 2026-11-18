@@ -72,7 +72,14 @@ class Booking extends Model
      * 💸 (15/10/26, ticket 13) เพิ่ม charges_total — Σ additional_charges (REQ-042/044)
      * 🏷️ (09/11/26) เพิ่ม booking_type — derived ประเภทการจอง (daily|group|monthly)
      */
-    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total', 'booking_type'];
+    /**
+     * 🏛️ (18/11/26, owner-envelope) — identity แบบ flat (organization_id + snapshot customer_*)
+     *    ถูกซ่อนออกจาก serialization ทุก endpoint แล้ว อ่านผ่าน `owner` object แทน
+     *    (ซ่อนเฉพาะตอน serialize — PHP/reports อ่าน column ตรง ๆ ได้ปกติ · user_id ไม่ซ่อน)
+     */
+    protected $hidden = ['organization_id', 'customer_name', 'customer_phone', 'customer_email'];
+
+    protected $appends = ['paid_amount', 'outstanding_amount', 'charges_total', 'booking_type', 'owner'];
 
     /**
      * 🏷️ ประเภทการจองระดับบิล (derived — mirror 3 เขตราคา: monthly > group > daily)
@@ -94,6 +101,59 @@ class Booking extends Model
         }
 
         return 'daily';
+    }
+
+    /**
+     * 🏛️ (18/11/26, owner-envelope) — เจ้าของบิลแบบ polymorphic object (breaking change
+     *    ของ organization-bookings ticket 03/07/08 — flat organization_id/customer_*
+     *    ถูกซ่อนออกจาก wire แล้ว อ่านผ่าน shape เดียวนี้ทุก endpoint)
+     *
+     *    key set เดียวกันทุก type · บิลหนึ่งมีเจ้าของได้คนเดียวเสมอ (user_id XOR organization_id)
+     *      - type "organization"  = โหมด C จองให้องค์กร (name/erp อ่าน live จาก organizations table)
+     *      - type "user"          = จองเอง / โหมด A จองแทน / walk-in (user_id = staff)
+     *      - type "contact"       = โหมด B เฮดเปล่าที่ระบุผู้ติดต่อ (snapshot customer_* ล้วน)
+     *      - null                 = draft ลอย ไม่ระบุเจ้าของ/ผู้ติดต่อใดเลย
+     */
+    public function getOwnerAttribute(): ?array
+    {
+        if ($this->organization_id !== null) {
+            // FK restrict ทำให้ organization_id มีค่า = row มีอยู่แน่ — ยัง null-safe กันเหนียว
+            return [
+                'type' => 'organization',
+                'id' => $this->organization_id,
+                'name' => $this->organization?->name,
+                'erp' => $this->organization?->erp,
+                'customer_name' => $this->customer_name,
+                'customer_phone' => $this->customer_phone,
+                'customer_email' => $this->customer_email,
+            ];
+        }
+
+        if ($this->user_id !== null) {
+            return [
+                'type' => 'user',
+                'id' => $this->user_id,
+                'name' => $this->user?->name,
+                'erp' => null,
+                'customer_name' => $this->customer_name,
+                'customer_phone' => $this->customer_phone,
+                'customer_email' => $this->customer_email,
+            ];
+        }
+
+        if ($this->customer_name !== null) {
+            return [
+                'type' => 'contact',
+                'id' => null,
+                'name' => null,
+                'erp' => null,
+                'customer_name' => $this->customer_name,
+                'customer_phone' => $this->customer_phone,
+                'customer_email' => $this->customer_email,
+            ];
+        }
+
+        return null;
     }
 
     // 🌟 Helper: ดึงชื่อผู้เข้าพักหลัก (primary guest) จาก booking_rooms แรกที่มี guests
