@@ -1271,7 +1271,7 @@ curl -s -H "Accept: application/json" \
 | `payment_type`    | string | 💳 Filter ตามประเภทการชำระ — ค่าเดียวหรือ comma-separated เช่น `deposit` หรือ `deposit,deferred` · ใช้ได้: `full, deposit, deferred` · ค่าอื่น → 422 · ไม่ใส่ = ทุกประเภท · ใช้ได้ทุก role (user เห็นเฉพาะบิลตัวเอง) · combine กับ `status` ได้ (AND) (26/10/26) |
 | `per_page`        | int    | Items per page (default: 15)                         |
 
-> 🏛️ **Org booking response (2026-09-25, ticket 08):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — `organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email` serialize ตาม booking ปกติ · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter
+> 🏛️ **Org booking response (2026-09-25, ticket 08 · 🔄 owner-envelope 18/11/26):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — **identity แบบ flat (`organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email`) ถูกซ่อนออกจาก serialization แล้ว อ่านผ่าน `owner` object แทน (breaking — ดูตาราง shape ในหัวข้อ `POST /bookings`)** · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter
 
 > 💳 **(22/10/26):** booking ทุกตัวใน `bookings[]` แนบ `confirmations` (array ประวัติส่งสลิป 1:N + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
 
@@ -1293,6 +1293,7 @@ curl -s -H "Accept: application/json" \
     {
       "id": "booking-uuid",
       "user_id": "user-uuid",
+      "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
       "confirmation": "202606-00001",
       "source": "online",
       "status": "draft",
@@ -1396,7 +1397,30 @@ curl -s -H "Accept: application/json" \
 > **(A) จองแทน user**: ส่ง `user` = UUID ปลายทาง → `user_id` = target (**draft-dedup / ราคา daily_ku ใช้ role ของ target — UUID ไม่เจอ 422** · 🔄 room cap ย้ายมาใช้ role ผู้ล็อกอินแล้ว — ดู Room Cap Rule amendment 20/10/26) ·
 > **(B) เฮดเปล่า**: ไม่ส่ง `user`/`organize` → `user_id = null` (ส่ง `customer_name` เพิ่มได้ = ระบุผู้ติดต่อ/ผู้เข้าพัก) ·
 > **(C) จองให้องค์กร**: ส่ง `organize` = **erp code** → server lookup ตาราง `organizations` เป็น FK `organization_id` (ไม่เจอ/inactive → 422) + **บังคับ `customer_name`** (phone/email nullable) → `user_id = null` + snapshot `customer_name`/`customer_phone`/`customer_email` บน bookings ·
-> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap (ทุกโหมด — 🔄 amendment 20/10/26: cap ตัดสินจาก Sanctum login role แม้โหมด A) · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · response เพิ่ม `organization_id` + `customer_name`/`customer_phone`/`customer_email`
+> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap (ทุกโหมด — 🔄 amendment 20/10/26: cap ตัดสินจาก Sanctum login role แม้โหมด A) · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · 🔄 **(18/11/26, owner-envelope)** response ตอบ identity ผ่าน **`owner` object** — flat `user_id` + `organization_id` + `customer_*` ถูกตัดออกจาก envelope แล้ว (breaking)
+
+> 🏛️ **owner object (18/11/26 — derived, มีทุก endpoint ที่ serialize Booking ทั้ง `POST /bookings` 201 / `GET /bookings` / `GET /bookings/{id}` / `PUT /bookings/{id}` 200):** เจ้าของบิลแบบ polymorphic — key set เดียวกันทุก type · บิลหนึ่งมีเจ้าของได้คนเดียวเสมอ
+>
+> | `owner.type` | ความหมาย | `id` | `name` | `erp` | `customer_*` |
+> |---|---|---|---|---|---|
+> | `organization` | โหมด C จองให้องค์กร | organization_id | ชื่อองค์กร (live จาก organizations table) | erp code (live) | snapshot ผู้ติดต่อ |
+> | `user` | จองเอง / โหมด A จองแทน / walk-in (user_id = staff) | user_id | ชื่อ user (live) | `null` | snapshot (มีได้เมื่อ attach ระบุ) |
+> | `contact` | โหมด B เฮดเปล่าระบุผู้ติดต่อ | `null` | `null` | `null` | snapshot ผู้ติดต่อ |
+> | `owner = null` | draft ลอย ไม่ระบุเจ้าของ/ผู้ติดต่อ | — | — | — | — |
+>
+> ```json
+> "owner": {
+>   "type": "organization",
+>   "id": "3f9c1a2e-8b47-4c6d-9e21-7a55f0d1c309",
+>   "name": "คณะเกษตร มหาวิทยาลัยเกษตรศาสตร์",
+>   "erp": "KU-AGR-001",
+>   "customer_name": "ดร.วิภา ราชกรี",
+>   "customer_phone": null,
+>   "customer_email": "wipa@ku.ac.th"
+> }
+> ```
+>
+> หมายเหตุ: DB columns (`organization_id`, `customer_*`) คงอยู่ครบ — ซ่อนเฉพาะ serialization ($hidden) · server-side/reports อ่าน column ตรง ๆ ตามเดิม · `user_id` (FK column) ยัง serialize บน booking object ของ `GET /bookings` / `GET /bookings/{id}` ตามเดิม (ตัดเฉพาะ echo ใน envelope)
 
 **Validation Rules:**
 
@@ -1450,11 +1474,7 @@ curl -s -H "Accept: application/json" \
   "paid_amount": 0,
   "outstanding_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
-  "user_id": "user-uuid",
-  "organization_id": null,
-  "customer_name": null,
-  "customer_phone": null,
-  "customer_email": null,
+  "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
   "booking_rooms": [
     {
       "id": "br-uuid",
@@ -2112,6 +2132,7 @@ curl -H "Authorization: Bearer <TOKEN>" \
   "booking": {
     "id": "booking-uuid",
     "user_id": "user-uuid",
+    "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
     "confirmation": "202606-00001",
     "source": "online",
     "status": "paid",
@@ -3204,19 +3225,20 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 | `deposit_amount` | nullable integer ≥ 1 | ส่ง `null` ชัด ๆ = revert ไป effective 50% · 422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit |
 | `discount_code` | nullable string max 50 | reuse กลไก `DiscountService` — reconcile `total_amount` ให้ครบ · ค่าว่าง = ลบโค้ด |
 | `payment_deadline` | nullable date after:now | ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม |
-| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · ส่ง `null` ชัด ๆ = ถอด identity กลับเฮดเปล่า |
-| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · ส่ง `null` ชัด ๆ = ถอด identity |
+| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · 🛡️ ส่ง `null`/`""` **ไม่มีผล** (no-op คง identity เดิม — 18/11/26) · ถอดใช้ `detach_identity: true` |
+| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · 🛡️ ส่ง `null`/`""` **ไม่มีผล** (no-op) · ถอดใช้ `detach_identity: true` |
+| `detach_identity` 🛡️ | boolean (18/11/26) | ถอด identity กลับเฮดเปล่า (เคลียร์ user/organization/snapshot ครบ) · ส่งคู่กับ `user`/`organize`/`customer_*` ค่าใหม่ → 422 |
 | `customer_name` 🏛️ | nullable string max 255 | **บังคับ** เมื่อส่ง `organize` · snapshot ผู้ติดต่อ/ผู้เข้าพัก |
 | `customer_phone` 🏛️ | nullable string max 50 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
 | `customer_email` 🏛️ | nullable string email max 255 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
 
 > `total_amount` **ไม่รับ**จาก input — reprice โดยระบบเสมอ
 >
-> 🏛️ **กติกา attach/switch/detach (ticket 07):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · ส่ง `user: null` / `organize: null` ชัด ๆ = ถอดกลับเฮดเปล่า (เคลียร์ครบ) · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
+> 🏛️ **กติกา attach/switch/detach (ticket 07 · 🛡️ supersedes 18/11/26 identity-detach-guard):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · **ถอด identity ต้องส่ง `detach_identity: true` ชัด ๆ** — `user`/`organize` เป็น `null`/`""` โดยไม่มี flag = **no-op คง identity เดิม** (กัน FE generic form ที่แถม key ครบจนล้าง identity) · ส่ง `detach_identity` คู่กับ `user`/`organize`/`customer_*` ค่าใหม่ → 422 · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize`/flag = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
 
 > 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
 
-**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "user_id": ..., "organization_id": ..., "customer_name": ..., "customer_phone": ..., "customer_email": ... }`
+**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "owner": { type, id, name, erp, customer_* } | null }` · 🔄 **(18/11/26, owner-envelope)** identity หลัง attach/switch/detach อ่านผ่าน `owner` object (ดูตาราง shape ในหัวข้อ `POST /bookings`) — flat `user_id`/`organization_id`/`customer_*` ถูกตัดออกจาก envelope แล้ว (breaking)
 
 **Errors**: `403` non-admin · `404` booking ไม่พบ · `422` payment fields บน non-draft / identity fields บน `complete`/`no_show` / `user`+`organize` พร้อมกัน / `organize` ไม่มี `customer_name` / erp ไม่เจอหรือ inactive / deposit_amount กับ type ที่ไม่ใช่ deposit
 

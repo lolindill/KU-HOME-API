@@ -203,7 +203,7 @@ class BookingTest extends TestCase
             'confirmation',
             'total_amount',
             'payment_deadline',
-            'user_id',
+            'owner', // 🏛️ owner-envelope — flat user_id ถูกตัดออก (breaking 18/11/26)
             'booking_rooms' => [
                 [
                     'id',

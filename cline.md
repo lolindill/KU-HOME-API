@@ -2255,7 +2255,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **กฎผลพวง `user_id = null`** (สืบทอดโหมด B — ถูก implement ไว้แล้วใน ticket 05, ยืนยันอีกชั้น): ไม่มี draft-dedup · ราคา `daily` เสมอ (`getEffectiveDailyRate(?, $booking->user)` กับ null) · ไม่โดน room cap · ownership เหลือแต่ admin
 - **ชื่อ default ใช้ `customer_name` (ticket 03 ข้อ 5):** `Booking::getPrimaryGuestNameAttribute` ยืด fallback chain เป็น `user?->name` → `customer_name` → `'Customer'` — ครอบทั้ง booking-level และ booking_rooms ที่ไม่ส่ง guests (BR-level accessor คืน 'Customer' แล้ว Booking-level resolve ต่อ)
 - **ส่วน flow หลังจองของ userless booking (ticket 04) ไม่ต้องเขียนโค้ดใหม่:** org booking = `deferred` เสมอ (สลิป block · อนุมัติ `draft → confirmed` · เก็บเงิน `recordPayment` — design ของแมป `booking-payment-types`) · admin ส่งสลิปแทนบิลไร้ user (non-deferred) ได้ผ่าน ownership guard เดิม · เฮดเปล่าโดน cleanup 15 นาทีตามเดิม — ขยายผ่าน `payment_deadline` บน `PUT /bookings/{id}` · front desk ค้นผ่าน term search เดิม (filter ตามองค์กร = ticket 08 ที่เดียว) · `customer_phone`/`email` เก็บติดต่อล้วน ไม่ผูก flow
-- **Response ของ `POST /bookings`** เพิ่ม 4 field: `organization_id` + `customer_name`/`customer_phone`/`customer_email` (null เมื่อไม่ใช่ org/โหมด B)
+- **Response ของ `POST /bookings`** เพิ่ม 4 field: `organization_id` + `customer_name`/`customer_phone`/`customer_email` (null เมื่อไม่ใช่ org/โหมด B) — **🔄 superseded 18/11/26 owner-envelope: อ่านผ่าน `owner` object แทน (ดูหัวข้อ "🏛️ Owner envelope")**
 - Tests: `tests/Feature/OrgBookingTest.php` (12 เคส — FK+snapshot · erp มั่ว 422 · inactive 422 · user×organize 422 · ไม่มี customer_name 422 · source ผิด 422 · non-admin 403 · ไม่มี dedup · ราคา daily · fallback ชื่อ · โหมด B snapshot · regression บิลปกติ) — **suite เต็ม 588 passed (2190 assertions)** · Pint ผ่าน
 
 ## 🏛️ ดู/รายงาน booking ตามองค์กร — filter ใน admin index (2026-09-25, wayfinder/organization-bookings — ticket 08)
@@ -2264,7 +2264,7 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 
 - **Filter = ขยาย `GET /bookings` เดิม ไม่เพิ่ม endpoint:** query param `organization_id` (UUID ตรงตาม FK — ค่าที่ไม่ใช่ UUID → `422`) **เฉพาะ admin** (non-admin ถูก scope `user_id` ตัวเองอยู่แล้ว ไม่รับ param นี้) · และขยาย `term` เดิมให้ค้น snapshot `customer_name` ด้วย (`whereRaw LOWER ... LIKE` — LIKE บน pgsql case-sensitive, ครอบ org booking/เฮดเปล่าที่ไม่มี user ให้ `whereHas` จับ) · `search_criteria` เพิ่ม `organization_id`
 - **ขอบเขต "รายงาน" = แค่ filter + response fields ไม่มี aggregation** — ยอดจอง/ยอดเงินต่อองค์กรเป็นของแมป `excel-reports` (เจ้าของเดียว ไม่ซ้อนทับ)
-- **Response shape:** admin เห็น object `organization` (id, erp, name, is_active) eager-load คู่ `user` ทั้ง `GET /bookings` และ `GET /bookings/{id}` (showById) เมื่อ booking ผูกองค์กร — `organization_id` + snapshot 3 fields serialize ตาม fillable เดิม · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user ดูได้เฉพาะ admin อยู่แล้ว)
+- **Response shape:** admin เห็น object `organization` (id, erp, name, is_active) eager-load คู่ `user` ทั้ง `GET /bookings` และ `GET /bookings/{id}` (showById) เมื่อ booking ผูกองค์กร — `organization_id` + snapshot 3 fields serialize ตาม fillable เดิม · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user ดูได้เฉพาะ admin อยู่แล้ว) — **🔄 superseded 18/11/26 owner-envelope: flat 4 fields หายจาก serialization อ่านผ่าน `owner` (object `organization` eager-load ยังอยู่ — ดูหัวข้อ "🏛️ Owner envelope")**
 - Tests: `OrgBookingTest` เพิ่ม 4 เคส (filter ตาม org + เห็น object organization · non-UUID 422 · term ค้น customer_name · showById เห็น organization) — suite รวม **602 passed** (2 failed เป็นของงาน implement ticket 07 ที่กำลังทำค้างใน working tree อีก session — ไม่เกี่ยวกับ ticket 08)
 
 ## 🏛️ Empty-head booking — attach user/organization ทีหลัง (2026-09-25, wayfinder/organization-bookings — ticket 07)
@@ -2281,7 +2281,22 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   - ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง (ไม่แตะ FK)
   - ไม่ re-run draft-dedup ตอน attach user (ผู้ตัดสินคือ admin — ต่างจาก POST โหมด A) · ไม่ผูก `source='admin'` ของ booking ตอน attach (ผู้เรียกคือ admin อยู่แล้ว)
 - **Reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` ทันที (chokepoint อ่าน `$booking->user` — ku_member ได้ `daily_ku` อัตโนมัติ, ถอดกลับเป็น `daily` สมมาตร) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** (ไม่ยุ่งยอดที่สลิป/การชำระ lock ไว้)
-- **Response ของ `PUT /bookings/{id}`** เพิ่ม 5 field: `user_id` / `organization_id` / `customer_name` / `customer_phone` / `customer_email`
+- **Response ของ `PUT /bookings/{id}`** เพิ่ม 5 field: `user_id` / `organization_id` / `customer_name` / `customer_phone` / `customer_email` — **🔄 superseded 18/11/26 owner-envelope: echo flat ตัดออก อ่านผ่าน `owner` (ดูหัวข้อ "🏛️ Owner envelope")**
+
+## 🏛️ Owner envelope — identity บิลรวมเป็น object เดียว (2026-11-18)
+
+> Breaking wire-format change ตามสั่ง owner ตรง ๆ ("encap field organization_id/customer_* + organization name → owner object") · supersede contract แบบ flat ของ organization-bookings ticket 03 (L2258 เดิม) / ticket 08 (L2267 เดิม) / ticket 07 (L2284 เดิม) — **มติ: object เดี่ยวมี `type` discriminator · unified ครอบ user + organization + เฮดเปล่า · breaking replace (ไม่เก็บ flat คู่กัน)**
+
+- **`Booking::getOwnerAttribute()` (derived — `$appends` เพิ่ม `owner`) — key set เดียวกันทุก type, บิลมีเจ้าของได้คนเดียวเสมอ (user_id XOR organization_id):**
+  - `type: "organization"` = โหมด C — `{ id: organization_id, name: org name (live), erp (live), customer_* snapshot }`
+  - `type: "user"` = self / โหมด A / walk-in (user_id = staff) — `{ id: user_id, name: user.name (live), erp: null, customer_* snapshot }`
+  - `type: "contact"` = โหมด B เฮดเปล่าระบุผู้ติดต่อ — `{ id: null, name: null, erp: null, customer_* }`
+  - `owner = null` = draft ลอยไม่ระบุใคร / หลัง detach_identity
+- **`Booking::$hidden = ['organization_id', 'customer_name', 'customer_phone', 'customer_email']`** — ซ่อน flat เฉพาะ serialization ทุก endpoint (PHP/reports อ่าน column ตรง ๆ ได้ปกติ — ErpTransfer/Deposit/CheckIn/CheckOut/Breakfast/DailyFinancial/ExtraBed ไม่กระทบ) · `user_id` **ไม่ซ่อน** (FK column ยัง serialize บน booking object เดิม — ตัดเฉพาะ echo ใน envelope) · pattern เดียวกับ `BookingRoom::$hidden = ['roomType','room']`
+- **Envelope ที่แก้มือ 2 จุด:** `BookingController::createBooking` ตัด echo `user_id`+org 4 field → `'owner' => $booking->fresh(['user','organization'])->owner` · `BookingManagementController::updateBookingPayment` ตัด echo 5 field → `'owner' => $fresh->owner` (fresh เพิ่ม eager `user`/`organization`) · `getBookings` เลิกทำ `with('user')` admin-only — **eager-load `user` ทุก role** (กัน N+1 จาก accessor ฝั่ง non-admin) · `with('organization')` คง admin-only · `showById`/discount/assign ไม่แก้โค้ด (ไหลผ่าน model)
+- **ห้ามแตะ:** input side คงเดิมทั้งหมด (`organize`/`customer_*`/`detach_identity` บน POST/PUT — detach guard 18/11/26 ไม่เปลี่ยน) · `search_criteria.organization_id` echo คงเดิม (query echo ไม่ใช่ identity) · object `organization` eager-load admin-only คงเดิม
+- **Tests:** ย้าย assertions เป็น owner paths — `OrgBookingTest` (owner.type/id/name/erp/customer_* ทั้ง create/list/show · บิลปกติ = type "user" · เฮดเปล่า = type "contact") · `BookingAttachCustomerTest` (attach/switch/detach อ่าน owner — detach → `owner = null`) · `AdminBookingForUserTest` (โหมด A owner.type=user · โหมด B ลอย owner null) · `BookingTest` assertJsonStructure `user_id` → `owner` — **suite เต็ม 992 passed (4284 assertions)**
+- **Docs:** `docs/api_guide.md` (owner shape table + sample 5 จุด + แก้ detach rule ให้ตรง guard 18/11/26) · `docs/api_patches/2026-11-18-booking-owner-envelope.md` (patch note FE)
 - Tests: `tests/Feature/BookingAttachCustomerTest.php` (12 เคส — attach user/org บนเฮดเปล่า · switch org→org→user แทนที่ทั้งชุด · detach null · contact-only patch · mutually exclusive · organize ไม่มี name · erp มั่ว/inactive · non-admin 403 · attach หลัง draft ได้แต่ payment fields 422 · complete/no_show 422 · reprice daily_ku↔daily สมมาตร)
 
 ## 🏛️ Room cap amendment — ตัดสินจาก role ผู้ล็อกอิน ไม่ใช่ target user (2026-10-20, owner decision)

@@ -119,8 +119,9 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id)
-            ->assertJsonPath('organization_id', null);
+            // 🏛️ owner-envelope — identity อ่านผ่าน owner object (flat ถูกตัดออกแล้ว)
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id);
 
         $fresh = $booking->fresh();
         $this->assertSame($target->id, $fresh->user_id);
@@ -145,9 +146,12 @@ class BookingAttachCustomerTest extends TestCase
                 'customer_email' => 'somchai@example.com',
             ])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', $org->id)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี');
+            ->assertJsonPath('owner.type', 'organization')
+            ->assertJsonPath('owner.id', $org->id)
+            ->assertJsonPath('owner.name', 'บริษัท ตัวอย่าง จำกัด')
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี')
+            ->assertJsonPath('owner.customer_phone', '0812345678')
+            ->assertJsonPath('owner.customer_email', 'somchai@example.com');
 
         $fresh = $booking->fresh();
         $this->assertNull($fresh->user_id);
@@ -184,8 +188,8 @@ class BookingAttachCustomerTest extends TestCase
             ->putJson("/api/v1/bookings/{$booking->id}", [
                 'organize' => 'ORGB', 'customer_name' => 'คนใหม่',
             ])->assertStatus(200)
-            ->assertJsonPath('organization_id', $orgB->id)
-            ->assertJsonPath('customer_name', 'คนใหม่');
+            ->assertJsonPath('owner.id', $orgB->id)
+            ->assertJsonPath('owner.customer_name', 'คนใหม่');
 
         $fresh = $booking->fresh();
         $this->assertSame($orgB->id, $fresh->organization_id);
@@ -196,8 +200,9 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id)
-            ->assertJsonPath('organization_id', null);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id)
+            ->assertJsonPath('owner.customer_name', null);
 
         $fresh = $booking->fresh();
         $this->assertSame($target->id, $fresh->user_id);
@@ -224,9 +229,7 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['detach_identity' => true])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', null)
-            ->assertJsonPath('customer_name', null);
+            ->assertJsonPath('owner', null);
 
         $fresh = $booking->fresh();
         $this->assertNull($fresh->user_id);
@@ -254,8 +257,8 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['customer_phone' => '0899999999'])
             ->assertStatus(200)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี')
-            ->assertJsonPath('customer_phone', '0899999999');
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี')
+            ->assertJsonPath('owner.customer_phone', '0899999999');
 
         $fresh = $booking->fresh();
         $this->assertSame('สมชาย ใจดี', $fresh->customer_name);
@@ -359,7 +362,8 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id);
 
         $fresh = $booking->fresh();
         $this->assertSame(2400, $fresh->total_amount); // ไม่ reprice หลัง draft — ไม่โดน daily_ku
@@ -417,7 +421,7 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['detach_identity' => true])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null);
+            ->assertJsonPath('owner', null);
 
         $this->assertSame(2400, $booking->fresh()->total_amount);
     }
@@ -458,7 +462,8 @@ class BookingAttachCustomerTest extends TestCase
                 'customer_email' => null,
             ])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $owner->id);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $owner->id);
 
         $fresh = $booking->fresh();
         $this->assertSame($owner->id, $fresh->user_id);
@@ -484,7 +489,7 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['organize' => ''])
             ->assertStatus(200)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี');
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี');
 
         $fresh = $booking->fresh();
         $this->assertNotNull($fresh->organization_id);
