@@ -23,6 +23,7 @@ class BookingManagementController extends Controller
      *   💳 payment_type · deposit_amount (ส่ง null = revert effective 50%) · discount_code (reuse
      *   DiscountService — ค่าว่าง = ลบโค้ด, แก้แล้ว reconcile total_amount) · payment_deadline
      *   🏛️ user (UUID) · organize (erp code → FK) · customer_name/phone/email (snapshot ผู้ติดต่อ)
+     *   🛡️ detach_identity: true (ถอด identity กลับเฮดเปล่า — 18/11/26: ต้องส่ง flag เท่านั้น)
      *
      * Guards (ticket 07 — แยกตาม field-group):
      * - role admin/system (route role:admin + re-check ตาม defense-in-depth)
@@ -31,7 +32,7 @@ class BookingManagementController extends Controller
      * - deposit_amount มีความหมายเฉพาะ type deposit (422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit)
      * - identity: user×organize mutually exclusive · organize บังคับ customer_name · erp lookup
      *   ไม่เจอ/inactive → 422 (ชุดเดียวกับ POST /bookings, ticket 03) · ส่ง identity ใหม่ = แทนที่
-     *   ทั้งชุด · ส่ง user/organize = null ชัด ๆ = ถอดกลับเฮดเปล่า · ไม่ re-run draft-dedup ตอน attach
+     *   ทั้งชุด · 🛡️ (18/11/26) ถอด identity ต้องส่ง detach_identity: true เท่านั้น — user/organize เป็น null/"" แต่ไม่มี flag = no-op (กัน FE generic form ล้าง user_id ของบิล self-booking) · ไม่ re-run draft-dedup ตอน attach
      * - total_amount ไม่รับจาก input — reprice เฉพาะตอน draft ผ่าน DiscountService::reprice()
      *   (attach/ถอด user เปลี่ยนเรท daily_ku/daily ผ่าน chokepoint $booking->user · หลัง draft ขึ้นไป
      *   = เขียน identity เท่านั้น ราคาคงเดิม)
@@ -51,7 +52,7 @@ class BookingManagementController extends Controller
             // 🏛️ ticket 07 — guard แยก field-group (ตรวจทั้งก่อน lock และหลัง lock กัน race)
             $touchesPayment = collect(['payment_type', 'deposit_amount', 'discount_code', 'payment_deadline'])
                 ->contains(fn ($field) => $request->has($field));
-            $touchesCustomer = collect(['user', 'organize', 'customer_name', 'customer_phone', 'customer_email'])
+            $touchesCustomer = collect(['user', 'organize', 'customer_name', 'customer_phone', 'customer_email', 'detach_identity'])
                 ->contains(fn ($field) => $request->has($field));
             $this->assertUpdatePaymentGroupGuards($booking->status, $touchesPayment, $touchesCustomer);
 
@@ -73,6 +74,20 @@ class BookingManagementController extends Controller
                 //    "แทนที่" = เคลียร์ identity เดิมทั้งชุดก่อน แล้วเขียนด้วย field ที่ส่งมา (ไม่ส่ง phone/email = null)
                 $attachUserId = $validated['user'] ?? null;
                 $organizeCode = trim((string) ($validated['organize'] ?? ''));
+
+                // 🛡️ (18/11/26 — fix self-booking user_id โดนล้าง): ถอด identity ต้องประกาศชัดด้วย
+                //    detach_identity: true — $request->has('user') คืน true แม้ค่าเป็น null/""
+                //    ทำให้ FE generic form ที่แถม identity key ครบทุกตัว เผลอล้าง identity ของบิล self-booking
+                $detachIdentity = $request->boolean('detach_identity');
+
+                // ห้าม detach คู่กับ attach / ข้อมูลผู้ติดต่อค่าใหม่ — กันความหมายคลุมเครือ
+                if ($detachIdentity) {
+                    $contradicting = collect(['customer_name', 'customer_phone', 'customer_email'])
+                        ->first(fn ($field) => filled($request->input($field)));
+                    if ($attachUserId !== null || $organizeCode !== '' || $contradicting !== null) {
+                        throw new \Exception('ส่ง detach_identity พร้อม user/organize/customer_* ค่าใหม่ไม่ได้ — เลือกถอด identity หรือ attach อย่างใดอย่างหนึ่งค่ะ 🏛️', 422);
+                    }
+                }
                 $identityChanged = false;
 
                 if ($attachUserId !== null && $organizeCode !== '') {
@@ -102,8 +117,8 @@ class BookingManagementController extends Controller
                     $locked->customer_phone = $validated['customer_phone'] ?? null;
                     $locked->customer_email = $validated['customer_email'] ?? null;
                     $identityChanged = true;
-                } elseif ($request->has('user') || $request->has('organize')) {
-                    // 🏛️ ส่ง user/organize = null ชัด ๆ — ถอด identity กลับเฮดเปล่า (เคลียร์ snapshot ครบ)
+                } elseif ($detachIdentity) {
+                    // 🛡️ detach_identity: true — ถอดกลับเฮดเปล่า (เคลียร์ user_id/organization_id/snapshot ครบ)
                     $locked->user_id = null;
                     $locked->organization_id = null;
                     $locked->customer_name = null;
@@ -111,7 +126,7 @@ class BookingManagementController extends Controller
                     $locked->customer_email = null;
                     $identityChanged = true;
                 } else {
-                    // แก้ snapshot ผู้ติดต่อล้วน (ไม่ส่ง user/organize) — แก้เฉพาะ field ที่ส่ง
+                    // แก้ snapshot ผู้ติดต่อล้วน / user·organize เป็น null/"" แต่ไม่มี flag = identity คงเดิม (no-op) — แก้เฉพาะ field ที่ส่ง
                     if ($request->has('customer_name')) {
                         $locked->customer_name = $validated['customer_name'] ?? null;
                     }

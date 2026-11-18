@@ -18,7 +18,7 @@ use Illuminate\Foundation\Http\FormRequest;
  * - total_amount ไม่รับจาก input — reprice โดยระบบเสมอ
  *
  * 🏛️ customer identity group (ticket 07 — attach user/organization ทีหลัง) — ได้จนก่อน complete/no_show
- * - user: UUID target (attach จองแทน) · ส่ง null ชัด ๆ = ถอด identity กลับเฮดเปล่า
+ * - user: UUID target (attach จองแทน) · ส่ง null = no-op (identity คงเดิม) · ถอด identity ใช้ detach_identity: true (18/11/26)
  * - organize: erp code → server lookup เป็น FK organization_id (ไม่เก็บ erp บน bookings — replaceability
  *   contract ของ ticket 01) · user×organize mutually exclusive + organize บังคับ customer_name —
  *   cross-field ตรวจใน controller (ชุดเดียวกับ POST /bookings, ticket 03)
@@ -45,6 +45,8 @@ class UpdateBookingPaymentRequest extends FormRequest
             'customer_name' => 'nullable|string|max:255',
             'customer_phone' => 'nullable|string|max:50',
             'customer_email' => 'nullable|string|email|max:255',
+            // 🛡️ (18/11/26) ถอด identity ต้องส่ง flag นี้ชัดเท่านั้น — user/organize null/"" ลอย ๆ = no-op
+            'detach_identity' => 'nullable|boolean',
 
             // 📊 (05/10/26, excel-reports spec §2.1 — ticket 09) booking attributes สำหรับรายงาน
             //    admin/system เท่านั้น (route role:admin + re-check ใน controller) · ไม่ผูก state
@@ -73,6 +75,7 @@ class UpdateBookingPaymentRequest extends FormRequest
             'customer_phone.max' => 'เบอร์โทรศัพท์ต้องไม่เกิน 50 ตัวอักษรค่ะ 🏛️',
             'customer_email.email' => 'รูปแบบอีเมลไม่ถูกต้องค่ะ 🏛️',
             'customer_email.max' => 'อีเมลต้องไม่เกิน 255 ตัวอักษรค่ะ 🏛️',
+            'detach_identity.boolean' => 'รูปแบบ detach_identity ต้องเป็น true/false ค่ะ 🏛️',
         ];
     }
 }
