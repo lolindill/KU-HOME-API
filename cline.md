@@ -2323,6 +2323,23 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
   - Attributes ใหม่บน `bookings`: `invoice_requested_at`, `special_request`, `comment`, `is_complimentary` (admin/system เท่านั้น — 403 ถ้า role อื่นส่ง)
   - Checklist แม่บ้าน: `PATCH /dashboard/tasks/{id}/status` รับ `cleaning_check_1/2/3` โดย `status` เป็น optional เมื่อส่ง checklist (tick ล้วน = บันทึกประกอบ ไม่ผูก done)
 
+## 🖨️ Report PDF export — `?format=pdf` (18/11/26, feature/report-pdf-export)
+
+> เพิ่มการ export รายงาน 15 ฉบับเป็น PDF คู่กับ Excel เดิม — **ไม่มี route ใหม่** ใช้ `GET /api/v1/reports/{slug}/export?format=pdf` บน 15 routes เดิมทุกเส้น (สิทธิ์/throttle/filterRules คงเดิมทั้งหมด)
+
+- **สถาปัตยกรรม:** ยังคง Hybrid Renderer — `render()` สร้าง Spreadsheet เดิม 100% แล้วสลับ writer ตอน stream เท่านั้น:
+  - `ExcelReportRenderer::renderForPdf()` = `render()` + ตั้ง `rowsToRepeatAtTop 1..3` **เฉพาะเส้นทาง PDF** · `streamPdfResponse()` ห่อด้วย writer PDF แล้ว stream `application/pdf` (0 ไฟล์ค้าง disk เหมือนเดิม)
+  - `ThaiMpdfWriter` (`app/Services/ReportExcel/ThaiMpdfWriter.php`) — subclass ของ PhpSpreadsheet `Writer\Pdf\Mpdf` · **ต้อง override `createExternalWriterInstance()` เพราะ vendor wrapper สร้าง mPDF instance เองด้วย config แค่ tempDir — ไม่มีช่องตั้งฟอนต์** จึงฉีด `fontDir/fontdata/default_font = sarabun` ที่นี่ที่เดียว
+  - **🔤 ฟอนต์ Sarabun** (SIL OFL — แจกซ้ำใน repo ได้ปลอดภัย): bundle 2 ไฟล์ที่ `resources/fonts/Sarabun-Regular.ttf` + `Sarabun-Bold.ttf` — รองรับสระ/วรรณยุกต์ไทย + Latin · HTML ที่ PhpSpreadsheet generate อ้าง font-family `Calibri` ซึ่ง mPDF ไม่รู้จัก → fallback ไป `default_font` ที่ตั้งไว้ จึงครอบทุก cell
+  - **composer:** `mpdf/mpdf` (^8.3) เป็น require ปกติ — ติดตามเข้า main ตอน sync (deploy ใช้ `composer install --no-dev`)
+  - **mPDF temp/cache:** `$writer->setTempDir(storage_path('app'))` → cache ฟอนต์อยู่ `storage/app/mpdf/` (mPDF `mkdir -p` สร้างเอง) — ไม่เขียว vendor บน prod
+- **🔁 Gotcha: หัวรายงานซ้ำทุกหน้า PDF —** ต่างจาก Excel print ที่ใช้ `rowsToRepeatAtTop 3..3` ได้, HTML/PDF writer สร้าง `<thead>` **เฉพาะเมื่อช่วงเริ่มแถว 1** (`Writer/Html.php generateSheetStarts` — เงื่อนไข `$rowsToRepeatAtTop[0] == 1`) จึงต้องตั้ง `1..3` (title + filter line + header) เพื่อให้ mPDF ซ้ำทุกหน้า · เส้นทาง Excel ยังคง `3..3` ตาม `render()` เดิมเป๊ะ (พฤติกรรม print xlsx ไม่เปลี่ยน)
+- **⚪ พฤติกรรมที่ต่างจาก Excel แล้วถือว่าถูกต้อง:** `freezePane`/`AutoFilter` เป็น feature หน้าจอ — ไม่ปรากฏใน PDF · บรรทัด filter (แถว 2) อาจตัดบรรทัดเป็น 2 แถวบน PDF (Excel ล้นขวาเป็นเส้นเดียว) — cosmetic ยอมรับได้ · หัวคอลัมน์/ชื่อรายงานคง template เดิมทุกอย่าง (PDF = หน้า print ของ xlsx เดียวกัน)
+- **⚠️ Error contract:** `?format=` นอกเหนือจาก `xlsx|pdf` → **422** `{"status":"error","message":"format รองรับเฉพาะ xlsx หรือ pdf เท่านั้นค่ะ"}` — ไม่ silent fallback เพื่อให้ frontend รู้ทันทีว่าส่งผิด · ไม่ส่ง param = `xlsx` ตามเดิม (backward compatible)
+- **🧪 Tests:** `tests/Feature/ReportPdfExportTest.php` (8 เคส — binary `%PDF` + embed ฟอนต์ Sarabun + role matrix + 422 format แปลก + default xlsx) · suite 997 passed
+- **📊 ตัวอย่าง:** `report-samples/*-sample.{xlsx,pdf}` (3 รายงาน: room-status · check-in · housekeeping) + script `report-samples/generate-pdf-samples.php` — หลอมข้อมูลจำลองใน transaction แล้ว **ROLLBACK ทิ้ง** (DB ไม่เปลี่ยน) · อยู่ใน EXCLUDED list ของ `scripts/sync-main.sh` อยู่แล้ว
+
+
 ## 📋 SRS v2 deviation ledger (2026-10-14)
 
 > บันทึกรายการข้อกำหนด SRS v2 (`srs_room_booking_v2.pdf`) ที่มีข้อยุติอย่างเป็นทางการกับ Owner แล้วว่า **ไม่ทำ (Deviation)**, **สถานะรอปัจจัยภายนอก (Pending External)**, หรือ **ระบบเดิมรองรับแล้วผ่านการตีความเชิงสถาปัตยกรรม (Interpretation)** โดยล็อกการตัดสินใจ ห้าม Re-litigate โดยไม่มีหลักฐานหรือคำสั่งใหม่จาก Owner (อ้างอิง Wayfinder map [`wayfinder/srs-v2-gap-closure/map.md`](./wayfinder/srs-v2-gap-closure/map.md) ticket [01](./wayfinder/srs-v2-gap-closure/tickets/01-srs-deviation-ledger.md))
@@ -2668,3 +2685,11 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Docs & Tests:** อัปเดต `routes/api.php` + `docs/api_guide.md` · เพิ่ม 12 เคสใน `BookingPaymentTypeTest` (deposit collect + report channel / full charge collect → checkout pass / paid→confirmed / full without amount / deposit without amount / non-admin 422 / deposit draft admin still pending / complete 422 / staff collect deposit / staff collect paid→confirmed / staff non-owner draft 403 / staff complete 422) · full suite **989 passed (4,248 assertions)** + `pint --dirty` PASS
 
 
+
+## 🛡️ Identity-detach guard — `PUT /bookings/{id}` ถอด identity ต้องส่ง `detach_identity: true` (2026-11-18)
+
+- **Bug ที่ FE รายงาน:** บิล self-booking (user จองเอง `POST /bookings` ด้วย token ตัวเอง) `user_id` กลายเป็น `null` ในหน้า report ฝั่ง FE — ตรวจแล้วทางสร้างบิลปลอดภัย (`createBooking` set `user_id` ตัวเองเสมอสำหรับ non-admin · admin โหมด B null ตาม ticket 02 · walk-in = staff)
+- **Root cause:** contract เดิมของ organization-bookings ticket 07 "ส่ง `user`/`organize` = null ชัด ๆ = ถอดกลับเฮดเปล่า" เช็คด้วย `$request->has()` — ซึ่งคืน **true แม้ค่าที่ส่งเป็น `null`/`""`** (พิสูจน์แล้ว: `Arr::has` ใช้ `array_key_exists`) → FE generic form ที่แถม identity key ครบทุกตัว (`user: null`) ตอน admin แก้ payment fields ผ่าน `PUT /bookings/{id}` เลยเข้า branch detach แล้วล้าง `user_id` + `organization_id` + customer snapshot ของบิล self-booking ทิ้ง — เป็น **writer เดียว**ในโค้ดที่ null `user_id` ได้หลังสร้าง (grep ครบทุก call site)
+- **Fix (มติ owner 18/11/26 — เลือก "ต้อง flag" จาก 3 ทาง):** ถอด identity ต้องส่ง `detach_identity: true` เท่านั้น · `user`/`organize` เป็น `null`/`""` แต่ไม่มี flag = **no-op** (identity คงเดิม) · `detach_identity` คู่กับ `user`/`organize`/`customer_*` ค่าใหม่ → **422** (กันความหมายคลุมเครือ) · `detach_identity` อยู่กลุ่ม identity (`$touchesCustomer` — guard complete/no_show ทำงานเหมือนเดิม) · attach/switch user/org คงเดิมทุกอย่าง
+- **Files:** `BookingManagementController::updateBookingPayment` (flag read + contradiction guard + branch เปลี่ยนจาก `has()` เป็น flag) · `UpdateBookingPaymentRequest` (rule `'detach_identity' => 'nullable|boolean'` + message)
+- **Docs & Tests:** patch note `docs/api_patches/2026-11-18-identity-detach-guard.md` · `BookingAttachCustomerTest` ปรับ 2 เคส detach เดิมเป็น flag + เพิ่ม 3 เคส (null keys no-op บน self-booking / `organize: ""` คง org / detach ขัด attach → 422) + เพิ่ม detach-on-complete 422 · full suite **1000 passed (4,286 assertions)** + `pint --dirty` PASS

@@ -169,7 +169,21 @@ class ReportController extends Controller
             // 🔍 validate filter ต่อรายงาน (รวมเพดานช่วงวันที่ ≤ 1 ปี) — 422 อัตโนมัติ
             $filters = $request->validate($report->filterRules());
 
-            return app(ExcelReportRenderer::class)->streamResponse($report, $filters);
+            // 🖨️ (18/11/26 report-pdf-export) ?format=pdf — ค่า default xlsx คงเดิม
+            //    เข้มงวดเป็น 422 ไม่ silent fallback เพราะ frontend ควรรู้ทันทีว่าส่งผิด
+            $format = strtolower((string) $request->query('format', 'xlsx'));
+            if (! in_array($format, ['xlsx', 'pdf'], true)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'format รองรับเฉพาะ xlsx หรือ pdf เท่านั้นค่ะ',
+                ], 422);
+            }
+
+            $renderer = app(ExcelReportRenderer::class);
+
+            return $format === 'pdf'
+                ? $renderer->streamPdfResponse($report, $filters)
+                : $renderer->streamResponse($report, $filters);
             // 🛑 (05/10/26): ValidationException extends \Exception — ต้อง rethrow ก่อน
             //    ไม่งั้นตกใน catch ล่างแล้วกลายเป็น 500 ทั้งที่ error contract คือ 422 (spec §4)
         } catch (ValidationException $e) {
