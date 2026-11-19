@@ -2385,6 +2385,8 @@ Preview a discount code and check live quota remaining without side effects (doe
 }
 ```
 > `check_in` and `check_out` are optional. If provided, the code's `stay_from` / `stay_until` window is validated.
+>
+> 🎯 `discount.room_type_ids` ใน response = **room-type targeting** ของโค้ด: `null` = ใช้ได้กับ**ทุก** room type · array ของ UUID = จำกัดเฉพาะ room type ที่ระบุ — การเช็ค eligibility รายห้องเกิดตอน apply จริง (endpoint นี้ preview เฉพาะ quota + stay window ไม่รับ room context)
 
 **Response `200`:**
 ```json
@@ -2451,6 +2453,8 @@ Lookup discount information by code name (case-insensitive) or UUID without requ
 ```
 
 **Error responses:** `401` (Unauthenticated) · `404` (Not Found)
+
+> 🎯 **`room_type_ids`** — `null` = ใช้ได้ทุก room type · array ของ UUID = จำกัดเฉพาะ room type นั้น (eligibility ตรวจราย `booking_room` ตอน apply — รายละเอียดดูหัวข้อ Discount Management Endpoints)
 
 ---
 
@@ -2569,6 +2573,12 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 > - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน
 > - `stay_from` / `stay_until` ต้องส่ง**มาเป็นคู่เสมอ** (`required_with` กันไว้ทั้ง store/update) — half-set window ถูกปฏิเสธ `422`
 > - ความซ้ำของ `code` เช็คแบบ **case-insensitive** (`welcome10` ≡ `WELCOME10`) — ส่งซ้ำต่าง case → `422` validation error
+
+> 🎯 **Room-type targeting (`room_type_ids`, 2026-08-27):**
+> - `POST /discounts` / `PUT /discounts/{id}` รับ `room_type_ids` เป็น **nullable array ของ room-type UUID** — validate `uuid|exists:room_types,id|distinct` (ห้ามซ้ำใน array เดียว, UUID ต้องมีอยู่จริงในตาราง `room_types` ไม่งั้น `422`)
+> - **`null` (ไม่ส่ง field) = ใช้ได้กับทุก room type** · ส่ง array = จำกัดเฉพาะ room type ที่ระบุเท่านั้น
+> - Eligibility ตรวจ**รายห้อง** (`booking_room.room_type_id` อยู่ในลิสต์ — `DiscountService::isEligible()`) ควบคู่กับช่วงวันเข้าพัก `stay_from`/`stay_until` — ห้อง tier ตรงเท่านั้นที่ได้ส่วนลดและกินโควตา (1 ห้อง eligible = 1 slot)
+> - บิลที่**ไม่มีห้องไหนเข้าเกณฑ์เลย** → apply โดน `422` (`"ไม่มีห้องในการจองนี้ที่ใช้โค้ดได้ค่ะ 🏨"`) — บิลหลายห้องที่บางส่วนตรง = ส่วนลดเข้าเฉพาะห้องที่ตรง (all-or-nothing อยู่ที่**โควตา** ไม่ใช่ targeting)
 
 ---
 
