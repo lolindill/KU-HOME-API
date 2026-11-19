@@ -1361,8 +1361,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "bed_preference": "king_size",
       "addons": {
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
         "early_checkin": 2,
         "late_checkout": 0
       }
@@ -1451,7 +1451,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.bed_preference`            | nullable, in: `king_size` (ห้องชั้น 8)        |
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
-| `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
+| `booking_rooms.*.addons.breakfast_enabled`  | nullable, boolean — 🍳 canonical (19/11/26)   |
+| `booking_rooms.*.addons.breakfast_code`     | nullable, string, max 50 — เรทจาก global_rates (code ขึ้นต้น breakfast) |
+| `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0 (⚠️ legacy alias → toggle) |
 | `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–7)                       |
 | `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–7)                       |
 | `booking_rooms.*.addons.early_hours`        | nullable, integer (0–7) — alias ของ `early_checkin` |
@@ -1505,8 +1507,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "br-uuid",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 200,
         "early_hours": 2,
         "late_checkOut_price": 0,
@@ -1569,8 +1572,8 @@ curl -s -H "Accept: application/json" \
       "billing_address": null,
       "billing_comment": null,
       "addons": {
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
         "early_checkin": 0,
         "late_checkout": 0
       }
@@ -1616,8 +1619,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -1679,7 +1683,7 @@ curl -s -H "Accept: application/json" \
   "bed_preference": "king_size",
   "billing_address": null,
   "billing_comment": null,
-  "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
+  "addons": { "breakfast_enabled": true, "breakfast_code": "breakfast_200", "early_checkin": 0, "late_checkout": 0 }
 }
 ```
 > 🎚️ `apply_new_rate` (nullable boolean, **default `false`**) และ `price_per_night` (nullable int baht) มีผลเฉพาะโหมด change-tier (บิล `paid|confirmed`, `admin+staff`): ไม่ส่งหรือ `false` = คงราคาห้องเดิมทั้งขาขึ้น/ลง · ส่ง `true` = คำนวณตามเรทใหม่จาก `global_rates` · ส่ง `price_per_night` = ใช้ราคาที่กรอกเสมอ (ชนะ `apply_new_rate`) · โหมด `draft` ไม่ใช้ toggle นี้ (reprice ตามเรทปกติเสมอ) · โหมด `checked_in` ห้ามส่งทั้งคู่ (`422`)
@@ -1698,7 +1702,9 @@ curl -s -H "Accept: application/json" \
 | `guests.*` | เหมือน `POST /bookings` |
 | `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
-| `addons.breakfast` | nullable integer ≥ 0 |
+| `addons.breakfast_enabled` | nullable boolean — 🍳 canonical (19/11/26) |
+| `addons.breakfast_code` | nullable string max 50 — เรทจาก global_rates |
+| `addons.breakfast` | nullable integer ≥ 0 (⚠️ legacy alias → toggle) |
 | `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–7) |
 | `addons.early_hours` / `addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
 
@@ -1733,8 +1739,9 @@ curl -s -H "Accept: application/json" \
     "addon": {
       "id": "addon-uuid-1",
       "booking_room_id": "br-uuid-1",
-      "extra_bed": 1,
-      "breakfast": 2,
+      "breakfast_enabled": true,
+      "breakfast_code": "breakfast_200",
+      "extra_beds_by_night": null,
       "early_checkIn_price": 0,
       "early_hours": 0,
       "late_checkOut_price": 0,
@@ -1802,7 +1809,7 @@ curl -s -H "Accept: application/json" \
       "guests": [
         { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
       ],
-      "addons": { "breakfast": 2 }
+      "addons": { "breakfast_enabled": true, "breakfast_code": "breakfast_200" }
     }
   ]
 }
@@ -1822,7 +1829,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
 | `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
-| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
+| `booking_rooms.*.addons.breakfast_enabled` | nullable boolean — 🍳 canonical (19/11/26) |
+| `booking_rooms.*.addons.breakfast_code` | nullable string max 50 — เรทจาก global_rates |
+| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 (⚠️ legacy alias → toggle) |
 | `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–7) |
 | `booking_rooms.*.addons.early_hours` / `booking_rooms.*.addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
 
@@ -1852,8 +1861,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid-1",
         "booking_room_id": "br-uuid-1",
-        "extra_bed": 1,
-        "breakfast": 0,
+        "breakfast_enabled": false,
+        "breakfast_code": null,
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -1881,8 +1891,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid-2",
         "booking_room_id": "br-uuid-2",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -2485,9 +2496,9 @@ Applies or swaps a discount code on an existing `draft` booking. Holds quota slo
         "discount_amount": 200000,
         "amount": 260000,
         "addon": {
-          "breakfast": 2,
+          "breakfast_enabled": true,
+          "breakfast_code": "breakfast_200",
           "breakfast_price": 60000,
-          "extra_bed": 0,
           "extra_bed_price": 0,
           "early_checkIn_price": 0,
           "late_checkOut_price": 0
@@ -2993,7 +3004,7 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 - ห้องอยู่ในช่วง **maintenance period** ทับวันใหม่ → `422` · **reserved period ไม่บล็อก** (ตามธรรมเนียม change-room/split-upgrade ฝั่ง admin+staff)
 - BR **ไม่มีห้อง → ข้ามตรวจห้องทั้งหมด** (ไปจัดตอน `PUT /bookings/{id}/assign-rooms` ตามปกติ)
 
-**ผลลัพธ์ (ใน transaction เดียว):** BR อัปเดต `check_in`/`check_out` ใหม่ (สถานะคงเดิม — **ไม่ transition สถานะใด**) · addon `extra_beds_by_night` **เลื่อน key ตาม delta วัน คง qty เดิม** (breakfast × จำนวนคืนเดิม กับ early/late hours คงมูลค่า) · reprice ทั้งบิลจากเรทวันนี้ผ่าน `DiscountService::reprice()` (⚠️ caveat ตระกูล — ราคาบิลอื่นบนใบเดียวกันอาจไหลตามเรทปัจจุบัน) + `syncIsPaid()` (ส่วนต่างไหลเข้า `outstanding_amount` — เก็บต่อผ่าน front-desk payment) · audit: `StatusChangeLog` note row ของ BR (from=to=สถานะเดิม, เล่าวันเดิม→ใหม่ + delta + ราคาเดิม→ใหม่)
+**ผลลัพธ์ (ใน transaction เดียว):** BR อัปเดต `check_in`/`check_out` ใหม่ (สถานะคงเดิม — **ไม่ transition สถานะใด**) · addon `extra_beds_by_night` **เลื่อน key ตาม delta วัน คง qty เดิม** (breakfast toggle/code คงเดิม — ยอดคิดใหม่ × คืน × หัว ตอน reprice กับ early/late hours คงมูลค่า) · reprice ทั้งบิลจากเรทวันนี้ผ่าน `DiscountService::reprice()` (⚠️ caveat ตระกูล — ราคาบิลอื่นบนใบเดียวกันอาจไหลตามเรทปัจจุบัน) + `syncIsPaid()` (ส่วนต่างไหลเข้า `outstanding_amount` — เก็บต่อผ่าน front-desk payment) · audit: `StatusChangeLog` note row ของ BR (from=to=สถานะเดิม, เล่าวันเดิม→ใหม่ + delta + ราคาเดิม→ใหม่)
 
 **Request Body:**
 ```json
@@ -3334,7 +3345,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 **Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast` 200 (200 THB), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast_100` 100 (100 THB), `breakfast_200` 200 (200 THB — 🍳 19/11/26 breakfast เป็น toggle เลือก 1 code · เพิ่ม code ขึ้นต้น `breakfast` ใช้ได้ทันที), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
@@ -3651,10 +3662,11 @@ Returns tasks with status `pending` or `in_progress`.
 |------------------------|---------|------------------------------------------|
 | `id`                   | UUID    | Primary key                              |
 | `booking_room_id`      | UUID    | FK → booking_rooms (one-to-one)          |
-| `extra_bed`            | integer | Number of extra beds requested           |
+| `breakfast_enabled`    | boolean | 🍳 (19/11/26) Breakfast toggle (แทน `breakfast_set_100/200` int เดิม — drop แล้ว) |
+| `breakfast_code`       | string\|null | 🍳 (19/11/26) เรทที่เลือกจาก global_rates (code ขึ้นต้น `breakfast`) — null เมื่อปิด |
+| `breakfast_price`      | integer | Total breakfast price (baht) = rate × nights × guests |
+| `extra_beds_by_night`  | JSON    | (05/10/26) map รายคืน `{YYYY-MM-DD: qty}` ของช่วง `[check_in, check_out)` (แทน `extra_bed` int เดิม) |
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
-| `breakfast`            | integer | Number of breakfasts                     |
-| `breakfast_price`      | integer | Total breakfast price (baht)             |
 | `early_checkIn_price`  | integer | Early check-in total price (integer baht)|
 | `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
 | `late_checkOut_price`  | integer | Late check-out total price (integer baht)|
@@ -3672,7 +3684,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Field            | Type    | Description                                       |
 |------------------|---------|---------------------------------------------------|
 | `id`             | UUID    | Primary key                                       |
-| `code`           | string  | Unique code: `breakfast`, `early_checkin`, etc.   |
+| `code`           | string  | Unique code: `breakfast_100`, `breakfast_200`, `early_checkin`, etc. |
 | `name_en`        | string  | English name                                      |
 | `name_th`        | string  | Thai name (nullable)                              |
 | `default_price`  | integer | Unit price (baht) — used in server-side pricing   |
@@ -3680,7 +3692,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `created_at`     | timestamp |                                                 |
 | `updated_at`     | timestamp |                                                 |
 
-**Seeded codes:** `breakfast`, `early_checkin`, `late_checkout`, `extra_bed`
+**Seeded codes:** `breakfast_100`, `breakfast_200`, `early_checkin`, `late_checkout`, `extra_bed` (🍳 19/11/26 — เรทอาหารเช้า = code ขึ้นต้น `breakfast` ที่ active ทั้งหมด เลือกได้ 1 code ต่อห้อง)
 
 ---
 
@@ -3980,11 +3992,11 @@ These endpoints exist but are **not production-ready**:
 - Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
 - 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
-- Pricing formula per room:
+- Pricing formula per room (🍳 breakfast toggle — 19/11/26):
   ```
   subtotal = (global_rates[rate_type='daily'].default_price × nights)
            + (extra_bed_qty × extra_bed_rate × nights)
-           + (breakfast_qty × breakfast_rate)
+           + (breakfast_rate(breakfast_code) × nights × guests)   # guests ว่าง นับ 1 — เปิด toggle เท่านั้น
            + (early_hours × early_checkin_rate)
            + (late_hours × late_checkout_rate)
   ```
@@ -4025,7 +4037,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
       "billing_address": null,
       "billing_comment": null,
-      "addons": {"extra_bed": 0, "breakfast": 2, "early_checkin": 0, "late_checkout": 0}
+      "addons": {"breakfast_enabled": true, "breakfast_code": "breakfast_200", "early_checkin": 0, "late_checkout": 0}
     }]
   }'
 ```
@@ -4076,7 +4088,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/roo
 | `daily-financial` | รายงานการเงินประจำวัน | `admin`, `staff` | • `date` *(required, date)*: วันที่ทำรายการการเงิน<br>• `payment_channel` *(nullable, in:ทั้งหมด,สลิป (โอน/QR),เงินสด)*: ค่าเริ่มต้นคือ 'ทั้งหมด' (ที่มาเงิน derive จาก reference_number โดย confirmation UUID = สลิป ไม่งั้นคือเงินสด) |
 | `deposit` | รายงานยอดมัดจำ / ยอดค้างชำระ | `admin`, `staff` | • `date` *(required, date)*: วันที่สร้างการจอง<br>• `guest_type` *(nullable, in:หน่วยงาน/ทั่วไป,หน่วยงาน,ทั่วไป)*: ค่าเริ่มต้นคือ 'หน่วยงาน/ทั่วไป' |
 | `occupancy` | รายงานการเข้าพัก 7 วันถัดไป | `admin`, `staff` | • `date` *(required, date)*: วันที่เริ่มต้นช่วง 7 คืน |
-| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด,ชุด 100,ชุด 200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' |
+| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด + code เรท active เช่น breakfast_100, breakfast_200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' — 🍳 19/11/26 กรองด้วย code (แทน ชุด 100/ชุด 200 เดิม) · qty ในชีต = จำนวนผู้เข้าพักของห้อง |
 | `erp-transfer` | รายงานการโอนระหว่างหน่วยงาน | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้นสร้างการจอง<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง date_from ถึง date_to ต้อง ≤ 366 วัน)<br>• `agency_code` *(nullable, string, max:100)*: รหัส ERP ของหน่วยงาน |
 | `housekeeping` | รายงานแม่บ้าน (v1) | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้านและสถานะห้องพัก |
 | `housekeeping-v2` | รายงานแม่บ้าน v2 | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้าน (หัวคอลัมน์ checklist 3 ช่องอ่านจาก config `reporting.cleaning_checks`) |
@@ -4215,16 +4227,15 @@ Accept: application/json
 - **`room_types.extra_bed_price` (Display-only):**
   - ฟิลด์ `extra_bed_price` บนโมเดล `RoomType` (ที่ส่งกลับใน availability / calendar endpoints) ทำหน้าที่เป็น **display-only สำหรับการแสดงผลหน้า UI เท่านั้น**
   - การคำนวณเงินจริงของระบบอ้างอิงจาก `global_rates` (code: `extra_bed`) ผ่าน `AddonPricing` เสมอ
-- **Addon Canonical Wire Format (รูปแบบมาตรฐานใหม่):**
-  - **ชุดอาหารเช้า (Breakfast):** ส่งเป็น `breakfast_sets` object แยก 2 ราคา:
+- **Addon Canonical Wire Format (🍳 breaking — 19/11/26, ดู patch note ฉบับเต็มที่ `docs/api_patches/2026-11-19-breakfast-toggle-guest-pricing.md`):**
+  - **อาหารเช้า (Breakfast):** เป็น **toggle (bool) ราคาห้องละชุดเดียว** + เลือกเรท 1 แบบจาก `global_rates` (code ขึ้นต้น `breakfast` — ปัจจุบัน `breakfast_100`/`breakfast_200`, เพิ่มเรทใหม่ใช้ได้ทันที):
     ```json
     "addons": {
-      "breakfast_sets": {
-        "set_100": 1,
-        "set_200": 2
-      }
+      "breakfast_enabled": true,
+      "breakfast_code": "breakfast_200"
     }
     ```
+    ยอดเงิน = `rate(breakfast_code) × nights × จำนวนผู้เข้าพักของห้อง` (**guests ว่าง นับ 1 คน**) · ส่ง `breakfast_code` ที่ไม่ active → **422** · response คืน `breakfast_enabled` / `breakfast_code` / `breakfast_price` (แทน `breakfast_set_100/200` ที่ถูกถอด)
   - **เตียงเสริม (Extra Bed):** ส่งเป็น `extra_beds_by_night` object ในรูปแบบ Map รายคืนของช่วงที่พัก `[check_in, check_out)`:
     ```json
     "addons": {
@@ -4236,7 +4247,8 @@ Accept: application/json
     ```
 - **การรองรับ Legacy Alias (ย้อนหลัง):**
   - ระบบยังคงรับและแปลงค่าผ่านคลาส `App\Services\Addon\AddonPricing` อัตโนมัติ:
-    - ส่ง `breakfast: N` (integer เดิม) → ถูก normalize แปลงเป็น `set_200 = N` (เรทเดิม 200 บาท)
+    - ส่ง `breakfast_sets: {set_100, set_200}` (จำนวนชุดเดิม 05/10/26) → ชุดไหน > 0 = เปิด toggle + code ตามชุดนั้น (ทั้งคู่ > 0 เลือก set_200) · ทั้งคู่ 0 = ปิด
+    - ส่ง `breakfast: N` (integer เด่า ๆ) → N > 0 = เปิด toggle + code `breakfast_200` (เรทเดิม), N = 0 = ปิด
     - ส่ง `extra_bed: N` หรือ `extra_beds: N` (integer เดิม) → ถูก normalize เป็น flat map ทุกคืนเท่ากับ $N$ เตียงตลอดช่วงเวลาเข้าพัก
 
 ---

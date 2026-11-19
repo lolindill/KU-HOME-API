@@ -650,8 +650,8 @@ class RoomDatesChangeTest extends TestCase
         $today = $this->today();
         Addon::create([
             'booking_room_id' => $br->id,
-            'breakfast_set_100' => 1,
-            'breakfast_set_200' => 0,
+            'breakfast_enabled' => true,
+            'breakfast_code' => 'breakfast_100',
             'extra_beds_by_night' => [
                 $today->copy()->addDay(1)->toDateString() => 1,
                 $today->copy()->addDays(2)->toDateString() => 2,
@@ -678,7 +678,7 @@ class RoomDatesChangeTest extends TestCase
         $this->assertArrayNotHasKey($today->copy()->addDay(1)->toDateString(), $beds);
         $this->assertArrayNotHasKey($today->copy()->addDays(2)->toDateString(), $beds);
 
-        // 💰 room 4000 + breakfast 100×4 = 400 + extra beds (1+2)×500 = 1500 → 5900
+        // 💰 room 4000 + breakfast 100×4 คืน×1 คน = 400 + extra beds (1+2)×500 = 1500 → 5900
         $response->assertJsonPath('total_amount', 5900);
         $this->assertAmountInvariant($booking->fresh());
     }

@@ -532,14 +532,15 @@ class DiscountTest extends TestCase
         $roomType = $this->createRoomType(2000);
         $booking = $this->createDraftBooking($user, $roomType, roomCount: 1, nights: 1);
 
-        // Add breakfast addon: 600 baht (2 ชุด × เรท 300 × 1 คืน — seed เรทเอง)
+        // Add breakfast addon: 300 baht (เรท 300 × 1 คืน × 1 คน — seed เรทเอง)
         GlobalRate::create([
             'rate_type' => 'addon', 'room_type_id' => null, 'code' => 'breakfast_200',
             'name_en' => 'Breakfast Set 200', 'default_price' => 300, 'is_active' => true,
         ]);
         $br = $booking->bookingRooms->first();
         $br->addon->update([
-            'breakfast_set_200' => 2,
+            'breakfast_enabled' => true,
+            'breakfast_code' => 'breakfast_200',
         ]);
 
         Discount::create([
@@ -556,11 +557,11 @@ class DiscountTest extends TestCase
         $freshBooking = $booking->fresh();
         $this->assertEquals(2000, $freshBooking->bookingRooms->first()->room_amount);
         $this->assertEquals(2000, $freshBooking->bookingRooms->first()->discount_amount);
-        // Total = (2000 - 2000) + 600 breakfast = 600
-        $this->assertEquals(600, $freshBooking->total_amount);
+        // Total = (2000 - 2000) + 300 breakfast = 300
+        $this->assertEquals(300, $freshBooking->total_amount);
 
-        // 🧾 (03/09/26) amount = 2,000 − 2,000 + 600 breakfast = 600 — addon ไม่โดนลด
-        $this->assertEquals(600, $freshBooking->bookingRooms->first()->amount);
+        // 🧾 (03/09/26) amount = 2,000 − 2,000 + 300 breakfast = 300 — addon ไม่โดนลด
+        $this->assertEquals(300, $freshBooking->bookingRooms->first()->amount);
         $this->assertAmountInvariant($booking);
     }
 

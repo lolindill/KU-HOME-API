@@ -1217,8 +1217,9 @@ class BookingTest extends TestCase
         $booking = $this->createDraftBooking($user, $roomType);
         $br = $booking->bookingRooms->first();
 
-        // 📊 (05/10/26) 3 คืน + extra_bed 1 หลัง + breakfast legacy 2 ชุด (→ set_200) + early 2 ชม.
-        //    → (1500×3) + (100×1×3) + (50×2×3 คืน) + (100×2) = 4500+300+300+200 = 5300
+        // 📊 (05/10/26) 3 คืน + extra_bed 1 หลัง + breakfast legacy 2 ชุด (→ toggle code breakfast_200)
+        //    + early 2 ชม.
+        //    → (1500×3) + (100×1×3) + (50×3 คืน×1 คน) + (100×2) = 4500+300+150+200 = 5150
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'check_in' => now()->addDays(5)->toDateString(),
@@ -1228,12 +1229,13 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('total_amount', 5300);
+        $response->assertJsonPath('total_amount', 5150);
 
         // 🛡️ ราคาถูกเขียนกลับลง Addon row ฝั่ง server เท่านั้น (canonical + snapshot โดย reprice)
         $addon = $br->fresh('addon')->addon;
-        $this->assertSame(2, $addon->breakfast_set_200); // legacy breakfast → set_200
-        $this->assertSame(300, $addon->breakfast_price); // 50 × 2 ชุด × 3 คืน
+        $this->assertTrue($addon->breakfast_enabled); // legacy breakfast → toggle on
+        $this->assertSame('breakfast_200', $addon->breakfast_code);
+        $this->assertSame(150, $addon->breakfast_price); // 50 × 3 คืน × 1 คน (guests ว่างนับ 1)
         $this->assertSame(
             [
                 now()->addDays(5)->toDateString() => 1,
@@ -1246,8 +1248,8 @@ class BookingTest extends TestCase
         $this->assertSame(2, $addon->early_hours);
         $this->assertSame(200, $addon->early_checkIn_price);
 
-        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 300 + 300 + 200 + 0 = 5300
-        $this->assertEquals(5300, $br->fresh()->amount);
+        // 🧾 (03/09/26) amount = 4500 (ห้อง) − 0 + 150 + 300 + 200 + 0 = 5150
+        $this->assertEquals(5150, $br->fresh()->amount);
         $this->assertAmountInvariant($booking);
     }
 
@@ -1783,8 +1785,9 @@ class BookingTest extends TestCase
 
         $booking = $this->createDraftBooking($user, $roomType);
         $br = $booking->bookingRooms->first();
-        // เดิมมี breakfast 2 ชุด — payload ที่ frontend ส่งไม่มี breakfast → ต้องคงเดิม ไม่หายเป็น 0
-        $br->addon->update(['breakfast_set_200' => 2]);
+        // เดิมมี breakfast เปิดอยู่ (code breakfast_200) — payload ที่ frontend ส่งไม่มี breakfast
+        // → ต้องคงเดิม ไม่หายเป็นปิด
+        $br->addon->update(['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_200']);
 
         // payload แบบเดียวกับที่ frontend (bookings.ts updateBookingRoomsInBooking) ส่งจริง
         $response = $this->actingAs($user, 'sanctum')
@@ -1803,11 +1806,12 @@ class BookingTest extends TestCase
         $this->assertSame(30000, $addon->early_checkIn_price); // reprice ฝั่ง server: 3 × 10000
         $this->assertSame(2, $addon->late_hours);
         $this->assertSame(20000, $addon->late_checkOut_price); // 2 × 10000
-        $this->assertSame(2, $addon->breakfast_set_200);               // ไม่ส่งมา = คงเดิม
-        // breakfast คิด × คืน (05/10/26): 2 ชุด × 5000 × 2 คืน
-        $this->assertSame(20000, $addon->breakfast_price);
-        // total = ห้อง 3000 + breakfast 20000 + early 30000 + late 20000 = 73000
-        $response->assertJsonPath('total_amount', 73000);
+        $this->assertTrue($addon->breakfast_enabled);                  // ไม่ส่งมา = คงเดิม
+        $this->assertSame('breakfast_200', $addon->breakfast_code);
+        // breakfast คิด × คืน × หัว (19/11/26): 5000 × 2 คืน × 1 คน
+        $this->assertSame(10000, $addon->breakfast_price);
+        // total = ห้อง 3000 + breakfast 10000 + early 30000 + late 20000 = 63000
+        $response->assertJsonPath('total_amount', 63000);
     }
 
     /**
@@ -2184,8 +2188,8 @@ class BookingTest extends TestCase
         [$br1, $br2] = $booking->bookingRooms->all();
         $deadline = $booking->payment_deadline;
 
-        // br1 ยืด 2→3 คืน (4500) · br2 เฉยๆ แต่เพิ่ม breakfast 2 ชุด (50×2×2 คืน = 200 → 3200)
-        // → total = 7700
+        // br1 ยืด 2→3 คืน (4500) · br2 เฉยๆ แต่เปิด breakfast (50×2 คืน×1 คน = 100 → 3100)
+        // → total = 7600
         $response = $this->actingAs($user, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms", [
                 'booking_rooms' => [
@@ -2203,7 +2207,7 @@ class BookingTest extends TestCase
             ]);
 
         $response->assertStatus(200);
-        $response->assertJsonPath('total_amount', 7700);
+        $response->assertJsonPath('total_amount', 7600);
         $response->assertJsonCount(2, 'booking_rooms');
 
         $freshBr1 = $br1->fresh();
@@ -2212,17 +2216,18 @@ class BookingTest extends TestCase
 
         $freshBr2 = $br2->fresh();
         $this->assertEquals('Batch Guest', $freshBr2->guests[0]['name']);
-        // 📊 legacy breakfast 2 → set_200 · คิด × คืน (2 ชุด × 50 × 2 คืน = 200)
+        // 📊 legacy breakfast 2 → toggle on + code breakfast_200 · คิด × คืน × หัว (50 × 2 คืน × 1 คน = 100)
         $addon2 = $freshBr2->addon;
-        $this->assertSame(2, $addon2->breakfast_set_200);
-        $this->assertSame(200, $addon2->breakfast_price);
+        $this->assertTrue($addon2->breakfast_enabled);
+        $this->assertSame('breakfast_200', $addon2->breakfast_code);
+        $this->assertSame(100, $addon2->breakfast_price);
 
         // payment_deadline คงเดิม (เหมือน addRooms/updateRoom)
         $this->assertTrue($booking->fresh()->payment_deadline->equalTo($deadline));
 
-        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+200 = 3200 → Σ = 7700
+        // 🧾 (03/09/26) amount รายห้อง: br1 = 4500 · br2 = 3000+100 = 3100 → Σ = 7600
         $this->assertEquals(4500, $freshBr1->amount);
-        $this->assertEquals(3200, $freshBr2->amount);
+        $this->assertEquals(3100, $freshBr2->amount);
         $this->assertAmountInvariant($booking);
     }
 

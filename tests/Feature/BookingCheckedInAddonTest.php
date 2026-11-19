@@ -170,7 +170,7 @@ class BookingCheckedInAddonTest extends TestCase
         $this->assertEquals(3000, $booking->paid_amount);
         $this->assertEquals(0, $booking->outstanding_amount);
 
-        // Staff เพิ่ม breakfast_set_200 1 ชุด สำหรับพัก 2 คืน (200 × 2 = 400 บาท)
+        // Staff เพิ่ม breakfast (code breakfast_200) สำหรับพัก 2 คืน × 1 คน (200 × 2 = 400 บาท)
         $res = $this->actingAs($staff, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'addons' => [
@@ -195,7 +195,8 @@ class BookingCheckedInAddonTest extends TestCase
         $this->assertEquals(400, $fresh->outstanding_amount);
         $this->assertFalse($fresh->is_paid);
 
-        $this->assertEquals(1, $br->fresh()->addon->breakfast_set_200);
+        $this->assertTrue($br->fresh()->addon->breakfast_enabled);
+        $this->assertSame('breakfast_200', $br->fresh()->addon->breakfast_code);
     }
 
     public function test_admin_sends_extra_beds_by_night_for_tonight(): void
@@ -337,8 +338,8 @@ class BookingCheckedInAddonTest extends TestCase
         $staff = $this->staff();
         [$booking, $br] = $this->checkedInBooking(1500, 'full', null, 1);
 
-        // ให้มี breakfast_set_200 อยู่แล้วตั้งแต่แรก และจ่ายเต็มครบถ้วน
-        $br->addon->update(['breakfast_set_200' => 1]);
+        // ให้เปิด breakfast (code breakfast_200) อยู่แล้วตั้งแต่แรก และจ่ายเต็มครบถ้วน
+        $br->addon->update(['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_200']);
         app(DiscountService::class)->reprice($booking);
         $totalWithBreakfast = $booking->fresh()->total_amount; // 1700
         $this->assertEquals(1700, $totalWithBreakfast);
@@ -347,7 +348,7 @@ class BookingCheckedInAddonTest extends TestCase
         DB::table('payments')->where('booking_id', $booking->id)->update(['amount' => 1700]);
         $booking->update(['is_paid' => true]);
 
-        // พยายามถอด breakfast_set_200 ออก ทำให้ยอดรวมลดเป็น 1500 (< 1700 ที่จ่ายแล้ว)
+        // พยายามปิด breakfast ทำให้ยอดรวมลดเป็น 1500 (< 1700 ที่จ่ายแล้ว)
         $res = $this->actingAs($staff, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'addons' => [
@@ -368,31 +369,31 @@ class BookingCheckedInAddonTest extends TestCase
         // จ่ายมัดจำ 1000 บาท
         [$booking, $br] = $this->checkedInBooking(1500, 'deposit', 1000, 1);
 
-        // ตั้งค่า addon เดิมให้มี breakfast_set_200 2 ชุด (400 บาท)
-        $br->addon->update(['breakfast_set_200' => 2]);
+        // ตั้งค่า addon เดิมให้เปิด breakfast (code breakfast_200 — 200 × 1 คืน × 1 คน = 200 บาท)
+        $br->addon->update(['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_200']);
         app(DiscountService::class)->reprice($booking);
-        $this->assertEquals(1900, $booking->fresh()->total_amount);
+        $this->assertEquals(1700, $booking->fresh()->total_amount);
         $this->assertEquals(1000, $booking->fresh()->paid_amount);
-        $this->assertEquals(900, $booking->fresh()->outstanding_amount);
+        $this->assertEquals(700, $booking->fresh()->outstanding_amount);
 
-        // ลดจำนวน breakfast_set_200 จาก 2 ชุดเหลือ 1 ชุด (ยอดรวมใหม่ 1700 > 1000 ที่ชำระแล้ว)
+        // ปิด breakfast ออก (ยอดรวมใหม่ 1500 > 1000 ที่ชำระแล้ว)
         $res = $this->actingAs($staff, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
                 'addons' => [
                     'breakfast_sets' => [
-                        'set_200' => 1,
+                        'set_200' => 0,
                     ],
                 ],
             ]);
 
         $res->assertStatus(200)
-            ->assertJsonPath('previous_total_amount', 1900)
-            ->assertJsonPath('total_amount', 1700)
+            ->assertJsonPath('previous_total_amount', 1700)
+            ->assertJsonPath('total_amount', 1500)
             ->assertJsonPath('surcharge_amount', -200)
             ->assertJsonPath('paid_amount', 1000)
-            ->assertJsonPath('outstanding_amount', 700);
+            ->assertJsonPath('outstanding_amount', 500);
 
-        $this->assertEquals(700, $booking->fresh()->outstanding_amount);
+        $this->assertEquals(500, $booking->fresh()->outstanding_amount);
     }
 
     public function test_integration_addon_surcharge_checkout_rejected_then_paid_and_checkout_succeeds(): void
@@ -484,8 +485,9 @@ class BookingCheckedInAddonTest extends TestCase
 
         $res->assertStatus(200);
         $this->assertNotNull($br->fresh()->addon);
-        $this->assertEquals(2, $br->fresh()->addon->breakfast_set_100);
-        $this->assertEquals(1700, $booking->fresh()->total_amount); // 1500 + 2×100
+        $this->assertTrue($br->fresh()->addon->breakfast_enabled);
+        $this->assertSame('breakfast_100', $br->fresh()->addon->breakfast_code);
+        $this->assertEquals(1600, $booking->fresh()->total_amount); // 1500 + 100×1×1 (legacy set_100:2 → toggle)
     }
 
     public function test_addons_early_hours_greater_than_7_is_422(): void

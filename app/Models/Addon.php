@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\PgBoolean;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -9,9 +10,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * 📊 (05/10/26) excel-reports spec §2.2 — addons reshape (ticket 10)
+ * 🍳 (19/11/26) breakfast reshape — toggle + เรทรายหัว:
  *
- *    เดิม breakfast/extra_bed เก็บ int เดียวทั้ง stay — reshape ให้รองรับ:
- *    - breakfast แยก 2 ชุด: breakfast_set_100 + breakfast_set_200 (คิดเงิน × คืน)
+ *    - breakfast เป็น toggle: breakfast_enabled (bool) + breakfast_code
+ *      (เลือก 1 เรทจาก global_rates แถว code ขึ้นต้น 'breakfast' — เช่น
+ *      breakfast_100/breakfast_200 อนาคตเพิ่ม code ใหม่ได้ไม่จำกัด)
+ *      ยอด = rate(breakfast_code) × คืน × max(1, จำนวนผู้เข้าพักในห้อง)
  *    - extra_bed เป็นรายคืน: extra_beds_by_night JSON เช่น {"2026-09-11": 1, "2026-09-12": 2}
  *      · คีย์ต้องเป็นคืนใน [check_in, check_out) (validate ฝั่ง BookingController)
  *      · qty ต่อคืน ≤ room_types.max_extra_beds
@@ -29,8 +33,8 @@ class Addon extends Model
      */
     protected $fillable = [
         'booking_room_id',
-        'breakfast_set_100',
-        'breakfast_set_200',
+        'breakfast_enabled',
+        'breakfast_code',
         'extra_beds_by_night',
         'early_checkIn_price',
         'early_hours',
@@ -41,8 +45,9 @@ class Addon extends Model
     ];
 
     protected $casts = [
-        'breakfast_set_100' => 'integer',
-        'breakfast_set_200' => 'integer',
+        // 🌟 Fix PostgreSQL strict boolean — ห้ามใช้ 'boolean' cast ธรรมดา (ดู AGENTS.md)
+        'breakfast_enabled' => PgBoolean::class,
+        'breakfast_code' => 'string',
         'extra_beds_by_night' => 'array',
         'early_checkIn_price' => 'integer',
         'early_hours' => 'integer',

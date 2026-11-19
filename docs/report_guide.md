@@ -141,13 +141,16 @@ GET /api/v1/reports/occupancy/export?date=2026-10-26
 
 ### 3.6 `breakfast` — รายงานอาหารเช้า (admin, staff)
 
+> 🍳 (19/11/26) breakfast เป็น toggle ราคาห้องละชุดเดียว — qty ในชีต = จำนวนผู้เข้าพักของห้อง
+> (guests ว่าง นับ 1) · คอลัมน์ `breakfast_code` แสดงเรทที่เลือก (แทน `qty_set_100/200` เดิม)
+
 | Param | Required | Rules | ความหมาย / Semantics |
 |---|---|---|---|
 | `date` | ✅ | `date` | วันที่รับอาหารเช้า — นิยามคืน D คือคืนที่ `check_in < D ≤ check_out` (เช้าวันถัดจากคืนนอน) |
-| `breakfast_type` | — | `in: ทั้งหมด, ชุด 100, ชุด 200` | ตัดแถวที่ชุดนั้น qty = 0 ทิ้ง · default `ทั้งหมด` |
+| `breakfast_type` | — | `in: ทั้งหมด + code เรท active (breakfast_100, breakfast_200, …)` | กรองตาม code เรท (🍳 19/11/26 แทน ชุด 100/ชุด 200 เดิม) · default `ทั้งหมด` |
 
 ```
-GET /api/v1/reports/breakfast/export?date=2026-10-27&breakfast_type=ชุด 100
+GET /api/v1/reports/breakfast/export?date=2026-10-27&breakfast_type=breakfast_100
 ```
 
 ### 3.7 `erp-transfer` — รายงานการโอนระหว่างหน่วยงาน (admin, staff)

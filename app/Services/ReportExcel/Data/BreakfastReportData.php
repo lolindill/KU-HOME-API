@@ -3,17 +3,20 @@
 namespace App\Services\ReportExcel\Data;
 
 use App\Models\Addon;
+use App\Models\GlobalRate;
+use App\Services\Addon\AddonPricing;
 use App\Services\ReportExcel\BaseReportData;
 use Carbon\Carbon;
 
 /**
  * 🍳 BreakfastReportData — รายงานอาหารเช้า (excel-reports spec §3.4, ticket 10)
+ * 🍳 (19/11/26) breakfast reshape — toggle + เรทรายหัว:
  *
  *    แถว = per (booking_room × วันกิน) — **วันกิน = เช้าวันถัดจากคืนนอน** D ∈ (check_in, check_out]
  *    (เช้าเช็คเอาท์นับ — ตรง sample ชีต: พัก 9/11→9/12 โผล่รายงานวันที่ 9/12)
- *    · qty แยกชุด 100/200 จาก addons.breakfast_set_100/200 · "x" ในชีต = null คงตีความเดิม
- *      (ไม่ได้ซื้อชุดนั้น)
- *    · filter breakfast_type ตัด row ที่ชุดนั้น qty = 0
+ *    · qty = จำนวนผู้เข้าพักของห้อง (toggle ราคาห้องละชุดเดียว — ทุกคนในห้องกิน;
+ *      guests ว่าง นับ 1 ตาม AddonPricing::guestCount) · เรทที่เลือก = breakfast_code
+ *    · filter breakfast_type รับ 'ทั้งหมด' หรือ code เรท (breakfast_100/breakfast_200/…)
  */
 class BreakfastReportData extends BaseReportData
 {
@@ -24,9 +27,12 @@ class BreakfastReportData extends BaseReportData
 
     public function filterRules(): array
     {
+        // เรท dynamic จาก global_rates (code ขึ้นต้น breakfast, active เท่านั้น)
+        $codes = array_keys(GlobalRate::breakfastRates());
+
         return array_merge(
             $this->singleDateRules('date'),
-            $this->enumFilterRules('breakfast_type', ['ทั้งหมด', 'ชุด 100', 'ชุด 200'], 'ทั้งหมด'),
+            $this->enumFilterRules('breakfast_type', $codes, 'ทั้งหมด'),
         );
     }
 
@@ -38,13 +44,11 @@ class BreakfastReportData extends BaseReportData
         // วันกิน D ∈ (check_in, check_out] — check_in < D <= check_out
         $addons = Addon::query()
             ->with(['bookingRoom.booking.user', 'bookingRoom.booking.organization', 'bookingRoom.room', 'bookingRoom.roomType'])
+            ->where('breakfast_enabled', true)
             ->whereHas('bookingRoom', function ($q) use ($eatDay) {
                 $q->where('check_in', '<', $eatDay->copy()->addDay())
                     ->where('check_out', '>=', $eatDay)
                     ->holdingSlot();
-            })
-            ->where(function ($q) {
-                $q->where('breakfast_set_100', '>', 0)->orWhere('breakfast_set_200', '>', 0);
             })
             ->get();
 
@@ -52,11 +56,8 @@ class BreakfastReportData extends BaseReportData
             ->map(fn (Addon $addon) => $this->mapRow($addon, $eatDay))
             ->filter()
             ->filter(function (array $row) use ($type) {
-                if ($type === 'ชุด 100') {
-                    return ($row['qty_set_100'] ?? 0) > 0;
-                }
-                if ($type === 'ชุด 200') {
-                    return ($row['qty_set_200'] ?? 0) > 0;
+                if ($type !== 'ทั้งหมด') {
+                    return ($row['breakfast_code'] ?? null) === $type;
                 }
 
                 return true;
@@ -74,8 +75,7 @@ class BreakfastReportData extends BaseReportData
 
         return [
             '_label' => 'รวม '.count($rows).' รายการ',
-            'qty_set_100' => array_sum(array_column($rows, 'qty_set_100')),
-            'qty_set_200' => array_sum(array_column($rows, 'qty_set_200')),
+            'qty' => array_sum(array_column($rows, 'qty')),
         ];
     }
 
@@ -84,13 +84,6 @@ class BreakfastReportData extends BaseReportData
         $br = $addon->bookingRoom;
         $booking = $br->booking;
 
-        $set100 = (int) $addon->breakfast_set_100;
-        $set200 = (int) $addon->breakfast_set_200;
-
-        if ($set100 === 0 && $set200 === 0) {
-            return null;
-        }
-
         return [
             'date' => $eatDay->toDateString(),
             'booking_no' => $booking->confirmation,
@@ -98,9 +91,8 @@ class BreakfastReportData extends BaseReportData
             'user_name' => $booking->user?->name ?? $booking->customer_name,
             'checkin_date' => $br->check_in->toDateString(),
             'checkout_date' => $br->check_out->toDateString(),
-            // "x" ในชีต = ไม่ได้ซื้อชุดนั้น → null
-            'qty_set_100' => $set100 > 0 ? $set100 : null,
-            'qty_set_200' => $set200 > 0 ? $set200 : null,
+            'breakfast_code' => $addon->breakfast_code,
+            'qty' => AddonPricing::guestCount($br),
         ];
     }
 }
