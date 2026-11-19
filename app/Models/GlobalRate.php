@@ -85,6 +85,24 @@ class GlobalRate extends Model
             ->toArray();
     }
 
+    /**
+     * 🍳 (19/11/26) เรทอาหารเช้าทั้งหมดที่ active — [code => price]
+     *
+     *    breakfast เป็น toggle ต่อห้อง + เลือก 1 code — จึงอ่านเป็นชุด (รองรับ
+     *    2 เรทขึ้นไป: breakfast_100/breakfast_200 อนาคตเพิ่ม code ขึ้นต้น
+     *    'breakfast' ใช้ได้ทันที ไม่ต้องแก้โค้ด)
+     */
+    public static function breakfastRates(): array
+    {
+        // ⚠️ ห้าม orderBy — ให้พฤติกรรม duplicate code (row หลังชนะ) ตรงกับ getPrices เดิม
+        //    (migration ปลูก row ก่อน seed/test row ใส่ทีหลังได้ทับตาม insertion order)
+        return self::where('rate_type', 'addon')
+            ->where('code', 'like', 'breakfast%')
+            ->whereRaw('is_active = TRUE')
+            ->pluck('default_price', 'code')
+            ->toArray();
+    }
+
     // ----------------------------------------------------------------------
     // Room rate lookups (rate_type = 'daily' | 'group' | 'month')
     // ----------------------------------------------------------------------

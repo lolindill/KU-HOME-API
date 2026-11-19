@@ -82,9 +82,11 @@ class StoreBookingRequest extends FormRequest
             'booking_rooms.*.billing_comment' => 'nullable|string|max:255',
 
             'booking_rooms.*.addons' => 'nullable|array',
-            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
-            //    extra_beds_by_night (map รายคืน) · legacy breakfast/extra_bed ยังรับ
+            // 🍳 (19/11/26): canonical — breakfast_enabled (toggle) + breakfast_code (เรทจาก
+            //    global_rates code ขึ้นต้น breakfast) · legacy breakfast_sets/breakfast ยังรับ
             //    (normalize: canonical → legacy → ค่าเดิม ที่ App\Services\Addon\AddonPricing)
+            'booking_rooms.*.addons.breakfast_enabled' => 'nullable|boolean',
+            'booking_rooms.*.addons.breakfast_code' => 'nullable|string|max:50',
             'booking_rooms.*.addons.breakfast_sets' => 'nullable|array',
             'booking_rooms.*.addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
             'booking_rooms.*.addons.breakfast_sets.set_200' => 'nullable|integer|min:0',

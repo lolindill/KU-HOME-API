@@ -496,8 +496,9 @@ class RoomMoveController extends Controller
 
                 Addon::create([
                     'booking_room_id' => $br2->id,
-                    'breakfast_set_100' => $addon->breakfast_set_100 ?? 0,
-                    'breakfast_set_200' => $addon->breakfast_set_200 ?? 0,
+                    // 🍳 (19/11/26) toggle + code — copy ทั้งคู่ (breakfast ทั้งสองช่วงกินเหมือนเดิม)
+                    'breakfast_enabled' => (bool) ($addon->breakfast_enabled ?? false),
+                    'breakfast_code' => $addon->breakfast_code,
                     'extra_beds_by_night' => ! empty($br2Beds) ? $br2Beds : null,
                     'early_hours' => 0,
                     'late_hours' => $lateHoursToCarry,

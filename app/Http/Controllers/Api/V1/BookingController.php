@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
@@ -414,7 +415,7 @@ class BookingController extends Controller
                 $addonInput = $roomRequest['addons'] ?? null;
 
                 // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
-                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $breakfast = AddonPricing::resolveBreakfast($addonInput, null, GlobalRate::breakfastRates());
                 $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
                     $roomRequest,
                     $addonInput,
@@ -439,8 +440,8 @@ class BookingController extends Controller
                 // 🌟 บันทึก Addon — canonical เท่านั้น (snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'breakfast_set_100' => $sets['set_100'],
-                    'breakfast_set_200' => $sets['set_200'],
+                    'breakfast_enabled' => $breakfast['enabled'],
+                    'breakfast_code' => $breakfast['code'],
                     'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
                     'late_hours' => $lateHours,
@@ -857,7 +858,7 @@ class BookingController extends Controller
                 $addonChanged = false;
 
                 if ($touchesAddons || $shapeChanged) {
-                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    $breakfast = AddonPricing::resolveBreakfast($addonInput, $existingAddon, GlobalRate::breakfastRates());
                     // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
                     $effectiveRoomRequest = $validated;
                     $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
@@ -880,8 +881,8 @@ class BookingController extends Controller
                     [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                     $addonData = [
-                        'breakfast_set_100' => $sets['set_100'],
-                        'breakfast_set_200' => $sets['set_200'],
+                        'breakfast_enabled' => $breakfast['enabled'],
+                        'breakfast_code' => $breakfast['code'],
                         'extra_beds_by_night' => $extraBedsByNight ?: null,
                         'early_hours' => $earlyHours,
                         'late_hours' => $lateHours,
@@ -892,6 +893,21 @@ class BookingController extends Controller
                             if ($k === 'extra_beds_by_night') {
                                 // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
                                 if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            // 🍳 (19/11/26) toggle/code — เทียบตาม type ของ column (bool / string nullable)
+                            if ($k === 'breakfast_enabled') {
+                                if ((bool) ($existingAddon->$k ?? false) !== (bool) $v) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ($k === 'breakfast_code') {
+                                if (($existingAddon->$k ?? null) !== $v) {
                                     $dirtyAddonFields[$k] = $v;
                                 }
 
@@ -1261,7 +1277,7 @@ class BookingController extends Controller
                     $existingAddon = $bookingRoom->addon;
                     $addonInput = $roomRequest['addons'] ?? null;
 
-                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    $breakfast = AddonPricing::resolveBreakfast($addonInput, $existingAddon, GlobalRate::breakfastRates());
                     // effective roomRequest — legacy extra_beds หัวห้องติดไปด้วย (pattern resolveExtraBed เดิม)
                     $effectiveRoomRequest = $roomRequest;
                     $effectiveRoomRequest['check_in'] = $u['check_in'];
@@ -1275,8 +1291,8 @@ class BookingController extends Controller
                     [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                     $addonData = [
-                        'breakfast_set_100' => $sets['set_100'],
-                        'breakfast_set_200' => $sets['set_200'],
+                        'breakfast_enabled' => $breakfast['enabled'],
+                        'breakfast_code' => $breakfast['code'],
                         'extra_beds_by_night' => $extraBedsByNight ?: null,
                         'early_hours' => $earlyHours,
                         'late_hours' => $lateHours,
@@ -1287,6 +1303,21 @@ class BookingController extends Controller
                             if ($k === 'extra_beds_by_night') {
                                 // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
                                 if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            // 🍳 (19/11/26) toggle/code — เทียบตาม type ของ column (bool / string nullable)
+                            if ($k === 'breakfast_enabled') {
+                                if ((bool) ($existingAddon->$k ?? false) !== (bool) $v) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ($k === 'breakfast_code') {
+                                if (($existingAddon->$k ?? null) !== $v) {
                                     $dirtyAddonFields[$k] = $v;
                                 }
 
@@ -1676,7 +1707,7 @@ class BookingController extends Controller
                 $addonInput = $roomRequest['addons'] ?? null;
 
                 // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
-                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $breakfast = AddonPricing::resolveBreakfast($addonInput, null, GlobalRate::breakfastRates());
                 $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
                     $roomRequest,
                     $addonInput,
@@ -1705,8 +1736,8 @@ class BookingController extends Controller
                 //    snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'breakfast_set_100' => $sets['set_100'],
-                    'breakfast_set_200' => $sets['set_200'],
+                    'breakfast_enabled' => $breakfast['enabled'],
+                    'breakfast_code' => $breakfast['code'],
                     'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
                     'late_hours' => $lateHours,

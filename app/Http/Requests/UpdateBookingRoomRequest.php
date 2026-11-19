@@ -65,8 +65,11 @@ class UpdateBookingRoomRequest extends FormRequest
 
             // ➕ Addons (ราคาคิดใหม่ทั้งหมดที่ server — ไม่รับ price จาก client)
             'addons' => 'nullable|array',
-            // 📊 (05/10/26, excel-reports ticket 10): canonical — breakfast_sets (แยก 2 ชุด) +
-            //    extra_beds_by_night (map รายคืน) · normalize ที่ App\Services\Addon\AddonPricing
+            // 🍳 (19/11/26): canonical — breakfast_enabled (toggle) + breakfast_code (เรทจาก
+            //    global_rates code ขึ้นต้น breakfast) · legacy breakfast_sets/breakfast ยังรับ
+            //    (normalize ที่ App\Services\Addon\AddonPricing)
+            'addons.breakfast_enabled' => 'nullable|boolean',
+            'addons.breakfast_code' => 'nullable|string|max:50',
             'addons.breakfast_sets' => 'nullable|array',
             'addons.breakfast_sets.set_100' => 'nullable|integer|min:0',
             'addons.breakfast_sets.set_200' => 'nullable|integer|min:0',
