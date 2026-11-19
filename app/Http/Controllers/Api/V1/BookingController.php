@@ -693,6 +693,13 @@ class BookingController extends Controller
             //    (container confirmed เสมอเมื่อมีห้อง checked_in → $postPayment เป็น true อยู่แล้ว)
             $isCheckedIn = $postPayment && $bookingRoom->status === 'checked_in';
 
+            // 🍳 (19/11/26) addon-only carve-out: request ที่ส่งมาเป็น addons/extra_beds ล้วน (ไม่แตะ
+            //    tier/วันที่/guests/ราคา) — ยกเว้นจาก guard ห้อง assign แล้ว เพราะ addon ไม่กระทบ
+            //    tier หรือเลขห้อง (เทียบเคียงโหมด 3 checked_in addon-only) · มติ v2 ข้อ 3 ยังคง
+            //    บังคับเต็มรูปแบบกับ shape/tier fields (room_type_id/check_in/check_out/guests/price)
+            $isAddonOnly = ! empty($validated)
+                && empty(array_diff(array_keys($validated), ['addons', 'extra_beds']));
+
             // 🔒 BR guard — draft mode: BR ต้อง draft · post-payment mode: แก้ได้ก่อนเข้าพัก หรือ เข้าพักแล้ว (addon-only)
             if ($postPayment) {
                 if (! in_array($bookingRoom->status, ['draft', 'confirmed', 'checked_in'], true)) {
@@ -700,13 +707,14 @@ class BookingController extends Controller
                 }
 
                 // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 3): โหมด 2 (post-payment change-tier) ต้องไม่มี room_id
+                //    (🍳 19/11/26 ยกเว้น addon-only — แก้ addon บนห้องที่มีเลขแล้วก่อนเช็คอินได้ โดยไม่แตะ tier/เลขห้อง)
                 if (! $isCheckedIn) {
                     if ($request->has('room_id')) {
                         throw new \Exception('ไม่สามารถระบุเลขห้องผ่านการแก้ไขห้องได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
                     }
 
-                    if ($bookingRoom->room_id !== null) {
-                        throw new \Exception('ห้องนี้มีเลขห้องจัดไว้แล้ว ไม่สามารถแก้ไขประเภทห้องผ่านหน้านี้ได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
+                    if ($bookingRoom->room_id !== null && ! $isAddonOnly) {
+                        throw new \Exception('ห้องนี้มีเลขห้องจัดไว้แล้ว ไม่สามารถแก้ไขประเภทห้องผ่านหน้านี้ได้ (รับเฉพาะ addon เท่านั้น) กรุณาใช้ change-room ค่ะ 🚪', 422);
                     }
                 }
             } elseif ($bookingRoom->status !== 'draft') {
@@ -991,7 +999,12 @@ class BookingController extends Controller
                             default => 'same-tier',
                         };
 
-                        $noteParts = ["change-tier ({$direction})"];
+                        // 🍳 (19/11/26) addon-only (ไม่เปลี่ยน tier) — ติดป้ายให้ต่างจาก change-tier
+                        $noteParts = [
+                            $isAddonOnly && ! $typeChanged
+                                ? 'addon-only (surcharge)'
+                                : "change-tier ({$direction})",
+                        ];
                         if ($typeChanged) {
                             $noteParts[] = "tier {$oldType?->name_en} → {$newType?->name_en}";
                         }
