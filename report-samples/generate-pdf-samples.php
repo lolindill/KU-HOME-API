@@ -10,10 +10,6 @@
  *    ⚠️ dev-only — report-samples/ ถูกตัดออกจาก main โดย scripts/sync-main.sh
  */
 
-require __DIR__.'/../vendor/autoload.php';
-$app = require __DIR__.'/../bootstrap/app.php';
-$app->make(Kernel::class)->bootstrap();
-
 use App\Models\Booking;
 use App\Models\BookingRoom;
 use App\Models\HousekeepingTask;
@@ -28,6 +24,11 @@ use App\Services\ReportExcel\ExcelReportRenderer;
 use App\Services\ReportExcel\ThaiMpdfWriter;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
+
+// ⚠️ use ต้องประกาศก่อนจุดที่ใช้ — ไม่งั้น Kernel::class ถูก resolve เป็น 'Kernel' เปล่า ๆ
+require __DIR__.'/../vendor/autoload.php';
+$app = require __DIR__.'/../bootstrap/app.php';
+$app->make(Kernel::class)->bootstrap();
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 

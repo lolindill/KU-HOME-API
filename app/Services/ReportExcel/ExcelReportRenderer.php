@@ -6,6 +6,8 @@ use App\Services\ReportExcel\Contracts\ReportData;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -234,7 +236,26 @@ class ExcelReportRenderer
     public function renderForPdf(ReportData $report, array $filters): Spreadsheet
     {
         $spreadsheet = $this->render($report, $filters);
-        $spreadsheet->getActiveSheet()->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd(1, 3);
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd(1, 3);
+
+        // 🖨️ (18/11/26 report-pdf-export) วาดเส้นตารางเฉพาะ PDF — Excel (.xlsx) คง Minimal flat เดิม
+        //    border ติดบน spreadsheet model แล้ว PhpSpreadsheet HTML writer แปลงเป็น inline CSS
+        //    ให้ mPDF วาดตามเป๊ะ · เริ่มกริดที่แถว 3 (หัวคอลัมน์) ไม่ล้อมหัวรายงานแถว 1–2
+        $lastCol = $sheet->getHighestDataColumn();
+        $lastRow = $sheet->getHighestDataRow();
+        $sheet->getStyle("A3:{$lastCol}{$lastRow}")->applyFromArray([
+            'borders' => ['allBorders' => [
+                'borderStyle' => Border::BORDER_THIN,
+                'color' => ['rgb' => '999999'],
+            ]],
+        ]);
+        $sheet->getStyle("A3:{$lastCol}3")->applyFromArray([
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'F2F2F2'],
+            ],
+        ]);
 
         return $spreadsheet;
     }
