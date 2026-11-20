@@ -6,6 +6,8 @@ use App\Services\ReportExcel\Contracts\ReportData;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -218,9 +220,72 @@ class ExcelReportRenderer
     }
 
     /**
-     * สร้างชื่อไฟล์ภาษาไทยตามช่วง filter เช่น รายงานห้องเข้าพัก (14-09-2569_ถึง_20-09-2569).xlsx
+     * 🖨️ (18/11/26 report-pdf-export) สตรีมไฟล์ PDF ทันที — reuse render() เดิมทุกอย่าง
+     *    (layout, PageSetup A4 Landscape, repeat print title แถว 3) เปลี่ยนแค่ writer
+     *    เป็น ThaiMpdfWriter (ฟอนต์ไทย Sarabun) — mPDF แบ่งหน้าตาม PageSetup เอง
+     *
+     *    ⚠️ freezePane/AutoFilter เป็น feature หน้าจอ Excel จะไม่ปรากฏใน PDF (ถูกต้องตามธรรมชาติ)
      */
-    public function filename(ReportData $report, array $filters): string
+    /**
+     * 🔁 (18/11/26 report-pdf-export) เวอร์ชันเตรียม spreadsheet "สำหรับ PDF"
+     *    HTML/PDF writer สร้าง <thead> เฉพาะเมื่อช่วง rows-to-repeat เริ่มแถว 1
+     *    (ดู vendor Writer/Html.php generateSheetStarts — `$rowsToRepeatAtTop[0] == 1`)
+     *    จึงตั้ง 1..3 เพื่อให้ mPDF ซ้ำ ชื่อรายงาน+บรรทัด filter+หัวคอลัมน์ ทุกหน้า
+     *    · เส้นทาง Excel คง 3..3 ตาม render() เดิม (พฤติกรรม print ของ xlsx ไม่เปลี่ยน)
+     */
+    public function renderForPdf(ReportData $report, array $filters): Spreadsheet
+    {
+        $spreadsheet = $this->render($report, $filters);
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd(1, 3);
+
+        // 🖨️ (18/11/26 report-pdf-export) วาดเส้นตารางเฉพาะ PDF — Excel (.xlsx) คง Minimal flat เดิม
+        //    border ติดบน spreadsheet model แล้ว PhpSpreadsheet HTML writer แปลงเป็น inline CSS
+        //    ให้ mPDF วาดตามเป๊ะ · เริ่มกริดที่แถว 3 (หัวคอลัมน์) ไม่ล้อมหัวรายงานแถว 1–2
+        $lastCol = $sheet->getHighestDataColumn();
+        $lastRow = $sheet->getHighestDataRow();
+        $sheet->getStyle("A3:{$lastCol}{$lastRow}")->applyFromArray([
+            'borders' => ['allBorders' => [
+                'borderStyle' => Border::BORDER_THIN,
+                'color' => ['rgb' => '999999'],
+            ]],
+        ]);
+        $sheet->getStyle("A3:{$lastCol}3")->applyFromArray([
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'F2F2F2'],
+            ],
+        ]);
+
+        return $spreadsheet;
+    }
+
+    public function streamPdfResponse(ReportData $report, array $filters): StreamedResponse
+    {
+        $spreadsheet = $this->renderForPdf($report, $filters);
+        $filename = $this->filename($report, $filters, 'pdf');
+        $encodedFilename = rawurlencode($filename);
+
+        $headers = [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => sprintf("attachment; filename=report.pdf; filename*=UTF-8''%s", $encodedFilename),
+            'Cache-Control' => 'max-age=0',
+        ];
+
+        return new StreamedResponse(function () use ($spreadsheet) {
+            $writer = new ThaiMpdfWriter($spreadsheet);
+            // 📦 cache ของ mPDF อยู่ใน storage/app/mpdf (mPDF mkdir ให้เองถ้ายังไม่มี)
+            //    — ไม่เขียวทิ้งไว้ใน vendor บน prod
+            $writer->setTempDir(storage_path('app'));
+            $writer->save('php://output');
+        }, 200, $headers);
+    }
+
+    /**
+     * สร้างชื่อไฟล์ภาษาไทยตามช่วง filter เช่น รายงานห้องเข้าพัก (14-09-2569_ถึง_20-09-2569).xlsx
+     * (18/11/26 report-pdf-export — เพิ่ม param $extension เพื่อ reuse สำหรับ .pdf)
+     */
+    public function filename(ReportData $report, array $filters, string $extension = 'xlsx'): string
     {
         $template = $this->loadTemplate($report->templateId());
         $nameTh = $template['name_th'] ?? $report->templateId();
@@ -230,10 +295,10 @@ class ExcelReportRenderer
         $slug = ThaiDate::rangeSlug($primaryFrom, $primaryTo);
 
         if ($slug !== '') {
-            return "{$nameTh} ({$slug}).xlsx";
+            return "{$nameTh} ({$slug}).{$extension}";
         }
 
-        return "{$nameTh}.xlsx";
+        return "{$nameTh}.{$extension}";
     }
 
     /**

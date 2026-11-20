@@ -352,6 +352,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     //    route ต่อรายงาน (explicit — owner เลือกแยก) · stream ไฟล์ทันที ไม่มีไฟล์ค้าง disk
     //    · สิทธิ์ admin+staff ทุกใบ · housekeeping เฉพาะ 2 ใบแม่บ้าน (+in-controller re-check)
     //    · throttle 10,1 (กลุ่ม lookups) · validate filter ต่อรายงาน (เพดานช่วงวันที่ ≤ 1 ปี)
+    //    🖨️ (18/11/26 report-pdf-export) ทุก route รับ ?format=pdf ได้ (default xlsx — ไม่มี route ใหม่)
     Route::middleware('role:admin,staff')->prefix('reports')->group(function () {
         Route::get('/check-in/export', [ReportController::class, 'checkIn'])->middleware('throttle:10,1');
         Route::get('/check-out/export', [ReportController::class, 'checkOut'])->middleware('throttle:10,1');
