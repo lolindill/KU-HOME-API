@@ -257,7 +257,7 @@ class BookingKuMemberPricingTest extends TestCase
                     'check_out' => $checkOut,
                     'addons' => [
                         'extra_bed' => 1,   // 500 * 2 nights = 1,000 baht
-                        'breakfast' => 2,   // 150 * 2 ชุด * 2 คืน = 600 baht (คิด × คืน, 05/10/26)
+                        'breakfast' => 2,   // legacy int > 0 → toggle code breakfast_200 — 150 * 2 คืน * 1 คน = 300 baht
                     ],
                 ],
             ],
@@ -270,12 +270,12 @@ class BookingKuMemberPricingTest extends TestCase
 
         // Room rate: 2 nights * 1,000 baht = 2,000 baht
         $this->assertSame(2000, $room->room_amount);
-        // Addons: 1,000 (extra bed) + 600 (breakfast × คืน) = 1,600 baht
+        // Addons: 1,000 (extra bed) + 300 (breakfast × คืน × หัว — guests ว่าง นับ 1) = 1,300 baht
         $this->assertSame(1000, $room->addon->extra_bed_price);
-        $this->assertSame(600, $room->addon->breakfast_price);
-        // Total room amount: 2,000 + 1,600 = 3,600 baht
-        $this->assertSame(3600, $room->amount);
-        $this->assertSame(3600, $booking->total_amount);
+        $this->assertSame(300, $room->addon->breakfast_price);
+        // Total room amount: 2,000 + 1,300 = 3,300 baht
+        $this->assertSame(3300, $room->amount);
+        $this->assertSame(3300, $booking->total_amount);
         $this->assertSame($booking->total_amount, $booking->bookingRooms->sum('amount'));
     }
 

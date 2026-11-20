@@ -887,4 +887,147 @@ class TierChangeFamilyTest extends TestCase
             ->assertJsonPath('surcharge_amount', 800)
             ->assertJsonPath('outstanding_amount', 800);
     }
+
+    // =========================================================
+    // 🍳 (19/11/26) addon-only carve-out — ห้อง assign แล้วก่อนเช็คอิน
+    //    (บิล paid/confirmed + BR confirmed ที่มี room_id — เดิมโดน guard 422 ทั้ง request)
+    // =========================================================
+
+    public function test_put_mode_2_addon_only_passes_guard_on_assigned_room_and_adds_surcharge(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
+        $room = $this->createRoom($standard);
+        GlobalRate::create([
+            'rate_type' => 'addon',
+            'code' => 'early_checkin',
+            'name_en' => 'Early Check-in',
+            'default_price' => 300,
+            'is_active' => true,
+        ]);
+
+        $booking = $this->createBooking(['total_amount' => 2000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 2000, 'status' => 'completed']);
+        $br = $this->createBookingRoom($booking, $standard, $room, 'confirmed', 1, [
+            'room_amount' => 2000,
+            'amount' => 2000,
+        ]);
+
+        // addon-only (early check-in 2 ชม. × 300 = 600) บนห้องที่มีเลขแล้ว → ผ่าน guard และคิด surcharge เฉพาะ addon
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_hours' => 2],
+            ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('total_amount', 2600)
+            ->assertJsonPath('surcharge_amount', 600)
+            ->assertJsonPath('outstanding_amount', 600);
+
+        // เลขห้อง/tier/วันที่ ต้องไม่ถูกแตะ
+        $this->assertSame($room->id, (string) $br->fresh()->room_id);
+        $this->assertSame(2000, (int) $br->fresh()->room_amount);
+        $this->assertSame(2600, (int) $br->fresh()->amount);
+
+        // is_paid recompute — paid 2000 < ยอดใหม่ 2600 → false
+        $this->assertFalse((bool) $booking->fresh()->is_paid);
+
+        // audit note ติดป้าย addon-only (ไม่ใช่ change-tier)
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'booking_room',
+            'entity_id' => $br->id,
+            'note' => 'addon-only (surcharge) · price 2000 → 2000 บาท',
+        ]);
+    }
+
+    public function test_put_mode_2_assigned_room_addon_with_shape_field_still_points_to_change_room(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
+        $deluxe = $this->createRoomTypeWithRate('Deluxe', 2, 1500);
+        $room = $this->createRoom($standard);
+
+        $booking = $this->createBooking(['total_amount' => 2000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 2000, 'status' => 'completed']);
+        $br = $this->createBookingRoom($booking, $standard, $room, 'confirmed');
+
+        // addons ปน shape field (room_type_id) → ยังโดน guard 422 ชี้ไป change-room เต็มรูปแบบ
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'room_type_id' => $deluxe->id,
+                'addons' => ['early_hours' => 2],
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('change-room', $response->json('message'));
+    }
+
+    public function test_put_mode_2_assigned_room_addon_only_param_room_id_still_rejected(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
+        $otherRoom = $this->createRoom($standard);
+        $room = $this->createRoom($standard);
+
+        $booking = $this->createBooking(['total_amount' => 2000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 2000, 'status' => 'completed']);
+        $br = $this->createBookingRoom($booking, $standard, $room, 'confirmed');
+
+        // แอบแถม room_id ใน request addon-only → ยังโดน 422 (จัดเลขห้องผ่าน assign/change-room เท่านั้น)
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_hours' => 2],
+                'room_id' => $otherRoom->id,
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('change-room', $response->json('message'));
+    }
+
+    public function test_put_mode_2_assigned_room_addon_only_owner_forbidden(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000);
+        $room = $this->createRoom($standard);
+
+        $booking = $this->createBooking(['total_amount' => 2000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 2000, 'status' => 'completed']);
+        $br = $this->createBookingRoom($booking, $standard, $room, 'confirmed');
+
+        // เจ้าของบิล (role user) ส่ง addon-only → 403 ตามโหมด 2 (admin/staff เท่านั้น)
+        $response = $this->actingAs($booking->user, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => ['early_hours' => 2],
+            ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_put_mode_2_assigned_room_addon_extra_beds_over_cap_rejected(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1000, 1); // max extra beds = 1
+        $room = $this->createRoom($standard);
+        GlobalRate::create([
+            'rate_type' => 'addon',
+            'code' => 'extra_bed',
+            'name_en' => 'Extra Bed',
+            'default_price' => 500,
+            'is_active' => true,
+        ]);
+
+        $today = Carbon::today(BookingRule::TIMEZONE);
+        $booking = $this->createBooking(['total_amount' => 2000]);
+        Payment::create(['booking_id' => $booking->id, 'amount' => 2000, 'status' => 'completed']);
+        $br = $this->createBookingRoom($booking, $standard, $room, 'confirmed', 1, [
+            'room_amount' => 2000,
+            'amount' => 2000,
+        ]);
+
+        // extra_beds_by_night คืนเดียว 2 เตียง > max_extra_beds (1) → 422
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}/rooms/{$br->id}", [
+                'addons' => [
+                    'extra_beds_by_night' => [$today->toDateString() => 2],
+                ],
+            ]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('เตียงเสริม', $response->json('message'));
+    }
 }

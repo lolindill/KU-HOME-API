@@ -774,8 +774,8 @@ class FrontDeskSplitUpgradeTest extends TestCase
 
         Addon::create([
             'booking_room_id' => $br->id,
-            'breakfast_set_100' => 1,
-            'breakfast_set_200' => 2,
+            'breakfast_enabled' => true,
+            'breakfast_code' => 'breakfast_200',
             'extra_beds_by_night' => [
                 $d0 => 1,
                 $d1 => 1,
@@ -802,11 +802,11 @@ class FrontDeskSplitUpgradeTest extends TestCase
         $br2 = BookingRoom::where('booking_id', $booking->id)->where('id', '!=', $br->id)->firstOrFail();
         $br2Addon = Addon::where('booking_room_id', $br2->id)->firstOrFail();
 
-        // 1. breakfast sets คัดลอกไปทั้งคู่
-        $this->assertSame(1, $br1Addon->breakfast_set_100);
-        $this->assertSame(2, $br1Addon->breakfast_set_200);
-        $this->assertSame(1, $br2Addon->breakfast_set_100);
-        $this->assertSame(2, $br2Addon->breakfast_set_200);
+        // 1. breakfast toggle + code คัดลอกไปทั้งคู่
+        $this->assertTrue($br1Addon->breakfast_enabled);
+        $this->assertSame('breakfast_200', $br1Addon->breakfast_code);
+        $this->assertTrue($br2Addon->breakfast_enabled);
+        $this->assertSame('breakfast_200', $br2Addon->breakfast_code);
 
         // 2. extra beds re-sliced: < d2 อยู่ BR-1, >= d2 อยู่ BR-2
         $this->assertEquals([$d0 => 1, $d1 => 1], $br1Addon->extra_beds_by_night);

@@ -19,7 +19,7 @@ use Tests\TestCase;
  * ขยาย PUT /bookings/{id} เดิม — guard แยก field-group:
  *   💳 payment fields = draft-only เดิม · 🏛️ customer identity = จนก่อน complete/no_show
  *   - attach/switch: ส่ง identity ใหม่ = แทนที่ทั้งชุด (validation ชุดเดียวกับ POST /bookings)
- *   - detach: ส่ง user/organize = null ชัด ๆ → กลับเฮดเปล่า (เคลียร์ snapshot ครบ)
+ *   - detach: ต้องส่ง detach_identity: true → กลับเฮดเปล่า (เคลียร์ snapshot ครบ) · user/organize null/"" ไม่มี flag = no-op (18/11/26)
  *   - reprice เฉพาะตอน draft ผ่าน DiscountService::reprice() (ku_member → daily_ku อัตโนมัติ)
  *   - admin/system เท่านั้น (non-admin 403) · ไม่ re-run draft-dedup ตอน attach
  */
@@ -119,8 +119,9 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id)
-            ->assertJsonPath('organization_id', null);
+            // 🏛️ owner-envelope — identity อ่านผ่าน owner object (flat ถูกตัดออกแล้ว)
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id);
 
         $fresh = $booking->fresh();
         $this->assertSame($target->id, $fresh->user_id);
@@ -145,9 +146,12 @@ class BookingAttachCustomerTest extends TestCase
                 'customer_email' => 'somchai@example.com',
             ])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', $org->id)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี');
+            ->assertJsonPath('owner.type', 'organization')
+            ->assertJsonPath('owner.id', $org->id)
+            ->assertJsonPath('owner.name', 'บริษัท ตัวอย่าง จำกัด')
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี')
+            ->assertJsonPath('owner.customer_phone', '0812345678')
+            ->assertJsonPath('owner.customer_email', 'somchai@example.com');
 
         $fresh = $booking->fresh();
         $this->assertNull($fresh->user_id);
@@ -184,8 +188,8 @@ class BookingAttachCustomerTest extends TestCase
             ->putJson("/api/v1/bookings/{$booking->id}", [
                 'organize' => 'ORGB', 'customer_name' => 'คนใหม่',
             ])->assertStatus(200)
-            ->assertJsonPath('organization_id', $orgB->id)
-            ->assertJsonPath('customer_name', 'คนใหม่');
+            ->assertJsonPath('owner.id', $orgB->id)
+            ->assertJsonPath('owner.customer_name', 'คนใหม่');
 
         $fresh = $booking->fresh();
         $this->assertSame($orgB->id, $fresh->organization_id);
@@ -196,8 +200,9 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id)
-            ->assertJsonPath('organization_id', null);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id)
+            ->assertJsonPath('owner.customer_name', null);
 
         $fresh = $booking->fresh();
         $this->assertSame($target->id, $fresh->user_id);
@@ -206,7 +211,7 @@ class BookingAttachCustomerTest extends TestCase
         $this->assertSame($orgA->id, $orgA->fresh()->id); // org rows ยังอยู่ (FK restrict — ไม่ถูกลบ)
     }
 
-    public function test_detach_identity_via_explicit_null_returns_to_empty_head(): void
+    public function test_detach_identity_flag_returns_to_empty_head(): void
     {
         $admin = $this->admin();
         Organization::create(['erp' => 'ORGA', 'name' => 'องค์กร เอ', 'is_active' => true]);
@@ -220,13 +225,11 @@ class BookingAttachCustomerTest extends TestCase
                 'organize' => 'ORGA', 'customer_name' => 'สมชาย ใจดี', 'customer_email' => 'a@b.c',
             ])->assertStatus(200);
 
-        // ส่ง organize = null ชัด ๆ → ถอดกลับเฮดเปล่า (เคลียร์ user_id/organization_id/customer_* ครบ)
+        // ส่ง detach_identity: true → ถอดกลับเฮดเปล่า (เคลียร์ user_id/organization_id/customer_* ครบ)
         $this->actingAs($admin, 'sanctum')
-            ->putJson("/api/v1/bookings/{$booking->id}", ['organize' => null])
+            ->putJson("/api/v1/bookings/{$booking->id}", ['detach_identity' => true])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', null)
-            ->assertJsonPath('customer_name', null);
+            ->assertJsonPath('owner', null);
 
         $fresh = $booking->fresh();
         $this->assertNull($fresh->user_id);
@@ -254,8 +257,8 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['customer_phone' => '0899999999'])
             ->assertStatus(200)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี')
-            ->assertJsonPath('customer_phone', '0899999999');
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี')
+            ->assertJsonPath('owner.customer_phone', '0899999999');
 
         $fresh = $booking->fresh();
         $this->assertSame('สมชาย ใจดี', $fresh->customer_name);
@@ -359,7 +362,8 @@ class BookingAttachCustomerTest extends TestCase
         $this->actingAs($admin, 'sanctum')
             ->putJson("/api/v1/bookings/{$booking->id}", ['user' => $target->id])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', $target->id);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id);
 
         $fresh = $booking->fresh();
         $this->assertSame(2400, $fresh->total_amount); // ไม่ reprice หลัง draft — ไม่โดน daily_ku
@@ -386,6 +390,11 @@ class BookingAttachCustomerTest extends TestCase
             ->putJson("/api/v1/bookings/{$completeBooking->id}", ['user' => $target->id])
             ->assertStatus(422);
 
+        // 🛡️ detach_identity อยู่กลุ่ม identity — โดน guard complete เดียวกัน
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$completeBooking->id}", ['detach_identity' => true])
+            ->assertStatus(422);
+
         $noShowBooking = $this->createEmptyHeadBooking($admin, $roomType);
         $noShowBooking->update(['status' => 'no_show']);
 
@@ -410,10 +419,114 @@ class BookingAttachCustomerTest extends TestCase
 
         // ถอด → reprice กลับ daily 1200 × 2 (สมมาตรกับ attach)
         $this->actingAs($admin, 'sanctum')
-            ->putJson("/api/v1/bookings/{$booking->id}", ['user' => null])
+            ->putJson("/api/v1/bookings/{$booking->id}", ['detach_identity' => true])
             ->assertStatus(200)
-            ->assertJsonPath('user_id', null);
+            ->assertJsonPath('owner', null);
 
         $this->assertSame(2400, $booking->fresh()->total_amount);
+    }
+    // =========================================================
+    // 🛡️ (18/11/26) no-op guard — user/organize null/"" ไม่มี flag = identity คงเดิม
+    //    (fix: FE generic form แถม user: null จนล้าง user_id ของบิล self-booking)
+    // =========================================================
+
+    public function test_null_identity_keys_without_detach_flag_are_noop_on_self_booking(): void
+    {
+        $admin = $this->admin();
+        $owner = User::factory()->create(['role' => 'user']);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+
+        // self-booking ด้วย token user — user_id = เจ้าของเสมอ
+        $created = $this->actingAs($owner, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $roomType->id,
+                    'check_in' => Carbon::now()->addDays(5)->toDateString(),
+                    'check_out' => Carbon::now()->addDays(7)->toDateString(),
+                ],
+            ],
+        ])->assertStatus(201);
+        $booking = Booking::findOrFail($created->json('booking_id'));
+        $this->assertSame($owner->id, $booking->user_id);
+
+        // FE generic form ส่ง identity key ครบแต่ค่า null — ต้องไม่แตะ identity เด็ดขาด
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", [
+                'user' => null,
+                'organize' => null,
+                'customer_name' => null,
+                'customer_phone' => null,
+                'customer_email' => null,
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $owner->id);
+
+        $fresh = $booking->fresh();
+        $this->assertSame($owner->id, $fresh->user_id);
+        $this->assertNull($fresh->organization_id);
+        $this->assertNull($fresh->customer_name);
+    }
+
+    public function test_empty_organize_without_detach_flag_keeps_organization(): void
+    {
+        $admin = $this->admin();
+        Organization::create(['erp' => 'ORGA', 'name' => 'องค์กร เอ', 'is_active' => true]);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+        $booking = $this->createEmptyHeadBooking($admin, $roomType);
+
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", [
+                'organize' => 'ORGA', 'customer_name' => 'สมชาย ใจดี',
+            ])->assertStatus(200);
+
+        // organize: "" (empty string) ไม่มี flag = no-op — org/snapshot คงเดิม
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", ['organize' => ''])
+            ->assertStatus(200)
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี');
+
+        $fresh = $booking->fresh();
+        $this->assertNotNull($fresh->organization_id);
+        $this->assertSame('สมชาย ใจดี', $fresh->customer_name);
+    }
+
+    public function test_detach_identity_conflicting_with_attach_or_contact_values_is_rejected(): void
+    {
+        $admin = $this->admin();
+        $target = User::factory()->create(['role' => 'user']);
+        Organization::create(['erp' => 'ORGA', 'name' => 'องค์กร เอ', 'is_active' => true]);
+
+        $roomType = $this->createRoomTypeWithRates();
+        $this->createRoom($roomType);
+        $booking = $this->createEmptyHeadBooking($admin, $roomType);
+
+        // detach คู่กับ attach user → 422
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", [
+                'detach_identity' => true, 'user' => $target->id,
+            ])->assertStatus(422);
+
+        // detach คู่กับ attach org → 422
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", [
+                'detach_identity' => true, 'organize' => 'ORGA', 'customer_name' => 'สมชาย',
+            ])->assertStatus(422);
+
+        // detach คู่กับข้อมูลผู้ติดต่อค่าใหม่ → 422
+        $this->actingAs($admin, 'sanctum')
+            ->putJson("/api/v1/bookings/{$booking->id}", [
+                'detach_identity' => true, 'customer_phone' => '0812345678',
+            ])->assertStatus(422);
+
+        // ยืนยัน identity ไม่ถูกแตะเลย
+        $fresh = $booking->fresh();
+        $this->assertNull($fresh->user_id);
+        $this->assertNull($fresh->organization_id);
     }
 }

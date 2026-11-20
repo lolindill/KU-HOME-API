@@ -13,12 +13,16 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * 📊 (05/10/26) excel-reports ticket 10 — addon pricing ใหม่ (spec §2.2/§3.4/§7)
+ * 📊 (05/10/26) excel-reports ticket 10 — addon pricing (spec §2.2/§3.4/§7)
+ * 🍳 (19/11/26) breakfast reshape — toggle + เรทรายหัว:
  *
- *    - breakfast แยก 2 ชุด (breakfast_100/breakfast_200) คิดเงิน × คืน
+ *    - breakfast เป็น toggle (breakfast_enabled + breakfast_code จาก global_rates
+ *      code ขึ้นต้น 'breakfast' — รองรับ 2 เรทขึ้นไป) คิดเงิน × คืน × หัว
+ *      (จำนวนผู้เข้าพักของห้อง — guests ว่าง นับ 1)
  *    - extra-bed รายคืน (extra_beds_by_night) จำนวนต่อคืนไม่เท่ากันได้
- *    - legacy alias normalize: breakfast (int) → set_200 · extra_bed/extra_beds (int) → flat map ทุกคืน
- *    - validate map คีย์นอกช่วง [check_in, check_out) → 422 · qty เกิน max_extra_beds → 422
+ *    - legacy alias normalize: breakfast_sets (ชุดไหน > 0 → enabled ตามชุดนั้น) ·
+ *      breakfast (int > 0) → enabled + code breakfast_200 · extra_bed/extra_beds (int) → flat map
+ *    - validate breakfast_code ไม่อยู่ในเรท active → 422 · map คีย์นอกช่วง → 422 · qty เกิน max → 422
  *    - invariant Σ booking_rooms.amount == total_amount + RoundToTen ท้ายสุด
  */
 class AddonPerNightPricingTest extends TestCase
@@ -76,7 +80,7 @@ class AddonPerNightPricingTest extends TestCase
         ];
     }
 
-    public function test_breakfast_two_sets_charged_per_night(): void
+    public function test_breakfast_toggle_charged_per_night_per_guest(): void
     {
         $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
             'source' => 'online',
@@ -84,7 +88,8 @@ class AddonPerNightPricingTest extends TestCase
                 [
                     'room_type_id' => $this->roomType->id,
                     ...$this->dates(),
-                    'addons' => ['breakfast_sets' => ['set_100' => 1, 'set_200' => 2]],
+                    'guests' => [['name' => 'สมชาย'], ['name' => 'สมหญิง']],
+                    'addons' => ['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_200'],
                 ],
             ],
         ]);
@@ -92,12 +97,148 @@ class AddonPerNightPricingTest extends TestCase
         $response->assertStatus(201);
 
         $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
-        $this->assertSame(1, $addon->breakfast_set_100);
-        $this->assertSame(2, $addon->breakfast_set_200);
-        // (1×100 + 2×200) × 3 คืน = 1500 — แก้ undercharge เดิมคิดครั้งเดียว
-        $this->assertSame(1500, $addon->breakfast_price);
-        // total = ห้อง 3000 + breakfast 1500 = 4500
-        $this->assertSame(4500, $response->json('total_amount'));
+        $this->assertSame(true, $addon->breakfast_enabled);
+        $this->assertSame('breakfast_200', $addon->breakfast_code);
+        // rate(200) × 3 คืน × 2 คน = 1200 — คิด × คืน × หัว
+        $this->assertSame(1200, $addon->breakfast_price);
+        // total = ห้อง 3000 + breakfast 1200 = 4200
+        $this->assertSame(4200, $response->json('total_amount'));
+        $this->assertAmountInvariant(Booking::findOrFail($response->json('booking_id')));
+    }
+
+    public function test_breakfast_toggle_without_guests_counts_one(): void
+    {
+        // guests ว่าง = นับ 1 คน (มติ owner 19/11/26 — กัน undercharge)
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$this->dates(),
+                    'addons' => ['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_200'],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(200 * 3 * 1, $addon->breakfast_price);
+    }
+
+    public function test_breakfast_default_code_is_cheapest_active_rate(): void
+    {
+        // เปิด toggle แต่ไม่ส่ง code → default = เรทถูกสุดที่ active (breakfast_100)
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$this->dates(),
+                    'addons' => ['breakfast_enabled' => true],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame('breakfast_100', $addon->breakfast_code);
+        $this->assertSame(100 * 3 * 1, $addon->breakfast_price);
+    }
+
+    public function test_breakfast_invalid_code_rejected(): void
+    {
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$this->dates(),
+                    'addons' => ['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_999'],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJson(['status' => 'error']);
+        $this->assertStringContainsString('breakfast_999', (string) $response->json('message'));
+    }
+
+    public function test_breakfast_disabled_no_charge(): void
+    {
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$this->dates(),
+                    'guests' => [['name' => 'สมชาย']],
+                    'addons' => ['breakfast_enabled' => false],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(false, $addon->breakfast_enabled);
+        $this->assertSame(null, $addon->breakfast_code);
+        $this->assertSame(0, $addon->breakfast_price);
+        // total = ห้องล้วน 3000
+        $this->assertSame(3000, $response->json('total_amount'));
+    }
+
+    public function test_legacy_breakfast_sets_map_to_code(): void
+    {
+        // legacy breakfast_sets — ชุดไหน > 0 → enabled + code ตามชุดนั้น
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$this->dates(),
+                    'addons' => ['breakfast_sets' => ['set_100' => 1, 'set_200' => 0]],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(true, $addon->breakfast_enabled);
+        $this->assertSame('breakfast_100', $addon->breakfast_code);
+        $this->assertSame(100 * 3 * 1, $addon->breakfast_price);
+    }
+
+    public function test_legacy_breakfast_and_extra_bed_normalize(): void
+    {
+        $dates = $this->dates();
+
+        // legacy: breakfast (int > 0) → enabled + code breakfast_200 (เรทเดิม)
+        //         extra_bed (int) → flat map ทุกคืน
+        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
+            'source' => 'online',
+            'booking_rooms' => [
+                [
+                    'room_type_id' => $this->roomType->id,
+                    ...$dates,
+                    'addons' => ['breakfast' => 2, 'extra_bed' => 1],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+
+        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
+        $this->assertSame(true, $addon->breakfast_enabled);
+        $this->assertSame('breakfast_200', $addon->breakfast_code);
+        $this->assertSame(200 * 3 * 1, $addon->breakfast_price); // × คืน × 1 (guests ว่าง = 1)
+        $this->assertSame(1, $addon->extra_beds_max);
+        $this->assertCount(3, $addon->extra_beds_by_night); // flat ทุกคืน
+        $this->assertSame(500 * 1 * 3, $addon->extra_bed_price);
+        // total = 3000 + 600 + 1500 = 5100
+        $this->assertSame(5100, $response->json('total_amount'));
         $this->assertAmountInvariant(Booking::findOrFail($response->json('booking_id')));
     }
 
@@ -125,36 +266,6 @@ class AddonPerNightPricingTest extends TestCase
         // Σ qty รายคืน (1+2+1) × 500 = 2000
         $this->assertSame(2000, $addon->extra_bed_price);
         $this->assertSame(3000 + 2000, $response->json('total_amount'));
-        $this->assertAmountInvariant(Booking::findOrFail($response->json('booking_id')));
-    }
-
-    public function test_legacy_breakfast_and_extra_bed_normalize(): void
-    {
-        $dates = $this->dates();
-
-        // legacy: breakfast (int) → set_200 · extra_bed (int) → flat map ทุกคืน
-        $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
-            'source' => 'online',
-            'booking_rooms' => [
-                [
-                    'room_type_id' => $this->roomType->id,
-                    ...$dates,
-                    'addons' => ['breakfast' => 2, 'extra_bed' => 1],
-                ],
-            ],
-        ]);
-
-        $response->assertStatus(201);
-
-        $addon = Addon::where('booking_room_id', $response->json('booking_rooms.0.id'))->firstOrFail();
-        $this->assertSame(0, $addon->breakfast_set_100);
-        $this->assertSame(2, $addon->breakfast_set_200);
-        $this->assertSame(200 * 2 * 3, $addon->breakfast_price); // × คืน
-        $this->assertSame(1, $addon->extra_beds_max);
-        $this->assertCount(3, $addon->extra_beds_by_night); // flat ทุกคืน
-        $this->assertSame(500 * 1 * 3, $addon->extra_bed_price);
-        // total = 3000 + 1200 + 1500 = 5700
-        $this->assertSame(5700, $response->json('total_amount'));
         $this->assertAmountInvariant(Booking::findOrFail($response->json('booking_id')));
     }
 
@@ -222,7 +333,7 @@ class AddonPerNightPricingTest extends TestCase
 
     public function test_round_to_ten_applied_after_addon_totals(): void
     {
-        // เรทชวนเลขไม่สวย — breakfast_100 = 7 → 2 ชุด × 7 × 3 คืน = 42
+        // เรทชวนเลขไม่สวย — breakfast_100 = 7 → 1 ชุด × 7 × 3 คืน × 1 คน = 21
         GlobalRate::where('code', 'breakfast_100')->update(['default_price' => 7]);
 
         $response = $this->actingAs($this->user, 'sanctum')->postJson('/api/v1/bookings', [
@@ -231,16 +342,16 @@ class AddonPerNightPricingTest extends TestCase
                 [
                     'room_type_id' => $this->roomType->id,
                     ...$this->dates(),
-                    'addons' => ['breakfast_sets' => ['set_100' => 2]],
+                    'addons' => ['breakfast_enabled' => true, 'breakfast_code' => 'breakfast_100'],
                 ],
             ],
         ]);
 
         $response->assertStatus(201);
-        // amount = 3000 + 42 = 3042 → RoundToTen ท้ายสุด = 3050
+        // amount = 3000 + 21 = 3021 → RoundToTen ท้ายสุด = 3030
         $booking = Booking::findOrFail($response->json('booking_id'));
-        $this->assertSame(3050, $booking->bookingRooms->first()->amount);
-        $this->assertSame(3050, $booking->total_amount);
+        $this->assertSame(3030, $booking->bookingRooms->first()->amount);
+        $this->assertSame(3030, $booking->total_amount);
         $this->assertAmountInvariant($booking);
     }
 }

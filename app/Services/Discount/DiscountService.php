@@ -161,7 +161,8 @@ class DiscountService
      * คำนวณยอดเงินใหม่ทั้งใบของการจอง (room_amount, discount_amount, amount, total_amount)
      * 🧾 (03/09/26) chokepoint เดียวที่เขียน `amount` (net ต่อห้อง) — walk-in ก็เรียก method นี้
      * 📊 (05/10/26, excel-reports ticket 10) addon คิดจาก canonical fields ผ่าน AddonPricing —
-     *    breakfast × คืน (แก้ undercharge เดิม) · extra-bed รายคืน · snapshot ทุกตัวเขียนที่นี่
+     *    breakfast × คืน × หัว (19/11/26 — toggle + เรทรายหัว) · extra-bed รายคืน ·
+     *    snapshot ทุกตัวเขียนที่นี่
      *
      * 🌙 (22/10/26, srs-v2-gap-closure ticket 09 — มติ owner 2026-10-22) pricing 2 เส้นทาง:
      *    ตัดสินจาก **role ผู้ล็อกอิน (sanctum)** ของ write ที่เรียก method นี้ (ตรงกับ guard
@@ -184,7 +185,9 @@ class DiscountService
         $holds = DiscountRedemption::whereIn('booking_room_id', $booking->bookingRooms()->pluck('id'))->get();
         $user = $booking->user;
         // 📊 เรท addon อ่านครั้งเดียวต่อ booking — pricing source = global_rates เท่านั้น
-        $rates = GlobalRate::getPrices(['breakfast_100', 'breakfast_200', 'extra_bed', 'early_checkin', 'late_checkout']);
+        //    🍳 (19/11/26) breakfast เป็น toggle + เลือก 1 code — อ่านเป็นชุด [code => price]
+        $rates = GlobalRate::getPrices(['extra_bed', 'early_checkin', 'late_checkout']);
+        $breakfastRates = GlobalRate::breakfastRates();
         // 🌙 pricing 2 เส้นทาง — เขตรายเดือน/group เป็น pricing ของเส้นทาง admin:
         //    actor เป็น admin หรือ **บิลที่เกิดจากเส้นทาง admin** (source='admin' หรือ userless/org)
         //    ใช้เส้นทาง admin เสมอ — กันเจ้าของ non-admin แก้ addon ทีหลังแล้วราคาเด้งขึ้นเงียบ ๆ
@@ -251,10 +254,13 @@ class DiscountService
                 $addon?->extra_beds_by_night ?? [],
                 (int) ($rates['extra_bed'] ?? 0)
             );
-            $breakfastTotal = AddonPricing::breakfastTotal([
-                'set_100' => $addon?->breakfast_set_100 ?? 0,
-                'set_200' => $addon?->breakfast_set_200 ?? 0,
-            ], $rates, $nights);
+            // 🍳 (19/11/26) breakfast toggle — ยอด = rate(code) × คืน × หัว (guests ว่าง = 1)
+            $breakfastTotal = AddonPricing::breakfastTotal(
+                (bool) ($addon?->breakfast_enabled ?? false),
+                (int) ($breakfastRates[$addon?->breakfast_code] ?? 0),
+                $nights,
+                AddonPricing::guestCount($br)
+            );
             $earlyTotal = ($addon?->early_hours ?? 0) * (int) ($rates['early_checkin'] ?? 0);
             $lateTotal = ($addon?->late_hours ?? 0) * (int) ($rates['late_checkout'] ?? 0);
 

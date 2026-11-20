@@ -103,7 +103,9 @@ class AdminBookingForUserTest extends TestCase
 
         $response->assertStatus(201)
             ->assertJson(['status' => 'success'])
-            ->assertJsonPath('user_id', $target->id);
+            // 🏛️ owner-envelope — โหมด A = owner.type "user" (flat user_id ถูกตัดออกจาก envelope)
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $target->id);
 
         $booking = Booking::findOrFail($response->json('booking_id'));
         $this->assertSame($target->id, $booking->user_id);
@@ -178,7 +180,8 @@ class AdminBookingForUserTest extends TestCase
         ]);
 
         $response->assertStatus(201)
-            ->assertJsonPath('user_id', null);
+            // 🏛️ owner-envelope — เฮดเปล่าลอย (ไม่ส่ง user/customer_name) = owner null
+            ->assertJsonPath('owner', null);
 
         $booking = Booking::with('bookingRooms')->findOrFail($response->json('booking_id'));
         $this->assertNull($booking->user_id);

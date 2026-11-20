@@ -1271,7 +1271,7 @@ curl -s -H "Accept: application/json" \
 | `payment_type`    | string | 💳 Filter ตามประเภทการชำระ — ค่าเดียวหรือ comma-separated เช่น `deposit` หรือ `deposit,deferred` · ใช้ได้: `full, deposit, deferred` · ค่าอื่น → 422 · ไม่ใส่ = ทุกประเภท · ใช้ได้ทุก role (user เห็นเฉพาะบิลตัวเอง) · combine กับ `status` ได้ (AND) (26/10/26) |
 | `per_page`        | int    | Items per page (default: 15)                         |
 
-> 🏛️ **Org booking response (2026-09-25, ticket 08):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — `organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email` serialize ตาม booking ปกติ · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter
+> 🏛️ **Org booking response (2026-09-25, ticket 08 · 🔄 owner-envelope 18/11/26):** admin ที่ `GET /bookings` หรือ `GET /bookings/{id}` จะเห็น object `organization` (id, erp, name, is_active) eager-load คู่กับ `user` เมื่อ booking ผูกองค์กรไว้ — **identity แบบ flat (`organization_id` + snapshot `customer_name`/`customer_phone`/`customer_email`) ถูกซ่อนออกจาก serialization แล้ว อ่านผ่าน `owner` object แทน (breaking — ดูตาราง shape ในหัวข้อ `POST /bookings`)** · non-admin ไม่กระทบ (org booking ไม่มีเจ้าของ user จึงดูได้เฉพาะ admin อยู่แล้ว) · การรายงานรวมยอดต่อองค์กร (aggregation) เป็นของแมป `excel-reports` — endpoint นี้ทำแค่ filter
 
 > 💳 **(22/10/26):** booking ทุกตัวใน `bookings[]` แนบ `confirmations` (array ประวัติส่งสลิป 1:N + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
 
@@ -1293,6 +1293,7 @@ curl -s -H "Accept: application/json" \
     {
       "id": "booking-uuid",
       "user_id": "user-uuid",
+      "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
       "confirmation": "202606-00001",
       "source": "online",
       "status": "draft",
@@ -1360,8 +1361,8 @@ curl -s -H "Accept: application/json" \
       "billing_comment": null,
       "bed_preference": "king_size",
       "addons": {
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
         "early_checkin": 2,
         "late_checkout": 0
       }
@@ -1396,7 +1397,30 @@ curl -s -H "Accept: application/json" \
 > **(A) จองแทน user**: ส่ง `user` = UUID ปลายทาง → `user_id` = target (**draft-dedup / ราคา daily_ku ใช้ role ของ target — UUID ไม่เจอ 422** · 🔄 room cap ย้ายมาใช้ role ผู้ล็อกอินแล้ว — ดู Room Cap Rule amendment 20/10/26) ·
 > **(B) เฮดเปล่า**: ไม่ส่ง `user`/`organize` → `user_id = null` (ส่ง `customer_name` เพิ่มได้ = ระบุผู้ติดต่อ/ผู้เข้าพัก) ·
 > **(C) จองให้องค์กร**: ส่ง `organize` = **erp code** → server lookup ตาราง `organizations` เป็น FK `organization_id` (ไม่เจอ/inactive → 422) + **บังคับ `customer_name`** (phone/email nullable) → `user_id = null` + snapshot `customer_name`/`customer_phone`/`customer_email` บน bookings ·
-> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap (ทุกโหมด — 🔄 amendment 20/10/26: cap ตัดสินจาก Sanctum login role แม้โหมด A) · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · response เพิ่ม `organization_id` + `customer_name`/`customer_phone`/`customer_email`
+> กติกา: ทั้ง 3 โหมด **เฉพาะ `role:admin`** (non-admin ส่ง `user`/`organize`/`customer_name` → 403) · `user` × `organize` **mutually exclusive** (422) · `organize` ต้องใช้ `source='admin'` (422) · โหมด B/C `user_id=null` → **ไม่มี draft-dedup** (จองซ้อนหลายบิลได้) · ราคา `daily` เสมอ (ไม่มี role ให้คิด daily_ku) · admin ไม่โดน room cap (ทุกโหมด — 🔄 amendment 20/10/26: cap ตัดสินจาก Sanctum login role แม้โหมด A) · ทุกโหมดส่ง `payment_type=deferred` ได้ (org booking ใช้ค้างชำระ — ดูหัวข้อ 💳) · 🔄 **(18/11/26, owner-envelope)** response ตอบ identity ผ่าน **`owner` object** — flat `user_id` + `organization_id` + `customer_*` ถูกตัดออกจาก envelope แล้ว (breaking)
+
+> 🏛️ **owner object (18/11/26 — derived, มีทุก endpoint ที่ serialize Booking ทั้ง `POST /bookings` 201 / `GET /bookings` / `GET /bookings/{id}` / `PUT /bookings/{id}` 200):** เจ้าของบิลแบบ polymorphic — key set เดียวกันทุก type · บิลหนึ่งมีเจ้าของได้คนเดียวเสมอ
+>
+> | `owner.type` | ความหมาย | `id` | `name` | `erp` | `customer_*` |
+> |---|---|---|---|---|---|
+> | `organization` | โหมด C จองให้องค์กร | organization_id | ชื่อองค์กร (live จาก organizations table) | erp code (live) | snapshot ผู้ติดต่อ |
+> | `user` | จองเอง / โหมด A จองแทน / walk-in (user_id = staff) | user_id | ชื่อ user (live) | `null` | snapshot (มีได้เมื่อ attach ระบุ) |
+> | `contact` | โหมด B เฮดเปล่าระบุผู้ติดต่อ | `null` | `null` | `null` | snapshot ผู้ติดต่อ |
+> | `owner = null` | draft ลอย ไม่ระบุเจ้าของ/ผู้ติดต่อ | — | — | — | — |
+>
+> ```json
+> "owner": {
+>   "type": "organization",
+>   "id": "3f9c1a2e-8b47-4c6d-9e21-7a55f0d1c309",
+>   "name": "คณะเกษตร มหาวิทยาลัยเกษตรศาสตร์",
+>   "erp": "KU-AGR-001",
+>   "customer_name": "ดร.วิภา ราชกรี",
+>   "customer_phone": null,
+>   "customer_email": "wipa@ku.ac.th"
+> }
+> ```
+>
+> หมายเหตุ: DB columns (`organization_id`, `customer_*`) คงอยู่ครบ — ซ่อนเฉพาะ serialization ($hidden) · server-side/reports อ่าน column ตรง ๆ ตามเดิม · `user_id` (FK column) ยัง serialize บน booking object ของ `GET /bookings` / `GET /bookings/{id}` ตามเดิม (ตัดเฉพาะ echo ใน envelope)
 
 **Validation Rules:**
 
@@ -1427,7 +1451,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.bed_preference`            | nullable, in: `king_size` (ห้องชั้น 8)        |
 | `booking_rooms.*.billing_address`           | nullable, string, max 255                     |
 | `booking_rooms.*.billing_comment`           | nullable, string, max 255                     |
-| `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0                      |
+| `booking_rooms.*.addons.breakfast_enabled`  | nullable, boolean — 🍳 canonical (19/11/26)   |
+| `booking_rooms.*.addons.breakfast_code`     | nullable, string, max 50 — เรทจาก global_rates (code ขึ้นต้น breakfast) |
+| `booking_rooms.*.addons.breakfast`          | nullable, integer, min 0 (⚠️ legacy alias → toggle) |
 | `booking_rooms.*.addons.early_checkin`      | nullable, integer (0–7)                       |
 | `booking_rooms.*.addons.late_checkout`      | nullable, integer (0–7)                       |
 | `booking_rooms.*.addons.early_hours`        | nullable, integer (0–7) — alias ของ `early_checkin` |
@@ -1450,11 +1476,7 @@ curl -s -H "Accept: application/json" \
   "paid_amount": 0,
   "outstanding_amount": 2600,
   "payment_deadline": "2026-06-20T11:00:00.000000Z",
-  "user_id": "user-uuid",
-  "organization_id": null,
-  "customer_name": null,
-  "customer_phone": null,
-  "customer_email": null,
+  "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
   "booking_rooms": [
     {
       "id": "br-uuid",
@@ -1485,8 +1507,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "br-uuid",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 200,
         "early_hours": 2,
         "late_checkOut_price": 0,
@@ -1549,8 +1572,8 @@ curl -s -H "Accept: application/json" \
       "billing_address": null,
       "billing_comment": null,
       "addons": {
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
         "early_checkin": 0,
         "late_checkout": 0
       }
@@ -1596,8 +1619,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid",
         "booking_room_id": "new-br-uuid",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -1629,14 +1653,14 @@ curl -s -H "Accept: application/json" \
 🌟 **(17/08/26, 10/11/26)**: แก้ไข booking room **รายห้อง** — สามโหมดตาม parent booking & booking room:
 
 1. **แก้ไขปกติ (draft)** — ใช้ได้เมื่อ BR เป็น `draft` **และ** parent booking เป็น `draft` (เจ้าของหรือ admin)
-2. 💳 **Change-tier หลังจ่ายก่อนเข้าพัก (25/09/26 ticket 10 · 🔄 **tier-endpoints-v2 2026-11-11**)** — parent booking เป็น `paid|confirmed` และ BR เป็น `confirmed` → **admin หรือ staff** (user เจ้าของ = `403`) · **เปลี่ยนประเภทห้องขึ้น/ลงได้ + ราคา manual** (ดู Constraints) · ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่)
+2. 💳 **Change-tier หลังจ่ายก่อนเข้าพัก (25/09/26 ticket 10 · 🔄 **tier-endpoints-v2 2026-11-11**)** — parent booking เป็น `paid|confirmed` และ BR เป็น `confirmed` → **admin หรือ staff** (user เจ้าของ = `403`) · **เปลี่ยนประเภทห้องขึ้น/ลงได้ + ราคา manual** (ดู Constraints) · ส่วนต่างไหลเข้า `outstanding_amount` เก็บต่อผ่าน `POST /front-desk/{id}/payment` (กลไกเดิม — ไม่มี endpoint เงินใหม่) · 🍳 **(19/11/26) addon-only carve-out:** บน BR ที่มีเลขห้องแล้ว (room_id ≠ null) ยังส่ง **`addons`/`extra_beds` ล้วน** เข้ามาได้ (early check-in / late check-out / breakfast / เตียงเสริม — เช่น ตกลงเรื่อง early check-in หลัง assign ห้องแล้ว) — server คิด surcharge เฉพาะส่วน addon คงราคาห้องเดิม ส่วน tier/shape fields (`room_type_id`, วันที่, `guests`, ราคา) ยัง `422` ชี้ `change-room` เต็มรูปแบบ
 3. 🏨 **Addon แก้กลางพัก (checked_in addon-only, 10/11/26)** — parent booking เป็น `confirmed` และ BR เป็น `checked_in` → **admin หรือ staff เท่านั้น** (owner/non-admin/non-staff = `403`) · **Field allow-list**: รับเฉพาะ `addons` และ `extra_beds` (หากส่ง `room_type_id`, `check_in`, `check_out`, `guests`, `bed_preference`, `billing_address`, `billing_comment` จะได้ `422` "ห้องเข้าพักแล้วรับเฉพาะการเพิ่ม/แก้ addon เท่านั้นค่ะ 🏨") · ข้ามการตรวจ guests cap, availability, room release · ราคา reprice recalculate และส่วนต่างเข้า `outstanding_amount` (keep surcharge envelope) · เก็บต่อผ่าน `POST /front-desk/{id}/payment` ก่อน check-out (หากมียอดค้างชำระ check-out จะถูก reject `400`)
 
 🔒 **Auth required** · Ownership/Role: **booking owner** or **admin** (โหมด change-tier: **admin หรือ staff**, โหมด checked_in: **admin หรือ staff เท่านั้น**) · ⏱ Rate-limited: 5 requests/minute
 
 **Constraints:**
 - โหมด draft: Booking `status = 'draft'` + BookingRoom `status = 'draft'` เท่านั้น → `422`
-- โหมด change-tier 💳 (🔄 **tier-endpoints-v2 2026-11-11** · 🎚️ **default keep-price 2026-11-16**): Booking `paid|confirmed` + BR `draft|confirmed` (`checked_out/no_show` = `422`) · **scope: BR `room_id = null` เท่านั้น** — BR ที่มีเลขห้องแล้ว → `422` ชี้ไปใช้ `change-room` (**breaking** กับกติกาเดิม 2026-11-04) · ส่ง param `room_id` → `422` (การจัดเลขห้องผ่าน assign-rooms/RoomAllocator เท่านั้น) · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · **ราคา (🎚️ 16/11/26):** **default คงราคาห้องเดิม (`apply_new_rate=false`) ทั้งขาขึ้นและขาลง** (`surcharge_amount = 0`, รวมห้องอื่นในบิลก็คงราคาเดิม) — ต้องส่ง `apply_new_rate: true` เพื่อคำนวณตามเรทใหม่จาก `global_rates` หรือระบุ `price_per_night` (int baht, ชนะเสมอ) · ยกเว้นเมื่อเปลี่ยนจำนวนคืน (`check_in`/`check_out` จำนวนคืนเปลี่ยน) หรือแก้ `addons`/`extra_beds` ระบบยังคำนวณส่วนต่างส่วนนั้นตามปกติ · guests cap เทียบ `max_guests` tier ใหม่ (`422` พร้อมแนะแก้ guests ในคำขอเดียวกัน) · `extra_beds_by_night` รายคืน ≤ `max_extra_beds` tier ใหม่ (`422`) · dates แก้ได้ตามเดิม (availability re-check) · **downgrade อนุญาต (เมื่อเปิด `apply_new_rate=true` หรือระบุ `price_per_night`) — ไม่คืนเงิน:** `outstanding = max(0, total + charges − paid)`, `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · `surcharge_amount` ติดลบได้ · audit `status_change_logs` note row บอก direction (`upgrade`/`downgrade`/`keep-price`/`same-tier`) + tier + ราคาเดิม→ใหม่
+- โหมด change-tier 💳 (🔄 **tier-endpoints-v2 2026-11-11** · 🎚️ **default keep-price 2026-11-16**): Booking `paid|confirmed` + BR `draft|confirmed` (`checked_out/no_show` = `422`) · **scope: BR `room_id = null` เท่านั้น** — BR ที่มีเลขห้องแล้ว → `422` ชี้ไปใช้ `change-room` (**breaking** กับกติกาเดิม 2026-11-04) · 🍳 **ยกเว้น addon-only (19/11/26):** payload ที่มีแค่ `addons`/`extra_beds` ล้วน **ผ่าน guard ได้** แม้ room_id ≠ null (ตรวจจาก validated keys ⊆ `['addons', 'extra_beds']` — ปน shape field อย่างอื่นเข้ามา = โดน 422 ตามเดิม) · surcharge = ส่วน addon ล้วน (คงราคาห้องเดิมทั้งบิลผ่าน keep-price override) + `extra_beds_by_night` ยังตรวจ cap ≤ `max_extra_beds` · audit note ติดป้าย `addon-only (surcharge)` แทน `change-tier` · ส่ง param `room_id` → `422` (การจัดเลขห้องผ่าน assign-rooms/RoomAllocator เท่านั้น — แม้ใน request addon-only) · `room_type_id` **ขึ้น/ลงได้** (เลิก upgrade-only) · **ราคา (🎚️ 16/11/26):** **default คงราคาห้องเดิม (`apply_new_rate=false`) ทั้งขาขึ้นและขาลง** (`surcharge_amount = 0`, รวมห้องอื่นในบิลก็คงราคาเดิม) — ต้องส่ง `apply_new_rate: true` เพื่อคำนวณตามเรทใหม่จาก `global_rates` หรือระบุ `price_per_night` (int baht, ชนะเสมอ) · ยกเว้นเมื่อเปลี่ยนจำนวนคืน (`check_in`/`check_out` จำนวนคืนเปลี่ยน) หรือแก้ `addons`/`extra_beds` ระบบยังคำนวณส่วนต่างส่วนนั้นตามปกติ · guests cap เทียบ `max_guests` tier ใหม่ (`422` พร้อมแนะแก้ guests ในคำขอเดียวกัน) · `extra_beds_by_night` รายคืน ≤ `max_extra_beds` tier ใหม่ (`422`) · dates แก้ได้ตามเดิม (availability re-check) · **downgrade อนุญาต (เมื่อเปิด `apply_new_rate=true` หรือระบุ `price_per_night`) — ไม่คืนเงิน:** `outstanding = max(0, total + charges − paid)`, `is_paid` recompute ผ่าน `Booking::syncIsPaid()` (ลดยอดแล้ว paid ครอบ → true คืนได้) · `surcharge_amount` ติดลบได้ · audit `status_change_logs` note row บอก direction (`upgrade`/`downgrade`/`keep-price`/`same-tier`) + tier + ราคาเดิม→ใหม่
 - โหมด checked_in 🏨: Booking `confirmed` + BR `checked_in` · รับเฉพาะ `addons` / `extra_beds` · `checked_out/no_show` = `422` เหมือนเดิม ("ไม่สามารถแก้ไขห้องได้ เนื่องจากห้องเข้าพักหรือปิดสถานะไปแล้วค่ะ") · downgrade ต่ำกว่าเงินที่เข้า ledger = `422` · ส่วนต่าง surcharge เข้า `outstanding_amount` · ต้องชำระเงินครบก่อน check-out เสมอ (front desk reject `400` เมื่อมียอดค้าง)
 - แก้ได้ทุก field ของห้องในโหมด draft/surcharge (วันที่ / ประเภทห้อง / guests / addons) — **ยกเว้น** `room_id` (ต้องผ่าน RoomAllocator) และ `status` (ต้องผ่าน transitionStatus) · สำหรับโหมด checked_in แก้ได้เฉพาะ `addons` และ `extra_beds`
 - ถ้าแก้ `room_type_id`/`check_in`/`check_out` → **เช็ค availability ใหม่** (นับ existing overlap โดยตัดห้องตัวเองออกจาก count) → เต็ม = `422` · 🏨 (24/09/26) denominator = **sellable pool ต่อช่วงเข้าพัก** — admin ส่ง `include_reserved=true` (body field) ขยายเป็น sellable + reserved (ดูหัวข้อ "Flag `include_reserved`" หมวด Rooms)
@@ -1659,7 +1683,7 @@ curl -s -H "Accept: application/json" \
   "bed_preference": "king_size",
   "billing_address": null,
   "billing_comment": null,
-  "addons": { "extra_bed": 1, "breakfast": 2, "early_checkin": 0, "late_checkout": 0 }
+  "addons": { "breakfast_enabled": true, "breakfast_code": "breakfast_200", "early_checkin": 0, "late_checkout": 0 }
 }
 ```
 > 🎚️ `apply_new_rate` (nullable boolean, **default `false`**) และ `price_per_night` (nullable int baht) มีผลเฉพาะโหมด change-tier (บิล `paid|confirmed`, `admin+staff`): ไม่ส่งหรือ `false` = คงราคาห้องเดิมทั้งขาขึ้น/ลง · ส่ง `true` = คำนวณตามเรทใหม่จาก `global_rates` · ส่ง `price_per_night` = ใช้ราคาที่กรอกเสมอ (ชนะ `apply_new_rate`) · โหมด `draft` ไม่ใช้ toggle นี้ (reprice ตามเรทปกติเสมอ) · โหมด `checked_in` ห้ามส่งทั้งคู่ (`422`)
@@ -1678,7 +1702,9 @@ curl -s -H "Accept: application/json" \
 | `guests.*` | เหมือน `POST /bookings` |
 | `bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `billing_address` / `billing_comment` | nullable string ≤ 255 |
-| `addons.breakfast` | nullable integer ≥ 0 |
+| `addons.breakfast_enabled` | nullable boolean — 🍳 canonical (19/11/26) |
+| `addons.breakfast_code` | nullable string max 50 — เรทจาก global_rates |
+| `addons.breakfast` | nullable integer ≥ 0 (⚠️ legacy alias → toggle) |
 | `addons.early_checkin` / `addons.late_checkout` | nullable integer (0–7) |
 | `addons.early_hours` / `addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
 
@@ -1713,8 +1739,9 @@ curl -s -H "Accept: application/json" \
     "addon": {
       "id": "addon-uuid-1",
       "booking_room_id": "br-uuid-1",
-      "extra_bed": 1,
-      "breakfast": 2,
+      "breakfast_enabled": true,
+      "breakfast_code": "breakfast_200",
+      "extra_beds_by_night": null,
       "early_checkIn_price": 0,
       "early_hours": 0,
       "late_checkOut_price": 0,
@@ -1782,7 +1809,7 @@ curl -s -H "Accept: application/json" \
       "guests": [
         { "title": "Mr.", "name": "Somchai Jaidee", "nationality": "Thai" }
       ],
-      "addons": { "breakfast": 2 }
+      "addons": { "breakfast_enabled": true, "breakfast_code": "breakfast_200" }
     }
   ]
 }
@@ -1802,7 +1829,9 @@ curl -s -H "Accept: application/json" \
 | `booking_rooms.*.guests.*` | เหมือน `POST /bookings` |
 | `booking_rooms.*.bed_preference` | nullable `in:king_size` (ห้องชั้น 8) |
 | `booking_rooms.*.billing_address` / `booking_rooms.*.billing_comment` | nullable string ≤ 255 |
-| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 |
+| `booking_rooms.*.addons.breakfast_enabled` | nullable boolean — 🍳 canonical (19/11/26) |
+| `booking_rooms.*.addons.breakfast_code` | nullable string max 50 — เรทจาก global_rates |
+| `booking_rooms.*.addons.breakfast` | nullable integer ≥ 0 (⚠️ legacy alias → toggle) |
 | `booking_rooms.*.addons.early_checkin` / `booking_rooms.*.addons.late_checkout` | nullable integer (0–7) |
 | `booking_rooms.*.addons.early_hours` / `booking_rooms.*.addons.late_hours` | nullable integer (0–7) — alias (canonical ชนะถ้าส่งทั้งคู่) |
 
@@ -1832,8 +1861,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid-1",
         "booking_room_id": "br-uuid-1",
-        "extra_bed": 1,
-        "breakfast": 0,
+        "breakfast_enabled": false,
+        "breakfast_code": null,
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -1861,8 +1891,9 @@ curl -s -H "Accept: application/json" \
       "addon": {
         "id": "addon-uuid-2",
         "booking_room_id": "br-uuid-2",
-        "extra_bed": 0,
-        "breakfast": 2,
+        "breakfast_enabled": true,
+        "breakfast_code": "breakfast_200",
+        "extra_beds_by_night": null,
         "early_checkIn_price": 0,
         "early_hours": 0,
         "late_checkOut_price": 0,
@@ -2112,6 +2143,7 @@ curl -H "Authorization: Bearer <TOKEN>" \
   "booking": {
     "id": "booking-uuid",
     "user_id": "user-uuid",
+    "owner": { "type": "user", "id": "user-uuid", "name": "Somchai Jaidee", "erp": null, "customer_name": null, "customer_phone": null, "customer_email": null },
     "confirmation": "202606-00001",
     "source": "online",
     "status": "paid",
@@ -2353,6 +2385,8 @@ Preview a discount code and check live quota remaining without side effects (doe
 }
 ```
 > `check_in` and `check_out` are optional. If provided, the code's `stay_from` / `stay_until` window is validated.
+>
+> 🎯 `discount.room_type_ids` ใน response = **room-type targeting** ของโค้ด: `null` = ใช้ได้กับ**ทุก** room type · array ของ UUID = จำกัดเฉพาะ room type ที่ระบุ — การเช็ค eligibility รายห้องเกิดตอน apply จริง (endpoint นี้ preview เฉพาะ quota + stay window ไม่รับ room context)
 
 **Response `200`:**
 ```json
@@ -2420,6 +2454,8 @@ Lookup discount information by code name (case-insensitive) or UUID without requ
 
 **Error responses:** `401` (Unauthenticated) · `404` (Not Found)
 
+> 🎯 **`room_type_ids`** — `null` = ใช้ได้ทุก room type · array ของ UUID = จำกัดเฉพาะ room type นั้น (eligibility ตรวจราย `booking_room` ตอน apply — รายละเอียดดูหัวข้อ Discount Management Endpoints)
+
 ---
 
 ### PUT `/bookings/{bookingId}/discount-code` — Apply / Change discount code 🎟️
@@ -2464,9 +2500,9 @@ Applies or swaps a discount code on an existing `draft` booking. Holds quota slo
         "discount_amount": 200000,
         "amount": 260000,
         "addon": {
-          "breakfast": 2,
+          "breakfast_enabled": true,
+          "breakfast_code": "breakfast_200",
           "breakfast_price": 60000,
-          "extra_bed": 0,
           "extra_bed_price": 0,
           "early_checkIn_price": 0,
           "late_checkOut_price": 0
@@ -2537,6 +2573,12 @@ Removes the discount code from a `draft` booking, releases held redemption slots
 > - `code` **rename ได้เฉพาะโค้ดที่ยังไม่มี redemption ผูกอยู่** (ไม่มี hold/used) — `bookings.discount_code` เป็น string snapshot การ rename ขณะมี hold จะทำให้ draft ใช้งานไม่ได้ → ตอบ `422`. ถ้าต้องการหยุดใช้โค้ด ใช้ `PATCH /discounts/{id}/toggle` แทน
 > - `stay_from` / `stay_until` ต้องส่ง**มาเป็นคู่เสมอ** (`required_with` กันไว้ทั้ง store/update) — half-set window ถูกปฏิเสธ `422`
 > - ความซ้ำของ `code` เช็คแบบ **case-insensitive** (`welcome10` ≡ `WELCOME10`) — ส่งซ้ำต่าง case → `422` validation error
+
+> 🎯 **Room-type targeting (`room_type_ids`, 2026-08-27):**
+> - `POST /discounts` / `PUT /discounts/{id}` รับ `room_type_ids` เป็น **nullable array ของ room-type UUID** — validate `uuid|exists:room_types,id|distinct` (ห้ามซ้ำใน array เดียว, UUID ต้องมีอยู่จริงในตาราง `room_types` ไม่งั้น `422`)
+> - **`null` (ไม่ส่ง field) = ใช้ได้กับทุก room type** · ส่ง array = จำกัดเฉพาะ room type ที่ระบุเท่านั้น
+> - Eligibility ตรวจ**รายห้อง** (`booking_room.room_type_id` อยู่ในลิสต์ — `DiscountService::isEligible()`) ควบคู่กับช่วงวันเข้าพัก `stay_from`/`stay_until` — ห้อง tier ตรงเท่านั้นที่ได้ส่วนลดและกินโควตา (1 ห้อง eligible = 1 slot)
+> - บิลที่**ไม่มีห้องไหนเข้าเกณฑ์เลย** → apply โดน `422` (`"ไม่มีห้องในการจองนี้ที่ใช้โค้ดได้ค่ะ 🏨"`) — บิลหลายห้องที่บางส่วนตรง = ส่วนลดเข้าเฉพาะห้องที่ตรง (all-or-nothing อยู่ที่**โควตา** ไม่ใช่ targeting)
 
 ---
 
@@ -2972,7 +3014,7 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 - ห้องอยู่ในช่วง **maintenance period** ทับวันใหม่ → `422` · **reserved period ไม่บล็อก** (ตามธรรมเนียม change-room/split-upgrade ฝั่ง admin+staff)
 - BR **ไม่มีห้อง → ข้ามตรวจห้องทั้งหมด** (ไปจัดตอน `PUT /bookings/{id}/assign-rooms` ตามปกติ)
 
-**ผลลัพธ์ (ใน transaction เดียว):** BR อัปเดต `check_in`/`check_out` ใหม่ (สถานะคงเดิม — **ไม่ transition สถานะใด**) · addon `extra_beds_by_night` **เลื่อน key ตาม delta วัน คง qty เดิม** (breakfast × จำนวนคืนเดิม กับ early/late hours คงมูลค่า) · reprice ทั้งบิลจากเรทวันนี้ผ่าน `DiscountService::reprice()` (⚠️ caveat ตระกูล — ราคาบิลอื่นบนใบเดียวกันอาจไหลตามเรทปัจจุบัน) + `syncIsPaid()` (ส่วนต่างไหลเข้า `outstanding_amount` — เก็บต่อผ่าน front-desk payment) · audit: `StatusChangeLog` note row ของ BR (from=to=สถานะเดิม, เล่าวันเดิม→ใหม่ + delta + ราคาเดิม→ใหม่)
+**ผลลัพธ์ (ใน transaction เดียว):** BR อัปเดต `check_in`/`check_out` ใหม่ (สถานะคงเดิม — **ไม่ transition สถานะใด**) · addon `extra_beds_by_night` **เลื่อน key ตาม delta วัน คง qty เดิม** (breakfast toggle/code คงเดิม — ยอดคิดใหม่ × คืน × หัว ตอน reprice กับ early/late hours คงมูลค่า) · reprice ทั้งบิลจากเรทวันนี้ผ่าน `DiscountService::reprice()` (⚠️ caveat ตระกูล — ราคาบิลอื่นบนใบเดียวกันอาจไหลตามเรทปัจจุบัน) + `syncIsPaid()` (ส่วนต่างไหลเข้า `outstanding_amount` — เก็บต่อผ่าน front-desk payment) · audit: `StatusChangeLog` note row ของ BR (from=to=สถานะเดิม, เล่าวันเดิม→ใหม่ + delta + ราคาเดิม→ใหม่)
 
 **Request Body:**
 ```json
@@ -3204,19 +3246,20 @@ Records a completed payment (เงินสดหน้าเคาน์เต
 | `deposit_amount` | nullable integer ≥ 1 | ส่ง `null` ชัด ๆ = revert ไป effective 50% · 422 ถ้า type ปัจจุบัน/ใหม่ ≠ deposit |
 | `discount_code` | nullable string max 50 | reuse กลไก `DiscountService` — reconcile `total_amount` ให้ครบ · ค่าว่าง = ลบโค้ด |
 | `payment_deadline` | nullable date after:now | ต่อ/ลดเวลาชำระ · ไม่ส่ง = คงเดิม |
-| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · ส่ง `null` ชัด ๆ = ถอด identity กลับเฮดเปล่า |
-| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · ส่ง `null` ชัด ๆ = ถอด identity |
+| `user` 🏛️ | nullable uuid exists:users | **attach จองแทน** — link target user · 🛡️ ส่ง `null`/`""` **ไม่มีผล** (no-op คง identity เดิม — 18/11/26) · ถอดใช้ `detach_identity: true` |
+| `organize` 🏛️ | nullable string max 100 | **attach org** — erp code → lookup เป็น FK `organization_id` (ไม่เจอ/inactive → 422) · mutually exclusive กับ `user` (422) · 🛡️ ส่ง `null`/`""` **ไม่มีผล** (no-op) · ถอดใช้ `detach_identity: true` |
+| `detach_identity` 🛡️ | boolean (18/11/26) | ถอด identity กลับเฮดเปล่า (เคลียร์ user/organization/snapshot ครบ) · ส่งคู่กับ `user`/`organize`/`customer_*` ค่าใหม่ → 422 |
 | `customer_name` 🏛️ | nullable string max 255 | **บังคับ** เมื่อส่ง `organize` · snapshot ผู้ติดต่อ/ผู้เข้าพัก |
 | `customer_phone` 🏛️ | nullable string max 50 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
 | `customer_email` 🏛️ | nullable string email max 255 | snapshot ติดต่อล้วน (ไม่ผูก flow) |
 
 > `total_amount` **ไม่รับ**จาก input — reprice โดยระบบเสมอ
 >
-> 🏛️ **กติกา attach/switch/detach (ticket 07):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · ส่ง `user: null` / `organize: null` ชัด ๆ = ถอดกลับเฮดเปล่า (เคลียร์ครบ) · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize` = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
+> 🏛️ **กติกา attach/switch/detach (ticket 07 · 🛡️ supersedes 18/11/26 identity-detach-guard):** ส่ง `user` หรือ `organize` ใหม่ = **แทนที่ identity เดิมทั้งชุด** (เคลียร์ org/user/snapshot เดิม แล้วเขียนด้วย field ที่ส่งมา — ไม่ส่ง phone/email = null) · **ถอด identity ต้องส่ง `detach_identity: true` ชัด ๆ** — `user`/`organize` เป็น `null`/`""` โดยไม่มี flag = **no-op คง identity เดิม** (กัน FE generic form ที่แถม key ครบจนล้าง identity) · ส่ง `detach_identity` คู่กับ `user`/`organize`/`customer_*` ค่าใหม่ → 422 · ส่ง `customer_*` โดยไม่ส่ง `user`/`organize`/flag = แก้ snapshot ผู้ติดต่อเฉพาะ field ที่ส่ง · **reprice เฉพาะตอน draft** — attach/ถอด `user` บน draft → `DiscountService::reprice()` (ku_member ได้ `daily_ku` อัตโนมัติผ่าน chokepoint `$booking->user`) · attach หลัง draft ขึ้นไป = เขียน identity เท่านั้น **ราคาคงเดิม** · ไม่ re-run draft-dedup ตอน attach (ผู้ตัดสินคือ admin)
 
 > 💳 **(22/10/26):** `booking` ใน response แนบ `confirmations` (array ประวัติส่งสลิป + `slip_image` signed URL) — รูปแบบเต็มดูหัวข้อ `GET /bookings/{id}`
 
-**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "user_id": ..., "organization_id": ..., "customer_name": ..., "customer_phone": ..., "customer_email": ... }`
+**Response 200**: `{ "status": "success", "booking": { ... }, "total_amount": ..., "payment_type": ..., "deposit_amount": ..., "paid_amount": ..., "outstanding_amount": ..., "payment_deadline": ..., "owner": { type, id, name, erp, customer_* } | null }` · 🔄 **(18/11/26, owner-envelope)** identity หลัง attach/switch/detach อ่านผ่าน `owner` object (ดูตาราง shape ในหัวข้อ `POST /bookings`) — flat `user_id`/`organization_id`/`customer_*` ถูกตัดออกจาก envelope แล้ว (breaking)
 
 **Errors**: `403` non-admin · `404` booking ไม่พบ · `422` payment fields บน non-draft / identity fields บน `complete`/`no_show` / `user`+`organize` พร้อมกัน / `organize` ไม่มี `customer_name` / erp ไม่เจอหรือ inactive / deposit_amount กับ type ที่ไม่ใช่ deposit
 
@@ -3312,7 +3355,7 @@ Creates a `pending` payment and returns a mock payment URL.
 
 **Query params (optional):** `?rate_type=daily|daily_ku|group|month|addon` · `?room_type_id={uuid}` — filter ได้ทั้งคู่
 
-> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast` 200 (200 THB), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
+> 🌟 **(26/08/26, 27/08/26)** Seeded addon defaults (integer baht, 11/09/26): `breakfast_100` 100 (100 THB), `breakfast_200` 200 (200 THB — 🍳 19/11/26 breakfast เป็น toggle เลือก 1 code · เพิ่ม code ขึ้นต้น `breakfast` ใช้ได้ทันที), `early_checkin` 100 (100 THB **ต่อชั่วโมง**), `late_checkout` 100 (100 THB **ต่อชั่วโมง**), `extra_bed` 500 (500 THB) — early/late คิดราคาตามสูตรรายชั่วโมง (int 0–7). Room rates ต่อ room type seed ผ่าน `RoomSeeder` (ดู `rates` object ใน [Rooms & Room Types](#rooms--room-types))
 
 **Response `200`:**
 ```json
@@ -3629,10 +3672,11 @@ Returns tasks with status `pending` or `in_progress`.
 |------------------------|---------|------------------------------------------|
 | `id`                   | UUID    | Primary key                              |
 | `booking_room_id`      | UUID    | FK → booking_rooms (one-to-one)          |
-| `extra_bed`            | integer | Number of extra beds requested           |
+| `breakfast_enabled`    | boolean | 🍳 (19/11/26) Breakfast toggle (แทน `breakfast_set_100/200` int เดิม — drop แล้ว) |
+| `breakfast_code`       | string\|null | 🍳 (19/11/26) เรทที่เลือกจาก global_rates (code ขึ้นต้น `breakfast`) — null เมื่อปิด |
+| `breakfast_price`      | integer | Total breakfast price (baht) = rate × nights × guests |
+| `extra_beds_by_night`  | JSON    | (05/10/26) map รายคืน `{YYYY-MM-DD: qty}` ของช่วง `[check_in, check_out)` (แทน `extra_bed` int เดิม) |
 | `extra_bed_price`      | integer | Total price for extra beds (baht)        |
-| `breakfast`            | integer | Number of breakfasts                     |
-| `breakfast_price`      | integer | Total breakfast price (baht)             |
 | `early_checkIn_price`  | integer | Early check-in total price (integer baht)|
 | `early_hours`          | integer | Early check-in hours (0–7, default: 0)   |
 | `late_checkOut_price`  | integer | Late check-out total price (integer baht)|
@@ -3650,7 +3694,7 @@ Returns tasks with status `pending` or `in_progress`.
 | Field            | Type    | Description                                       |
 |------------------|---------|---------------------------------------------------|
 | `id`             | UUID    | Primary key                                       |
-| `code`           | string  | Unique code: `breakfast`, `early_checkin`, etc.   |
+| `code`           | string  | Unique code: `breakfast_100`, `breakfast_200`, `early_checkin`, etc. |
 | `name_en`        | string  | English name                                      |
 | `name_th`        | string  | Thai name (nullable)                              |
 | `default_price`  | integer | Unit price (baht) — used in server-side pricing   |
@@ -3658,7 +3702,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `created_at`     | timestamp |                                                 |
 | `updated_at`     | timestamp |                                                 |
 
-**Seeded codes:** `breakfast`, `early_checkin`, `late_checkout`, `extra_bed`
+**Seeded codes:** `breakfast_100`, `breakfast_200`, `early_checkin`, `late_checkout`, `extra_bed` (🍳 19/11/26 — เรทอาหารเช้า = code ขึ้นต้น `breakfast` ที่ active ทั้งหมด เลือกได้ 1 code ต่อห้อง)
 
 ---
 
@@ -3958,11 +4002,11 @@ These endpoints exist but are **not production-ready**:
 - Room rates come from `global_rates` (rows where `rate_type='daily'` หรือ `rate_type='daily_ku'` สำหรับผู้ใช้ role `ku_member`).
 - 🌟 **KU Member Pricing (07/09/26)**: การคิดเงินรองรับ `daily_ku` สำหรับผู้ใช้ role `ku_member` อัตโนมัติ (fallback ไป `daily` หากไม่มีเรท KU) — ส่วน `group` / `month` rows ยังคงเป็น display-only ผ่าน `rates` object
 - Addon rates come from `global_rates.default_price` — **server-side only** (clients cannot send prices).
-- Pricing formula per room:
+- Pricing formula per room (🍳 breakfast toggle — 19/11/26):
   ```
   subtotal = (global_rates[rate_type='daily'].default_price × nights)
            + (extra_bed_qty × extra_bed_rate × nights)
-           + (breakfast_qty × breakfast_rate)
+           + (breakfast_rate(breakfast_code) × nights × guests)   # guests ว่าง นับ 1 — เปิด toggle เท่านั้น
            + (early_hours × early_checkin_rate)
            + (late_hours × late_checkout_rate)
   ```
@@ -4003,7 +4047,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/bookings \
       "guests": [{"title":"Mr.","name":"Test","nationality":"Thai"}],
       "billing_address": null,
       "billing_comment": null,
-      "addons": {"extra_bed": 0, "breakfast": 2, "early_checkin": 0, "late_checkout": 0}
+      "addons": {"breakfast_enabled": true, "breakfast_code": "breakfast_200", "early_checkin": 0, "late_checkout": 0}
     }]
   }'
 ```
@@ -4054,7 +4098,7 @@ curl -X POST https://ku-home.ku.ac.th/backend/api/v1/front-desk/booking-uuid/roo
 | `daily-financial` | รายงานการเงินประจำวัน | `admin`, `staff` | • `date` *(required, date)*: วันที่ทำรายการการเงิน<br>• `payment_channel` *(nullable, in:ทั้งหมด,สลิป (โอน/QR),เงินสด)*: ค่าเริ่มต้นคือ 'ทั้งหมด' (ที่มาเงิน derive จาก reference_number โดย confirmation UUID = สลิป ไม่งั้นคือเงินสด) |
 | `deposit` | รายงานยอดมัดจำ / ยอดค้างชำระ | `admin`, `staff` | • `date` *(required, date)*: วันที่สร้างการจอง<br>• `guest_type` *(nullable, in:หน่วยงาน/ทั่วไป,หน่วยงาน,ทั่วไป)*: ค่าเริ่มต้นคือ 'หน่วยงาน/ทั่วไป' |
 | `occupancy` | รายงานการเข้าพัก 7 วันถัดไป | `admin`, `staff` | • `date` *(required, date)*: วันที่เริ่มต้นช่วง 7 คืน |
-| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด,ชุด 100,ชุด 200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' |
+| `breakfast` | รายงานอาหารเช้า | `admin`, `staff` | • `date` *(required, date)*: วันที่รับประทานอาหารเช้า (เช้าวันถัดจากคืนนอน D ∈ (check_in, check_out])<br>• `breakfast_type` *(nullable, in:ทั้งหมด + code เรท active เช่น breakfast_100, breakfast_200)*: ค่าเริ่มต้นคือ 'ทั้งหมด' — 🍳 19/11/26 กรองด้วย code (แทน ชุด 100/ชุด 200 เดิม) · qty ในชีต = จำนวนผู้เข้าพักของห้อง |
 | `erp-transfer` | รายงานการโอนระหว่างหน่วยงาน | `admin`, `staff` | • `date_from` *(required, date)*: วันที่เริ่มต้นสร้างการจอง<br>• `date_to` *(required, date, after_or_equal:date_from)*: วันสิ้นสุด (ช่วงห่าง date_from ถึง date_to ต้อง ≤ 366 วัน)<br>• `agency_code` *(nullable, string, max:100)*: รหัส ERP ของหน่วยงาน |
 | `housekeeping` | รายงานแม่บ้าน (v1) | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้านและสถานะห้องพัก |
 | `housekeeping-v2` | รายงานแม่บ้าน v2 | `admin`, `staff`, **`housekeeping`** | • `date` *(required, date)*: วันที่ต้องการดูงานแม่บ้าน (หัวคอลัมน์ checklist 3 ช่องอ่านจาก config `reporting.cleaning_checks`) |
@@ -4193,16 +4237,15 @@ Accept: application/json
 - **`room_types.extra_bed_price` (Display-only):**
   - ฟิลด์ `extra_bed_price` บนโมเดล `RoomType` (ที่ส่งกลับใน availability / calendar endpoints) ทำหน้าที่เป็น **display-only สำหรับการแสดงผลหน้า UI เท่านั้น**
   - การคำนวณเงินจริงของระบบอ้างอิงจาก `global_rates` (code: `extra_bed`) ผ่าน `AddonPricing` เสมอ
-- **Addon Canonical Wire Format (รูปแบบมาตรฐานใหม่):**
-  - **ชุดอาหารเช้า (Breakfast):** ส่งเป็น `breakfast_sets` object แยก 2 ราคา:
+- **Addon Canonical Wire Format (🍳 breaking — 19/11/26, ดู patch note ฉบับเต็มที่ `docs/api_patches/2026-11-19-breakfast-toggle-guest-pricing.md`):**
+  - **อาหารเช้า (Breakfast):** เป็น **toggle (bool) ราคาห้องละชุดเดียว** + เลือกเรท 1 แบบจาก `global_rates` (code ขึ้นต้น `breakfast` — ปัจจุบัน `breakfast_100`/`breakfast_200`, เพิ่มเรทใหม่ใช้ได้ทันที):
     ```json
     "addons": {
-      "breakfast_sets": {
-        "set_100": 1,
-        "set_200": 2
-      }
+      "breakfast_enabled": true,
+      "breakfast_code": "breakfast_200"
     }
     ```
+    ยอดเงิน = `rate(breakfast_code) × nights × จำนวนผู้เข้าพักของห้อง` (**guests ว่าง นับ 1 คน**) · ส่ง `breakfast_code` ที่ไม่ active → **422** · response คืน `breakfast_enabled` / `breakfast_code` / `breakfast_price` (แทน `breakfast_set_100/200` ที่ถูกถอด)
   - **เตียงเสริม (Extra Bed):** ส่งเป็น `extra_beds_by_night` object ในรูปแบบ Map รายคืนของช่วงที่พัก `[check_in, check_out)`:
     ```json
     "addons": {
@@ -4214,7 +4257,8 @@ Accept: application/json
     ```
 - **การรองรับ Legacy Alias (ย้อนหลัง):**
   - ระบบยังคงรับและแปลงค่าผ่านคลาส `App\Services\Addon\AddonPricing` อัตโนมัติ:
-    - ส่ง `breakfast: N` (integer เดิม) → ถูก normalize แปลงเป็น `set_200 = N` (เรทเดิม 200 บาท)
+    - ส่ง `breakfast_sets: {set_100, set_200}` (จำนวนชุดเดิม 05/10/26) → ชุดไหน > 0 = เปิด toggle + code ตามชุดนั้น (ทั้งคู่ > 0 เลือก set_200) · ทั้งคู่ 0 = ปิด
+    - ส่ง `breakfast: N` (integer เด่า ๆ) → N > 0 = เปิด toggle + code `breakfast_200` (เรทเดิม), N = 0 = ปิด
     - ส่ง `extra_bed: N` หรือ `extra_beds: N` (integer เดิม) → ถูก normalize เป็น flat map ทุกคืนเท่ากับ $N$ เตียงตลอดช่วงเวลาเข้าพัก
 
 ---

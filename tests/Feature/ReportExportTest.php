@@ -9,6 +9,8 @@ use App\Models\BookingRoom;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
+use App\Services\ReportExcel\Data\BreakfastReportData;
+use App\Services\ReportExcel\Data\ExtraBedReportData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Str;
@@ -90,7 +92,7 @@ class ReportExportTest extends TestCase
 
         foreach ($this->validFilterMap() as $slug => $filters) {
             $queryString = http_build_query($filters);
-            $url = "/api/v1/reports/{$slug}/export" . ($queryString ? "?{$queryString}" : '');
+            $url = "/api/v1/reports/{$slug}/export".($queryString ? "?{$queryString}" : '');
 
             $response = $this->actingAs($admin, 'sanctum')->getJson($url);
 
@@ -104,7 +106,7 @@ class ReportExportTest extends TestCase
 
         foreach ($this->validFilterMap() as $slug => $filters) {
             $queryString = http_build_query($filters);
-            $url = "/api/v1/reports/{$slug}/export" . ($queryString ? "?{$queryString}" : '');
+            $url = "/api/v1/reports/{$slug}/export".($queryString ? "?{$queryString}" : '');
 
             $response = $this->actingAs($staff, 'sanctum')->getJson($url);
 
@@ -120,7 +122,7 @@ class ReportExportTest extends TestCase
 
         foreach ($this->validFilterMap() as $slug => $filters) {
             $queryString = http_build_query($filters);
-            $url = "/api/v1/reports/{$slug}/export" . ($queryString ? "?{$queryString}" : '');
+            $url = "/api/v1/reports/{$slug}/export".($queryString ? "?{$queryString}" : '');
 
             $response = $this->actingAs($housekeeper, 'sanctum')->getJson($url);
 
@@ -236,7 +238,7 @@ class ReportExportTest extends TestCase
         $this->assertStringStartsWith('PK', $content);
 
         // บันทึกลง temporary file และโหลดผ่าน IOFactory::load()
-        $tempFile = tempnam(sys_get_temp_dir(), 'add_charge_test_') . '.xlsx';
+        $tempFile = tempnam(sys_get_temp_dir(), 'add_charge_test_').'.xlsx';
         file_put_contents($tempFile, $content);
 
         try {
@@ -347,7 +349,7 @@ class ReportExportTest extends TestCase
             'extra_beds_by_night' => ['2026-10-02' => 1, '2026-10-03' => 1],
         ]);
 
-        $report = app(\App\Services\ReportExcel\Data\ExtraBedReportData::class);
+        $report = app(ExtraBedReportData::class);
         $rows = iterator_to_array($report->rows(['date_from' => '2026-10-01', 'date_to' => '2026-10-05']));
 
         $this->assertCount(1, $rows);
@@ -389,12 +391,13 @@ class ReportExportTest extends TestCase
             'status' => 'draft',
             'check_in' => '2026-10-02',
             'check_out' => '2026-10-04',
-            'num_guests' => 2,
+            'guests' => [['name' => 'A'], ['name' => 'B']],
             'amount' => 1000,
         ]);
         Addon::create([
             'booking_room_id' => $activeBR->id,
-            'breakfast_set_100' => 2,
+            'breakfast_enabled' => true,
+            'breakfast_code' => 'breakfast_100',
         ]);
 
         // Expired draft
@@ -416,18 +419,22 @@ class ReportExportTest extends TestCase
             'status' => 'draft',
             'check_in' => '2026-10-02',
             'check_out' => '2026-10-04',
-            'num_guests' => 2,
+            'guests' => [['name' => 'A'], ['name' => 'B']],
             'amount' => 1000,
         ]);
         Addon::create([
             'booking_room_id' => $expiredBR->id,
-            'breakfast_set_100' => 2,
+            'breakfast_enabled' => true,
+            'breakfast_code' => 'breakfast_100',
         ]);
 
-        $report = app(\App\Services\ReportExcel\Data\BreakfastReportData::class);
+        $report = app(BreakfastReportData::class);
         $rows = iterator_to_array($report->rows(['date' => '2026-10-03']));
 
         $this->assertCount(1, $rows);
         $this->assertEquals($activeBooking->booking_number, $rows[0]['booking_no']);
+        // qty = จำนวนผู้เข้าพักของห้อง (toggle ราคาห้องละชุดเดียว — ทุกคนกิน)
+        $this->assertSame(2, $rows[0]['qty']);
+        $this->assertSame('breakfast_100', $rows[0]['breakfast_code']);
     }
 }

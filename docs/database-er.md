@@ -127,14 +127,15 @@ erDiagram
     ADDONS {
         uuid id PK
         uuid booking_room_id FK
-        integer extra_bed "default: 0"
-        integer breakfast "default: 0"
+        boolean breakfast_enabled "default: false — 🍳 19/11/26 toggle (แทน breakfast_set_100/200 int เดิม)"
+        string breakfast_code "nullable — เรทจาก global_rates (code ขึ้นต้น breakfast), null เมื่อปิด"
+        json extra_beds_by_night "map รายคืน {YYYY-MM-DD: qty} (แทน extra_bed int เดิม)"
         integer early_checkIn_price "default: 0"
         integer early_hours "default: 0"
         integer late_checkOut_price "default: 0"
         integer late_hours "default: 0"
         integer extra_bed_price "default: 0"
-        integer breakfast_price "default: 0"
+        integer breakfast_price "default: 0 — rate × nights × guests"
         timestamp created_at
         timestamp updated_at
     }

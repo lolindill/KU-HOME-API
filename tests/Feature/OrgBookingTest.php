@@ -19,6 +19,8 @@ use Tests\TestCase;
  * โหมด org บน POST /bookings เดิม: `organize` = erp code → lookup เป็น FK organization_id
  * · user×organize mutually exclusive (422) · organize บังคับ customer_name (phone/email nullable)
  * · เฉพาะ role:admin + source='admin' · snapshot 3 columns บน bookings
+ * · 🏛️ owner-envelope (18/11/26): response อ่าน identity ผ่าน owner object — flat
+ *   organization_id/customer_* ถูกซ่อนออกจาก wire แล้ว (DB columns คงเดิม)
  * · กฎผลพวง user_id=null สืบทอดโหมด B ของ ticket 02 (ไม่ dedup · ราคา daily · ไม่มี cap)
  */
 class OrgBookingTest extends TestCase
@@ -103,11 +105,14 @@ class OrgBookingTest extends TestCase
         ], $this->bookingPayload($roomType->id, $checkIn, $checkOut)));
 
         $response->assertStatus(201)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', $org->id)
-            ->assertJsonPath('customer_name', 'สมชาย ใจดี')
-            ->assertJsonPath('customer_phone', '0812345678')
-            ->assertJsonPath('customer_email', 'somchai@example.com');
+            // 🏛️ owner-envelope (18/11/26) — identity อ่านผ่าน owner object (flat ถูกตัดออกแล้ว)
+            ->assertJsonPath('owner.type', 'organization')
+            ->assertJsonPath('owner.id', $org->id)
+            ->assertJsonPath('owner.name', 'บริษัท ตัวอย่าง จำกัด')
+            ->assertJsonPath('owner.erp', 'ORG001')
+            ->assertJsonPath('owner.customer_name', 'สมชาย ใจดี')
+            ->assertJsonPath('owner.customer_phone', '0812345678')
+            ->assertJsonPath('owner.customer_email', 'somchai@example.com');
 
         $booking = Booking::findOrFail($response->json('booking_id'));
         $this->assertNull($booking->user_id);
@@ -328,9 +333,11 @@ class OrgBookingTest extends TestCase
         ], $this->bookingPayload($roomType->id, $checkIn, $checkOut)));
 
         $response->assertStatus(201)
-            ->assertJsonPath('user_id', null)
-            ->assertJsonPath('organization_id', null)
-            ->assertJsonPath('customer_name', 'คุณเฮดเปล่า');
+            // 🏛️ owner-envelope — เฮดเปล่าที่ระบุผู้ติดต่อ = type "contact" (id/name null)
+            ->assertJsonPath('owner.type', 'contact')
+            ->assertJsonPath('owner.id', null)
+            ->assertJsonPath('owner.name', null)
+            ->assertJsonPath('owner.customer_name', 'คุณเฮดเปล่า');
 
         $booking = Booking::findOrFail($response->json('booking_id'));
         $this->assertNull($booking->user_id);
@@ -352,11 +359,16 @@ class OrgBookingTest extends TestCase
             'source' => 'online',
         ], $this->bookingPayload($roomType->id, $checkIn, $checkOut)));
 
+        // 🏛️ owner-envelope — บิล self-booking = type "user" (snapshot customer_* เป็น null)
         $response->assertStatus(201)
-            ->assertJsonPath('organization_id', null)
-            ->assertJsonPath('customer_name', null);
+            ->assertJsonPath('owner.type', 'user')
+            ->assertJsonPath('owner.id', $user->id)
+            ->assertJsonPath('owner.name', $user->name)
+            ->assertJsonPath('owner.erp', null)
+            ->assertJsonPath('owner.customer_name', null);
 
         $booking = Booking::findOrFail($response->json('booking_id'));
+        $this->assertSame($user->id, $booking->user_id);
         $this->assertNull($booking->organization_id);
         $this->assertNull($booking->customer_name);
         $this->assertNull($booking->customer_phone);
@@ -404,8 +416,12 @@ class OrgBookingTest extends TestCase
             ->assertJsonPath('search_criteria.organization_id', $orgA->id)
             ->assertJsonCount(1, 'bookings')
             ->assertJsonPath('bookings.0.id', $bookingA)
-            ->assertJsonPath('bookings.0.organization_id', $orgA->id)
-            // 🏛️ admin เห็น object organization (erp, name) eager-load
+            // 🏛️ owner-envelope — identity บน list อ่านผ่าน owner
+            ->assertJsonPath('bookings.0.owner.type', 'organization')
+            ->assertJsonPath('bookings.0.owner.id', $orgA->id)
+            ->assertJsonPath('bookings.0.owner.name', 'องค์กรเอ')
+            ->assertJsonPath('bookings.0.owner.erp', 'ORGA')
+            // 🏛️ admin เห็น object organization (erp, name) eager-load คงเดิม
             ->assertJsonPath('bookings.0.organization.id', $orgA->id)
             ->assertJsonPath('bookings.0.organization.erp', 'ORGA')
             ->assertJsonPath('bookings.0.organization.name', 'องค์กรเอ');
@@ -436,7 +452,7 @@ class OrgBookingTest extends TestCase
         $response->assertStatus(200)
             ->assertJsonPath('status', 'success')
             ->assertJsonCount(1, 'bookings')
-            ->assertJsonPath('bookings.0.customer_name', 'สมชาย ใจดี');
+            ->assertJsonPath('bookings.0.owner.customer_name', 'สมชาย ใจดี');
     }
 
     public function test_admin_sees_organization_object_on_show(): void
@@ -452,9 +468,12 @@ class OrgBookingTest extends TestCase
             ->getJson("/api/v1/bookings/{$bookingId}");
 
         $response->assertStatus(200)
-            ->assertJsonPath('booking.organization_id', $org->id)
+            // 🏛️ owner-envelope — identity บน show อ่านผ่าน owner
+            ->assertJsonPath('booking.owner.type', 'organization')
+            ->assertJsonPath('booking.owner.id', $org->id)
+            ->assertJsonPath('booking.owner.customer_name', 'สมศรี มีสุข')
+            // object organization eager-load คงเดิม (admin)
             ->assertJsonPath('booking.organization.erp', 'ORGD')
-            ->assertJsonPath('booking.organization.name', 'องค์กรดี')
-            ->assertJsonPath('booking.customer_name', 'สมศรี มีสุข');
+            ->assertJsonPath('booking.organization.name', 'องค์กรดี');
     }
 }

@@ -10,6 +10,7 @@ use App\Http\Requests\UpdateBookingRoomsRequest;
 use App\Models\Addon;
 use App\Models\Booking;
 use App\Models\BookingRoom;
+use App\Models\GlobalRate;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomStatePeriod;
@@ -97,10 +98,12 @@ class BookingController extends Controller
 
             // 🌟 Eager load bookingRooms.addon (roomType และ room ถูกซ่อน/ไม่ load เพื่อลด payload)
             // 💳 (22/10/26): confirmations.slipImage — ประวัติส่งสลิป 1:N (array) แนบใน booking ทุกตัว
-            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage'])
+            // 🏛️ (18/11/26, owner-envelope): with('user') ทุก role — accessor `owner` อ่าน user.name
+            //    (org booking มองไม่เห็นใน non-admin อยู่แล้ว จึงไม่มี organization query ไฟร้)
+            $query = Booking::with(['bookingRooms.addon', 'confirmations.slipImage', 'user'])
                 ->when($user && $user->role === 'admin', function ($q) {
-                    // 🏛️ ticket 08 — admin เห็น object organization คู่กับ user (org booking ไม่มีเจ้าของ user)
-                    $q->with('user')->with('organization');
+                    // 🏛️ ticket 08 — admin เห็น object organization (org booking ไม่มีเจ้าของ user)
+                    $q->with('organization');
                 });
 
             if ($user && $user->role === 'admin') {
@@ -412,7 +415,7 @@ class BookingController extends Controller
                 $addonInput = $roomRequest['addons'] ?? null;
 
                 // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
-                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $breakfast = AddonPricing::resolveBreakfast($addonInput, null, GlobalRate::breakfastRates());
                 $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
                     $roomRequest,
                     $addonInput,
@@ -437,8 +440,8 @@ class BookingController extends Controller
                 // 🌟 บันทึก Addon — canonical เท่านั้น (snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'breakfast_set_100' => $sets['set_100'],
-                    'breakfast_set_200' => $sets['set_200'],
+                    'breakfast_enabled' => $breakfast['enabled'],
+                    'breakfast_code' => $breakfast['code'],
                     'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
                     'late_hours' => $lateHours,
@@ -690,6 +693,13 @@ class BookingController extends Controller
             //    (container confirmed เสมอเมื่อมีห้อง checked_in → $postPayment เป็น true อยู่แล้ว)
             $isCheckedIn = $postPayment && $bookingRoom->status === 'checked_in';
 
+            // 🍳 (19/11/26) addon-only carve-out: request ที่ส่งมาเป็น addons/extra_beds ล้วน (ไม่แตะ
+            //    tier/วันที่/guests/ราคา) — ยกเว้นจาก guard ห้อง assign แล้ว เพราะ addon ไม่กระทบ
+            //    tier หรือเลขห้อง (เทียบเคียงโหมด 3 checked_in addon-only) · มติ v2 ข้อ 3 ยังคง
+            //    บังคับเต็มรูปแบบกับ shape/tier fields (room_type_id/check_in/check_out/guests/price)
+            $isAddonOnly = ! empty($validated)
+                && empty(array_diff(array_keys($validated), ['addons', 'extra_beds']));
+
             // 🔒 BR guard — draft mode: BR ต้อง draft · post-payment mode: แก้ได้ก่อนเข้าพัก หรือ เข้าพักแล้ว (addon-only)
             if ($postPayment) {
                 if (! in_array($bookingRoom->status, ['draft', 'confirmed', 'checked_in'], true)) {
@@ -697,13 +707,14 @@ class BookingController extends Controller
                 }
 
                 // 🚪 tier-endpoints-v2 (มติ v2 ข้อ 3): โหมด 2 (post-payment change-tier) ต้องไม่มี room_id
+                //    (🍳 19/11/26 ยกเว้น addon-only — แก้ addon บนห้องที่มีเลขแล้วก่อนเช็คอินได้ โดยไม่แตะ tier/เลขห้อง)
                 if (! $isCheckedIn) {
                     if ($request->has('room_id')) {
                         throw new \Exception('ไม่สามารถระบุเลขห้องผ่านการแก้ไขห้องได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
                     }
 
-                    if ($bookingRoom->room_id !== null) {
-                        throw new \Exception('ห้องนี้มีเลขห้องจัดไว้แล้ว ไม่สามารถแก้ไขประเภทห้องผ่านหน้านี้ได้ กรุณาใช้ change-room ค่ะ 🚪', 422);
+                    if ($bookingRoom->room_id !== null && ! $isAddonOnly) {
+                        throw new \Exception('ห้องนี้มีเลขห้องจัดไว้แล้ว ไม่สามารถแก้ไขประเภทห้องผ่านหน้านี้ได้ (รับเฉพาะ addon เท่านั้น) กรุณาใช้ change-room ค่ะ 🚪', 422);
                     }
                 }
             } elseif ($bookingRoom->status !== 'draft') {
@@ -855,7 +866,7 @@ class BookingController extends Controller
                 $addonChanged = false;
 
                 if ($touchesAddons || $shapeChanged) {
-                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    $breakfast = AddonPricing::resolveBreakfast($addonInput, $existingAddon, GlobalRate::breakfastRates());
                     // effective roomRequest = ค่าใหม่ถ้าส่งมา ไม่งั้นค่าเดิม (legacy extra_beds หัวห้องติดไปด้วย)
                     $effectiveRoomRequest = $validated;
                     $effectiveRoomRequest['check_in'] = $effectiveCheckIn;
@@ -878,8 +889,8 @@ class BookingController extends Controller
                     [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                     $addonData = [
-                        'breakfast_set_100' => $sets['set_100'],
-                        'breakfast_set_200' => $sets['set_200'],
+                        'breakfast_enabled' => $breakfast['enabled'],
+                        'breakfast_code' => $breakfast['code'],
                         'extra_beds_by_night' => $extraBedsByNight ?: null,
                         'early_hours' => $earlyHours,
                         'late_hours' => $lateHours,
@@ -890,6 +901,21 @@ class BookingController extends Controller
                             if ($k === 'extra_beds_by_night') {
                                 // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
                                 if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            // 🍳 (19/11/26) toggle/code — เทียบตาม type ของ column (bool / string nullable)
+                            if ($k === 'breakfast_enabled') {
+                                if ((bool) ($existingAddon->$k ?? false) !== (bool) $v) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ($k === 'breakfast_code') {
+                                if (($existingAddon->$k ?? null) !== $v) {
                                     $dirtyAddonFields[$k] = $v;
                                 }
 
@@ -973,7 +999,12 @@ class BookingController extends Controller
                             default => 'same-tier',
                         };
 
-                        $noteParts = ["change-tier ({$direction})"];
+                        // 🍳 (19/11/26) addon-only (ไม่เปลี่ยน tier) — ติดป้ายให้ต่างจาก change-tier
+                        $noteParts = [
+                            $isAddonOnly && ! $typeChanged
+                                ? 'addon-only (surcharge)'
+                                : "change-tier ({$direction})",
+                        ];
                         if ($typeChanged) {
                             $noteParts[] = "tier {$oldType?->name_en} → {$newType?->name_en}";
                         }
@@ -1259,7 +1290,7 @@ class BookingController extends Controller
                     $existingAddon = $bookingRoom->addon;
                     $addonInput = $roomRequest['addons'] ?? null;
 
-                    $sets = AddonPricing::resolveBreakfastSets($addonInput, $existingAddon);
+                    $breakfast = AddonPricing::resolveBreakfast($addonInput, $existingAddon, GlobalRate::breakfastRates());
                     // effective roomRequest — legacy extra_beds หัวห้องติดไปด้วย (pattern resolveExtraBed เดิม)
                     $effectiveRoomRequest = $roomRequest;
                     $effectiveRoomRequest['check_in'] = $u['check_in'];
@@ -1273,8 +1304,8 @@ class BookingController extends Controller
                     [$earlyHours, $lateHours] = AddonPricing::resolveEarlyLate($addonInput, $existingAddon);
 
                     $addonData = [
-                        'breakfast_set_100' => $sets['set_100'],
-                        'breakfast_set_200' => $sets['set_200'],
+                        'breakfast_enabled' => $breakfast['enabled'],
+                        'breakfast_code' => $breakfast['code'],
                         'extra_beds_by_night' => $extraBedsByNight ?: null,
                         'early_hours' => $earlyHours,
                         'late_hours' => $lateHours,
@@ -1285,6 +1316,21 @@ class BookingController extends Controller
                             if ($k === 'extra_beds_by_night') {
                                 // map รายคืน — เทียบเป็น array (แก้จำนวนรายคืน = dirty)
                                 if (($existingAddon->$k ?? []) !== ($v ?? [])) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            // 🍳 (19/11/26) toggle/code — เทียบตาม type ของ column (bool / string nullable)
+                            if ($k === 'breakfast_enabled') {
+                                if ((bool) ($existingAddon->$k ?? false) !== (bool) $v) {
+                                    $dirtyAddonFields[$k] = $v;
+                                }
+
+                                continue;
+                            }
+                            if ($k === 'breakfast_code') {
+                                if (($existingAddon->$k ?? null) !== $v) {
                                     $dirtyAddonFields[$k] = $v;
                                 }
 
@@ -1674,7 +1720,7 @@ class BookingController extends Controller
                 $addonInput = $roomRequest['addons'] ?? null;
 
                 // 📊 canonical/legacy normalize ผ่าน AddonPricing จุดเดียว (spec §2.2)
-                $sets = AddonPricing::resolveBreakfastSets($addonInput);
+                $breakfast = AddonPricing::resolveBreakfast($addonInput, null, GlobalRate::breakfastRates());
                 $extraBedsByNight = AddonPricing::resolveExtraBedsByNight(
                     $roomRequest,
                     $addonInput,
@@ -1703,8 +1749,8 @@ class BookingController extends Controller
                 //    snapshot ราคาเขียนโดย reprice())
                 Addon::create([
                     'booking_room_id' => $bookingRoom->id,
-                    'breakfast_set_100' => $sets['set_100'],
-                    'breakfast_set_200' => $sets['set_200'],
+                    'breakfast_enabled' => $breakfast['enabled'],
+                    'breakfast_code' => $breakfast['code'],
                     'extra_beds_by_night' => $extraBedsByNight ?: null,
                     'early_hours' => $earlyHours,
                     'late_hours' => $lateHours,
@@ -1739,13 +1785,9 @@ class BookingController extends Controller
                 'paid_amount' => $booking->fresh()->paid_amount,
                 'outstanding_amount' => $booking->fresh()->outstanding_amount,
                 'payment_deadline' => $booking->payment_deadline->toDateTimeString(),
-                // 🏛️ (25/09/26, organization-bookings ticket 02): user_id = target (โหมด A) / null (โหมด B)
-                'user_id' => $bookingUserId,
-                // 🏛️ (25/09/26, organization-bookings ticket 03): org fields (null เมื่อไม่ใช่ org/โหมด B)
-                'organization_id' => $booking->organization_id,
-                'customer_name' => $booking->customer_name,
-                'customer_phone' => $booking->customer_phone,
-                'customer_email' => $booking->customer_email,
+                // 🏛️ (18/11/26, owner-envelope) — identity อ่านผ่าน owner object ทุกโหมด
+                //    (flat user_id/organization_id/customer_* ถูกตัดออกจาก envelope แล้ว — breaking)
+                'owner' => $booking->fresh(['user', 'organization'])->owner,
                 'booking_rooms' => $bookingRoomsResponse,
             ], 201);
 
