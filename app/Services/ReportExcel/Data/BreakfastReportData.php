@@ -44,7 +44,9 @@ class BreakfastReportData extends BaseReportData
         // วันกิน D ∈ (check_in, check_out] — check_in < D <= check_out
         $addons = Addon::query()
             ->with(['bookingRoom.booking.user', 'bookingRoom.booking.organization', 'bookingRoom.room', 'bookingRoom.roomType'])
-            ->where('breakfast_enabled', true)
+            // 🐘 (25/11/26) PostgreSQL strict boolean — ห้าม where('breakfast_enabled', true) (PDO bind เป็น int → 500 บน prod
+            //    แม้ไม่มีข้อมูล · SQLite/test ไม่พัง) ใช้ whereRaw ตามธรรมเนียมเดียวกับ GlobalRate/RoomType
+            ->whereRaw('addons.breakfast_enabled = TRUE')
             ->whereHas('bookingRoom', function ($q) use ($eatDay) {
                 $q->where('check_in', '<', $eatDay->copy()->addDay())
                     ->where('check_out', '>=', $eatDay)

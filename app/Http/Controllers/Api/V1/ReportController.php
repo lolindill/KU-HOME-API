@@ -188,8 +188,11 @@ class ReportController extends Controller
             //    ไม่งั้นตกใน catch ล่างแล้วกลายเป็น 500 ทั้งที่ error contract คือ 422 (spec §4)
         } catch (ValidationException $e) {
             throw $e;
-        } catch (\Exception $e) {
-            Log::error("Report export failed [{$slug}]: ".$e->getMessage(), [
+        } catch (\Throwable $e) {
+            // 🩺 (25/11/26) \Throwable (เดิม \Exception) — Error เช่น class Mpdf\Mpdf not found / TypeError
+            //    เคยหลุดเป็นหน้า HTML "Server Error" · ValidationException ถูก rethrow ด้านบนแล้ว
+            Log::error("Report export failed [{$slug}]: ".get_class($e).': '.$e->getMessage(), [
+                'file' => $e->getFile().':'.$e->getLine(),
                 'user_id' => optional($request->user('sanctum'))->id,
                 'filters' => $request->query(),
             ]);

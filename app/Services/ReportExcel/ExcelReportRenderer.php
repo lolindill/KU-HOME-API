@@ -272,13 +272,26 @@ class ExcelReportRenderer
             'Cache-Control' => 'max-age=0',
         ];
 
-        return new StreamedResponse(function () use ($spreadsheet) {
-            $writer = new ThaiMpdfWriter($spreadsheet);
-            // 📦 cache ของ mPDF อยู่ใน storage/app/mpdf (mPDF mkdir ให้เองถ้ายังไม่มี)
-            //    — ไม่เขียวทิ้งไว้ใน vendor บน prod
-            $writer->setTempDir(storage_path('app'));
-            $writer->save('php://output');
-        }, 200, $headers);
+        // 🩺 (25/11/26) สร้าง PDF "ก่อน" คืน response (eager) — เดิมเขียนใน callback ของ StreamedResponse
+        //    ซึ่งรันหลัง try/catch ของ ReportController จบไปแล้ว → error (mpdf หาย/temp dir เขียนไม่ได้/ฟอนต์หาย)
+        //    หลุดเป็นหน้า HTML "Server Error" ไม่มี log รายงาน · ตอนนี้ throw ภายใน try/catch ได้ → Log + JSON 500
+        $writer = new ThaiMpdfWriter($spreadsheet);
+        // 📦 cache ของ mPDF อยู่ใน storage/app/mpdf (mPDF mkdir ให้เองถ้ายังไม่มี)
+        //    — ไม่เขียวทิ้งไว้ใน vendor บน prod
+        $writer->setTempDir(storage_path('app'));
+
+        $stream = fopen('php://temp', 'r+');
+        try {
+            $writer->save($stream);
+            rewind($stream);
+            $pdf = (string) stream_get_contents($stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return new StreamedResponse(function () use ($pdf) {
+            echo $pdf;
+        }, 200, $headers + ['Content-Length' => (string) strlen($pdf)]);
     }
 
     /**
