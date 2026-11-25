@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AdditionalCharge;
 use App\Models\Booking;
 use App\Models\User;
+use App\Services\ReportExcel\ExcelReportRenderer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Str;
@@ -51,6 +52,20 @@ class ReportPdfExportTest extends TestCase
         $disposition = $response->headers->get('Content-Disposition');
         $this->assertStringContainsString("filename*=UTF-8''", (string) $disposition);
         $this->assertStringContainsString('.pdf', (string) $disposition);
+    }
+
+    public function test_pdf_render_error_returns_json_500_not_html(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        // 🩺 (25/11/26) จำลอง Error (ไม่ใช่ Exception) ตอนสร้าง PDF — เช่น class Mpdf หาย
+        $this->mock(ExcelReportRenderer::class)
+            ->shouldReceive('streamPdfResponse')
+            ->andThrow(new \Error('Class "Mpdf\\Mpdf" not found'));
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/reports/room-status/export?format=pdf');
+
+        $response->assertStatus(500)->assertJson(['status' => 'error']);
     }
 
     public function test_pdf_embeds_sarabun_thai_font(): void
