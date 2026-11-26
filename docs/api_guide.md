@@ -2864,7 +2864,7 @@ Assigns the room (if not yet assigned) and transitions the booking_room to `chec
 **เงื่อนไข (ทุกข้อผ่านก่อน — ผิดข้อใดข้อหนึ่ง = `422`):**
 - BR ต้องเป็น `checked_in` หรือ `confirmed` หรือ `draft` **ที่มี `room_id` แล้ว** (🔄 v2 ข้อ 7: รับ BR `draft` หลัง T-2 จัดห้อง — โครงสร้างจริง: BR ก่อนเช็คอิน = `draft` เสมอ)
 - Booking container: BR `checked_in` → ต้อง `confirmed` · BR `confirmed`/`draft` → `paid|confirmed`
-- ห้องใหม่ ≠ ห้องปัจจุบัน · ห้องใหม่สถานะ `available|prep_checkin|dirty`
+- ห้องใหม่ ≠ ห้องปัจจุบัน · **เฉพาะ BR `checked_in`:** ห้องใหม่สถานะ `available|prep_checkin|dirty` · 🗓️ **(2026-11-26) BR `confirmed`/`draft` (ก่อนเช็คอิน) ไม่ตรวจสถานะบอร์ดของห้องใหม่** — ย้ายล่วงหน้าเข้าห้องที่วันนี้ `occupied`/`checkout_makeup` ได้ ถ้าช่วงพักไม่ทับ (กันซ้อนด้วย overlap + maintenance ข้อถัดไป · ความพร้อมห้องตรวจอีกทีตอนเช็คอิน)
 - ห้องใหม่ไม่ติด **maintenance period** ทับช่วงพัก (reserved ผ่าน — ธรรมเนียมเดียวกับ check-in) · ไม่มี BR อื่น `holdingSlot()` ทับช่วงเข้าพักของ BR นี้
 - จำนวนแขกเดิม ≤ `max_guests` ของ type ใหม่
 - 🔄 **เลิก upgrade-only (v2)** · 🎚️ **default คงราคาเดิม (2026-11-16):** type ใหม่แพง/ถูกกว่าได้ — **ไม่ส่ง `apply_new_rate` หรือส่ง `false` = คงราคาห้องเดิมทั้งขาขึ้น/ลง** (`surcharge_amount = 0`, รวมห้องอื่นในบิลด้วย) · ส่ง `apply_new_rate: true` = คำนวณตาม effective rate ของ type ใหม่ · ส่ง `price_per_night` = ใช้ราคาที่กรอกเสมอ

@@ -489,6 +489,62 @@ class ChangeRoomTest extends TestCase
         $this->assertNull($response->json('housekeeping_task_id'));
     }
 
+    // 🚪 (2026-11-26): pre-checkin move ไม่ดูสถานะบอร์ด "วันนี้" ของห้องปลายทาง — ห้องที่วันนี้มีแขก
+    //    (occupied / checkout_makeup) แต่ว่างช่วงพักในอนาคต ย้ายล่วงหน้าเข้าได้ · ห้องไม่ถูกแตะ
+    public function test_pre_checkin_move_ignores_destination_board_status_for_future_stay(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+
+        foreach (['confirmed', 'draft'] as $brStatus) {
+            foreach (['occupied', 'checkout_makeup'] as $roomStatus) {
+                $booking = $this->createBooking(['status' => 'paid', 'total_amount' => 3000]);
+                $oldRoom = $this->createRoom($standard, 'available');
+                $br = $this->createBookingRoom($booking, $standard, $oldRoom, $brStatus, overrides: [
+                    'check_in' => now()->addDays(7)->toDateString(),
+                    'check_out' => now()->addDays(9)->toDateString(),
+                ]);
+                $newRoom = $this->createRoom($standard, $roomStatus);
+
+                // แขกปัจจุบันของห้องปลายทาง ออกก่อนวันเข้าพัก → ไม่ทับช่วง
+                $currentGuestBooking = $this->createBooking();
+                $this->createBookingRoom($currentGuestBooking, $standard, $newRoom, 'checked_in', overrides: [
+                    'check_in' => now()->subDay()->toDateString(),
+                    'check_out' => now()->addDays(2)->toDateString(),
+                ]);
+
+                $response = $this->actingAs($this->createStaff(), 'sanctum')
+                    ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+                $response->assertStatus(200)->assertJsonPath('status', 'success');
+                $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $newRoom->id, 'status' => $brStatus]);
+                $this->assertSame($roomStatus, $newRoom->fresh()->status, "BR {$brStatus} → {$roomStatus}: ห้องใหม่ต้องไม่ถูกแตะ");
+                $this->assertSame('available', $oldRoom->fresh()->status);
+            }
+        }
+
+        $this->assertDatabaseCount('housekeeping_tasks', 0);
+    }
+
+    // 🚪 (2026-11-26): ปลด board-status guard แล้ว pre-checkin ยังโดน overlap guard กันซ้อนเหมือนเดิม
+    public function test_pre_checkin_move_still_rejects_destination_with_overlapping_stay(): void
+    {
+        $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
+        $booking = $this->createBooking(['status' => 'paid', 'total_amount' => 3000]);
+        $oldRoom = $this->createRoom($standard, 'available');
+        $br = $this->createBookingRoom($booking, $standard, $oldRoom, 'confirmed');
+        $newRoom = $this->createRoom($standard, 'occupied');
+
+        // แขกปัจจุบันยังพักทับช่วงเดียวกัน
+        $this->createBookingRoom($this->createBooking(), $standard, $newRoom, 'checked_in');
+
+        $response = $this->actingAs($this->createStaff(), 'sanctum')
+            ->postJson($this->endpoint($booking, $br), ['room_id' => $newRoom->id]);
+
+        $response->assertStatus(422);
+        $this->assertStringContainsString('ทับช่วงเข้าพัก', $response->json('message'));
+        $this->assertDatabaseHas('booking_rooms', ['id' => $br->id, 'room_id' => $oldRoom->id]);
+    }
+
     public function test_checked_in_room_can_move_into_dirty_room(): void
     {
         $standard = $this->createRoomTypeWithRate('Standard', 2, 1500);
