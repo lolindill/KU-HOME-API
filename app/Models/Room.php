@@ -96,7 +96,7 @@ class Room extends Model
      *
      * available → occupied, dirty, prep_checkin
      * occupied → checkout_makeup, dirty, prep_checkin
-     * checkout_makeup → occupied, available, prep_checkin
+     * checkout_makeup → occupied, available, prep_checkin, dirty
      * dirty → occupied, available, prep_checkin
      * prep_checkin → occupied, available, dirty
      *
@@ -124,11 +124,14 @@ class Room extends Model
         //    🚪 (2026-11-09): เปิด 2 ทิศ — occupied รับ 'dirty' (แขกยอมเข้าห้องที่ยังไม่เก็บ
         //       · change-room/check-in) + dirty รับ 'occupied' (ย้ายห้องกลางทาง ห้องเก่า → dirty)
         //       · walk-in ยังเข้มเหมือนเดิม (explicit check available/prep_checkin)
+        //    🧹 (2026-11-26): dirty รับ 'checkout_makeup' — DailyRoomMaintenance Phase 3 flag
+        //       ห้อง checkout_makeup ที่ค้าง > 2 วันเป็น dirty มาตั้งแต่ Phase A แต่กฎไม่เคยเปิดทางนี้
+        //       → exception ทำ job พังทั้งรอบบน prod (ห้อง 512 ค้างตั้งแต่ 18/11)
         $allowedTransitions = [
             'occupied' => ['available', 'prep_checkin', 'dirty'],
             'checkout_makeup' => ['occupied'],
             'available' => ['checkout_makeup', 'dirty', 'prep_checkin'],
-            'dirty' => ['available', 'prep_checkin', 'occupied'],
+            'dirty' => ['available', 'prep_checkin', 'occupied', 'checkout_makeup'],
             'prep_checkin' => ['available', 'dirty', 'occupied', 'checkout_makeup'],
         ];
 
