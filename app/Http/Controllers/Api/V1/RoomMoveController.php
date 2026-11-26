@@ -106,7 +106,11 @@ class RoomMoveController extends Controller
 
             // 🛡️ ห้องใหม่ต้องพร้อมรับแขก — transition → occupied ถูกกฎ state machine เสมอ
             //    (2026-11-09): รับ dirty ด้วย — แขกยอมเข้าห้องที่ยังไม่เก็บ (occupied รับ dirty แล้ว)
-            if (! in_array($newRoom->status, ['available', 'prep_checkin', 'dirty'])) {
+            //    (2026-11-26): เช็คเฉพาะ in-stay — pre-checkin move (BR draft/confirmed) เป็น re-point
+            //    ล้วนไม่แตะห้องกายภาพ สถานะบอร์ด "วันนี้" ไม่เกี่ยวกับช่วงพักในอนาคต (เช่นห้องที่วันนี้
+            //    occupied แต่แขกออกก่อนวันเข้าพัก) — กันซ้อนด้วย overlap guard + maintenance period
+            //    ข้างล่างแทน · ความพร้อมห้องจริงถูกตรวจอีกครั้งตอนเช็คอิน (transitionStatusTo occupied)
+            if ($isInStay && ! in_array($newRoom->status, ['available', 'prep_checkin', 'dirty'])) {
                 throw new \Exception(
                     "ห้องหมายเลข {$newRoom->room_number} ไม่พร้อมให้เข้าพัก (สถานะ: {$newRoom->status}) กรุณาเลือกห้องอื่นค่ะนายท่าน",
                     422
