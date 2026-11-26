@@ -109,12 +109,12 @@ class RoomStatusLogTest extends TestCase
 
     public function test_invalid_transition_writes_no_log(): void
     {
-        $room = $this->createRoom('checkout_makeup');
+        $room = $this->createRoom('available');
 
         try {
-            // checkout_makeup → dirty ผิด flow (🚪 2026-11-09: dirty→occupied valid แล้ว
-            // จึงใช้ checkout_makeup→dirty เป็นตัวแทน invalid transition)
-            $room->transitionStatusTo('dirty');
+            // available → checkout_makeup ผิด flow (ต้องผ่าน occupied ก่อน)
+            // 🧹 2026-11-26: checkout_makeup→dirty valid แล้ว จึงเปลี่ยนตัวแทน invalid transition
+            $room->transitionStatusTo('checkout_makeup');
             $this->fail('ควร throw exception สำหรับ invalid transition');
         } catch (\Exception $e) {
             $this->assertSame(422, $e->getCode());

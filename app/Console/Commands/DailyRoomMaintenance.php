@@ -245,7 +245,22 @@ class DailyRoomMaintenance extends Command
         $dirtyTasksCreated = 0;
         foreach ($staleRooms as $room) {
             $originalStatus = $room->status;
-            $room->transitionStatusTo('dirty');
+
+            // 🛡️ (2026-11-26): ครอบรายห้องเหมือน Phase 2 — ห้องเดียว transition ไม่ผ่าน
+            //    ต้องไม่ลากทั้ง job ล้ม (เดิม exception หลุดทำให้ห้องที่เหลือ + log ท้าย job ไม่ถูกทำเลย)
+            try {
+                $room->transitionStatusTo('dirty');
+            } catch (\Exception $e) {
+                $this->warn("  ✗ Cannot flag room {$room->room_number} dirty (status: {$originalStatus}): {$e->getMessage()}");
+                Log::warning('Daily room maintenance: stale room transition failed', [
+                    'room_id' => $room->id,
+                    'room_number' => $room->room_number,
+                    'status' => $originalStatus,
+                    'error' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
             $flaggedDirty++;
 
             // 🧹 สร้าง task 'daily' ถ้ายังไม่มี active task ในห้องนี้

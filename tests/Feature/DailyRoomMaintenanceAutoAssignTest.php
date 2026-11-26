@@ -297,4 +297,43 @@ final class DailyRoomMaintenanceAutoAssignTest extends TestCase
         $this->assertNotNull($task);
         $this->assertSame('unassigned', $task->status);
     }
+
+    /**
+     * 🧹 (2026-11-26) regression: ห้อง checkout_makeup ค้าง > 2 วันเคยทำ Phase 3 throw
+     *    "Invalid status transition from 'checkout_makeup' to 'dirty'" → job พังทั้งรอบ
+     *    ห้อง available ที่ค้างในรอบเดียวกันก็ไม่ถูก flag (เจอบน prod: ห้อง 512)
+     */
+    public function test_stale_checkout_makeup_room_is_flagged_dirty_without_aborting_run(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-26 03:00:00'));
+
+        $makeup = $this->createRoom('512', 'checkout_makeup');
+        $available = $this->createRoom('504');
+        $fresh = $this->createRoom('519', 'checkout_makeup');
+
+        // query builder update — status_updated_at ไม่อยู่ใน $fillable (เซ็ตผ่าน transitionStatusTo เท่านั้น)
+        Room::whereIn('id', [$makeup->id, $available->id])
+            ->update(['status_updated_at' => Carbon::now()->subDays(5)]);
+        Room::whereKey($fresh->id)->update(['status_updated_at' => Carbon::now()->subHours(2)]);
+
+        $this->artisan('app:daily-room-maintenance')->assertSuccessful();
+
+        $this->assertSame('dirty', $makeup->fresh()->status);
+        $this->assertSame('dirty', $available->fresh()->status);
+        $this->assertSame('checkout_makeup', $fresh->fresh()->status);
+
+        foreach ([$makeup, $available] as $room) {
+            $this->assertDatabaseHas('housekeeping_tasks', [
+                'room_id' => $room->id,
+                'task_type' => 'daily',
+                'status' => 'unassigned',
+            ]);
+        }
+        $this->assertDatabaseHas('status_change_logs', [
+            'entity_type' => 'room',
+            'entity_id' => $makeup->id,
+            'from_status' => 'checkout_makeup',
+            'to_status' => 'dirty',
+        ]);
+    }
 }

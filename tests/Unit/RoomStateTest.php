@@ -167,11 +167,12 @@ class RoomStateTest extends TestCase
         $this->assertEquals('dirty', $room->fresh()->status);
     }
 
-    public function test_cannot_go_from_checkout_makeup_to_dirty(): void
+    public function test_checkout_makeup_to_dirty(): void
     {
-        $this->expectException(\Exception::class);
+        // 🧹 (2026-11-26): เปิดทางให้ DailyRoomMaintenance flag ห้อง checkout_makeup ที่ค้าง > 2 วัน
         $room = $this->createRoom('checkout_makeup');
         $room->transitionStatusTo('dirty');
+        $this->assertEquals('dirty', $room->fresh()->status);
     }
 
     public function test_cannot_go_from_occupied_to_available(): void
