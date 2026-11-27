@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
 use App\Models\User;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -21,7 +22,7 @@ class AuthController extends Controller
         $validated = $request->validated();
 
         try {
-            // 🛡️ SECURITY: Only pick safe fields — never trust client with role/ver
+            // 🛡️ SECURITY: Only pick safe fields — never trust client with role/status
             // role defaults to 'user' via DB column default
             $user = User::create([
                 'name' => $validated['name'],
@@ -93,6 +94,12 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // 🔐 (2026-11-27) บัญชีถูกปิด → 403 — ตรวจหลังเช็ครหัสผ่านเสมอ
+        //    (ไม่บอกสถานะบัญชีกับคนที่ใส่รหัสผิด)
+        if (! $user->isActive()) {
+            return self::inactiveAccountResponse();
+        }
+
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
         return response()->json([
@@ -101,6 +108,15 @@ class AuthController extends Controller
             'access_token' => $token,
             'token_type' => 'Bearer',
         ], 200);
+    }
+
+    // 🔐 (2026-11-27) response กลางของบัญชีที่ถูกปิด — ใช้ร่วมกับ SsoController (KU SSO + Google)
+    public static function inactiveAccountResponse(): JsonResponse
+    {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบค่ะ 🔒',
+        ], 403);
     }
 
     // 🚪 ออกจากระบบ

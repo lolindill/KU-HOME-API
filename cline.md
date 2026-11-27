@@ -53,7 +53,7 @@ hotel/
 │   │   │   └── CheckRole.php          # role-based authorization (user.role vs allowed roles)
 │   │   └── Requests/                  # 24 Form Requests (Store*/Update* per model)
 │   ├── Models/                        # 13 Eloquent models (most use UUID via HasUuids)
-│   │   ├── User.php                   # UUID PK, role field, PgBoolean casts (is_ku_member, ver)
+│   │   ├── User.php                   # UUID PK, role field, status (active|inactive)
 │   │   ├── Booking.php                # UUID, confirmation (atomic counter), PgBoolean is_paid
 │   │   ├── BookingRoom.php            # 🌟 check_in/out + guests JSON + BR-level state machine + bed_preference
 │   │   ├── Room.php                   # transitionStatusTo() + topology (floor/side/pos/bed_type)
@@ -259,8 +259,8 @@ Image ── polymorphic (imageable_type + imageable_id) 🚧 DRAFT
 
 #### User (`app/Models/User.php`)
 - **Primary Key**: UUID (`$incrementing = false`, `$keyType = 'string'`)
-- **Fillable**: name, email, password, role, title, phone, nationality, auth_provider, ver
-- **Casts**: password→hashed, ver→PgBoolean
+- **Fillable**: name, email, password, role, title, phone, nationality, auth_provider (`status` จงใจไม่ fillable — ดูหัวข้อ "🔐 User status")
+- **Casts**: password→hashed
 
 #### Booking (`app/Models/Booking.php`)
 - **Primary Key**: UUID (HasUuids trait)
@@ -596,7 +596,7 @@ Total:        31 passed (60 assertions)
 
 - **ทางแก้เดิม**: `DB::raw('TRUE'/'FALSE')` หรือ string `'true'`/`'false'` กระจัดกระจาย → ไม่สวย และนักพัฒนาใหม่เผลอใช้ PHP bool แล้วพัง
 - **ทางแก้ใหม่**: **`App\Casts\PgBoolean`** (Custom Cast class) — แปลง PHP bool ↔ SQL boolean literal อัตโนมัติ ทำงานได้ทั้ง PostgreSQL (strict) และ MySQL/SQLite (lenient)
-- **Apply ครบทุก boolean column**: `is_paid`, `extra_bed_enabled`, `is_active`, `is_ku_member`, `ver`
+- **Apply ครบทุก boolean column**: `is_paid`, `extra_bed_enabled`, `is_active` (`is_ku_member` drop 2026-09-08 · `ver` drop 2026-11-27)
 
 > 🔒 **Re-litigation Freeze (03/08/26 — บันทึกตามคำสั่งนายท่าน):**
 > เคย scrutinize + พยายามแก้ทางอื่นมาแล้ว แต่ **ไม่ work** → `PgBoolean` (emit `DB::raw('TRUE'/'FALSE')` ตอน write) คือ **final solution**.
@@ -2732,3 +2732,14 @@ Public route → cap `(end − start) ≤ 365` คืน (366 max) → เกิ
 - **Fix:** ① `dirty` รับ `checkout_makeup` เป็น source (ห้องที่แขกออกแล้วไม่มีใครเก็บเกิน 2 วัน = สกปรกจริง) ② Phase 3 ครอบ try/catch รายห้อง (`warn` + `Log::warning` แล้ว `continue`) เหมือน Phase 2 — ห้องเดียวพังต้องไม่ลากทั้ง job
 - **Tests:** `RoomStateTest` เคส `checkout_makeup → dirty` เปลี่ยนจาก invalid → valid · `RoomStatusLogTest::test_invalid_transition_writes_no_log` เปลี่ยนตัวแทน invalid เป็น `available → checkout_makeup` · regression ใหม่ `DailyRoomMaintenanceAutoAssignTest::test_stale_checkout_makeup_room_is_flagged_dirty_without_aborting_run` · full suite **1012 passed (4,351 assertions)** + `pint --dirty` PASS
 - **ข้อสังเกตจาก prod ที่ยังไม่แก้ (ข้อมูล ไม่ใช่โค้ด):** ห้อง 805 `occupied` ทับ maintenance period active ตั้งแต่ 17/11 · ห้อง `available` + maintenance period 13 ห้อง (by design — FE ต้องอ่าน `active_periods` ไม่ใช่แค่ `status`) · หลัง deploy รอบแรก job จะ flag dirty ~74 ห้องพร้อมสร้างงาน `daily` ทีเดียว
+
+## 🔐 User status `active` / `inactive` — แทน legacy `users.ver` (2026-11-27, feature/user-status)
+
+- **ที่มา:** `ver` (boolean) ไม่เคยมี flow ใดอ่านไปตัดสินอะไร — มีแค่ `PUT /users/{id}/verify` toggle เก็บไว้ → owner สั่ง drop แล้วแทนด้วยสถานะบัญชีที่**มีผลจริง**
+- **Schema:** migration `2026_11_27_100000_replace_ver_with_status_on_users_table` — `status` string default `'active'` + index · drop `ver` · user เดิมทุกคน `active` (**ห้าม** map `ver=false → inactive` — จะล็อกทุกคนออก) · เลือก string ไม่ใช่ boolean → ไม่พึ่ง `PgBoolean` + ขยายสถานะได้
+- **Model:** `User::STATUS_ACTIVE|STATUS_INACTIVE|STATUSES` + `isActive()` + `$attributes` default `active` (instance ที่เพิ่ง `create()` เช่น SSO first login มี `status` ใน JSON ทันที) · **`status` จงใจไม่อยู่ใน `$fillable`/request rules** → ส่งมาทาง `/register`, `PUT /profile`, `POST|PUT /users` ถูกเมิน
+- **ช่องทางเดียวที่เปลี่ยน status:** `PATCH /users/{id}/status` (admin, `UserController::updateStatus`) — `inactive` ลบ `tokens()` ทั้งหมดใน transaction เดียวกัน · admin ปิดตัวเอง → 422
+- **กัน 2 ชั้น:** ① login ทั้ง 3 ทาง (`AuthController::login` หลังเช็ครหัสผ่าน · `SsoController` KU + Google หลัง findOrCreate) → 403 ผ่าน `AuthController::inactiveAccountResponse()` ② `Sanctum::authenticateAccessTokensUsing` ใน `AppServiceProvider::boot` ปฏิเสธ token ของ user inactive → 401 ทุก route `auth:sanctum` (กันกรณีปิดผ่าน tinker/SQL แล้ว token ค้าง) — callback ต้อง AND กับ `$isValid` เสมอ ไม่งั้น expiry 8 ชม. หาย
+- **เลือก Sanctum callback แทน middleware ใหม่:** ครอบทุก route ที่ใช้ `auth:sanctum` อัตโนมัติ (รวม `images.file`) ไม่ต้องแตะ route group · ⚠️ `actingAs()` ใน test ข้าม guard → test พฤติกรรม token ต้องใช้ Bearer จริง (ดู `UserStatusTest`)
+- **Breaking (FE):** `PUT /users/{id}/verify` → 404 · `ver` หายจาก user object · patch note `docs/api_patches/2026-11-27-user-status.md`
+- **Tests:** `UserStatusTest` 13 เคส + KU/Google SSO inactive 403 + `AuthTest` register ignore status · full suite **1029 passed (4,430 assertions)**
