@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Casts\PgBoolean;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -26,16 +25,33 @@ class User extends Authenticatable
         'title',
         'phone',
         'nationality',
-        'ver',
+        // 🔐 (2026-11-27) `status` จงใจไม่อยู่ใน fillable — เปลี่ยนได้ทางเดียวคือ
+        //    PATCH /users/{id}/status (UserController::updateStatus) ซึ่ง revoke token ไปพร้อมกัน
+    ];
+
+    // 🔐 สถานะบัญชี (2026-11-27 — แทน legacy `ver`): inactive = login ไม่ได้ + token เดิมใช้ไม่ได้
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    public const STATUSES = [self::STATUS_ACTIVE, self::STATUS_INACTIVE];
+
+    // 🔐 default ฝั่ง model ให้ตรงกับ column default — instance ที่เพิ่ง create() (เช่น SSO first login)
+    //    จะมี status ใน JSON ทันทีโดยไม่ต้อง fresh()
+    protected $attributes = [
+        'status' => self::STATUS_ACTIVE,
     ];
 
     protected function casts(): array
     {
         return [
             'password' => 'hashed',
-            // 🌟 Fix PostgreSQL strict boolean (03/07/26): PgBoolean cast
-            'ver' => PgBoolean::class,
         ];
+    }
+
+    public function isActive(): bool
+    {
+        return $this->status !== self::STATUS_INACTIVE;
     }
 
     public function bookings(): HasMany

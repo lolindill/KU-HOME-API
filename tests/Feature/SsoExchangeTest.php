@@ -365,4 +365,23 @@ class SsoExchangeTest extends TestCase
             ->assertJsonPath('users.data.0.auth_provider', 'ku_sso')
             ->assertJsonPath('users.data.0.email', 'sso-only@ku.th');
     }
+
+    // 🔐 (2026-11-27) user status: บัญชี KU SSO ที่ถูกปิด → 403 และไม่ออก token ใหม่
+    public function test_exchange_rejects_inactive_account_with_403(): void
+    {
+        $this->fakeHappyPath();
+        $user = User::factory()->create([
+            'email' => 'somchai.j@ku.th',
+            'auth_provider' => 'ku_sso',
+            'role' => 'ku_member',
+            'status' => User::STATUS_INACTIVE,
+        ]);
+
+        $this->postExchange()
+            ->assertStatus(403)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonMissingPath('access_token');
+
+        $this->assertSame(0, $user->tokens()->count());
+    }
 }

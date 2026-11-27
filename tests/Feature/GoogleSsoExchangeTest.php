@@ -391,4 +391,23 @@ class GoogleSsoExchangeTest extends TestCase
 
         $this->postExchange()->assertStatus(429);
     }
+
+    // 🔐 (2026-11-27) user status: บัญชี Google ที่ถูกปิด → 403 และไม่ออก token ใหม่
+    public function test_exchange_rejects_inactive_account_with_403(): void
+    {
+        $this->fakeHappyPath();
+        $user = User::factory()->create([
+            'email' => 'guest@gmail.com',
+            'auth_provider' => 'google',
+            'role' => 'user',
+            'status' => User::STATUS_INACTIVE,
+        ]);
+
+        $this->postExchange()
+            ->assertStatus(403)
+            ->assertJsonPath('status', 'error')
+            ->assertJsonMissingPath('access_token');
+
+        $this->assertSame(0, $user->tokens()->count());
+    }
 }

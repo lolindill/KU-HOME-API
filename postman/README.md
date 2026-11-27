@@ -91,7 +91,7 @@ The collection is pre-configured with **Sanctum Bearer Token** authentication.
 7. **`07. 🛎️ Front Desk Operations`** (5 requests)
    - Walk-in booking + instant check-in, manual front payment recording, guest check-in, guest check-out (triggers housekeeping task), and no-show mark.
 8. **`08. 👥 User Management`** (6 requests)
-   - Admin user CRUD, pagination, and user verification toggle (`ver: true/false`).
+   - Admin user CRUD, pagination, and account status toggle (`PATCH /users/{id}/status` — `active`/`inactive`).
 9. **`09. 🛏️ Room Management`** (1 request)
    - Admin room status transition (`available`, `maintenance`, `reserved_closed`, etc.).
 10. **`10. 🧹 Housekeeping Dashboard`** (7 requests)

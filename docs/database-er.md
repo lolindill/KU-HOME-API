@@ -43,7 +43,7 @@ erDiagram
         string title "nullable"
         string phone "nullable"
         string nationality "default: Thai"
-        boolean ver "default: false, verification flag"
+        string status "default: active — active | inactive (2026-11-27 แทน ver)"
         remember_token remember_token
         timestamp created_at
         timestamp updated_at

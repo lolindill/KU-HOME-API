@@ -111,7 +111,7 @@ class AuthTest extends TestCase
             'email' => 'hacker@evil.com',
             'password' => 'password123',
             'role' => 'admin',       // 🛑 พยายามตั้งเป็น admin
-            'ver' => true,           // 🛑 พยายาม verify ตัวเอง
+            'status' => 'inactive',  // 🛑 พยายามตั้งสถานะบัญชีเอง (แทน legacy ver — 2026-11-27)
             'is_ku_member' => true,  // 🛑 พยายามตั้งสถานะสมาชิก KU
         ]);
 
@@ -123,9 +123,9 @@ class AuthTest extends TestCase
             'role' => 'user',
         ]);
 
-        // ver ต้องเป็น default (false) ไม่ใช่ true
+        // status ต้องเป็น default (active) — client ตั้งเองไม่ได้
         $user = User::where('email', 'hacker@evil.com')->first();
-        $this->assertFalse($user->ver);
+        $this->assertSame(User::STATUS_ACTIVE, $user->status);
     }
 
     /*

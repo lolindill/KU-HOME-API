@@ -2959,7 +2959,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"name\": \"Staff Member\",\n    \"email\": \"staff_{{$timestamp}}@kuhome.com\",\n    \"password\": \"Password123!\",\n    \"role\": \"user\",\n    \"ver\": true\n}",
+              "raw": "{\n    \"name\": \"Staff Member\",\n    \"email\": \"staff_{{$timestamp}}@kuhome.com\",\n    \"password\": \"Password123!\",\n    \"role\": \"user\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3084,7 +3084,7 @@
           }
         },
         {
-          "name": "PUT Toggle User Verification (/users/{id}/verify)",
+          "name": "PATCH Set User Status (/users/{id}/status)",
           "event": [
             {
               "listen": "test",
@@ -3109,7 +3109,7 @@
                 }
               ]
             },
-            "method": "PUT",
+            "method": "PATCH",
             "header": [
               {
                 "key": "Accept",
@@ -3124,7 +3124,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n    \"ver\": true\n}",
+              "raw": "{\n    \"status\": \"active\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3132,14 +3132,14 @@
               }
             },
             "url": {
-              "raw": "{{base_url}}/users/{{target_user_id}}/verify",
+              "raw": "{{base_url}}/users/{{target_user_id}}/status",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "users",
                 "{{target_user_id}}",
-                "verify"
+                "status"
               ]
             }
           }

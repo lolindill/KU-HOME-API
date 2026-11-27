@@ -187,6 +187,14 @@ Used by `GET /bookings` and `GET /users`:
 }
 ```
 
+**Response `403`** — 🔐 บัญชีถูกปิด (`status = inactive`, 2026-11-27) · ตรวจหลังรหัสผ่านถูกเท่านั้น (รหัสผิดยังได้ `401`) · KU SSO / Google exchange ตอบ `403` แบบเดียวกัน:
+```json
+{
+  "status": "error",
+  "message": "บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบค่ะ 🔒"
+}
+```
+
 ---
 
 ### POST `/auth/sso/exchange` — KU SSO login (Keycloak)
@@ -303,7 +311,7 @@ Revokes the current access token.
     "title": "นิสิต",
     "phone": "0812345678",
     "nationality": "Thai",
-    "ver": false,
+    "status": "active",
     "avatar": null,
     "created_at": "2026-06-19T10:00:00.000000Z",
     "updated_at": "2026-06-19T10:00:00.000000Z"
@@ -311,7 +319,7 @@ Revokes the current access token.
 }
 ```
 
-> `auth_provider` = `password` | `ku_sso` | `google` (split-user model — email ซ้ำข้าม provider ได้) · `avatar` = Image object พร้อม signed `url` (อายุ 15 นาที) หรือ `null` ถ้ายังไม่ได้ตั้ง · `password`/`remember_token` ไม่ถูก expose เสมอ
+> `status` = `active` | `inactive` (2026-11-27 แทน legacy `ver`) · `auth_provider` = `password` | `ku_sso` | `google` (split-user model — email ซ้ำข้าม provider ได้) · `avatar` = Image object พร้อม signed `url` (อายุ 15 นาที) หรือ `null` ถ้ายังไม่ได้ตั้ง · `password`/`remember_token` ไม่ถูก expose เสมอ
 
 ---
 
@@ -319,7 +327,7 @@ Revokes the current access token.
 
 🔒 **Auth required**
 
-> 🛡️ Users **cannot** change their own `role` or `ver` (verification) — ต้องผ่าน admin endpoints (`PUT /users/{id}`, `PUT /users/{id}/verify`)
+> 🛡️ Users **cannot** change their own `role` or `status` — ต้องผ่าน admin endpoints (`PUT /users/{id}`, `PATCH /users/{id}/status`) · ส่ง `status` มาจะถูกเมิน
 >
 > 🔒 **SSO email lock (2026-11-11):** account `auth_provider = ku_sso` | `google` ส่ง field `email` → **422** — email เป็น identity anchor ที่ผูกกับผู้ให้บริการต้นทาง (ระบบใช้ email ค้นหา account ตอน SSO login ถ้าแก้แล้วจะกลายเป็น account ใหม่ซ้ำ) · password account (`auth_provider = password`) เปลี่ยนเองได้ตามปกติ · admin ยังแก้ email ของ SSO user ได้ผ่าน `PUT /users/{id}`
 
@@ -407,6 +415,7 @@ Multipart form — field `file`: รูปภาพ `jpeg` / `png` / `jpg` / `we
 **Query Params:**
 - Pagination automatic (15 per page)
 - `auth_provider` (optional) — กรองเฉพาะ provider (`password` | `ku_sso` | `google`) · 🎫 split-user model: email เดียวมีได้หลาย account ข้าม provider (2026-09-07)
+- `status` (optional) — กรองสถานะบัญชี (`active` | `inactive`) · 🔐 2026-11-27
 
 > ทุก user object serialize รวม field `auth_provider` (`password` เริ่มต้นสำหรับ user เก่า · `ku_sso` สำหรับ account ที่เกิดจาก KU SSO login · `google` สำหรับ account ที่เกิดจาก Google login)
 
@@ -437,10 +446,11 @@ Multipart form — field `file`: รูปภาพ `jpeg` / `png` / `jpg` / `we
   "name": "New User",
   "email": "new@example.com",
   "password": "Password123!",
-  "role": "user",
-  "ver": false
+  "role": "user"
 }
 ```
+
+> user ที่สร้างเป็น `status: "active"` เสมอ — ส่ง `status` มาจะถูกเมิน (ปิดบัญชีผ่าน `PATCH /users/{id}/status`)
 
 **Response `201`:**
 ```json
@@ -482,10 +492,11 @@ Multipart form — field `file`: รูปภาพ `jpeg` / `png` / `jpg` / `we
   "name": "Updated Name",
   "email": "updated@example.com",
   "password": "NewPassword!",
-  "role": "admin",
-  "ver": true
+  "role": "admin"
 }
 ```
+
+> `status` แก้ทาง endpoint นี้ไม่ได้ (ถูกเมิน) — ใช้ `PATCH /users/{id}/status` ซึ่ง revoke token ให้ด้วย
 
 **Response `200`:**
 ```json
@@ -512,25 +523,36 @@ Multipart form — field `file`: รูปภาพ `jpeg` / `png` / `jpg` / `we
 
 ---
 
-### PUT `/users/{id}/verify` — Toggle user verification (Admin)
+### PATCH `/users/{id}/status` — Activate / deactivate user (Admin)
 
-🔒 **Admin only**
+🔒 **Admin only** · 🔐 2026-11-27 — แทน `PUT /users/{id}/verify` เดิม (legacy `ver` ถูก drop · route เดิมตอบ `404`)
 
 **Request Body:**
 ```json
 {
-  "ver": true
+  "status": "inactive"
 }
 ```
+
+| Field    | Rule |
+|----------|------|
+| `status` | required, `active` \| `inactive` |
+
+ผลของ `inactive`:
+- ลบ token ทุกตัวของ user ทันที (kick ออกทุก device) · token ที่ค้างจากทางอื่นถูกปฏิเสธ `401` ทุก route ที่ต้อง login
+- login ทุกช่องทาง (`/login`, `/auth/sso/exchange`, `/auth/sso/google/exchange`) ตอบ `403`
+- ข้อมูลอื่น (booking ฯลฯ) ไม่ถูกแตะ — ตั้งกลับเป็น `active` แล้ว login ใหม่ได้ตามปกติ
 
 **Response `200`:**
 ```json
 {
   "status": "success",
-  "message": "ยืนยันตัวตนผู้ใช้สำเร็จ",
-  "user": { ...user with updated ver... }
+  "message": "ปิดการใช้งานบัญชีผู้ใช้เรียบร้อยแล้วค่ะ",
+  "user": { ...user with updated status... }
 }
 ```
+
+**Response `422`:** `status` ไม่ถูกต้อง · หรือ admin พยายามปิดบัญชีตัวเอง
 
 ---
 
@@ -3534,7 +3556,7 @@ Returns tasks with status `pending` or `in_progress`.
 | `email`       | string    | Unique email                           |
 | `password`    | string    | Hashed (bcrypt)                        |
 | `role`        | string    | `user`, `guest`, `ku_member`, `staff`, `admin`, `housekeeping`, `system` (default: `user`) |
-| `ver`         | boolean   | Verified status (default: false)       |
+| `status`      | string    | `active` \| `inactive` (default: `active`) — inactive = login ไม่ได้ (2026-11-27 แทน `ver`) |
 | `created_at`  | timestamp |                                        |
 | `updated_at`  | timestamp |                                        |
 

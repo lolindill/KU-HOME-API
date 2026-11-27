@@ -76,6 +76,11 @@ class SsoController extends Controller
             ], 500);
         }
 
+        // 🔐 (2026-11-27) บัญชีถูกปิด → 403 เหมือน password login
+        if (! $user->isActive()) {
+            return AuthController::inactiveAccountResponse();
+        }
+
         // Sanctum นโยบายเดียวกับ password login ทุกประการ — token ใหม่ ไม่ revoke ของเดิม (ticket 03)
         $token = $user->createToken('ku_home_auth_token')->plainTextToken;
 
@@ -150,6 +155,11 @@ class SsoController extends Controller
                 'status' => 'error',
                 'message' => 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ กรุณาลองใหม่อีกครั้งค่ะ',
             ], 500);
+        }
+
+        // 🔐 (2026-11-27) บัญชีถูกปิด → 403 เหมือน password login
+        if (! $user->isActive()) {
+            return AuthController::inactiveAccountResponse();
         }
 
         // Sanctum นโยบายเดียวกับ password login ทุกประการ — token ใหม่ ไม่ revoke ของเดิม (ticket 06 ข้อ 7)
