@@ -1,10 +1,8 @@
-# 📢 API Patch Notes (Frontend) — 2026-11-27 (`dev` @ `1b8b9b6` + `feature/user-status` @ `769e12a`)
+# 📢 API Patch Notes (Frontend) — 2026-11-27 (`dev` @ `ade6602`)
 
 > **สำหรับ:** ทีม Frontend (`ku-home`)
 > **ขอบเขต:** สรุปเฉพาะสิ่งที่ Frontend ต้องรู้/ต้องปรับ ต่อจาก digest รอบก่อน ([`2026-11-18-fe-patch-notes.md`](./2026-11-18-fe-patch-notes.md) จบที่ `1dac03f`) — commits `1dac03f` → `769e12a`
 > **เอกสารละเอียดประกอบ:** [`2026-11-27-user-status.md`](./2026-11-27-user-status.md) · [`2026-11-19-breakfast-toggle-guest-pricing.md`](./2026-11-19-breakfast-toggle-guest-pricing.md) · [`2026-11-19-addon-only-carveout-assigned-room.md`](./2026-11-19-addon-only-carveout-assigned-room.md) · [`2026-11-18-report-pdf-export.md`](./2026-11-18-report-pdf-export.md)
->
-> ⚠️ ข้อ 1 (user status) ยังอยู่บน branch `feature/user-status` — รอ merge เข้า `dev`
 
 ---
 
