@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Models\User;
 use App\Services\RoomAllocator\RoomAllocator;
 use App\Services\RoomAllocator\Weights;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -25,6 +27,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // 🔐 (2026-11-27) user status: token ของบัญชี inactive ใช้ไม่ได้ทุก route ที่ผ่าน auth:sanctum → 401
+        //    ชั้นที่สองต่อจากการลบ token ตอนปิดบัญชี (UserController::updateStatus) — กันกรณีปิดบัญชี
+        //    ด้วยทางอื่น (tinker/SQL) แล้ว token ยังค้าง · $isValid ส่งผล expiry 8 ชม. มาให้แล้ว ห้ามทิ้ง
+        Sanctum::authenticateAccessTokensUsing(
+            fn ($accessToken, bool $isValid) => $isValid
+                && ! ($accessToken->tokenable instanceof User && ! $accessToken->tokenable->isActive())
+        );
     }
 }

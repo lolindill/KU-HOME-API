@@ -186,7 +186,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
         Route::get('/users/{id}', [UserController::class, 'show']);
         Route::put('/users/{id}', [UserController::class, 'update']);
         Route::delete('/users/{id}', [UserController::class, 'destroy']);
-        Route::put('/users/{id}/verify', [UserController::class, 'verify']);
+        // 🔐 (2026-11-27) เปิด/ปิดบัญชี — แทน PUT /users/{id}/verify (legacy `ver` ถูก drop)
+        Route::patch('/users/{id}/status', [UserController::class, 'updateStatus']);
 
         // 🏛️ Organizations (wayfinder/organization-bookings ticket 01/05) —
         //    ไม่มี DELETE ตาม precedent discounts — เลิกใช้ = PATCH .../toggle

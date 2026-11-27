@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
@@ -18,11 +19,17 @@ class UserController extends Controller
     {
         // 🎫 split user: email ซ้ำข้าม provider ได้ — โชว์ auth_provider + ให้ admin กรองได้ (ticket 09)
         $provider = $request->query('auth_provider');
+        // 🔐 (2026-11-27) กรองสถานะบัญชีได้ ?status=active|inactive
+        $status = $request->query('status');
 
         $users = User::query()
             ->when(
                 $provider !== null && $provider !== '',
                 fn ($query) => $query->where('auth_provider', $provider)
+            )
+            ->when(
+                $status !== null && $status !== '',
+                fn ($query) => $query->where('status', $status)
             )
             ->paginate(15);
 
@@ -96,7 +103,8 @@ class UserController extends Controller
 
         // 🛡️ SECURITY: Users cannot change their own role via profile update
         // Role changes must go through admin update (PUT /users/{id})
-        unset($validated['role'], $validated['ver']);
+        // (status ไม่อยู่ใน rules/fillable อยู่แล้ว — เปลี่ยนได้ทาง PATCH /users/{id}/status เท่านั้น)
+        unset($validated['role']);
 
         // 🔒 SSO user (ku_sso/google) ห้ามแก้ email — ตัดออกเป็น defense-in-depth
         //    (ชั้นแรกคือ rule 'prohibited' ใน UpdateUserRequest → 422)
@@ -203,21 +211,41 @@ class UserController extends Controller
     }
 
     /**
-     * Verify user (admin only) - toggle ver status
+     * 🔐 PATCH /users/{id}/status — เปิด/ปิดบัญชีผู้ใช้ (admin only) — แทน PUT /users/{id}/verify เดิม (2026-11-27)
+     *
+     *    inactive → ลบ token ทุกตัวของ user ทันที (kick ออกทุก device) + login ทุกช่องทางตอบ 403
+     *    (ชั้นที่สอง: Sanctum token callback ใน AppServiceProvider ปฏิเสธ token ของ user inactive)
+     *    🛡️ admin ปิดบัญชีตัวเองไม่ได้ → 422 กันล็อกตัวเองออกจากระบบ
      */
-    public function verify(Request $request, string $id)
+    public function updateStatus(Request $request, string $id)
     {
         $user = User::findOrFail($id);
 
         $validated = $request->validate([
-            'ver' => 'required|boolean',
+            'status' => ['required', 'string', Rule::in(User::STATUSES)],
         ]);
 
-        $user->update(['ver' => $validated['ver']]);
+        if ($validated['status'] === User::STATUS_INACTIVE && $user->id === $request->user()->id) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'ปิดบัญชีของตัวเองไม่ได้ค่ะนายท่าน — ให้ผู้ดูแลระบบคนอื่นเป็นคนปิดนะคะ 🥺',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($user, $validated) {
+            $user->status = $validated['status'];
+            $user->save();
+
+            if ($validated['status'] === User::STATUS_INACTIVE) {
+                $user->tokens()->delete();
+            }
+        });
 
         return response()->json([
             'status' => 'success',
-            'message' => $validated['ver'] ? 'ยืนยันตัวตนผู้ใช้สำเร็จ' : 'ยกเลิกการยืนยันตัวตนผู้ใช้สำเร็จ',
+            'message' => $validated['status'] === User::STATUS_INACTIVE
+                ? 'ปิดการใช้งานบัญชีผู้ใช้เรียบร้อยแล้วค่ะ'
+                : 'เปิดการใช้งานบัญชีผู้ใช้เรียบร้อยแล้วค่ะ',
             'user' => $user->fresh(),
         ]);
     }
